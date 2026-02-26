@@ -1,0 +1,33 @@
+services:
+  backtest-v2-standalone:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: backtest-v2-standalone
+    restart: unless-stopped
+    environment:
+      PGHOST: pams-postgres
+      PGPORT: 5432
+      PGDATABASE: pams
+      PGUSER: pams
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PAMS_PG_HOST: pams-postgres
+      PAMS_PG_PORT: 5432
+      PAMS_PG_DBNAME: pams
+      PAMS_PG_USER: pams
+      PAMS_PG_PASSWORD: ${POSTGRES_PASSWORD}
+      BACKTEST_V2_ROOT: /app/backend/core
+      RESULTS_ROOT: /app/outputs
+      PAMS_REPORTS_DIR: /app/outputs/report
+    ports:
+      - "8091:8000"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./frontend:/app/frontend
+      - ./backend:/app/backend
+    networks:
+      - pams_default
+
+networks:
+  pams_default:
+    external: true

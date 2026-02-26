@@ -1,0 +1,12 @@
+fastapi==0.115.8
+uvicorn[standard]==0.30.6
+psycopg2-binary==2.9.9
+psycopg[binary]>=3.2.0
+yfinance>=0.2.36
+akshare>=1.14.0
+pandas>=2.2.0
+tushare>=1.4.0
+pytest>=7.4.0
+pytest-cov>=4.0.0
+pytest-asyncio>=0.21.0
+httpx>=0.24.0

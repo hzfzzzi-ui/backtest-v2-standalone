@@ -1,0 +1,6 @@
+﻿symbol,type,stamp_tax_sell,board,lot_size,tick_size,limit_pct
+600000.SH,STOCK,true,MAIN,100,0.01,0.1
+000001.SZ,STOCK,true,MAIN,100,0.01,0.1
+300750.SZ,STOCK,true,GEM,100,0.01,0.2
+688981.SH,STOCK,true,STAR,100,0.01,0.2
+510300.SH,ETF,false,MAIN,100,0.001,0.1

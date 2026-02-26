@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+
+# Project root (parent of backend/)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.api.endpoints.backtest_v2 import router as backtest_v2_router  # noqa: E402
+
+
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    """Force no-cache on every response so Ctrl+Shift+R always gets fresh files."""
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+
+app = FastAPI(title="backtest-v2-standalone", version="1.0.0")
+app.add_middleware(NoCacheMiddleware)
+app.include_router(backtest_v2_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+FRONTEND_DIR = PROJECT_ROOT / "frontend"
+app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="assets")
+
+
+@app.get("/healthz")
+def healthz() -> dict:
+    return {"ok": True, "service": "backtest-v2-standalone"}
+
+
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+
+
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(str(FRONTEND_DIR / "index.html"), headers=_NO_CACHE)
+
+
+@app.get("/index.html")
+def page() -> FileResponse:
+    return FileResponse(str(FRONTEND_DIR / "index.html"), headers=_NO_CACHE)

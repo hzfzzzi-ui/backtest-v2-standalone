@@ -1,0 +1,87 @@
+{
+  "db": {
+    "host": "pams-postgres",
+    "port": 5432,
+    "dbname": "pams",
+    "user": "pams",
+    "password": ""
+  },
+  "db_runtime": {
+    "statement_timeout_ms": 60000
+  },
+  "universe": {
+    "symbols": ["600000.SH", "000001.SZ"],
+    "benchmark": "000300.SH",
+    "start": "2021-01-01",
+    "end": "2026-02-01"
+  },
+  "data_source": {
+    "stocks_table": "pams_ohlcv_daily",
+    "index_table": "pit_index_daily",
+    "prefer_index_table": true,
+    "allow_cn_index_in_stocks_table": false,
+    "cn_index_filter_column": "market",
+    "cn_index_filter_value": "CN_INDEX"
+  },
+  "schema_mapping": {
+    "pams_ohlcv_daily": {
+      "date": "trade_date",
+      "symbol": "symbol",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "turnover",
+      "limit_up": "limit_up",
+      "limit_down": "limit_down",
+      "is_suspended": "is_suspended"
+    },
+    "pit_index_daily": {
+      "date": "trade_date",
+      "symbol": "index_code",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "turnover"
+    }
+  },
+  "data_scope": {
+    "extend_prev_close": true,
+    "prev_close_missing_policy": "disable_limit_check"
+  },
+  "execution": {
+    "lot_size": 100,
+    "tick_size": 0.01,
+    "limit_pct_default": 0.1,
+    "limit_pct_star": 0.05,
+    "limit_pct_kcb_gem": 0.2,
+    "liquidity_cap_pct": 0.1,
+    "allow_liquidity_without_volume": false,
+    "t_plus_one": true,
+    "t_plus_one_cash": false,
+    "limit_price_epsilon_mode": "tick_or_default",
+    "limit_price_epsilon_default": 0.01
+  },
+  "costs": {
+    "commission_rate": 0.0003,
+    "commission_min": 5.0,
+    "stamp_tax_rate": 0.001,
+    "slippage_bps": 2.0,
+    "slippage_mode": "price_adjustment_only"
+  },
+  "initial_capital": 100000,
+  "strategy": {
+    "name": "ma_trend_filter",
+    "fast": 5,
+    "slow": 20,
+    "order_size": 1000,
+    "params": {
+      "trend_ma": 200,
+      "use_benchmark_regime": false
+    }
+  }
+}
+

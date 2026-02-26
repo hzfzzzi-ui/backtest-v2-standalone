@@ -1,0 +1,39 @@
+# Environment & secrets
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Node
+node_modules/
+package-lock.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backtest outputs (runtime data, not source)
+outputs/
+
+# Docker volumes
+pgdata/
+
+# Claude / Codex agent state
+.claude/
+.codex/
+
+# Temp files
+.tmp_*
