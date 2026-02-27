@@ -35,7 +35,8 @@
       "amount": "turnover",
       "limit_up": "limit_up",
       "limit_down": "limit_down",
-      "is_suspended": "is_suspended"
+      "is_suspended": "is_suspended",
+      "adj_factor": "adj_factor"
     },
     "pit_index_daily": {
       "date": "trade_date",

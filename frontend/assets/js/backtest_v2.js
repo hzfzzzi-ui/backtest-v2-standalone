@@ -209,8 +209,48 @@ function toggleStatusPanel(force = null) {
 
 function updateUniverseInputVisibility() {
   const mode = byId('wbUniverseMode')?.value || 'ALL_A';
-  const wrap = byId('wbSymbolsWrap');
-  if (wrap) wrap.style.display = mode === 'CUSTOM' ? '' : 'none';
+  const symbolsWrap = byId('wbSymbolsWrap');
+  const industryWrap = byId('wbIndustryPickerWrap');
+  if (symbolsWrap) symbolsWrap.style.display = mode === 'CUSTOM' ? '' : 'none';
+  if (industryWrap) industryWrap.hidden = mode !== 'INDUSTRY';
+  if (mode === 'INDUSTRY') loadIndustryPicker();
+}
+
+let _industryPickerLoaded = false;
+async function loadIndustryPicker() {
+  if (_industryPickerLoaded) return;
+  const container = byId('wbIndustryPicker');
+  if (!container) return;
+  try {
+    const resp = await fetch('/api/backtest_v2/industries');
+    const data = await resp.json();
+    const industries = Array.isArray(data.industries) ? data.industries : [];
+    if (!industries.length) {
+      container.innerHTML = '<span style="color:#888">暂无行业数据，请先运行导入脚本</span>';
+      return;
+    }
+    container.innerHTML = '';
+    for (const name of industries) {
+      const label = document.createElement('label');
+      label.className = 'wb-industry-chip';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = name;
+      cb.addEventListener('change', () => buildConfigDraft());
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(' ' + name));
+      container.appendChild(label);
+    }
+    _industryPickerLoaded = true;
+  } catch (e) {
+    container.innerHTML = '<span style="color:#c33">加载行业列表失败</span>';
+  }
+}
+
+function getSelectedIndustries() {
+  const container = byId('wbIndustryPicker');
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
 }
 
 function setDrawerPanel(panel) {
@@ -292,6 +332,34 @@ function aggregateNav(dailyNav, period) {
       return dailyNav;
     }
     buckets.set(key, { date: key, value: pt.value }); // 覆盖为最后一天的值
+  }
+  return [...buckets.values()];
+}
+
+// 回撤序列周期聚合：取周期内最小值（最大回撤深度），而非末日值
+function aggregateDrawdown(dailyDd, period) {
+  if (!dailyDd?.length || !period || period === 'D') return dailyDd;
+  const buckets = new Map();
+  for (const pt of dailyDd) {
+    const d = pt.date || pt.time;
+    let key;
+    if (period === 'W') {
+      const dt = new Date(d + 'T00:00:00');
+      const day = dt.getDay();
+      const mon = new Date(dt);
+      mon.setDate(dt.getDate() - ((day + 6) % 7));
+      key = mon.toISOString().slice(0, 10);
+    } else if (period === 'M') {
+      key = d.slice(0, 7) + '-01';
+    } else if (period === 'Y') {
+      key = d.slice(0, 4) + '-01-01';
+    } else {
+      return dailyDd;
+    }
+    const existing = buckets.get(key);
+    if (!existing || pt.value < existing.value) {
+      buckets.set(key, { date: key, value: pt.value });
+    }
   }
   return [...buckets.values()];
 }
@@ -406,12 +474,14 @@ function buildConfigDraft() {
     mode: state.mode,
     strategy_pack: byId('wbStrategyPack')?.value || 'SMA_CROSS',
     universe_mode: byId('wbUniverseMode')?.value || 'ALL_A',
+    industries: getSelectedIndustries(),
     universe: {
       start: byId('wbStartDate')?.value || '2021-01-01',
       end: byId('wbEndDate')?.value || '2026-02-01',
       benchmark: byId('wbBenchmark')?.value || '000300.SH',
       symbols: (byId('wbSymbols')?.value || '').split(',').map((s) => s.trim()).filter(Boolean),
       limit: Number(byId('wbUniverseLimit')?.value || 1000),
+      price_adj: byId('wbPriceAdj')?.value || 'hfq',
       filters: {
         exclude_st: !!byId('wbExcludeSt')?.checked,
         exclude_suspended: !!byId('wbExcludeSuspended')?.checked,
@@ -529,8 +599,7 @@ function currentSymbolsForValidate() {
   const mode = byId('wbUniverseMode')?.value || 'ALL_A';
   const custom = (byId('wbSymbols')?.value || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (mode === 'CUSTOM' && custom.length) return custom;
-  if (mode === 'HS300') return ['600519.SH', '601318.SH', '000001.SZ'];
-  if (mode === 'ZZ500') return ['300750.SZ', '002415.SZ', '601012.SH'];
+  // 非 CUSTOM 模式下 resolver 会动态解析，这里用少量样本做验证
   return custom.length ? custom : ['600000.SH', '000001.SZ', '600519.SH'];
 }
 
@@ -597,13 +666,13 @@ async function pollJob(jobId) {
 }
 function runPayloadFromDraft(preset) {
   const d = buildConfigDraft();
-  return {
+  const mode = d.universe_mode || 'CUSTOM';
+  const payload = {
     preset,
     start_date: d.universe.start,
     end_date: d.universe.end,
     benchmark: d.universe.benchmark,
     compare_symbol: '000001.SH',
-    symbols: d.universe.symbols,
     universe_limit: d.universe.limit,
     max_positions: d.position_risk.max_positions,
     lot_size: d.position_risk.lot,
@@ -611,7 +680,16 @@ function runPayloadFromDraft(preset) {
     workbench_mode: state.mode,
     workbench_config: d,
     fast_mode: true,
+    universe_mode: mode,
+    price_adj: d.universe.price_adj || 'hfq',
   };
+  // CUSTOM 模式传 symbols，INDUSTRY 模式传 industries
+  if (mode === 'CUSTOM') {
+    payload.symbols = d.universe.symbols;
+  } else if (mode === 'INDUSTRY') {
+    payload.industries = d.industries || [];
+  }
+  return payload;
 }
 
 async function runExperiment(presetOverride = null) {
@@ -741,7 +819,8 @@ async function loadBenchmarkSeries(navPoints) {
 function renderLoadingSkeleton() {
   setHtmlById('wbGroupLoadStatus', '<span class="wb-mini">加载组产物中...</span>');
   // 清理 lightweight-charts 实例后再替换 innerHTML
-  if (_lwChart) { _lwChart.remove(); _lwChart = null; }
+  if (_lwChartNav) { _lwChartNav.remove(); _lwChartNav = null; }
+  if (_lwChartDd) { _lwChartDd.remove(); _lwChartDd = null; }
   setHtmlById('wbNavChart', '<div class="wb-skeleton" style="height:100%"></div>');
   setHtmlById('wbDdChart', '<div class="wb-skeleton" style="height:100%"></div>');
 }
@@ -795,8 +874,10 @@ function renderLineChart(containerId, series, yFmt = (v) => num(v, 4)) {
   `;
 }
 
-// lightweight-charts 蜡烛图 + 折线叠加渲染
-let _lwChart = null;
+// lightweight-charts 实例管理
+let _lwChartNav = null;  // 收益图
+let _lwChartDd = null;   // 回撤图
+let _syncLock = false;   // 防止时间轴同步递归
 function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -807,13 +888,13 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark) {
 
   // 无任何数据时显示空状态
   if (!hasNav && !hasBench) {
-    if (_lwChart) { _lwChart.remove(); _lwChart = null; }
+    if (_lwChartNav) { _lwChartNav.remove(); _lwChartNav = null; }
     container.innerHTML = '<div class="wb-empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>运行实验后显示净值曲线</span></div>';
     return;
   }
 
   // 清理旧实例
-  if (_lwChart) { _lwChart.remove(); _lwChart = null; }
+  if (_lwChartNav) { _lwChartNav.remove(); _lwChartNav = null; }
   container.innerHTML = '';
 
   const LWC = window.LightweightCharts;
@@ -844,7 +925,7 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark) {
       rightOffset: 5,      // 右侧留白
     },
   });
-  _lwChart = chart;
+  _lwChartNav = chart;
 
   // Benchmark 蜡烛图（兼容 v4.0+ 和 v4.2+ API）
   if (showBenchmark && hasBench) {
@@ -885,11 +966,143 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark) {
 
   // 响应容器大小变化
   const ro = new ResizeObserver(() => {
-    if (_lwChart === chart) {
+    if (_lwChartNav === chart) {
       chart.applyOptions({ width: container.clientWidth, height: container.clientHeight || 420 });
     }
   });
   ro.observe(container);
+}
+
+// 回撤图 — LightweightCharts AreaSeries 渲染
+function renderDdChartLW(containerId, ddSeries, benchDdSeries, showBenchmark) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const hasDd = Array.isArray(ddSeries) && ddSeries.length > 0;
+  const hasBenchDd = Array.isArray(benchDdSeries) && benchDdSeries.length > 0;
+
+  if (!hasDd && !hasBenchDd) {
+    if (_lwChartDd) { _lwChartDd.remove(); _lwChartDd = null; }
+    container.innerHTML = '<div class="wb-empty"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span>回撤曲线</span></div>';
+    return;
+  }
+
+  if (_lwChartDd) { _lwChartDd.remove(); _lwChartDd = null; }
+  container.innerHTML = '';
+
+  const LWC = window.LightweightCharts;
+  if (!LWC) {
+    container.innerHTML = '<div class="wb-empty"><span>lightweight-charts 加载失败</span></div>';
+    return;
+  }
+
+  const chart = LWC.createChart(container, {
+    width: container.clientWidth,
+    height: container.clientHeight || 160,
+    layout: {
+      background: { type: LWC.ColorType ? LWC.ColorType.Solid : 'solid', color: 'transparent' },
+      textColor: '#94a3b8',
+      fontSize: 11,
+    },
+    grid: {
+      vertLines: { color: 'rgba(51,65,85,0.4)' },
+      horzLines: { color: 'rgba(51,65,85,0.4)' },
+    },
+    crosshair: { mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 0 },
+    rightPriceScale: {
+      borderColor: '#334155',
+    },
+    localization: {
+      priceFormatter: (v) => (v * 100).toFixed(1) + '%',
+    },
+    timeScale: {
+      borderColor: '#334155',
+      timeVisible: false,
+      barSpacing: 6,
+      minBarSpacing: 2,
+      rightOffset: 5,
+    },
+  });
+  _lwChartDd = chart;
+
+  // 策略回撤 — BaselineSeries 以 0 为基线，向下填充红色
+  if (hasDd) {
+    const baseOpts = {
+      baseValue: { type: 'price', price: 0 },
+      topLineColor: 'transparent',
+      topFillColor1: 'transparent',
+      topFillColor2: 'transparent',
+      bottomLineColor: '#ef4444',
+      bottomFillColor1: 'rgba(239, 68, 68, 0.35)',
+      bottomFillColor2: 'rgba(239, 68, 68, 0.05)',
+      lineWidth: 2,
+      priceLineVisible: false,
+      crosshairMarkerVisible: true,
+    };
+    const baselineSeries = typeof chart.addBaselineSeries === 'function'
+      ? chart.addBaselineSeries(baseOpts)
+      : chart.addSeries(LWC.BaselineSeries, baseOpts);
+    baselineSeries.setData(ddSeries.map((p) => ({ time: p.date, value: p.value })));
+  }
+
+  // 基准回撤 — 橙色线
+  if (showBenchmark && hasBenchDd) {
+    const lineOpts = { color: '#f97316', lineWidth: 1, priceLineVisible: false, crosshairMarkerVisible: false };
+    const benchLine = typeof chart.addLineSeries === 'function'
+      ? chart.addLineSeries(lineOpts)
+      : chart.addSeries(LWC.LineSeries, lineOpts);
+    benchLine.setData(benchDdSeries.map((p) => ({ time: p.date, value: p.value })));
+  }
+
+  chart.timeScale().fitContent();
+
+  // 响应容器大小变化
+  const ro = new ResizeObserver(() => {
+    if (_lwChartDd === chart) {
+      chart.applyOptions({ width: container.clientWidth, height: container.clientHeight || 160 });
+    }
+  });
+  ro.observe(container);
+
+  // --- 时间轴同步 + crosshair 联动 ---
+  setupChartSync();
+}
+
+// 双图时间轴同步 + crosshair 联动
+function setupChartSync() {
+  if (!_lwChartNav || !_lwChartDd) return;
+
+  // 时间轴缩放/平移同步
+  _lwChartNav.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+    if (_syncLock || !range) return;
+    _syncLock = true;
+    try { _lwChartDd.timeScale().setVisibleLogicalRange(range); } catch (_) {}
+    _syncLock = false;
+  });
+  _lwChartDd.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+    if (_syncLock || !range) return;
+    _syncLock = true;
+    try { _lwChartNav.timeScale().setVisibleLogicalRange(range); } catch (_) {}
+    _syncLock = false;
+  });
+
+  // crosshair 联动
+  _lwChartNav.subscribeCrosshairMove((param) => {
+    if (!param || !param.time) {
+      _lwChartDd.clearCrosshairPosition();
+      return;
+    }
+    // 用 setCrosshairPosition 同步到回撤图（需要 price + time）
+    // 传 NaN 作为 price 让 LWC 自动定位到数据点
+    try { _lwChartDd.setCrosshairPosition(NaN, param.time, _lwChartDd.getSeries?.() || undefined); } catch (_) {}
+  });
+  _lwChartDd.subscribeCrosshairMove((param) => {
+    if (!param || !param.time) {
+      _lwChartNav.clearCrosshairPosition();
+      return;
+    }
+    try { _lwChartNav.setCrosshairPosition(NaN, param.time, _lwChartNav.getSeries?.() || undefined); } catch (_) {}
+  });
 }
 
 async function loadActiveArtifacts() {
@@ -1012,20 +1225,14 @@ function renderPerfPanel() {
   // 按周期聚合 OHLC 和 NAV
   const benchOhlc = aggregateOhlc(art.benchmarkOhlc || [], period);
   const navSeries = aggregateNav(art.navSeries || [], period);
-  const ddSeries = aggregateNav(art.drawdownSeries || [], period);
-  const benchDdSeries = aggregateNav(art.benchmarkDrawdownSeries || [], period);
+  const ddSeries = aggregateDrawdown(art.drawdownSeries || [], period);
+  const benchDdSeries = aggregateDrawdown(art.benchmarkDrawdownSeries || [], period);
 
   // 主图：lightweight-charts 蜡烛图 + 折线叠加
   renderNavChartLW('wbNavChart', benchOhlc, navSeries, state.chart_show_benchmark);
 
-  // 回撤图：保持 SVG 折线
-  const ddPlot = [{ name: '策略回撤', color: '#ef4444', points: ddSeries }];
-  if (state.chart_show_benchmark) {
-    ddPlot.push({ name: '基准回撤', color: '#f97316', points: benchDdSeries });
-  }
-  renderLineChart('wbDdChart', [
-    ...ddPlot,
-  ], (v) => pct(v));
+  // 回撤图：LightweightCharts AreaSeries（与主图时间轴同步）
+  renderDdChartLW('wbDdChart', ddSeries, benchDdSeries, state.chart_show_benchmark);
 
   const navInfo = navSeries.length ? `净值=${navSeries.length}点` : `净值缺失(${art.errors?.find((x) => String(x).startsWith('nav:')) || '未提供'})`;
   const bmInfo = art.benchmarkError ? `基准异常=${art.benchmarkError}` : `基准来源=${art.benchmarkSource || '无'}`;
@@ -1125,8 +1332,8 @@ function renderTradesList() {
     el.innerHTML = '<div class=”wb-mini”>运行后显示交易明细</div>';
     return;
   }
-  const labels = ['日期', '标的', '方向', '价格', '数量', '金额', '原因'];
-  const aligns = ['', '', '', 'num', 'num', 'num', ''];
+  const labels = ['日期', '标的', '方向', '成交价', '数量', '金额', '佣金', '印花税', '净额', '原因'];
+  const aligns = ['', '', '', 'num', 'num', 'num', 'num', 'num', 'num', ''];
   const header = `<tr>${labels.map((l, i) => `<th${aligns[i] ? ' class=”num”' : ''}>${esc(l)}</th>`).join('')}</tr>`;
   const body = rows.map((r) => {
     const isBuy = String(r.side || '').toUpperCase() === 'BUY';
@@ -1136,7 +1343,11 @@ function renderTradesList() {
     const sym = String(r.symbol ?? '');
     const displayName = stockZh(sym);
     const symbolCell = displayName !== sym ? `<span title=”${esc(sym)}”>${esc(displayName)}</span>` : esc(sym);
-    return `<tr><td>${esc(String(r.date ?? ''))}</td><td>${symbolCell}</td><td>${sideBadge}</td><td class=”num”>${num(r.price, 3)}</td><td class=”num”>${fmtInt(r.qty)}</td><td class=”num”>${fmtMoney(r.value)}</td><td>${esc(reasonZh(r.reason_code))}</td></tr>`;
+    const fp = r.fill_price != null ? num(r.fill_price, 3) : num(r.price, 3);
+    const comm = r.commission != null ? fmtMoney(r.commission) : '-';
+    const stax = r.stamp_tax != null ? fmtMoney(r.stamp_tax) : '-';
+    const netAmt = r.net_amount != null ? fmtMoney(r.net_amount) : fmtMoney(r.value);
+    return `<tr><td>${esc(String(r.date ?? ''))}</td><td>${symbolCell}</td><td>${sideBadge}</td><td class=”num”>${fp}</td><td class=”num”>${fmtInt(r.qty)}</td><td class=”num”>${fmtMoney(r.value)}</td><td class=”num”>${comm}</td><td class=”num”>${stax}</td><td class=”num”>${netAmt}</td><td>${esc(reasonZh(r.reason_code))}</td></tr>`;
   }).join('');
   el.innerHTML = `<div class=”wb-mini” style=”margin-bottom:4px”>交易明细 (${fmtInt(rows.length)} 条)</div><table class=”wb-table”><thead>${header}</thead><tbody>${body}</tbody></table>`;
 }
@@ -1179,13 +1390,26 @@ function applyConfigToUI(cfg) {
   byId('wbStartDate').value = u.start || byId('wbStartDate').value;
   byId('wbEndDate').value = u.end || byId('wbEndDate').value;
   byId('wbBenchmark').value = u.benchmark || byId('wbBenchmark').value;
-  byId('wbUniverseMode').value = cfg?.universe_mode || byId('wbUniverseMode').value;
+  const loadedMode = cfg?.universe_mode || byId('wbUniverseMode').value;
+  byId('wbUniverseMode').value = loadedMode;
+  // 同步按钮组 active 状态
+  document.querySelectorAll('#wbUniverseModeGroup button').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-val') === loadedMode);
+  });
   byId('wbSymbols').value = Array.isArray(u.symbols) ? u.symbols.join(',') : byId('wbSymbols').value;
   byId('wbUniverseLimit').value = u.limit ?? byId('wbUniverseLimit').value;
   byId('wbExcludeSt').checked = !!f.exclude_st;
   byId('wbExcludeSuspended').checked = !!f.exclude_suspended;
   byId('wbMinListDays').value = f.min_list_days ?? byId('wbMinListDays').value;
   byId('wbMinTurnover').value = f.min_avg_turnover_20d ?? byId('wbMinTurnover').value;
+
+  // 价格口径
+  const loadedAdj = u.price_adj || 'hfq';
+  const adjSel = byId('wbPriceAdj');
+  if (adjSel) adjSel.value = loadedAdj;
+  document.querySelectorAll('#wbAdjGroup button').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-val') === loadedAdj);
+  });
 
   const sma = cfg?.signal_generation?.sma || {};
   byId('wbFastMa').value = sma.fast_ma ?? byId('wbFastMa').value;
@@ -1383,7 +1607,36 @@ function populateConstraintStats(counters, config) {
 
 function bindEvents() {
   document.querySelectorAll('#wbMode button').forEach((btn) => btn.addEventListener('click', () => setMode(btn.getAttribute('data-mode') || 'experiment')));
+  // Universe 模式按钮绑定
+  document.querySelectorAll('#wbUniverseModeGroup button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const val = btn.getAttribute('data-val');
+      if (!val) return;
+      // 切换 active 样式
+      document.querySelectorAll('#wbUniverseModeGroup button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      // 更新 hidden select
+      const sel = byId('wbUniverseMode');
+      if (sel) sel.value = val;
+      updateUniverseInputVisibility();
+      buildConfigDraft();
+      renderRunHints();
+    });
+  });
   byId('wbUniverseMode')?.addEventListener('change', () => { updateUniverseInputVisibility(); buildConfigDraft(); renderRunHints(); });
+  // 价格口径按钮绑定
+  document.querySelectorAll('#wbAdjGroup button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const val = btn.getAttribute('data-val');
+      if (!val) return;
+      document.querySelectorAll('#wbAdjGroup button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const sel = byId('wbPriceAdj');
+      if (sel) sel.value = val;
+      buildConfigDraft();
+      updateAtrNote();
+    });
+  });
   byId('wbStrategyPack')?.addEventListener('change', buildConfigDraft);
   document.querySelectorAll('.wb-rail-btn').forEach((btn) => btn.addEventListener('click', () => {
     const panel = btn.getAttribute('data-panel') || 'universe';
@@ -1719,33 +1972,155 @@ function generateReport() {
   // §6 策略参数摘要
   function buildConfigSummary() {
     const bc = config.base_config || config || {};
-    const pr = bc.position_risk || {};
-    const sig = bc.signal || {};
-    const exitCfg = bc.exit || {};
-    return `<table>
-      <tr><td>引擎模式</td><td>${e(meta.code?.engine_mode || '-')}</td></tr>
-      <tr><td>最大持仓数</td><td>${iNum(pr.max_positions || '-')}</td></tr>
-      <tr><td>单票仓位上限</td><td>${p(pr.single_position_cap || 0)}</td></tr>
-      <tr><td>行业仓位上限</td><td>${p(pr.industry_cap || 0)}</td></tr>
-      <tr><td>信号类型</td><td>${e(sig.type || sig.signal_type || '-')}</td></tr>
-      <tr><td>ATR止损倍数</td><td>${n2(exitCfg.atr_stop_multiplier || exitCfg.atr_stop?.multiplier || '-')}</td></tr>
-      <tr><td>ATR追踪倍数</td><td>${n2(exitCfg.atr_trail_multiplier || exitCfg.atr_trail?.multiplier || '-')}</td></tr>
-      <tr><td>最大持仓天数</td><td>${iNum(exitCfg.max_hold_days || '-')}</td></tr>
+    const wc = (config.overrides || {}).workbench_config || null;
+
+    // 链式读取：wc[wcPath] → bc[bcPath] → "-"
+    const _dig = (obj, path) => {
+      if (!obj || !path) return undefined;
+      return path.split('.').reduce((o, k) => (o != null ? o[k] : undefined), obj);
+    };
+    const wcVal = (wcPath, bcPath) => {
+      const v = _dig(wc, wcPath);
+      if (v != null && v !== '') return v;
+      const fb = _dig(bc, bcPath);
+      if (fb != null && fb !== '') return fb;
+      return '-';
+    };
+    const yesNo = (v) => (v === true ? '是' : v === false ? '否' : '-');
+    const enabledTxt = (v) => (v === true ? '启用' : v === false ? '禁用' : '-');
+    const pctAdj = (label) => { const adj = {'hfq':'后复权','qfq':'前复权','none':'不复权'}; return adj[label] || label || '-'; };
+
+    let html = '';
+
+    // ── 子表 1：信号策略 ──
+    const stratName = wcVal('signal_generation.strategy', 'strategy.name');
+    const fastMa = wcVal('signal_generation.sma.fast_ma', 'strategy.fast');
+    const slowMa = wcVal('signal_generation.sma.slow_ma', 'strategy.slow');
+    const entryBuf = wcVal('signal_generation.sma.entry_buffer_pct', null);
+    const atrN = wcVal(null, 'strategy.params.atr_n');
+    const atrK = wcVal('exit_rules.atr_stop.k', 'strategy.params.atr_k');
+    const trendMa = wcVal(null, 'strategy.params.trend_ma');
+    html += `<h3>信号策略</h3><table>
+      <tr><td>策略名称</td><td>${e(stratName)}</td></tr>
+      <tr><td>快线周期</td><td>${e(fastMa)}</td></tr>
+      <tr><td>慢线周期</td><td>${e(slowMa)}</td></tr>
+      <tr><td>入场缓冲</td><td>${entryBuf !== '-' ? n2(entryBuf) + '%' : '-'}</td></tr>
+      <tr><td>ATR 窗口</td><td>${e(atrN)}</td></tr>
+      <tr><td>ATR 倍数</td><td>${atrK !== '-' ? n2(atrK) : '-'}</td></tr>
+      <tr><td>趋势过滤 MA</td><td>${e(trendMa)}</td></tr>
     </table>`;
+
+    // ── 子表 2：退出规则 ──
+    const exitRules = wc ? (wc.exit_rules || {}) : {};
+    const sigReverse = exitRules.signal_reverse;
+    const atrStop = exitRules.atr_stop || {};
+    const trailing = exitRules.trailing || {};
+    const timeExit = exitRules.time_exit || {};
+    const exitPri = wc ? (wc.exit_priority || []) : [];
+    html += `<h3>退出规则</h3><table>
+      <tr><td>反转退出</td><td>${enabledTxt(sigReverse)}</td></tr>
+      <tr><td>ATR 止损</td><td>${atrStop.enabled === true ? '启用 (k=' + n2(atrStop.k) + ')' : atrStop.enabled === false ? '禁用' : '-'}</td></tr>
+      <tr><td>追踪止损</td><td>${trailing.enabled === true ? '启用 (k=' + n2(trailing.k) + ')' : trailing.enabled === false ? '禁用' : '-'}</td></tr>
+      <tr><td>时间退出</td><td>${timeExit.enabled === true ? '启用 (' + (timeExit.n_days || '-') + ' 天)' : timeExit.enabled === false ? '禁用' : '-'}</td></tr>
+      <tr><td>退出优先级</td><td>${exitPri.length ? e(exitPri.join(' → ')) : '-'}</td></tr>
+    </table>`;
+
+    // ── 子表 3：仓位与风控 ──
+    const posRisk = wc ? (wc.position_risk || {}) : {};
+    const riskGate = wc ? (wc.risk_gate || {}) : {};
+    const maxPos = wcVal('position_risk.max_positions', null);
+    const singleCap = _dig(wc, 'position_risk.single_stock_cap');
+    const indCap = _dig(wc, 'position_risk.industry_cap');
+    const lot = wcVal('position_risk.lot', 'execution.lot_size');
+    const cashPolicy = wcVal('position_risk.cash_shortage_policy', null);
+    let riskGateTxt = '-';
+    if (riskGate.enabled === true) {
+      const dd = riskGate.drawdown_threshold;
+      const ddPct = (dd != null && Number.isFinite(Number(dd))) ? Math.abs(Number(dd) * 100).toFixed(0) + '%' : '-';
+      riskGateTxt = `启用 — 回撤阈值 ${ddPct}, 动作 ${e(riskGate.action || '-')}, 冷却 ${riskGate.cooldown_days ?? '-'} 天`;
+    } else if (riskGate.enabled === false) {
+      riskGateTxt = '禁用';
+    }
+    html += `<h3>仓位与风控</h3><table>
+      <tr><td>最大持仓数</td><td>${e(maxPos)}</td></tr>
+      <tr><td>单票仓位上限</td><td>${singleCap != null ? (Number(singleCap) * 100).toFixed(0) + '%' : '-'}</td></tr>
+      <tr><td>行业仓位上限</td><td>${indCap != null ? (Number(indCap) * 100).toFixed(0) + '%' : '-'}</td></tr>
+      <tr><td>手数</td><td>${e(lot)}</td></tr>
+      <tr><td>现金不足策略</td><td>${e(cashPolicy)}</td></tr>
+      <tr><td>风险门</td><td>${riskGateTxt}</td></tr>
+    </table>`;
+
+    // ── 子表 4：选股范围 ──
+    const uniMode = wcVal(null, null);  // 先单独处理
+    const uniModeVal = _dig(wc, 'universe_mode') || _dig(config.overrides, 'universe_mode') || '-';
+    const uniSymbols = (_dig(wc, 'universe.symbols') || bc.universe?.symbols || []);
+    const filters = wc ? (_dig(wc, 'universe.filters') || {}) : {};
+    const turnover20d = filters.min_avg_turnover_20d;
+    const turnoverDisplay = (turnover20d != null && Number.isFinite(Number(turnover20d)))
+      ? (Number(turnover20d) / 10000).toLocaleString('en-US', {maximumFractionDigits: 0}) + ' 万'
+      : '-';
+    const priceMin = filters.price_min ?? '-';
+    const priceMax = filters.price_max ?? '-';
+    const priceRange = (priceMin !== '-' || priceMax !== '-') ? `${priceMin} ~ ${priceMax}` : '-';
+    const adjVal = _dig(wc, 'universe.price_adj') || _dig(config.overrides, 'price_adj') || '-';
+    html += `<h3>选股范围</h3><table>
+      <tr><td>选股模式</td><td>${e(uniModeVal)}</td></tr>
+      <tr><td>标的数量</td><td>${iNum(uniSymbols.length)}</td></tr>
+      <tr><td>排除 ST</td><td>${yesNo(filters.exclude_st)}</td></tr>
+      <tr><td>排除停牌</td><td>${yesNo(filters.exclude_suspended)}</td></tr>
+      <tr><td>最小上市天数</td><td>${filters.min_list_days != null ? iNum(filters.min_list_days) : '-'}</td></tr>
+      <tr><td>日均成交额下限</td><td>${turnoverDisplay}</td></tr>
+      <tr><td>价格区间</td><td>${e(priceRange)}</td></tr>
+      <tr><td>ATR 波动区间</td><td>${e(filters.atr_pct_range || '-')}</td></tr>
+      <tr><td>涨跌停规则</td><td>${e(filters.limit_rule || '-')}</td></tr>
+      <tr><td>价格口径</td><td>${e(pctAdj(adjVal) + ' (' + adjVal + ')')}</td></tr>
+    </table>`;
+
+    // ── 子表 5：执行假设 ──
+    const costs = bc.costs || {};
+    const exec = bc.execution || {};
+    const commRate = Number(costs.commission_rate);
+    const stampRate = Number(costs.stamp_tax_rate);
+    html += `<h3>执行假设</h3><table>
+      <tr><td>佣金率</td><td>${Number.isFinite(commRate) ? (commRate * 10000).toFixed(0) + '‱' : '-'}</td></tr>
+      <tr><td>最低佣金</td><td>${costs.commission_min != null ? n2(costs.commission_min) : '-'}</td></tr>
+      <tr><td>印花税率</td><td>${Number.isFinite(stampRate) ? (stampRate * 1000).toFixed(0) + '‰' : '-'}</td></tr>
+      <tr><td>滑点</td><td>${costs.slippage_bps != null ? n2(costs.slippage_bps) + ' bps' : '-'}</td></tr>
+      <tr><td>手数</td><td>${exec.lot_size != null ? iNum(exec.lot_size) : '-'}</td></tr>
+      <tr><td>T+1</td><td>${yesNo(exec.t_plus_one)}</td></tr>
+      <tr><td>初始资金</td><td>${bc.initial_capital != null ? Number(bc.initial_capital).toLocaleString('en-US') : '-'}</td></tr>
+    </table>`;
+
+    // ── 可选：复合信号子表 ──
+    const sigComp = wc ? (wc.signal_composition || {}) : {};
+    if (sigComp.enabled === true && Array.isArray(sigComp.modules) && sigComp.modules.length > 0) {
+      html += `<h3>复合信号 (${e(sigComp.compose_mode || '-')})</h3>`;
+      html += '<table><thead><tr><th>模块名</th><th>角色</th><th>权重</th><th>优先级</th></tr></thead><tbody>';
+      sigComp.modules.forEach((m) => {
+        html += `<tr><td>${e(m.name || '-')}</td><td>${e(m.role || '-')}</td><td>${n2(m.weight)}</td><td>${e(m.priority ?? '-')}</td></tr>`;
+      });
+      html += '</tbody></table>';
+    }
+
+    return html;
   }
 
   // §7 交易明细附录
   function buildTradeAppendix() {
     if (!trades.length) return '<p>无交易记录</p>';
     const names = (art.stockNames || {});
-    let html = '<table><thead><tr><th>日期</th><th>标的</th><th>方向</th><th style="text-align:right">价格</th><th style="text-align:right">数量</th><th style="text-align:right">金额</th><th>原因</th></tr></thead><tbody>';
+    let html = '<table><thead><tr><th>日期</th><th>标的</th><th>方向</th><th style="text-align:right">成交价</th><th style="text-align:right">数量</th><th style="text-align:right">金额</th><th style="text-align:right">佣金</th><th style="text-align:right">印花税</th><th style="text-align:right">净额</th><th>原因</th></tr></thead><tbody>';
     trades.forEach((t) => {
       const isBuy = String(t.side || '').toUpperCase() === 'BUY';
       const side = isBuy ? '<span style="color:#2e7d32;font-weight:600">买入</span>' : '<span style="color:#c62828;font-weight:600">卖出</span>';
       const sym = String(t.symbol || '');
       const displayName = names[sym] || sym;
       const symbolCell = displayName !== sym ? `<span title="${e(sym)}">${e(displayName)}</span>` : e(sym);
-      html += `<tr><td>${e(t.date || '')}</td><td>${symbolCell}</td><td>${side}</td><td style="text-align:right">${Number(t.price || 0).toFixed(3)}</td><td style="text-align:right">${iNum(t.qty)}</td><td style="text-align:right">${mNum(t.value)}</td><td>${e(rZh(t.reason_code))}</td></tr>`;
+      const fp = t.fill_price != null ? Number(t.fill_price).toFixed(3) : Number(t.price || 0).toFixed(3);
+      const comm = t.commission != null ? mNum(t.commission) : '-';
+      const stax = t.stamp_tax != null ? mNum(t.stamp_tax) : '-';
+      const netAmt = t.net_amount != null ? mNum(t.net_amount) : mNum(t.value);
+      html += `<tr><td>${e(t.date || '')}</td><td>${symbolCell}</td><td>${side}</td><td style="text-align:right">${fp}</td><td style="text-align:right">${iNum(t.qty)}</td><td style="text-align:right">${mNum(t.value)}</td><td style="text-align:right">${comm}</td><td style="text-align:right">${stax}</td><td style="text-align:right">${netAmt}</td><td>${e(rZh(t.reason_code))}</td></tr>`;
     });
     html += '</tbody></table>';
     return html;

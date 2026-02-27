@@ -11,8 +11,10 @@ import pandas as pd
 
 from backend.core.config.loader import load_config
 from backend.core.data.pg_provider import PostgresDataProvider
+from backend.core.data.price_adjust import apply_price_adjustment
 from backend.core.portfolio.portfolio_builder import run_portfolio_backtest
 from backend.core.strategies.registry import build_strategy
+from backend.core.universe.universe_resolver import resolve_universe_by_mode
 
 
 DEFAULT_EXPERIMENT_SYMBOLS = ["600000.SH", "000001.SZ", "600519.SH"]
@@ -126,19 +128,55 @@ def run_experiment(
         rules_path=tmp_cfg.parent / "instrument_rules_cn.csv",
     )
 
-    symbols = list(cfg_obj.universe.symbols or DEFAULT_EXPERIMENT_SYMBOLS)
-    _emit_progress(progress_hook, 20, f"加载行情数据: {len(symbols)} 标的")
+    # ── Universe 解析: 根据 mode 从 DB 查询 PIT-safe 的 symbols ──
+    universe_mode = str(ov.get("universe_mode", "CUSTOM")).strip().upper()
+    universe_industries = list(ov.get("industries") or [])
+    user_symbols = list(cfg_obj.universe.symbols or [])
+
+    if universe_mode == "CUSTOM" and not user_symbols:
+        user_symbols = list(DEFAULT_EXPERIMENT_SYMBOLS)
+
+    _emit_progress(progress_hook, 10, f"解析 Universe ({universe_mode})")
+    symbols, universe_meta = resolve_universe_by_mode(
+        mode=universe_mode,
+        as_of=cfg_obj.universe.start,
+        db=cfg_obj.db,
+        runtime=cfg_obj.db_runtime,
+        industries=universe_industries,
+        symbols=user_symbols,
+        universe_limit=int(ov.get("universe_limit") or 0) or None,
+    )
+    _emit_progress(progress_hook, 20, f"加载行情数据: {len(symbols)} 标的 ({universe_mode})")
     history = provider.load_ohlcv_daily(symbols, cfg_obj.universe.start, cfg_obj.universe.end, source="stocks")
     benchmark = provider.load_benchmark_daily(cfg_obj.universe.benchmark, cfg_obj.universe.start, cfg_obj.universe.end)
     calendar = provider.load_trading_calendar_cn(cfg_obj.universe.start, cfg_obj.universe.end)
     trading_days = [d.date() for d in calendar]
+
+    # ── 价格复权: 信号计算用复权价，成交执行用不复权价 ──
+    price_adj_mode = str(ov.get("price_adj", "hfq")).strip().lower()
+    if price_adj_mode not in ("hfq", "qfq", "none"):
+        price_adj_mode = "hfq"
+    raw_history = history
+    adj_factor_stats: dict[str, Any] = {}
+    if "adj_factor" in history.columns:
+        af = history["adj_factor"]
+        adj_factor_stats = {
+            "min": float(af.min()),
+            "max": float(af.max()),
+            "null_count": int(af.isna().sum()),
+        }
+    if price_adj_mode != "none":
+        signal_history = apply_price_adjustment(history, price_adj_mode)
+    else:
+        signal_history = history
 
     _emit_progress(progress_hook, 55, "执行组合回测")
     strategy = build_strategy(cfg_obj.strategy)
     strategy.set_context({"run_id": exp_id, "results_dir": str(results_dir)})
     bt_result = run_portfolio_backtest(
         strategy=strategy,
-        history=history,
+        history=signal_history,
+        raw_history=raw_history,
         benchmark=benchmark,
         trading_days=trading_days,
         benchmark_symbol=cfg_obj.universe.benchmark,
@@ -155,6 +193,7 @@ def run_experiment(
         mf_concentrate_topn=int(ov.get("mf_concentrate_topn", 3)),
         mf_concentrate_scale=float(ov.get("mf_concentrate_scale", 1.5)),
         mf_rank_gate_mode=str(ov.get("mf_rank_gate_mode", "ALWAYS_ON")),
+        cost_cfg=cfg_obj.costs,
     )
 
     _emit_progress(progress_hook, 85, "写出回测产物")
@@ -192,6 +231,9 @@ def run_experiment(
             "symbols_count": len(symbols),
             "trading_days": len(trading_days),
         },
+        "universe_meta": universe_meta,
+        "price_adj_mode": price_adj_mode,
+        "adj_factor_stats": adj_factor_stats,
     }
 
 

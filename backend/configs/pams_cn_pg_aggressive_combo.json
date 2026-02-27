@@ -1,0 +1,154 @@
+{
+  "db": {
+    "host": "pams-postgres",
+    "port": 5432,
+    "dbname": "pams",
+    "user": "pams",
+    "password": ""
+  },
+  "db_runtime": {
+    "statement_timeout_ms": 60000
+  },
+  "universe": {
+    "symbols": ["600000.SH", "000001.SZ", "600519.SH"],
+    "benchmark": "000300.SH",
+    "benchmark_compare_symbol": "000001.SH",
+    "start": "2021-01-01",
+    "end": "2026-02-01"
+  },
+  "data_source": {
+    "stocks_table": "pams_ohlcv_daily",
+    "index_table": "pit_index_daily",
+    "prefer_index_table": true,
+    "allow_cn_index_in_stocks_table": false,
+    "cn_index_filter_column": "market",
+    "cn_index_filter_value": "CN_INDEX"
+  },
+  "schema_mapping": {
+    "pams_ohlcv_daily": {
+      "date": "trade_date",
+      "symbol": "symbol",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "turnover",
+      "limit_up": "limit_up",
+      "limit_down": "limit_down",
+      "is_suspended": "is_suspended",
+      "adj_factor": "adj_factor"
+    },
+    "pit_index_daily": {
+      "date": "trade_date",
+      "symbol": "index_code",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "turnover"
+    }
+  },
+  "data_scope": {
+    "extend_prev_close": true,
+    "prev_close_missing_policy": "disable_limit_check"
+  },
+  "execution": {
+    "lot_size": 100,
+    "tick_size": 0.01,
+    "limit_pct_default": 0.1,
+    "limit_pct_star": 0.05,
+    "limit_pct_kcb_gem": 0.2,
+    "liquidity_cap_pct": 0.1,
+    "allow_liquidity_without_volume": false,
+    "t_plus_one": true,
+    "t_plus_one_cash": false,
+    "limit_price_epsilon_mode": "tick_or_default",
+    "limit_price_epsilon_default": 0.01
+  },
+  "sizing": {
+    "mode": "fixed_qty",
+    "order_value": 20000.0,
+    "reserve_cash_ratio": 0.02,
+    "lot_size": 100,
+    "univote_lot_mode": "OFF"
+  },
+  "costs": {
+    "commission_rate": 0.0003,
+    "commission_min": 5.0,
+    "stamp_tax_rate": 0.001,
+    "slippage_bps": 2.0,
+    "slippage_mode": "price_adjustment_only"
+  },
+  "initial_capital": 100000.0,
+  "strategy": {
+    "name": "composite",
+    "params": {
+      "combine_mode": "VOTE",
+      "vote_threshold": 0.5,
+      "debug": false,
+      "strategies": [
+        {
+          "name": "sma_cross_regime_atr",
+          "params": {
+            "fast": 10,
+            "slow": 40,
+            "order_size": 1000,
+            "regime_ma": 120,
+            "benchmark_symbol": "000300.SH",
+            "entry_buffer": 0.01,
+            "buffer_mode": "slow_ma",
+            "enable_trend_filter": false,
+            "enable_trend_tier": true,
+            "enable_trend_accel": true,
+            "enable_trend_break_exit": true,
+            "trend_break_confirm_days": 3,
+            "trend_break_confirm_gap_pct": 0.0,
+            "trend_break_use_benchmark_regime": false,
+            "trend_tier_mode": "MA120_GT_MA200",
+            "weak_trend_order_scale": 0.6,
+            "strong_trend_order_scale": 1.2,
+            "trend_fast_ma": 120,
+            "trend_slow_ma": 200,
+            "enable_trend_slope_filter": false,
+            "slope_lookback": 5,
+            "enable_trend_continuity_filter": false,
+            "continuity_n": 10,
+            "atr_n": 14,
+            "atr_stop_k": 2.2,
+            "atr_trail_k": 3.2,
+            "enable_atr_stop": true,
+            "enable_atr_trail": true
+          }
+        },
+        {
+          "name": "momentum_roc",
+          "params": {
+            "roc_period": 20,
+            "roc_threshold": 0.03,
+            "enable_roc_exit": false,
+            "min_data_days": 40
+          }
+        },
+        {
+          "name": "volume_breakout",
+          "params": {
+            "vol_ma_period": 20,
+            "vol_mult": 1.8,
+            "min_data_days": 40
+          }
+        },
+        {
+          "name": "bollinger_breakout",
+          "params": {
+            "bb_period": 20,
+            "bb_std_mult": 2.0,
+            "enable_bb_mid_exit": false,
+            "min_data_days": 40
+          }
+        }
+      ]
+    }
+  }
+}

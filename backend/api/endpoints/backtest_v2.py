@@ -180,31 +180,6 @@ def _coerce_number(value: Any, *, integer: bool = False) -> int | float | None:
     return None
 
 
-def infer_tier(start: Any, end: Any, universe_size: Any, trades: Any) -> str:
-    years = 0.0
-    try:
-        if start and end:
-            s = date.fromisoformat(str(start))
-            e = date.fromisoformat(str(end))
-            years = max((e - s).days / 365.25, 0.0)
-    except Exception:
-        years = 0.0
-
-    u = int(_coerce_number(universe_size, integer=True) or 0)
-    t = int(_coerce_number(trades, integer=True) or 0)
-
-    # Low-sample gate has highest priority.
-    if years < 1.0 or u < 50 or t < 50:
-        return "T0"
-    if years >= 5.0 and u >= 700 and t >= 1000:
-        return "T3"
-    if years >= 3.0 and u >= 300 and t >= 300:
-        return "T2"
-    if (1.0 <= years < 3.0) or (50 <= u < 300) or (50 <= t < 300):
-        return "T1"
-    return "T0"
-
-
 def _parse_ps_object_row(raw: str) -> dict[str, Any] | None:
     text = str(raw or "").strip()
     if not (text.startswith("@{") and text.endswith("}")):
@@ -944,6 +919,9 @@ class BacktestV2ExperimentRequest(BaseModel):
     config_id: str | None = None
     workbench_mode: str | None = None
     workbench_config: dict[str, Any] | None = None
+    universe_mode: str = "CUSTOM"
+    industries: list[str] = []
+    price_adj: str = "hfq"
 
 
 class BacktestV2ConfigSaveRequest(BaseModel):
@@ -1414,189 +1392,26 @@ def _job_payload(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _write_experiment_click_report(bt_root: Path, result: dict[str, Any]) -> Path:
-    report_dir = _results_root() / "report"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    exp_id = str(result.get("exp_id", "exp"))
-    preset = str(result.get("preset", "unknown"))
-    out = report_dir / f"{stamp}_{exp_id}_{preset}.md"
-
-    rows_raw = list(result.get("rows") or [])
-    rows: list[dict[str, Any]] = []
-    for rr in rows_raw:
-        if isinstance(rr, dict):
-            rows.append(rr)
-        elif isinstance(rr, str):
-            text = rr.strip()
-            if text.startswith("@{") and text.endswith("}"):
-                body = text[2:-1]
-                parsed: dict[str, Any] = {}
-                for part in body.split(";"):
-                    if "=" not in part:
-                        continue
-                    k, v = part.split("=", 1)
-                    parsed[str(k).strip()] = str(v).strip()
-                rows.append(parsed)
-            else:
-                rows.append({"group_id": text, "status": "FAILED", "error_message": "ROW_PARSE_FAILED"})
-        else:
-            rows.append({"group_id": str(rr), "status": "FAILED", "error_message": "ROW_TYPE_INVALID"})
-    lines: list[str] = [
-        f"# 实验总结：{preset}",
-        "",
-        "## 1) 基本信息",
-        f"- exp_id：{exp_id}",
-        f"- 结果目录：{result.get('results_dir', '-')}",
-        f"- 分组数量：{len(rows)}",
-        "",
-        "## 2) 关键数据",
-    ]
-    if not rows:
-        lines.append("- 本次没有可展示的分组结果。")
-    else:
-        for row in rows[:8]:
-            gid = str(row.get("group_id", "-"))
-            status = str(row.get("status", "-"))
-            ret = row.get("total_return")
-            mdd = row.get("max_drawdown")
-            sharpe = row.get("sharpe")
-            ret_s = "-" if ret is None else f"{float(ret) * 100:.2f}%"
-            mdd_s = "-" if mdd is None else f"{float(mdd) * 100:.2f}%"
-            sharpe_s = "-" if sharpe is None else f"{float(sharpe):.3f}"
-            lines.append(f"- {gid} | 状态：{status} | 收益：{ret_s} | 回撤：{mdd_s} | 夏普：{sharpe_s}")
-
-    failed = [r for r in rows if str(r.get("status", "")).upper() == "FAILED"]
-    lines.extend(
-        [
-            "",
-            "## 3) 结论建议",
-            f"- 成功分组：{len(rows) - len(failed)}",
-            f"- 失败分组：{len(failed)}",
-        ]
-    )
-    if failed:
-        lines.append("- 建议先排查失败分组报错，再比较策略优劣。")
-    else:
-        lines.append("- 建议优先对比“收益、回撤、成交率”三项，再决定默认策略。")
-    lines.append("")
-    out.write_text("\n".join(lines), encoding="utf-8")
-    return out
-
-
-def _promote_single_md_report(bt_root: Path, result: dict[str, Any]) -> Path | None:
-    report_dir = _results_root() / "report"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    exp_id = str(result.get("exp_id", "exp"))
-    preset = str(result.get("preset", "unknown"))
-
-    # 1) explicit single report path
-    single = str(result.get("single_report_path") or "").strip()
-    if single:
-        p = Path(single)
-        if p.exists():
-            out = report_dir / f"{stamp}_{exp_id}_{preset}.md"
-            out.write_text(p.read_text(encoding="utf-8-sig"), encoding="utf-8")
-            try:
-                if p.resolve() != out.resolve():
-                    p.unlink(missing_ok=True)
-            except Exception:
-                pass
-            result["single_report_path"] = str(out)
-            return out
-
-    # 2) legacy md in experiment dir -> move out and clean up
-    exp_dir = Path(str(result.get("results_dir") or ""))
-    if exp_dir.exists():
-        md_files = sorted(exp_dir.glob("*.md"))
-        if md_files:
-            latest = md_files[-1]
-            out = report_dir / f"{stamp}_{exp_id}_{preset}.md"
-            out.write_text(latest.read_text(encoding="utf-8-sig"), encoding="utf-8")
-            for f in md_files:
-                try:
-                    f.unlink(missing_ok=True)
-                except Exception:
-                    pass
-            result["single_report_path"] = str(out)
-            return out
-    return None
-
-
-@router.post("/api/backtest_v2/run")
-def run_backtest_v2(body: BacktestV2RunRequest):
-    raise HTTPException(
-        status_code=410,
-        detail=(
-            "legacy /api/backtest_v2/run path is removed. "
-            "Please use /api/backtest_v2/experiment/run_async with VECTOR_FAST_STRICT presets."
-        ),
-    )
-
-
-def _run_backtest_v2_sync(body: BacktestV2RunRequest) -> dict[str, Any]:
-    bt_root = _bt_root()
-    if not bt_root.exists():
-        raise HTTPException(status_code=500, detail=f"backtest_V2 root not found: {bt_root}")
-
-    if not body.force_run:
-        if not body.validation_request_id:
-            raise HTTPException(status_code=409, detail="validation required: missing validation_request_id")
-        audit = _read_validation_audit(bt_root, body.validation_request_id)
-        if not audit:
-            raise HTTPException(status_code=409, detail=f"validation required: audit not found for {body.validation_request_id}")
-        if not bool(audit.get("pass")):
-            raise HTTPException(status_code=409, detail="validation failed: run blocked unless force_run=true")
-
-    cfg_path, run_id = _build_runtime_config(bt_root, body)
+@router.get("/api/backtest_v2/industries")
+def get_industries():
+    """返回 pit_industry_history 中所有不重复的 L1 行业名列表。"""
     try:
-        out_dir = _run_backtest_v2(bt_root, cfg_path, run_id)
-        _write_data_validation_section(out_dir, body, bt_root)
-        payload = _sanitize_for_json(_read_result(out_dir))
-        payload["run_id"] = run_id
-        return payload
-    finally:
-        try:
-            cfg_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-
-def _run_backtest_v2_job(job_id: str, body: BacktestV2RunRequest) -> None:
-    try:
-        if _is_cancel_requested(job_id):
-            _update_job(job_id, status="canceled", message="任务已取消")
-            return
-        _update_job(job_id, status="running", progress_pct=5, message="校验参数与验收状态")
-        payload = _run_backtest_v2_sync(body)
-        if _is_cancel_requested(job_id):
-            _update_job(job_id, status="canceled", message="任务已取消")
-            return
-        _update_job(job_id, status="running", progress_pct=90, message="整理结果与报告")
-        if _is_cancel_requested(job_id):
-            _update_job(job_id, status="canceled", message="任务已取消")
-            return
-        _update_job(job_id, status="success", progress_pct=100, message="回测完成", result=payload)
-    except Exception as exc:
-        msg = str(exc)
-        if isinstance(exc, HTTPException):
-            msg = str(exc.detail)
-        if _is_cancel_requested(job_id):
-            _update_job(job_id, status="canceled", message="任务已取消")
-            return
-        _update_job(job_id, status="failed", message="回测失败", error=msg)
-
-
-@router.post("/api/backtest_v2/run_async")
-def run_backtest_v2_async(body: BacktestV2RunRequest):
-    raise HTTPException(
-        status_code=410,
-        detail=(
-            "legacy /api/backtest_v2/run_async path is removed. "
-            "Please use /api/backtest_v2/experiment/run_async with VECTOR_FAST_STRICT presets."
-        ),
-    )
+        import psycopg
+        conn = psycopg.connect(
+            host=os.environ.get("PGHOST", os.environ.get("PAMS_PG_HOST", "pams-postgres")),
+            port=int(os.environ.get("PGPORT", os.environ.get("PAMS_PG_PORT", "5432"))),
+            dbname=os.environ.get("PGDATABASE", os.environ.get("PAMS_PG_DBNAME", "pams")),
+            user=os.environ.get("PGUSER", os.environ.get("PAMS_PG_USER", "pams")),
+            password=os.environ.get("PGPASSWORD", os.environ.get("PAMS_PG_PASSWORD", "")),
+            autocommit=True,
+        )
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT industry_l1 FROM public.pit_industry_history ORDER BY industry_l1")
+            industries = [r[0] for r in cur.fetchall()]
+        conn.close()
+    except Exception:
+        industries = []
+    return {"industries": industries}
 
 
 @router.get("/api/backtest_v2/results/{run_id}")
@@ -1723,6 +1538,12 @@ def _run_backtest_v2_experiment_sync(
         overrides["workbench_mode"] = str(body.workbench_mode)
     if isinstance(body.workbench_config, dict):
         overrides["workbench_config"] = sanitize_json(dict(body.workbench_config))
+    if body.universe_mode:
+        overrides["universe_mode"] = str(body.universe_mode)
+    if body.industries:
+        overrides["industries"] = list(body.industries)
+    if body.price_adj:
+        overrides["price_adj"] = str(body.price_adj)
 
     env_backup = {
         "PAMS_PG_HOST": os.environ.get("PAMS_PG_HOST"),

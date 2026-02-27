@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.api.endpoints.backtest_v2 import router as backtest_v2_router  # noqa: E402
+from backend.api.endpoints.transactions import router as transactions_router  # noqa: E402
 
 
 class NoCacheMiddleware(BaseHTTPMiddleware):
@@ -31,6 +32,7 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
 app = FastAPI(title="backtest-v2-standalone", version="1.0.0")
 app.add_middleware(NoCacheMiddleware)
 app.include_router(backtest_v2_router)
+app.include_router(transactions_router)
 
 app.add_middleware(
     CORSMiddleware,

@@ -92,13 +92,14 @@ def to_canonical(
         "limit_up": mapping.get("limit_up", ""),
         "limit_down": mapping.get("limit_down", ""),
         "is_suspended": mapping.get("is_suspended", ""),
+        "adj_factor": mapping.get("adj_factor", ""),
     }
     for key, src_col in optional_cols.items():
         if src_col and src_col in df.columns:
             out[key] = df[src_col]
 
     base_cols = ["date", "symbol", "open", "high", "low", "close", "volume", "amount"]
-    keep_cols = base_cols + [c for c in ("limit_up", "limit_down", "is_suspended") if c in out.columns]
+    keep_cols = base_cols + [c for c in ("limit_up", "limit_down", "is_suspended", "adj_factor") if c in out.columns]
     out = out[keep_cols]
     out["date"] = pd.to_datetime(out["date"]).dt.normalize()
 
@@ -111,6 +112,10 @@ def to_canonical(
     for col in ["limit_up", "limit_down"]:
         if col in out.columns:
             out[col] = pd.to_numeric(out[col], errors="coerce")
+
+    # adj_factor: Decimal→float, NULL→1.0（不复权等价）
+    if "adj_factor" in out.columns:
+        out["adj_factor"] = pd.to_numeric(out["adj_factor"], errors="coerce").fillna(1.0).astype(float)
 
     out = out.sort_values(["date", "symbol"]).reset_index(drop=True)
     return out, warnings

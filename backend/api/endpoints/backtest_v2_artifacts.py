@@ -287,7 +287,14 @@ def ensure_standard_artifacts(
             "fast_mode": bool(overrides.get("fast_mode", True)),
         },
         "counters": _build_counters(result, results_dir),
+        "price_adj_mode": str(result.get("price_adj_mode") or "hfq"),
+        "adj_factor_stats": sanitize_json(result.get("adj_factor_stats") or {}),
     }
+    # 注入 universe resolver 元数据（来自 experiment_runner）
+    u_meta = result.get("universe_meta")
+    if isinstance(u_meta, dict):
+        run_meta_obj["universe"] = sanitize_json(u_meta)
+        run_meta_obj["data"]["universe_mode"] = str(u_meta.get("universe_mode") or "CUSTOM")
     run_meta_path = results_dir / "run_meta.json"
     run_meta_path.write_text(json.dumps(sanitize_json(run_meta_obj), ensure_ascii=False, indent=2), encoding="utf-8")
 

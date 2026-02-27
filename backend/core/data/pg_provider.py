@@ -136,7 +136,7 @@ class PostgresDataProvider(DataProvider):
         existing_cols = self._get_table_columns(self._source.stocks_table)
         cols = self._filter_existing_cols(
             mapping,
-            ["date", "symbol", "open", "high", "low", "close", "volume", "amount"],
+            ["date", "symbol", "open", "high", "low", "close", "volume", "amount", "adj_factor"],
             existing_cols,
         )
         cols_sql = ", ".join(safe_ident(c) for c in cols)

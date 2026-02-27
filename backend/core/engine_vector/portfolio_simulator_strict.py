@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from backend.core.config.models import CostConfig
 from backend.core.core.models import Position
 from backend.core.core.models import Signal
 from backend.core.core.types import Side
@@ -134,6 +135,8 @@ def run_vector_portfolio_backtest_strict(
     mf_concentrate_topn: int = 3,
     mf_concentrate_scale: float = 1.5,
     mf_rank_gate_mode: str = "ALWAYS_ON",
+    cost_cfg: CostConfig | None = None,
+    raw_history: pd.DataFrame | None = None,
 ) -> PortfolioBacktestResult:
     # VECTOR_FAST_STRICT optimized path is tailored for SMA-like strategies.
     # For composite/multi-signal strategies, keep VECTOR engine mode but use
@@ -162,6 +165,8 @@ def run_vector_portfolio_backtest_strict(
             mf_concentrate_topn=mf_concentrate_topn,
             mf_concentrate_scale=mf_concentrate_scale,
             mf_rank_gate_mode=mf_rank_gate_mode,
+            cost_cfg=cost_cfg,
+            raw_history=raw_history,
         )
 
     if history.empty:
@@ -261,14 +266,19 @@ def run_vector_portfolio_backtest_strict(
     cand_idx = build_daily_candidate_index(sig_m["buy_base"])
     precompute_seconds = float(time.perf_counter() - pre_t0)
 
-    # lookup for close/nav snapshots
+    # lookup for close/nav snapshots — 成交执行使用不复权价格
+    _raw = raw_history if raw_history is not None else history
+    _raw_hist = _raw.copy()
+    _raw_hist["date"] = pd.to_datetime(_raw_hist["date"])
+    _raw_hist["symbol"] = _raw_hist["symbol"].astype(str).str.lower()
     open_idx: dict[tuple[date, str], float] = {}
     close_idx: dict[tuple[date, str], float] = {}
-    for r in hist.itertuples(index=False):
+    for r in _raw_hist.itertuples(index=False):
         d = pd.Timestamp(r.date).date()
         s = str(r.symbol).lower()
         open_idx[(d, s)] = float(r.open)
         close_idx[(d, s)] = float(r.close)
+    del _raw_hist
     sym_to_col = {s: i for i, s in enumerate(mx.symbols)}
 
     sim_t0 = time.perf_counter()
@@ -288,6 +298,12 @@ def run_vector_portfolio_backtest_strict(
     cand_index_access_count = 0
     diag_reason_counts: dict[str, int] = {}
 
+    _cc = cost_cfg if cost_cfg is not None else CostConfig()
+    _slip_bps = _cc.slippage_bps / 10000.0
+    _comm_rate = _cc.commission_rate
+    _comm_min = _cc.commission_min
+    _stamp_rate = _cc.stamp_tax_rate
+
     trade_rows: list[dict[str, Any]] = []
     candidate_rows: list[dict[str, Any]] = []
     daily_rows: list[dict[str, Any]] = []
@@ -306,9 +322,13 @@ def run_vector_portfolio_backtest_strict(
                 qty = min(held, int(od["qty"]))
                 if qty <= 0:
                     continue
-                value = qty * px
-                cash += value
-                traded_value += value
+                fill_px = px * (1.0 - _slip_bps)
+                gross = qty * fill_px
+                comm = max(_comm_min, gross * _comm_rate)
+                stax = gross * _stamp_rate
+                net = gross - comm - stax
+                cash += net
+                traded_value += gross
                 positions[od["symbol"]] = held - qty
                 if positions[od["symbol"]] <= 0:
                     positions.pop(od["symbol"], None)
@@ -321,8 +341,13 @@ def run_vector_portfolio_backtest_strict(
                         "symbol": od["symbol"],
                         "side": "SELL",
                         "price": px,
+                        "fill_price": round(fill_px, 4),
                         "qty": qty,
-                        "value": value,
+                        "value": round(gross, 2),
+                        "commission": round(comm, 2),
+                        "stamp_tax": round(stax, 2),
+                        "slippage": round(abs(fill_px - px) * qty, 2),
+                        "net_amount": round(net, 2),
                         "reason_code": od["reason_code"],
                         "triggered_rule": str((od.get("meta") or {}).get("triggered_rule", "")),
                         "break_streak": int((od.get("meta") or {}).get("break_streak", 0) or 0),
@@ -331,15 +356,18 @@ def run_vector_portfolio_backtest_strict(
                 )
             else:
                 qty = int(od["qty"])
-                value = qty * px
-                if qty <= 0 or value > cash:
+                fill_px = px * (1.0 + _slip_bps)
+                gross = qty * fill_px
+                comm = max(_comm_min, gross * _comm_rate)
+                net = gross + comm
+                if qty <= 0 or net > cash:
                     continue
-                cash -= value
-                traded_value += value
+                cash -= net
+                traded_value += gross
                 prev_qty = int(positions.get(od["symbol"], 0))
                 prev_avg = float(position_avg_cost.get(od["symbol"], 0.0))
                 new_qty = prev_qty + qty
-                new_avg = ((prev_qty * prev_avg) + (qty * px)) / float(new_qty) if new_qty > 0 else 0.0
+                new_avg = ((prev_qty * prev_avg) + (qty * fill_px)) / float(new_qty) if new_qty > 0 else 0.0
                 positions[od["symbol"]] = new_qty
                 position_avg_cost[od["symbol"]] = float(new_avg)
                 peak_close_state.setdefault(od["symbol"], float(close_idx.get((day, od["symbol"]), px)))
@@ -349,8 +377,13 @@ def run_vector_portfolio_backtest_strict(
                         "symbol": od["symbol"],
                         "side": "BUY",
                         "price": px,
+                        "fill_price": round(fill_px, 4),
                         "qty": qty,
-                        "value": value,
+                        "value": round(gross, 2),
+                        "commission": round(comm, 2),
+                        "stamp_tax": 0.0,
+                        "slippage": round(abs(fill_px - px) * qty, 2),
+                        "net_amount": round(net, 2),
                         "reason_code": od["reason_code"],
                         "triggered_rule": str((od.get("meta") or {}).get("triggered_rule", "")),
                         "break_streak": int((od.get("meta") or {}).get("break_streak", 0) or 0),
@@ -970,6 +1003,8 @@ def _run_vector_portfolio_backtest_generic_signals(
     mf_concentrate_topn: int,
     mf_concentrate_scale: float,
     mf_rank_gate_mode: str,
+    cost_cfg: CostConfig | None = None,
+    raw_history: pd.DataFrame | None = None,
 ) -> PortfolioBacktestResult:
     if history.empty:
         raise ValueError("history is empty")
@@ -1000,13 +1035,19 @@ def _run_vector_portfolio_backtest_generic_signals(
     else:
         combined = hist
 
+    # 成交执行使用不复权价格
+    _raw_gs = raw_history if raw_history is not None else history
+    _raw_gs_hist = _raw_gs.copy()
+    _raw_gs_hist["date"] = pd.to_datetime(_raw_gs_hist["date"])
+    _raw_gs_hist["symbol"] = _raw_gs_hist["symbol"].astype(str).str.lower()
     open_idx: dict[tuple[date, str], float] = {}
     close_idx: dict[tuple[date, str], float] = {}
-    for r in hist.itertuples(index=False):
+    for r in _raw_gs_hist.itertuples(index=False):
         d = pd.Timestamp(r.date).date()
         s = str(r.symbol).lower()
         open_idx[(d, s)] = float(r.open)
         close_idx[(d, s)] = float(r.close)
+    del _raw_gs_hist
 
     pending: dict[date, list[dict[str, Any]]] = {}
     positions: dict[str, int] = {}
@@ -1044,6 +1085,12 @@ def _run_vector_portfolio_backtest_generic_signals(
     mf_fast = _build_multifactor_and_fast_gate(strategy, hist, day_list)
     mf_fast_hits = 0
 
+    _cc2 = cost_cfg if cost_cfg is not None else CostConfig()
+    _slip_bps2 = _cc2.slippage_bps / 10000.0
+    _comm_rate2 = _cc2.commission_rate
+    _comm_min2 = _cc2.commission_min
+    _stamp_rate2 = _cc2.stamp_tax_rate
+
     for i, day in enumerate(day_list):
         traded_value = 0.0
         for od in pending.pop(day, []):
@@ -1055,9 +1102,13 @@ def _run_vector_portfolio_backtest_generic_signals(
                 qty = min(held, int(od["qty"]))
                 if qty <= 0:
                     continue
-                value = qty * px
-                cash += value
-                traded_value += value
+                fill_px = px * (1.0 - _slip_bps2)
+                gross = qty * fill_px
+                comm = max(_comm_min2, gross * _comm_rate2)
+                stax = gross * _stamp_rate2
+                net = gross - comm - stax
+                cash += net
+                traded_value += gross
                 positions[od["symbol"]] = held - qty
                 if positions[od["symbol"]] <= 0:
                     positions.pop(od["symbol"], None)
@@ -1068,8 +1119,13 @@ def _run_vector_portfolio_backtest_generic_signals(
                         "symbol": od["symbol"],
                         "side": "SELL",
                         "price": px,
+                        "fill_price": round(fill_px, 4),
                         "qty": qty,
-                        "value": value,
+                        "value": round(gross, 2),
+                        "commission": round(comm, 2),
+                        "stamp_tax": round(stax, 2),
+                        "slippage": round(abs(fill_px - px) * qty, 2),
+                        "net_amount": round(net, 2),
                         "reason_code": od["reason_code"],
                         "triggered_rule": str((od.get("meta") or {}).get("triggered_rule", "")),
                         "break_streak": int((od.get("meta") or {}).get("break_streak", 0) or 0),
@@ -1078,15 +1134,18 @@ def _run_vector_portfolio_backtest_generic_signals(
                 )
             else:
                 qty = int(od["qty"])
-                value = qty * px
-                if qty <= 0 or value > cash:
+                fill_px = px * (1.0 + _slip_bps2)
+                gross = qty * fill_px
+                comm = max(_comm_min2, gross * _comm_rate2)
+                net = gross + comm
+                if qty <= 0 or net > cash:
                     continue
-                cash -= value
-                traded_value += value
+                cash -= net
+                traded_value += gross
                 prev_qty = int(positions.get(od["symbol"], 0))
                 prev_avg = float(position_avg_cost.get(od["symbol"], 0.0))
                 new_qty = prev_qty + qty
-                new_avg = ((prev_qty * prev_avg) + (qty * px)) / float(new_qty) if new_qty > 0 else 0.0
+                new_avg = ((prev_qty * prev_avg) + (qty * fill_px)) / float(new_qty) if new_qty > 0 else 0.0
                 positions[od["symbol"]] = new_qty
                 position_avg_cost[od["symbol"]] = float(new_avg)
                 trade_rows.append(
@@ -1095,8 +1154,13 @@ def _run_vector_portfolio_backtest_generic_signals(
                         "symbol": od["symbol"],
                         "side": "BUY",
                         "price": px,
+                        "fill_price": round(fill_px, 4),
                         "qty": qty,
-                        "value": value,
+                        "value": round(gross, 2),
+                        "commission": round(comm, 2),
+                        "stamp_tax": 0.0,
+                        "slippage": round(abs(fill_px - px) * qty, 2),
+                        "net_amount": round(net, 2),
                         "reason_code": od["reason_code"],
                         "triggered_rule": str((od.get("meta") or {}).get("triggered_rule", "")),
                         "break_streak": int((od.get("meta") or {}).get("break_streak", 0) or 0),

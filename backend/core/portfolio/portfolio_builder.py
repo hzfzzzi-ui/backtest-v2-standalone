@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 
+from backend.core.config.models import CostConfig
 from backend.core.core.models import Position, Signal
 from backend.core.core.types import Side
 from backend.core.strategies.base import Strategy
@@ -424,6 +425,8 @@ def run_portfolio_backtest(
     mf_concentrate_topn: int = 3,
     mf_concentrate_scale: float = 1.5,
     mf_rank_gate_mode: str = "ALWAYS_ON",
+    cost_cfg: CostConfig | None = None,
+    raw_history: pd.DataFrame | None = None,
 ) -> PortfolioBacktestResult:
     if str(engine_mode).upper() == "VECTOR_FAST_STRICT":
         from backend.core.engine_vector.portfolio_simulator_strict import run_vector_portfolio_backtest_strict
@@ -448,6 +451,8 @@ def run_portfolio_backtest(
             mf_concentrate_topn=int(mf_concentrate_topn),
             mf_concentrate_scale=float(mf_concentrate_scale),
             mf_rank_gate_mode=str(mf_rank_gate_mode),
+            cost_cfg=cost_cfg,
+            raw_history=raw_history,
         )
     if history.empty:
         raise ValueError("history is empty")
