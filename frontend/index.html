@@ -55,6 +55,9 @@
         <button class="wb-rail-btn" data-panel="json" title="JSON">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
         </button>
+        <button class="wb-rail-btn" data-panel="history" title="实验历史">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </button>
       </aside>
 
       <!-- ═══ B-2. Drawer (340 px, collapsible) ═══ -->
@@ -442,6 +445,20 @@
             <summary>Validation & Diff</summary>
             <div class="wb-acc-body"><pre id="wbConfigDiff" class="wb-pre"></pre></div>
           </details>
+        </section>
+
+        <!-- ── History module ── -->
+        <section class="wb-module" data-module="history">
+          <div class="wb-history-head">
+            <strong>实验历史</strong>
+            <button id="wbHistoryClear" class="pill wb-action-ghost">清空</button>
+          </div>
+          <div id="wbHistoryList" class="wb-history-list">
+            <div class="wb-empty" style="padding:24px 0">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>暂无实验记录，运行回测后将自动保存</span>
+            </div>
+          </div>
         </section>
       </aside>
 

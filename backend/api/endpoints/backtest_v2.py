@@ -17,6 +17,7 @@ from typing import Any, Callable
 import pandas as pd
 from pandas.errors import EmptyDataError
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from .backtest_v2_artifacts import stabilize_experiment_result
 
@@ -2059,5 +2060,81 @@ def read_backtest_v2_artifact(body: BacktestV2ArtifactReadRequest):
         return _sanitize_for_json({"kind": "csv", "path": rel, "rows": df.to_dict(orient="records"), "columns": list(df.columns)})
     text = target.read_text(encoding="utf-8", errors="ignore")
     return _sanitize_for_json({"kind": "text", "path": rel, "text": text[:200000]})
+
+
+# ── Experiment History API ──────────────────────────────────────────────────
+
+def _experiments_root() -> Path:
+    return _results_root() / "experiments"
+
+
+def _read_index() -> list[dict[str, Any]]:
+    index_path = _experiments_root() / "index.json"
+    if not index_path.exists():
+        return []
+    try:
+        entries = json.loads(index_path.read_text(encoding="utf-8"))
+        return entries if isinstance(entries, list) else []
+    except Exception:
+        return []
+
+
+def _write_index(entries: list[dict[str, Any]]) -> None:
+    index_path = _experiments_root() / "index.json"
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+@router.get("/api/backtest_v2/experiments")
+def list_experiments():
+    """Return experiment list (newest first), with lazy orphan cleanup."""
+    entries = _read_index()
+    exp_root = _experiments_root()
+    # Filter out orphan entries whose directories no longer exist
+    valid = [e for e in entries if (exp_root / str(e.get("exp_id", ""))).is_dir()]
+    if len(valid) != len(entries):
+        _write_index(valid)
+    # Sort by created_at descending
+    valid.sort(key=lambda e: str(e.get("created_at", "")), reverse=True)
+    return valid
+
+
+@router.get("/api/backtest_v2/experiments/{exp_id}/report")
+def get_experiment_report(exp_id: str):
+    """Return report.html as text/html."""
+    report_path = _experiments_root() / exp_id / "report.html"
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="report not found")
+    html = report_path.read_text(encoding="utf-8")
+    return HTMLResponse(content=html)
+
+
+@router.delete("/api/backtest_v2/experiments/{exp_id}")
+def delete_experiment(exp_id: str):
+    """Delete a single experiment directory and remove from index."""
+    import shutil
+    exp_dir = _experiments_root() / exp_id
+    if not exp_dir.is_dir():
+        raise HTTPException(status_code=404, detail="experiment not found")
+    shutil.rmtree(exp_dir, ignore_errors=True)
+    entries = _read_index()
+    entries = [e for e in entries if e.get("exp_id") != exp_id]
+    _write_index(entries)
+    return {"status": "deleted"}
+
+
+@router.delete("/api/backtest_v2/experiments")
+def clear_all_experiments():
+    """Delete all experiment directories and reset index."""
+    import shutil
+    exp_root = _experiments_root()
+    count = 0
+    if exp_root.exists():
+        for d in exp_root.iterdir():
+            if d.is_dir() and d.name.startswith("exp_"):
+                shutil.rmtree(d, ignore_errors=True)
+                count += 1
+    _write_index([])
+    return {"status": "cleared", "count": count}
 
 

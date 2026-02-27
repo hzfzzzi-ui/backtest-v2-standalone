@@ -416,6 +416,8 @@ input[type="checkbox"] {
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
 }
 .wb-accent-text { color: var(--wb-accent); font-weight: 600; }
+.wb-green-text { color: var(--wb-green); }
+.wb-red-text { color: var(--wb-red); }
 .wb-red-flag {
   border: 1px solid color-mix(in srgb, var(--wb-red) 40%, var(--wb-line));
   border-radius: var(--wb-radius-xs); padding: 6px 10px;
@@ -908,6 +910,62 @@ input[type="checkbox"] {
   border: none;
   border-top: 1px dashed var(--wb-line-dim);
   margin: 8px 0;
+}
+
+/* ── 18a. History Panel ── */
+.wb-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--wb-line-dim);
+}
+.wb-history-head strong {
+  font-size: 13px;
+  color: var(--wb-text);
+}
+.wb-history-list {
+  padding: 8px;
+  overflow-y: auto;
+  max-height: calc(100vh - 160px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wb-history-card {
+  background: var(--wb-surface-2);
+  border: 1px solid var(--wb-line-dim);
+  border-radius: var(--wb-radius-xs);
+  padding: 10px 12px;
+}
+.wb-history-card .wb-hc-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wb-text);
+  margin-bottom: 2px;
+}
+.wb-history-card .wb-hc-range {
+  font-size: 11px;
+  color: var(--wb-text-soft);
+  margin-bottom: 6px;
+}
+.wb-history-card .wb-stat-row {
+  margin-bottom: 6px;
+}
+.wb-history-card .wb-hc-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.wb-history-card .wb-hc-actions .pill {
+  flex: 1;
+  text-align: center;
+}
+.wb-history-card .wb-hc-time {
+  font-size: 10px;
+  color: var(--wb-text-soft);
+  margin-top: 4px;
+  opacity: 0.7;
 }
 
 /* ── 18. Responsive ── */

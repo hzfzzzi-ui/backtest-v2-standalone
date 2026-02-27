@@ -259,7 +259,7 @@ function setDrawerPanel(panel) {
   document.querySelectorAll('.wb-module').forEach((m) => m.classList.toggle('active', m.getAttribute('data-module') === state.drawer_panel));
   const titleEl = byId('wbDrawerTitle');
   if (titleEl) {
-    const titles = { universe: 'Universe', signal: 'Signal', compose: 'Composition', risk: 'Risk & Exit', json: 'JSON' };
+    const titles = { universe: 'Universe', signal: 'Signal', compose: 'Composition', risk: 'Risk & Exit', json: 'JSON', history: '实验历史' };
     titleEl.textContent = titles[state.drawer_panel] || state.drawer_panel;
   }
 }
@@ -1644,6 +1644,7 @@ function bindEvents() {
     /* open drawer if collapsed */
     const app = document.querySelector('.wb-app');
     if (app && app.classList.contains('wb-drawer-hidden')) toggleDrawer(false);
+    if (panel === 'history') loadExperimentList();
   }));
 
   byId('wbValidateBtn')?.addEventListener('click', async () => {
@@ -1739,7 +1740,7 @@ function bindEvents() {
     navigator.clipboard?.writeText(JSON.stringify(payload, null, 2));
     addLog('图表摘要已复制');
   });
-  byId('wbExportReport')?.addEventListener('click', () => { generateReport(); });
+  byId('wbExportReport')?.addEventListener('click', () => { generateReport().catch((e) => addLog(`报告生成失败: ${e}`)); });
   byId('wbStatusBell')?.addEventListener('click', () => toggleStatusPanel());
   byId('wbErrorBannerView')?.addEventListener('click', () => toggleStatusPanel(true));
   byId('wbStatusCopy')?.addEventListener('click', () => {
@@ -1826,14 +1827,129 @@ function init() {
 
 init();
 
+// ── 实验历史面板 ──────────────────────────────────────────
+
+async function loadExperimentList() {
+  try {
+    const data = await apiRequestJson('experiments', '/api/backtest_v2/experiments');
+    renderHistoryPanel(data);
+  } catch (e) {
+    addLog(`加载实验列表失败: ${e?.message || e}`);
+    renderHistoryPanel([]);
+  }
+}
+
+function renderHistoryPanel(experiments) {
+  const container = byId('wbHistoryList');
+  if (!container) return;
+  if (!experiments || !experiments.length) {
+    container.innerHTML = `<div class="wb-empty" style="padding:24px 0">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <span>暂无实验记录，运行回测后将自动保存</span>
+    </div>`;
+    return;
+  }
+  container.innerHTML = experiments.map((exp) => {
+    const label = esc(exp.label || exp.exp_id || '-');
+    const expId = esc(exp.exp_id || '');
+    const totalReturn = pct(exp.total_return);
+    const maxDd = pct(exp.max_drawdown);
+    const sharpe = num(exp.sharpe, 2);
+    const trades = fmtInt(exp.trades);
+    const trClass = Number(exp.total_return) >= 0 ? 'wb-green-text' : 'wb-red-text';
+    const ddClass = 'wb-red-text';
+    const created = exp.created_at ? exp.created_at.replace('T', ' ').slice(0, 16) : '-';
+    const reportBtn = exp.has_report
+      ? `<button class="pill wb-hc-report" data-exp="${expId}">查看报告</button>`
+      : '';
+    return `<div class="wb-history-card" data-exp-id="${expId}">
+      <div class="wb-hc-label">${label}</div>
+      <div class="wb-stat-row">
+        <div class="wb-stat-item"><span class="wb-stat-label">收益</span><span class="wb-stat-value ${trClass}">${totalReturn}</span></div>
+        <div class="wb-stat-item"><span class="wb-stat-label">回撤</span><span class="wb-stat-value ${ddClass}">${maxDd}</span></div>
+        <div class="wb-stat-item"><span class="wb-stat-label">夏普</span><span class="wb-stat-value">${sharpe}</span></div>
+        <div class="wb-stat-item"><span class="wb-stat-label">交易</span><span class="wb-stat-value">${trades}</span></div>
+      </div>
+      <div class="wb-hc-actions">
+        ${reportBtn}
+        <button class="pill wb-hc-load" data-exp="${expId}">加载结果</button>
+      </div>
+      <div class="wb-hc-time">${created}</div>
+    </div>`;
+  }).join('');
+
+  // Bind report buttons
+  container.querySelectorAll('.wb-hc-report').forEach((btn) => btn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const expId = btn.getAttribute('data-exp');
+    window.open(`/api/backtest_v2/experiments/${expId}/report`, '_blank');
+  }));
+
+  // Bind load buttons
+  container.querySelectorAll('.wb-hc-load').forEach((btn) => btn.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    const expId = btn.getAttribute('data-exp');
+    await loadHistoricalExperiment(expId);
+  }));
+}
+
+async function loadHistoricalExperiment(expId) {
+  addLog(`加载历史实验: ${expId}`);
+  const resultsDir = `experiments/${expId}`;
+  // Build a minimal result object so loadActiveArtifacts can work
+  const fakeResult = {
+    exp_id: expId,
+    results_dir: resultsDir,
+    status: 'OK',
+    artifacts: {
+      perf: 'perf.json',
+      nav: 'nav.csv',
+      funnel: 'funnel.csv',
+      reason_codes: 'reason_codes.csv',
+      run_meta: 'run_meta.json',
+      config: 'config.json',
+      stock_names: 'stock_names.json',
+      trades: 'portfolio_trades.csv',
+      daily: 'portfolio_daily.csv',
+    },
+  };
+  state.active_exp = fakeResult;
+  state.active_result = fakeResult;
+  await loadActiveArtifacts();
+  renderRightInspector();
+  addLog(`已加载历史实验: ${expId}`);
+}
+
+// Clear all experiments handler
+byId('wbHistoryClear')?.addEventListener('click', async () => {
+  if (!confirm('确定清空所有实验记录？此操作不可恢复。')) return;
+  try {
+    await apiRequestJson('clearExperiments', '/api/backtest_v2/experiments', { method: 'DELETE' });
+    addLog('所有实验记录已清空');
+    renderHistoryPanel([]);
+  } catch (e) {
+    addLog(`清空失败: ${e?.message || e}`);
+  }
+});
+
 // ── 报告生成 ──────────────────────────────────────────
-function generateReport() {
+async function generateReport() {
   const art = state.active_artifacts;
   const result = state.active_result;
   if (!art || !result || !result.exp_id) {
     addLog('请先运行回测');
     return;
   }
+  // Try backend report first
+  try {
+    const reportUrl = `/api/backtest_v2/experiments/${encodeURIComponent(result.exp_id)}/report`;
+    const resp = await fetch(reportUrl);
+    if (resp.ok) {
+      window.open(reportUrl, '_blank');
+      return;
+    }
+  } catch (_) { /* fallback to local generation */ }
+  addLog('后端报告不可用，使用本地生成');
   const perf = art.perf || {};
   const meta = art.run_meta || {};
   const counters = meta.counters || {};

@@ -7,7 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import logging
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def _repo_root() -> Path:
@@ -78,6 +81,67 @@ def _resolve_runtime_path(raw: str | None, bt_root: Path) -> Path | None:
         if mapped.exists():
             return mapped.resolve()
     return None
+
+
+def _resolve_stock_names(symbols: list[str]) -> dict[str, str]:
+    """Query DB for Chinese stock names. Returns {symbol: name} mapping."""
+    if not symbols:
+        return {}
+    try:
+        import psycopg
+        conn = psycopg.connect(
+            host=os.environ.get("PGHOST", os.environ.get("PAMS_PG_HOST", "pams-postgres")),
+            port=int(os.environ.get("PGPORT", os.environ.get("PAMS_PG_PORT", "5432"))),
+            dbname=os.environ.get("PGDATABASE", os.environ.get("PAMS_PG_DBNAME", "pams")),
+            user=os.environ.get("PGUSER", os.environ.get("PAMS_PG_USER", "pams")),
+            password=os.environ.get("PGPASSWORD", os.environ.get("PAMS_PG_PASSWORD", "")),
+            autocommit=True,
+        )
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT symbol, name FROM pit_security_master WHERE symbol = ANY(%s) AND name IS NOT NULL AND name != ''",
+                (list(symbols),),
+            )
+            names = {row[0]: row[1] for row in cur.fetchall()}
+        conn.close()
+        return names
+    except Exception as exc:
+        logger.warning("resolve_stock_names failed: %s", exc)
+        return {}
+
+
+def _generate_experiment_label(base_cfg: dict[str, Any], overrides: dict[str, Any]) -> str:
+    """Generate a human-readable label like 'SMA_CROSS 5/20 | CUSTOM 2只 | HFQ | 2024-01~06'."""
+    wc = overrides.get("workbench_config") or {}
+
+    strategy = str(wc.get("strategy") or base_cfg.get("signal", {}).get("strategy") or "UNKNOWN").upper()
+
+    # Extract MA params (wc path: signal_generation.sma or sma)
+    sig_gen = wc.get("signal_generation") or {}
+    sma = sig_gen.get("sma") or wc.get("sma") or base_cfg.get("signal", {}).get("sma") or {}
+    fast = sma.get("fast_ma") or sma.get("fast_period") or ""
+    slow = sma.get("slow_ma") or sma.get("slow_period") or ""
+    param_str = f" {fast}/{slow}" if fast and slow else ""
+
+    # Universe mode + count
+    u_mode = str(overrides.get("universe_mode") or wc.get("universe_mode") or "CUSTOM").upper()
+    symbols = overrides.get("symbols") or []
+    count_str = f" {len(symbols)}只" if symbols else ""
+
+    # Price adj
+    price_adj = str(overrides.get("price_adj") or wc.get("price_adj") or "hfq").upper()
+
+    # Date range
+    start = str(overrides.get("start_date") or base_cfg.get("universe", {}).get("start") or "")
+    end = str(overrides.get("end_date") or base_cfg.get("universe", {}).get("end") or "")
+    start_short = start[:7] if len(start) >= 7 else start
+    end_short = end[5:7] if len(end) >= 7 else end
+    date_str = f"{start_short}~{end_short}" if start and end else ""
+
+    parts = [f"{strategy}{param_str}", f"{u_mode}{count_str}", price_adj]
+    if date_str:
+        parts.append(date_str)
+    return " | ".join(parts)
 
 
 def _write_nav_csv(results_dir: Path, result: dict[str, Any]) -> Path:
@@ -260,6 +324,19 @@ def ensure_standard_artifacts(
     else:
         pd.DataFrame(columns=["reason_code", "count"]).to_csv(reason_path, index=False)
 
+    # stock_names.json — 从 trades 提取 symbols，查 DB 获取中文名
+    stock_names: dict[str, str] = {}
+    if trades_path.exists():
+        try:
+            tdf_sn = pd.read_csv(trades_path)
+            if not tdf_sn.empty and "symbol" in tdf_sn.columns:
+                unique_symbols = list(tdf_sn["symbol"].dropna().unique())
+                stock_names = _resolve_stock_names(unique_symbols)
+        except Exception:
+            pass
+    stock_names_path = results_dir / "stock_names.json"
+    stock_names_path.write_text(json.dumps(stock_names, ensure_ascii=False, indent=2), encoding="utf-8")
+
     config_path = results_dir / "config.json"
     config_path.write_text(
         json.dumps(
@@ -272,6 +349,7 @@ def ensure_standard_artifacts(
 
     run_meta_obj = {
         "exp_id": str(result.get("exp_id") or ""),
+        "tier": str(result.get("tier") or "T0"),
         "status": str(result.get("status") or "OK"),
         "created_at": datetime.now().isoformat(),
         "data": {
@@ -305,6 +383,7 @@ def ensure_standard_artifacts(
         "reason_codes": _to_rel(reason_path, results_dir),
         "config": _to_rel(config_path, results_dir),
         "run_meta": _to_rel(run_meta_path, results_dir),
+        "stock_names": _to_rel(stock_names_path, results_dir),
     }
     # 如果引擎已写出 trades CSV，也加入 artifacts 映射
     if trades_path.exists():
@@ -340,6 +419,49 @@ def write_manifest(results_dir: Path, result: dict[str, Any]) -> tuple[Path, dic
     return path, manifest
 
 
+def _append_to_experiment_index(
+    results_dir: Path,
+    result: dict[str, Any],
+    base_cfg: dict[str, Any],
+    overrides: dict[str, Any],
+) -> None:
+    """Append an experiment summary to outputs/experiments/index.json."""
+    experiments_root = results_dir.parent
+    index_path = experiments_root / "index.json"
+
+    # Read existing index
+    entries: list[dict[str, Any]] = []
+    if index_path.exists():
+        try:
+            entries = json.loads(index_path.read_text(encoding="utf-8"))
+            if not isinstance(entries, list):
+                entries = []
+        except Exception:
+            entries = []
+
+    exp_id = str(result.get("exp_id") or "")
+    label = _generate_experiment_label(base_cfg, overrides)
+    has_report = (results_dir / "report.html").exists()
+
+    entry = {
+        "exp_id": exp_id,
+        "label": label,
+        "created_at": datetime.now().isoformat(),
+        "status": str(result.get("status") or "OK"),
+        "total_return": _safe_float(result.get("total_return")),
+        "max_drawdown": _safe_float(result.get("max_drawdown")),
+        "sharpe": _safe_float(result.get("sharpe")),
+        "trades": _safe_int(result.get("trades")),
+        "has_report": has_report,
+    }
+
+    # Remove existing entry for same exp_id (re-run)
+    entries = [e for e in entries if e.get("exp_id") != exp_id]
+    entries.append(sanitize_json(entry))
+
+    index_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def stabilize_experiment_result(
     *,
     bt_root: Path,
@@ -365,6 +487,23 @@ def stabilize_experiment_result(
         base_cfg=base_cfg,
         overrides=overrides,
     )
+    # Generate report.html (failure does not block)
+    report_ok = False
+    try:
+        from backend.core.report.report_generator import generate_report
+        generate_report(str(results_dir))
+        report_ok = True
+    except Exception as exc:
+        logger.warning("Report generation failed: %s", exc)
+
+    # Update artifacts with report path
+    artifacts = dict(out.get("artifacts") or {})
+    if report_ok:
+        artifacts["report"] = "report.html"
+    else:
+        artifacts["report"] = None
+    out["artifacts"] = artifacts
+
     manifest_path, manifest_obj = write_manifest(results_dir, out)
 
     files = dict(out.get("files") or {})
@@ -374,5 +513,11 @@ def stabilize_experiment_result(
 
     if run_profile_summary:
         out["run_profile_summary"] = run_profile_summary
+
+    # Append to experiment index
+    try:
+        _append_to_experiment_index(results_dir, out, base_cfg, overrides)
+    except Exception as exc:
+        logger.warning("Failed to update experiment index: %s", exc)
 
     return sanitize_json(out)
