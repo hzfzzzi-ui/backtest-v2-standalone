@@ -103,6 +103,80 @@ class StrategyConfig:
 
 
 @dataclass(slots=True)
+class ExitConfig:
+    enable_take_profit: bool = False
+    take_profit_mode: str = "pct"
+    take_profit_pct: float = 0.10
+    take_profit_atr_k: float = 3.0
+    enable_fixed_stop_loss: bool = False
+    fixed_stop_loss_pct: float = 0.05
+    enable_atr_stop: bool = False
+    atr_stop_k: float = 2.0
+    enable_atr_trail: bool = False
+    atr_trail_k: float = 3.0
+
+
+@dataclass(slots=True)
+class RiskConfig:
+    pass
+
+
+@dataclass(slots=True)
+class RiskBudgetConfig:
+    enabled: bool = False
+    base_portfolio_risk: float = 0.06
+    trend_multiplier: float = 1.0
+    dd_scale_10: float = 0.8
+    dd_scale_15: float = 0.6
+    dd_fixed_20: float = 0.03
+    dd_stop_pct: float = 0.25
+    dd_stop_cooldown_days: int = 120
+    dd_stop_protect_days: int = 60
+    min_active_ratio: float = 0.6
+    atr_stop_k: float = 2.0
+
+
+@dataclass(slots=True)
+class MarketFilterConfig:
+    enabled: bool = False
+    slope_window: int = 10
+    slope_ma_period: int = 50
+    bull_multiplier: float = 1.5
+    light_multiplier: float = 0.6
+    ema_light_fast: int = 5
+    ema_light_slow: int = 20
+
+
+@dataclass(slots=True)
+class BenchmarkRegimeConfig:
+    enabled: bool = False
+    fast_period: int = 20
+    slow_period: int = 60
+    slope_window: int = 5
+
+
+@dataclass(slots=True)
+class BreadthConfig:
+    enabled: bool = False
+    mode: str = "dynamic_maxpos"
+    score_type: str = "B"
+    mapping_mode: str = "smooth"
+    min_positions: int = 3
+    max_positions: int = 15
+    step_high: float = 0.60
+    step_mid: float = 0.45
+    smooth_lo: float = 0.40
+    smooth_range: float = 0.20
+    ema_fast: int = 8
+    ema_slow: int = 25
+    gate_threshold: float = 0.45
+    gate_quantile_window: int = 252
+    gate_quantile_pct: float = 0.20
+    gate_persist_days: int = 3
+    size_scale_floor: float = 0.3
+
+
+@dataclass(slots=True)
 class BacktestConfig:
     db: DBConfig
     db_runtime: DBRuntimeConfig
@@ -113,6 +187,12 @@ class BacktestConfig:
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     sizing: SizingConfig = field(default_factory=SizingConfig)
     costs: CostConfig = field(default_factory=CostConfig)
+    exit: ExitConfig = field(default_factory=ExitConfig)
+    risk: RiskConfig = field(default_factory=RiskConfig)
+    risk_budget: RiskBudgetConfig = field(default_factory=RiskBudgetConfig)
+    market_filter: MarketFilterConfig = field(default_factory=MarketFilterConfig)
+    benchmark_regime: BenchmarkRegimeConfig = field(default_factory=BenchmarkRegimeConfig)
+    breadth: BreadthConfig = field(default_factory=BreadthConfig)
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
     initial_capital: float = 100000.0
 

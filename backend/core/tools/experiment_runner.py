@@ -120,13 +120,18 @@ def run_experiment(
     tmp_cfg.write_text(json.dumps(cfg_merged, ensure_ascii=False, indent=2), encoding="utf-8")
 
     cfg_obj, _ = load_config(str(tmp_cfg))
-    provider = PostgresDataProvider(
+    _pg = PostgresDataProvider(
         db=cfg_obj.db,
         runtime=cfg_obj.db_runtime,
         data_source=cfg_obj.data_source,
         schema_mapping=cfg_obj.schema_mapping,
         rules_path=tmp_cfg.parent / "instrument_rules_cn.csv",
     )
+    try:
+        from backend.core.data.cached_provider import CachedDataProvider
+        provider = CachedDataProvider(_pg)
+    except ImportError:
+        provider = _pg
 
     # ── Universe 解析: 根据 mode 从 DB 查询 PIT-safe 的 symbols ──
     universe_mode = str(ov.get("universe_mode", "CUSTOM")).strip().upper()
@@ -170,6 +175,19 @@ def run_experiment(
     else:
         signal_history = history
 
+    # ── 辅助数据: ST 历史、行业指数、行业映射 ──
+    _emit_progress(progress_hook, 40, "加载辅助数据 (ST/行业)")
+    st_history = provider.load_st_history(symbols, cfg_obj.universe.start, cfg_obj.universe.end)
+    sector_data: dict[str, pd.DataFrame] = {}
+    try:
+        sec_df = provider.load_sector_indices(cfg_obj.universe.start, cfg_obj.universe.end)
+        if not sec_df.empty and "symbol" in sec_df.columns:
+            for sym, grp in sec_df.groupby("symbol"):
+                sector_data[str(sym)] = grp.reset_index(drop=True)
+    except Exception:
+        pass
+    industry_map = provider.load_industry_mapping(symbols)
+
     _emit_progress(progress_hook, 55, "执行组合回测")
     strategy = build_strategy(cfg_obj.strategy)
     strategy.set_context({"run_id": exp_id, "results_dir": str(results_dir)})
@@ -183,6 +201,7 @@ def run_experiment(
         initial_cash=float(cfg_obj.initial_capital),
         max_positions=int(ov.get("max_positions", 10)),
         lot_size=int(cfg_obj.execution.lot_size),
+        base_order_value=float(cfg_obj.sizing.order_value),
         enable_strength_rank=bool(ov.get("enable_strength_rank", False)),
         strength_ma=int(ov.get("strength_ma", 120)),
         strength_top_k_mode=str(ov.get("strength_top_k_mode", "FILL_TO_MAX")),
@@ -194,6 +213,16 @@ def run_experiment(
         mf_concentrate_scale=float(ov.get("mf_concentrate_scale", 1.5)),
         mf_rank_gate_mode=str(ov.get("mf_rank_gate_mode", "ALWAYS_ON")),
         cost_cfg=cfg_obj.costs,
+        exit_cfg=cfg_obj.exit,
+        risk_cfg=cfg_obj.risk,
+        sizing_cfg=cfg_obj.sizing,
+        st_history=st_history,
+        sector_data=sector_data,
+        industry_map=industry_map,
+        risk_budget_cfg=cfg_obj.risk_budget,
+        market_filter_cfg=cfg_obj.market_filter,
+        benchmark_regime_cfg=cfg_obj.benchmark_regime,
+        breadth_cfg=cfg_obj.breadth,
     )
 
     _emit_progress(progress_hook, 85, "写出回测产物")
@@ -226,6 +255,20 @@ def run_experiment(
         "mf_rank_applied_rate": float(m.get("mf_rank_applied_rate", 0.0) or 0.0),
         "mf_gate_on_rate": float(m.get("mf_gate_on_rate", m.get("gate_on_rate", 0.0)) or 0.0),
         "candidate_diag_reason_counts": dict(m.get("candidate_diag_reason_counts") or {}),
+        # breadth / exit / regime / market filter 计数器
+        "breadth_score_mean": float(m.get("breadth_score_mean", 0.0) or 0.0),
+        "breadth_gate_block_count": int(m.get("breadth_gate_block_count", 0) or 0),
+        "breadth_maxpos_mean": float(m.get("breadth_maxpos_mean", 0.0) or 0.0),
+        "exit_take_profit_count": int(m.get("exit_take_profit_count", 0) or 0),
+        "exit_fixed_stop_count": int(m.get("exit_fixed_stop_count", 0) or 0),
+        "exit_atr_stop_count": int(m.get("exit_atr_stop_count", 0) or 0),
+        "exit_atr_trail_count": int(m.get("exit_atr_trail_count", 0) or 0),
+        "exit_time_exit_count": int(m.get("exit_time_exit_count", 0) or 0),
+        "exit_signal_count": int(m.get("exit_signal_count", 0) or 0),
+        "market_filter_bull_days": int(m.get("market_filter_bull_days", 0) or 0),
+        "market_filter_bear_days": int(m.get("market_filter_bear_days", 0) or 0),
+        "risk_budget_active_days": int(m.get("risk_budget_active_days", 0) or 0),
+        "st_block_count": int(m.get("st_block_count", 0) or 0),
         "run_profile_summary": {
             "engine_mode": "VECTOR_FAST_STRICT",
             "symbols_count": len(symbols),
