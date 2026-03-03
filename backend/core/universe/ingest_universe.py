@@ -1,9 +1,13 @@
-"""Universe 数据导入脚本 — 从 AKShare 拉取行业分类历史 + 中证800 成分数据。
+"""Universe 数据导入脚本 — 从 AKShare 拉取行业分类历史 + 中证800 成分 + 申万行业指数日线。
 
 用法:
   # 两步式（Docker 无外网时）:
   python -m backend.core.universe.ingest_universe --fetch-only --csv-dir ./data_cache
   docker-compose exec backtest-v2-standalone python -m backend.core.universe.ingest_universe --all --from-csv /app/data_cache
+
+  # 仅拉取+导入申万行业指数日线:
+  python -m backend.core.universe.ingest_universe --fetch-only --csv-dir ./data_cache
+  docker-compose exec backtest-v2-standalone python -m backend.core.universe.ingest_universe --sw-index --from-csv /app/data_cache
 
   # 一步式（有外网时）:
   python -m backend.core.universe.ingest_universe --all
@@ -13,6 +17,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from datetime import date, datetime
 from pathlib import Path
 
@@ -76,8 +81,46 @@ SW_L1_MAP: dict[str, str] = {
     "47": "社会服务",   # 旧:休闲服务 → 2021:社会服务
 }
 
+# ── 申万 L1 行业名 → 行业指数代码 ─────────────────────────────────────
+# industry_l1 名称（pit_industry_history 中的值）→ 申万行业指数代码（pit_index_daily 中的 index_code）
+SW_L1_INDEX_MAP: dict[str, str] = {
+    "农林牧渔": "801010.SI",
+    "基础化工": "801030.SI",
+    "钢铁": "801040.SI",
+    "有色金属": "801050.SI",
+    "电子": "801080.SI",
+    "汽车": "801880.SI",
+    "家用电器": "801110.SI",
+    "食品饮料": "801120.SI",
+    "纺织服饰": "801130.SI",
+    "轻工制造": "801140.SI",
+    "医药生物": "801150.SI",
+    "公用事业": "801160.SI",
+    "交通运输": "801170.SI",
+    "房地产": "801180.SI",
+    "商贸零售": "801200.SI",
+    "社会服务": "801210.SI",
+    "银行": "801780.SI",
+    "非银金融": "801790.SI",
+    "综合": "801230.SI",
+    "建筑材料": "801710.SI",
+    "建筑装饰": "801720.SI",
+    "电力设备": "801730.SI",
+    "机械设备": "801890.SI",
+    "国防军工": "801740.SI",
+    "计算机": "801750.SI",
+    "传媒": "801760.SI",
+    "通信": "801770.SI",
+    "煤炭": "801950.SI",
+    "石油石化": "801960.SI",
+    "环保": "801970.SI",
+    "美容护理": "801980.SI",
+}
+
 _INDUSTRY_CSV = "industry_clf_hist_sw.csv"
 _INDEX_CSV = "index_stock_cons_000906.csv"
+_SW_INDEX_DAILY_CSV = "sw_index_daily.csv"
+_SW_INDEX_START_DATE = "2010-01-01"
 
 
 def _get_db_conn():
@@ -137,6 +180,35 @@ def _fetch_index_raw() -> pd.DataFrame:
     return raw
 
 
+def _fetch_sw_index_daily(start_date: str = _SW_INDEX_START_DATE) -> pd.DataFrame:
+    """从 AKShare 拉取所有申万 L1 行业指数日线数据。"""
+    if ak is None:
+        raise RuntimeError("akshare 未安装")
+
+    info = ak.sw_index_first_info()
+    # col[0] = index code like "801010.SI"
+    codes = info.iloc[:, 0].str.replace(".SI", "", regex=False).tolist()
+    print(f"[fetch] 申万 L1 行业指数: {len(codes)} 个")
+
+    all_frames = []
+    for i, code in enumerate(codes):
+        print(f"[fetch] ({i + 1}/{len(codes)}) 拉取 {code} 日线 ...")
+        df = ak.index_hist_sw(symbol=code, period="day")
+        all_frames.append(df)
+        if i < len(codes) - 1:
+            time.sleep(0.3)
+
+    combined = pd.concat(all_frames, ignore_index=True)
+
+    # Filter by start_date — col[1] is date
+    date_col = combined.columns[1]
+    combined[date_col] = pd.to_datetime(combined[date_col])
+    combined = combined[combined[date_col] >= start_date].reset_index(drop=True)
+
+    print(f"[fetch] 合计 {len(combined)} 条 (>= {start_date})")
+    return combined
+
+
 def fetch_and_save(csv_dir: str) -> None:
     """拉取 AKShare 数据并保存为 CSV（在有外网的环境运行）。"""
     out = Path(csv_dir)
@@ -151,6 +223,11 @@ def fetch_and_save(csv_dir: str) -> None:
     index_path = out / _INDEX_CSV
     index_raw.to_csv(str(index_path), index=False, encoding="utf-8-sig")
     print(f"[fetch] 已保存 {index_path} ({len(index_raw)} 行)")
+
+    sw_daily = _fetch_sw_index_daily()
+    sw_path = out / _SW_INDEX_DAILY_CSV
+    sw_daily.to_csv(str(sw_path), index=False, encoding="utf-8-sig")
+    print(f"[fetch] 已保存 {sw_path} ({len(sw_daily)} 行)")
 
 
 def _load_industry_raw(csv_dir: str | None) -> pd.DataFrame:
@@ -169,6 +246,15 @@ def _load_index_raw(csv_dir: str | None) -> pd.DataFrame:
         print(f"[index] 从 CSV 加载: {p}")
         return pd.read_csv(str(p), dtype=str)
     return _fetch_index_raw()
+
+
+def _load_sw_index_raw(csv_dir: str | None) -> pd.DataFrame:
+    """从 AKShare 或 CSV 加载申万行业指数日线数据。"""
+    if csv_dir:
+        p = Path(csv_dir) / _SW_INDEX_DAILY_CSV
+        print(f"[sw-index] 从 CSV 加载: {p}")
+        return pd.read_csv(str(p))
+    return _fetch_sw_index_daily()
 
 
 def _transform_industry(raw: pd.DataFrame) -> pd.DataFrame:
@@ -308,6 +394,51 @@ def ingest_index(conn, csv_dir: str | None = None) -> int:
     return count
 
 
+def ingest_sw_index(conn, csv_dir: str | None = None) -> int:
+    """导入申万 L1 行业指数日线到 pit_index_daily。"""
+    raw = _load_sw_index_raw(csv_dir)
+
+    # Rename by position (encoding-safe): code, date, close, open, high, low, volume, turnover
+    raw.columns = ["code", "date", "close", "open", "high", "low", "volume", "turnover"]
+
+    raw["index_code"] = raw["code"].astype(str).str.strip().apply(
+        lambda c: f"{c}.SI" if not c.endswith(".SI") else c
+    )
+    raw["trade_date"] = pd.to_datetime(raw["date"]).dt.date
+    raw["open"] = pd.to_numeric(raw["open"], errors="coerce").fillna(0.0)
+    raw["high"] = pd.to_numeric(raw["high"], errors="coerce").fillna(0.0)
+    raw["low"] = pd.to_numeric(raw["low"], errors="coerce").fillna(0.0)
+    raw["close"] = pd.to_numeric(raw["close"], errors="coerce").fillna(0.0)
+    # 亿股 → 股, 亿元 → 元
+    raw["vol_shares"] = (pd.to_numeric(raw["volume"], errors="coerce").fillna(0.0) * 1e8).astype(int)
+    raw["to_yuan"] = pd.to_numeric(raw["turnover"], errors="coerce").fillna(0.0) * 1e8
+
+    records = list(
+        raw[["index_code", "trade_date", "open", "high", "low", "close", "vol_shares", "to_yuan"]]
+        .itertuples(index=False, name=None)
+    )
+
+    n_codes = raw["index_code"].nunique()
+    print(f"[sw-index] 准备写入 {len(records)} 条, {n_codes} 个行业指数")
+
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM public.pit_index_daily WHERE index_code LIKE '801%.SI'")
+        deleted = cur.rowcount
+        if deleted:
+            print(f"[sw-index] 清理旧数据 {deleted} 条")
+
+        insert_sql = """
+            INSERT INTO public.pit_index_daily
+                (index_code, trade_date, open, high, low, close, volume, turnover, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        """
+        cur.executemany(insert_sql, records)
+    conn.commit()
+
+    print(f"[sw-index] 写入 pit_index_daily {len(records)} 条")
+    return len(records)
+
+
 def update_security_master_industry(conn) -> int:
     """用每只股票最新的行业分类更新 pit_security_master.industry。"""
     sql = """
@@ -332,6 +463,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Universe 数据导入脚本")
     parser.add_argument("--industry", action="store_true", help="导入申万行业分类历史")
     parser.add_argument("--index", action="store_true", help="导入中证800成分")
+    parser.add_argument("--sw-index", action="store_true", help="导入申万 L1 行业指数日线")
     parser.add_argument("--update-master", action="store_true", help="更新 pit_security_master.industry")
     parser.add_argument("--all", action="store_true", help="全部导入")
     parser.add_argument("--fetch-only", action="store_true", help="仅从 AKShare 拉取数据保存为 CSV（不写 DB）")
@@ -345,7 +477,7 @@ def main() -> None:
         print("[done] 数据已保存，可用 --from-csv 导入到数据库")
         return
 
-    if not any([args.industry, args.index, args.update_master, args.all]):
+    if not any([args.industry, args.index, args.sw_index, args.update_master, args.all]):
         parser.print_help()
         sys.exit(1)
 
@@ -356,6 +488,8 @@ def main() -> None:
             ingest_industry(conn, csv_dir)
         if args.index or args.all:
             ingest_index(conn, csv_dir)
+        if args.sw_index or args.all:
+            ingest_sw_index(conn, csv_dir)
         if args.update_master or args.all:
             update_security_master_industry(conn)
     finally:

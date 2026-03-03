@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 
-from backend.core.config.models import CostConfig
+from backend.core.config.models import BenchmarkRegimeConfig, BreadthConfig, CostConfig, ExitConfig, MarketFilterConfig, RiskBudgetConfig, RiskConfig, SizingConfig
 from backend.core.core.models import Position, Signal
 from backend.core.core.types import Side
 from backend.core.strategies.base import Strategy
@@ -41,12 +41,28 @@ def compute_nav_snapshot(
     positions: dict[str, int],
     close_idx: dict[tuple[date, str], float],
     day: date,
+    hfq_close_idx: dict[tuple[date, str], float] | None = None,
+    position_entry_adj: dict[str, float] | None = None,
 ) -> tuple[float, float, list[tuple[str, float]]]:
+    """计算 NAV 快照。
+
+    当同时提供 hfq_close_idx 和 position_entry_adj 时，使用归一化公式：
+        market_value = qty × hfq_close / entry_adj_factor
+    这样持仓估值与 raw 价格空间一致，同时消除除权除息的虚假跳变。
+    当只提供 close_idx 时，向后兼容使用 raw close。
+    """
+    _use_hfq = hfq_close_idx is not None and position_entry_adj is not None
+    _val_idx = hfq_close_idx if _use_hfq else close_idx
+    _entry_adj = position_entry_adj or {}
     market_value = 0.0
     pos_values: list[tuple[str, float]] = []
     for sym, qty in positions.items():
-        c = float(close_idx.get((day, sym), 0.0) or 0.0)
-        v = c * qty
+        c = float(_val_idx.get((day, sym), 0.0) or 0.0)
+        if _use_hfq:
+            ea = _entry_adj.get(sym, 1.0)
+            v = c / ea * qty if ea > 1e-8 else c * qty
+        else:
+            v = c * qty
         market_value += v
         pos_values.append((sym, v))
     nav = float(cash) + float(market_value)
@@ -129,6 +145,10 @@ def build_rebalance_orders(
     decision_date: date | None = None,
     candidate_audit: list[dict[str, Any]] | None = None,
     debug_plan: dict[str, Any] | None = None,
+    base_order_value: float = 0.0,
+    sizing_cfg: SizingConfig | None = None,
+    risk_amount: float = 0.0,
+    atr_stop_k: float = 2.0,
 ) -> list[PortfolioOrder]:
     orders: list[PortfolioOrder] = []
     future_positions = dict(positions)
@@ -267,7 +287,8 @@ def build_rebalance_orders(
             order_pos = {s: i for i, s in enumerate(order)}
             ranked.sort(key=lambda x: int(order_pos.get(str(x.get("symbol", "")).lower(), 10**9)))
 
-    target_amount = float(nav_close) / float(max_positions) if max_positions > 0 else 0.0
+    cfg_order_value = float(base_order_value)
+    target_amount = cfg_order_value if cfg_order_value > 0 else (float(nav_close) / float(max_positions) if max_positions > 0 else 0.0)
     selected_n = 0
     buy_exec_plan: list[dict[str, Any]] = []
     reject_reason_counts: dict[str, int] = {}
@@ -307,7 +328,24 @@ def build_rebalance_orders(
             item["reject_reason"] = "BLOCK_WEAK_TIER_DISABLED" if trend_tier == "WEAK" else "SKIP_QTY_ZERO"
             reject_reason_counts[item["reject_reason"]] = int(reject_reason_counts.get(item["reject_reason"], 0)) + 1
             continue
-        target_amount_scaled = float(target_amount) * float(order_value_scale)
+        # ── 仓位计算 ──
+        if risk_amount > 0:
+            # 风险预算路径：shares = risk_amount / (k × ATR)
+            _atr_v = sig_meta.get("atr_last")
+            if _atr_v is not None and float(_atr_v) > 0 and px > 0:
+                _stop_dist = float(atr_stop_k) * float(_atr_v)
+                _shares_raw = risk_amount / _stop_dist
+                target_amount_scaled = _shares_raw * px
+                # 安全上限：single_stock_cap（默认无上限用 nav）
+                _cap_value = float(nav_close) * 0.2  # 单票上限 20%
+                if target_amount_scaled > _cap_value:
+                    target_amount_scaled = _cap_value
+            else:
+                # ATR 不可用 → 降级为等权
+                target_amount_scaled = float(nav_close) / float(max_positions) if max_positions > 0 else 0.0
+        else:
+            # 等权路径（risk_budget 关闭）
+            target_amount_scaled = float(target_amount) * float(order_value_scale)
         qty = calc_lot_qty(target_amount_scaled, px, lot_size)
         if qty < lot_size:
             item["reject_reason"] = "SKIP_QTY_ZERO"
@@ -426,7 +464,18 @@ def run_portfolio_backtest(
     mf_concentrate_scale: float = 1.5,
     mf_rank_gate_mode: str = "ALWAYS_ON",
     cost_cfg: CostConfig | None = None,
+    exit_cfg: ExitConfig | None = None,
+    risk_cfg: RiskConfig | None = None,
+    sizing_cfg: SizingConfig | None = None,
     raw_history: pd.DataFrame | None = None,
+    base_order_value: float = 0.0,
+    st_history: pd.DataFrame | None = None,
+    sector_data: dict[str, pd.DataFrame] | None = None,
+    industry_map: dict[str, str] | None = None,
+    risk_budget_cfg: RiskBudgetConfig | None = None,
+    market_filter_cfg: MarketFilterConfig | None = None,
+    benchmark_regime_cfg: BenchmarkRegimeConfig | None = None,
+    breadth_cfg: BreadthConfig | None = None,
 ) -> PortfolioBacktestResult:
     if str(engine_mode).upper() == "VECTOR_FAST_STRICT":
         from backend.core.engine_vector.portfolio_simulator_strict import run_vector_portfolio_backtest_strict
@@ -452,7 +501,18 @@ def run_portfolio_backtest(
             mf_concentrate_scale=float(mf_concentrate_scale),
             mf_rank_gate_mode=str(mf_rank_gate_mode),
             cost_cfg=cost_cfg,
+            exit_cfg=exit_cfg,
+            risk_cfg=risk_cfg,
+            sizing_cfg=sizing_cfg,
             raw_history=raw_history,
+            base_order_value=float(base_order_value),
+            st_history=st_history,
+            sector_data=sector_data,
+            industry_map=industry_map,
+            risk_budget_cfg=risk_budget_cfg,
+            market_filter_cfg=market_filter_cfg,
+            benchmark_regime_cfg=benchmark_regime_cfg,
+            breadth_cfg=breadth_cfg,
         )
     if history.empty:
         raise ValueError("history is empty")
@@ -656,7 +716,14 @@ def run_portfolio_backtest(
                 meta_d = dict(sig.meta) if isinstance(sig.meta, dict) else {}
                 day_gate_by_symbol[sym_k] = {
                     "cross_up": str(sig.reason_code or sig.reason or "").upper()
-                    in {"SMA_CROSS_UP", "SMA_CROSS_UP_BLOCKED", "ENTRY_BUFFER_BLOCKED", "BUY_BLOCKED_TREND_FILTER"},
+                    in {
+                        "SMA_CROSS_UP",
+                        "EMA_CROSS_UP",
+                        "SMA_CROSS_UP_BLOCKED",
+                        "EMA_CROSS_UP_BLOCKED",
+                        "ENTRY_BUFFER_BLOCKED",
+                        "BUY_BLOCKED_TREND_FILTER",
+                    },
                     "entry_buffer_ok": bool(meta_d.get("buffer_ok")) if "buffer_ok" in meta_d else None,
                     "trend_ok": bool(meta_d.get("trend_ok")) if "trend_ok" in meta_d else None,
                     "regime_ok": bool(meta_d.get("regime_on")) if "regime_on" in meta_d else None,
@@ -705,7 +772,7 @@ def run_portfolio_backtest(
                     if str(s.symbol).lower() == sym and str(s.side.value).upper() == "BUY":
                         rc = str(s.reason_code or s.reason or "").upper()
                         break
-            g["buy_raw_ok"] = rc == "SMA_CROSS_UP"
+            g["buy_raw_ok"] = rc in {"SMA_CROSS_UP", "EMA_CROSS_UP"}
         strength_map: dict[str, float | None] = {}
         if enable_strength_rank and buy_sigs:
             for sig in buy_sigs:
@@ -927,6 +994,7 @@ def _compute_metrics(
     daily_ret = pd.to_numeric(daily_df["daily_return"], errors="coerce").fillna(0.0)
     vol_annual = float(daily_ret.std(ddof=0) * sqrt(252.0))
     sharpe = float((daily_ret.mean() / daily_ret.std(ddof=0)) * sqrt(252.0)) if float(daily_ret.std(ddof=0)) > 0 else 0.0
+    calmar = float(cagr / abs(max_drawdown)) if max_drawdown != 0 else 0.0
     max_daily_drawdown = float(daily_ret.min())
     avg_positions = float(pd.to_numeric(daily_df["positions_count"], errors="coerce").fillna(0.0).mean())
     turnover_avg = float(pd.to_numeric(daily_df["turnover_pct"], errors="coerce").fillna(0.0).mean())
@@ -1017,6 +1085,7 @@ def _compute_metrics(
         "cagr": cagr,
         "max_drawdown": max_drawdown,
         "sharpe": sharpe,
+        "calmar": calmar,
         "vol_annual": vol_annual,
         "max_daily_drawdown": max_daily_drawdown,
         "trades": int(len(trades_df)),
@@ -1063,4 +1132,6 @@ def _compute_metrics(
         ),
         "strength_rank_enabled": bool(enable_strength_rank),
         "strength_ma": int(strength_ma),
+        "total_buy_signals": int(total_buy_signals),
+        "blocked_signals": int(blocked_by_trend_count),
     }

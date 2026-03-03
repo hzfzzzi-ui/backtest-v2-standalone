@@ -1,0 +1,113 @@
+{
+  "db": {
+    "host": "pams-postgres",
+    "port": 5432,
+    "dbname": "pams",
+    "user": "pams",
+    "password": ""
+  },
+  "db_runtime": {
+    "statement_timeout_ms": 300000
+  },
+  "universe": {
+    "symbols": [],
+    "benchmark": "000300.SH",
+    "start": "2016-03-01",
+    "end": "2026-02-13"
+  },
+  "data_source": {
+    "stocks_table": "pams_ohlcv_daily",
+    "index_table": "pit_index_daily",
+    "prefer_index_table": true,
+    "allow_cn_index_in_stocks_table": false,
+    "cn_index_filter_column": "market",
+    "cn_index_filter_value": "CN_INDEX"
+  },
+  "schema_mapping": {
+    "pams_ohlcv_daily": {
+      "date": "trade_date",
+      "symbol": "symbol",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "turnover",
+      "limit_up": "limit_up",
+      "limit_down": "limit_down",
+      "is_suspended": "is_suspended",
+      "adj_factor": "adj_factor"
+    },
+    "pit_index_daily": {
+      "date": "trade_date",
+      "symbol": "index_code",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "turnover"
+    }
+  },
+  "data_scope": {
+    "extend_prev_close": true,
+    "prev_close_missing_policy": "disable_limit_check"
+  },
+  "execution": {
+    "lot_size": 100,
+    "tick_size": 0.01,
+    "limit_pct_default": 0.1,
+    "limit_pct_star": 0.05,
+    "limit_pct_kcb_gem": 0.2,
+    "liquidity_cap_pct": 0.1,
+    "allow_liquidity_without_volume": false,
+    "t_plus_one": true,
+    "t_plus_one_cash": false,
+    "limit_price_epsilon_mode": "tick_or_default",
+    "limit_price_epsilon_default": 0.01
+  },
+  "sizing": {
+    "mode": "fixed_qty",
+    "order_value": 0.0,
+    "reserve_cash_ratio": 0.02,
+    "lot_size": 100,
+    "univote_lot_mode": "OFF"
+  },
+  "costs": {
+    "commission_rate": 0.0003,
+    "commission_min": 5.0,
+    "stamp_tax_rate": 0.001,
+    "slippage_bps": 2.0,
+    "slippage_mode": "price_adjustment_only"
+  },
+  "initial_capital": 1000000.0,
+  "strategy": {
+    "name": "regime_router",
+    "regime_ma": 60,
+    "trend_strategy": "sma_cross",
+    "trend_params": {
+      "fast": 5,
+      "slow": 20,
+      "order_size": 1000
+    },
+    "mr_strategy": "rsi_reversal",
+    "mr_params": {
+      "rsi_period": 14,
+      "rsi_buy_threshold": 30.0,
+      "rsi_sell_threshold": 70.0,
+      "mr_max_hold_days": 5,
+      "mr_stop_loss_pct": 0.05,
+      "order_size": 1000
+    }
+  },
+  "exit": {
+    "enable_atr_stop": true,
+    "atr_stop_k": 2.0,
+    "enable_atr_trail": true,
+    "atr_trail_k": 3.0
+  },
+  "_sweep": {
+    "universe_mode": "HS300_ZZ500",
+    "max_positions": 10
+  }
+}

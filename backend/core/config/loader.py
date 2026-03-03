@@ -9,12 +9,18 @@ from typing import Any
 
 from .models import (
     BacktestConfig,
+    BenchmarkRegimeConfig,
+    BreadthConfig,
     CostConfig,
     DataScopeConfig,
     DataSourceConfig,
     DBConfig,
     DBRuntimeConfig,
     ExecutionConfig,
+    ExitConfig,
+    MarketFilterConfig,
+    RiskBudgetConfig,
+    RiskConfig,
     SizingConfig,
     StrategyConfig,
     UniverseConfig,
@@ -28,6 +34,17 @@ def _env(key: str, fallback: Any) -> Any:
 
 def _parse_date(value: str) -> date:
     return date.fromisoformat(value)
+
+
+_STRATEGY_CONFIG_FIELDS = frozenset(f.name for f in __import__("dataclasses").fields(StrategyConfig))
+
+
+def _build_strategy_config(raw: dict[str, Any]) -> StrategyConfig:
+    known = {k: v for k, v in raw.items() if k in _STRATEGY_CONFIG_FIELDS}
+    extra = {k: v for k, v in raw.items() if k not in _STRATEGY_CONFIG_FIELDS}
+    cfg = StrategyConfig(**known)
+    cfg.params = {**cfg.params, **extra}
+    return cfg
 
 
 def load_config(path: str | Path) -> tuple[BacktestConfig, str]:
@@ -53,6 +70,13 @@ def load_config(path: str | Path) -> tuple[BacktestConfig, str]:
         benchmark_compare_symbol=str(uni_raw.get("benchmark_compare_symbol", "000001.SH")),
     )
 
+    # 旧字段静默忽略（向后兼容）
+    _sizing_raw = {k: v for k, v in raw.get("sizing", {}).items()
+                   if k not in ("enable_volatility_sizing", "vol_target_risk_pct")}
+    _risk_raw = {k: v for k, v in raw.get("risk", {}).items()
+                 if k not in ("enable_drawdown_breaker", "drawdown_breaker_pct", "drawdown_breaker_recover_pct")}
+    _exit_raw = raw.get("exit", {})
+
     cfg = BacktestConfig(
         db=db,
         db_runtime=runtime,
@@ -61,9 +85,15 @@ def load_config(path: str | Path) -> tuple[BacktestConfig, str]:
         schema_mapping=raw["schema_mapping"],
         data_scope=DataScopeConfig(**raw.get("data_scope", {})),
         execution=ExecutionConfig(**raw.get("execution", {})),
-        sizing=SizingConfig(**raw.get("sizing", {})),
+        sizing=SizingConfig(**_sizing_raw),
         costs=CostConfig(**raw.get("costs", {})),
-        strategy=StrategyConfig(**raw.get("strategy", {})),
+        exit=ExitConfig(**_exit_raw),
+        risk=RiskConfig(**_risk_raw),
+        risk_budget=RiskBudgetConfig(**raw.get("risk_budget", {})),
+        market_filter=MarketFilterConfig(**raw.get("market_filter", {})),
+        benchmark_regime=BenchmarkRegimeConfig(**raw.get("benchmark_regime", {})),
+        breadth=BreadthConfig(**raw.get("breadth", {})),
+        strategy=_build_strategy_config(raw.get("strategy", {})),
         initial_capital=float(raw.get("initial_capital", 100000.0)),
     )
 

@@ -22,6 +22,10 @@ def build_signal_matrices(
     enable_trend_continuity_filter: bool = False,
     continuity_n: int = 10,
     risk_on: np.ndarray,
+    # 入场趋势过滤（基于信号 slow_ma）
+    enable_entry_above_slow_ma: bool = False,
+    enable_entry_slow_ma_slope: bool = False,
+    entry_slope_lookback: int = 5,
 ) -> dict[str, np.ndarray]:
     t, n = close.shape
     cross_up = np.zeros((t, n), dtype=bool)
@@ -112,6 +116,28 @@ def build_signal_matrices(
         tradable=tradable,
         apply_tradable_in_raw=False,
     )
+    # 入场过滤矩阵：close > slow_ma
+    entry_above_slow_ma = np.ones((t, n), dtype=bool)
+    if bool(enable_entry_above_slow_ma):
+        entry_above_slow_ma = (
+            ~np.isnan(close)
+            & ~np.isnan(slow_ma)
+            & (close > slow_ma)
+        )
+
+    # 入场过滤矩阵：slow_ma 斜率 > 0
+    entry_slow_ma_slope_pos = np.ones((t, n), dtype=bool)
+    if bool(enable_entry_slow_ma_slope):
+        elb = max(1, int(entry_slope_lookback))
+        entry_slow_ma_slope_pos[:] = False
+        if t > elb:
+            slow_ma_diff = np.full((t, n), np.nan, dtype=float)
+            slow_ma_diff[elb:, :] = slow_ma[elb:, :] - slow_ma[:-elb, :]
+            entry_slow_ma_slope_pos = (
+                ~np.isnan(slow_ma_diff)
+                & (slow_ma_diff > 0.0)
+            )
+
     return {
         "cross_up": cross_up,
         "cross_down": cross_down,
@@ -124,4 +150,6 @@ def build_signal_matrices(
         "ma_is_valid": ma_is_valid,
         "buy_base": buy_base,
         "risk_on_matrix": risk_on_matrix,
+        "entry_above_slow_ma": entry_above_slow_ma,
+        "entry_slow_ma_slope_pos": entry_slow_ma_slope_pos,
     }

@@ -36,11 +36,11 @@
     }
   ],
   "counters": {
-    "raw_signal_count": 1000,
-    "blocked_count": 300,
-    "orders_count": 400,
-    "skipped_count": 10,
-    "closed_trades_count": 320,
+    "raw_signal": 1000,
+    "blocked": 300,
+    "orders": 400,
+    "skipped": 10,
+    "closed_trades": 320,
     "gate_on_rate": 0.55,
     "mf_rank_applied_rate": 0.21,
     "trend_slope_block_count": 78,
@@ -53,10 +53,15 @@
     "perf": "groups/GROUP_A/perf.json",
     "nav": "groups/GROUP_A/nav.csv",
     "funnel": "groups/GROUP_A/funnel.csv",
-    "reason_codes": "groups/GROUP_A/reason_code_counts.csv",
-    "config": "groups/GROUP_A/config.json"
+    "reason_codes": "groups/GROUP_A/reason_codes.csv",
+    "config": "groups/GROUP_A/config.json",
+    "symbol_performance": "groups/GROUP_A/symbol_performance.csv"
   },
-  "missing_fields": []
+  "missing_fields": [],
+  "legacy_hits": {
+    "reason_codes_filename": 0,
+    "counters_field_alias": 0
+  }
 }
 ```
 
@@ -67,4 +72,6 @@
   - `missing_nav_source`
   - `missing_funnel_source`
   - `missing_reason_code_source`
+  - `missing_symbol_performance_source`
   - `missing_atr_trigger_counters`
+- 新写出的 `counters` 只使用短名；读取侧兼容窗口可回退 `*_count` 旧字段。

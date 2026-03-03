@@ -4,6 +4,7 @@ from backend.core.config.models import StrategyConfig
 from .base import Strategy
 from .ma_atr_stop import MAAtrStopStrategy
 from .ma_trend_filter import MATrendFilterStrategy
+from .ema_cross import EMACrossStrategy
 from .sma_cross import SMACrossStrategy
 from .sma_cross_regime import SMACrossRegimeStrategy
 from .sma_cross_regime_atr import SMACrossRegimeATRStrategy
@@ -12,6 +13,9 @@ from .volume_breakout import VolumeBreakoutStrategy
 from .momentum_roc import MomentumROCStrategy
 from .relative_strength import RelativeStrengthStrategy
 from .bollinger_breakout import BollingerBreakoutStrategy
+from .adaptive_regime import AdaptiveRegimeStrategy
+from .rsi_reversal import RSIReversalStrategy
+from .regime_router import RegimeDetector, RegimeRouter
 from .composite_strategy import CompositeStrategy
 
 
@@ -19,10 +23,36 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
     name = cfg.name.lower()
     params = dict(cfg.params or {})
     if name == "sma_cross":
+        _default_exempt = ["ATR_STOP_LOSS", "ATR_TRAIL_EXIT", "RISK_OFF_EXIT", "TREND_BREAK_EXIT"]
         return SMACrossStrategy(
             fast=int(params.get("fast", cfg.fast)),
             slow=int(params.get("slow", cfg.slow)),
             order_size=int(params.get("order_size", cfg.order_size)),
+            enable_atr_stop=bool(params.get("enable_atr_stop", False)),
+            atr_stop_k=float(params.get("atr_stop_k", 2.0)),
+            enable_atr_trail=bool(params.get("enable_atr_trail", False)),
+            atr_trail_k=float(params.get("atr_trail_k", 3.0)),
+            max_hold_days=int(params.get("max_hold_days", 0)),
+            min_hold_days=int(params.get("min_hold_days", 0)),
+            cooldown_days=int(params.get("cooldown_days", 0)),
+            min_hold_exempt_reasons=list(params.get("min_hold_exempt_reasons", _default_exempt)),
+        )
+    if name == "ema_cross":
+        return EMACrossStrategy(
+            fast=int(params.get("fast", cfg.fast)),
+            slow=int(params.get("slow", cfg.slow)),
+            order_size=int(params.get("order_size", cfg.order_size)),
+            enable_atr_stop=bool(params.get("enable_atr_stop", False)),
+            atr_stop_k=float(params.get("atr_stop_k", 2.0)),
+            enable_atr_trail=bool(params.get("enable_atr_trail", False)),
+            atr_trail_k=float(params.get("atr_trail_k", 3.0)),
+            enable_entry_above_slow_ma=bool(params.get("enable_entry_above_slow_ma", False)),
+            enable_entry_slow_ma_slope=bool(params.get("enable_entry_slow_ma_slope", False)),
+            entry_slope_lookback=int(params.get("entry_slope_lookback", 5)),
+            max_hold_days=int(params.get("max_hold_days", 0)),
+            min_hold_days=int(params.get("min_hold_days", 0)),
+            cooldown_days=int(params.get("cooldown_days", 0)),
+            min_hold_exempt_reasons=list(params.get("min_hold_exempt_reasons", ["ATR_STOP_LOSS", "ATR_TRAIL_EXIT", "RISK_OFF_EXIT", "TREND_BREAK_EXIT"])),
         )
     if name == "ma_trend_filter":
         return MATrendFilterStrategy(
@@ -98,13 +128,6 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
             enable_atr_trail=bool(params.get("enable_atr_trail", False)),
             debug_atr=bool(params.get("debug_atr", False)),
         )
-    if name == "sma_cross_multifactor":
-        # sma_cross_multifactor已废弃，请使用composite策略替代
-        raise ValueError(
-            "Strategy 'sma_cross_multifactor' is deprecated. "
-            "Please use 'composite' strategy with independent factor strategies instead. "
-            "See MULTIFACTOR_INCREMENTAL_V1 variants for examples."
-        )
     if name == "multifactor_signal":
         # 独立的多因子信号策略
         return MultifactorSignalStrategy(
@@ -144,6 +167,65 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
             bb_std_mult=float(params.get("bb_std_mult", 2.0)),
             enable_bb_mid_exit=bool(params.get("enable_bb_mid_exit", False)),
             min_data_days=int(params.get("min_data_days", 30)),
+        )
+    if name == "rsi_reversal":
+        return RSIReversalStrategy(
+            rsi_period=int(params.get("rsi_period", 6)),
+            rsi_buy_threshold=float(params.get("rsi_buy_threshold", 20.0)),
+            rsi_sell_threshold=float(params.get("rsi_sell_threshold", 80.0)),
+            mr_max_hold_days=int(params.get("mr_max_hold_days", 5)),
+            mr_stop_loss_pct=float(params.get("mr_stop_loss_pct", 0.03)),
+            order_size=int(params.get("order_size", cfg.order_size)),
+        )
+    if name == "regime_router":
+        trend_name = str(params.get("trend_strategy", "sma_cross")).lower()
+        trend_params = dict(params.get("trend_params", {}))
+        trend_params.setdefault("fast", params.get("fast", cfg.fast))
+        trend_params.setdefault("slow", params.get("slow", cfg.slow))
+        trend_params.setdefault("order_size", params.get("order_size", cfg.order_size))
+        trend_strategy = build_strategy(StrategyConfig(name=trend_name, params=trend_params))
+
+        mr_name = str(params.get("mr_strategy", "rsi_reversal")).lower()
+        mr_params = dict(params.get("mr_params", {}))
+        mr_params.setdefault("order_size", params.get("order_size", cfg.order_size))
+        mr_strategy = build_strategy(StrategyConfig(name=mr_name, params=mr_params))
+
+        detector = RegimeDetector(
+            regime_ma=int(params.get("regime_ma", 60)),
+        )
+        router = RegimeRouter(
+            detector=detector,
+            trend_strategy=trend_strategy,
+            mr_strategy=mr_strategy,
+        )
+        # 可选: RegimeFilter 三层趋势过滤器配置
+        rf_cfg = params.get("regime_filter")
+        if isinstance(rf_cfg, dict):
+            router.regime_filter_cfg = rf_cfg  # type: ignore[attr-defined]
+        return router
+    if name == "adaptive_regime":
+        # 向后兼容: 构造 RegimeRouter(SMA + RSI)
+        order_size = int(params.get("order_size", cfg.order_size))
+        trend_strategy = SMACrossStrategy(
+            fast=int(params.get("fast", cfg.fast)),
+            slow=int(params.get("slow", cfg.slow)),
+            order_size=order_size,
+        )
+        mr_strategy = RSIReversalStrategy(
+            rsi_period=int(params.get("rsi_period", 6)),
+            rsi_buy_threshold=float(params.get("rsi_buy_threshold", 20.0)),
+            rsi_sell_threshold=float(params.get("rsi_sell_threshold", 80.0)),
+            mr_max_hold_days=int(params.get("mr_max_hold_days", 5)),
+            mr_stop_loss_pct=float(params.get("mr_stop_loss_pct", 0.03)),
+            order_size=order_size,
+        )
+        detector = RegimeDetector(
+            regime_ma=int(params.get("regime_ma", 60)),
+        )
+        return RegimeRouter(
+            detector=detector,
+            trend_strategy=trend_strategy,
+            mr_strategy=mr_strategy,
         )
     if name == "composite":
         # 组合策略

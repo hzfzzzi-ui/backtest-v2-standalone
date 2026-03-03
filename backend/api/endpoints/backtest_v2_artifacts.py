@@ -10,35 +10,12 @@ from typing import Any
 import logging
 import pandas as pd
 
+from backend.core.analytics.symbol_performance import build_symbol_performance
+from .backtest_v2_protocol import ARTIFACT_FILENAMES, MISSING_FIELD_KEYS
+from ._utils import sanitize_json
+from ._paths import _repo_root, _results_root
+
 logger = logging.getLogger(__name__)
-
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
-
-
-def _results_root() -> Path:
-    raw = os.environ.get("RESULTS_ROOT", "outputs").strip() or "outputs"
-    p = Path(raw)
-    if not p.is_absolute():
-        p = (_repo_root() / p).resolve()
-    return p
-
-
-def sanitize_json(obj: Any) -> Any:
-    if isinstance(obj, float):
-        return None if (math.isnan(obj) or math.isinf(obj)) else obj
-    if isinstance(obj, (str, int, bool)) or obj is None:
-        return obj
-    if isinstance(obj, Path):
-        return str(obj)
-    if isinstance(obj, list):
-        return [sanitize_json(x) for x in obj]
-    if isinstance(obj, tuple):
-        return [sanitize_json(x) for x in obj]
-    if isinstance(obj, dict):
-        return {str(k): sanitize_json(v) for k, v in obj.items()}
-    return str(obj)
 
 
 def _safe_float(v: Any) -> float | None:
@@ -116,11 +93,12 @@ def _generate_experiment_label(base_cfg: dict[str, Any], overrides: dict[str, An
 
     strategy = str(wc.get("strategy") or base_cfg.get("signal", {}).get("strategy") or "UNKNOWN").upper()
 
-    # Extract MA params (wc path: signal_generation.sma or sma)
+    # Extract MA params — use ema config for EMA strategy, sma otherwise
     sig_gen = wc.get("signal_generation") or {}
-    sma = sig_gen.get("sma") or wc.get("sma") or base_cfg.get("signal", {}).get("sma") or {}
-    fast = sma.get("fast_ma") or sma.get("fast_period") or ""
-    slow = sma.get("slow_ma") or sma.get("slow_period") or ""
+    ma_key = "ema" if "EMA" in strategy else "sma"
+    ma_cfg = sig_gen.get(ma_key) or wc.get(ma_key) or base_cfg.get("signal", {}).get(ma_key) or {}
+    fast = ma_cfg.get("fast_ma") or ma_cfg.get("fast_period") or ""
+    slow = ma_cfg.get("slow_ma") or ma_cfg.get("slow_period") or ""
     param_str = f" {fast}/{slow}" if fast and slow else ""
 
     # Universe mode + count
@@ -205,12 +183,14 @@ def _build_counters(result: dict[str, Any], results_dir: Path) -> dict[str, Any]
     counters["closed_trades"] = int(result.get("closed_trades", 0) or 0)
 
     # --- 从 portfolio_trades.csv 派生 exit 计数器 ---
-    trades_path = results_dir / "portfolio_trades.csv"
+    trades_path = results_dir / ARTIFACT_FILENAMES["trades"]
     atr_stop = 0
     atr_trail = 0
     atr_trail_update = 0
     reversal = 0
     time_exit = 0
+    take_profit = 0
+    fixed_stop_loss = 0
     if trades_path.exists():
         try:
             tdf = pd.read_csv(trades_path)
@@ -218,8 +198,10 @@ def _build_counters(result: dict[str, Any], results_dir: Path) -> dict[str, Any]
                 rc = tdf["reason_code"].astype(str).str.upper()
                 atr_stop = int(rc.eq("ATR_STOP_LOSS").sum())
                 atr_trail = int(rc.eq("ATR_TRAIL_EXIT").sum())
-                reversal = int(rc.isin(["SIGNAL_REVERSE", "SMA_CROSS_DOWN"]).sum())
+                reversal = int(rc.isin(["SIGNAL_REVERSE", "SMA_CROSS_DOWN", "EMA_CROSS_DOWN"]).sum())
                 time_exit = int(rc.eq("TIME_EXIT").sum())
+                take_profit = int(rc.eq("TAKE_PROFIT").sum())
+                fixed_stop_loss = int(rc.eq("FIXED_STOP_LOSS").sum())
             # atr_trail_update_count: 从 triggered_rule 列推导
             if not tdf.empty and "triggered_rule" in tdf.columns:
                 tr = tdf["triggered_rule"].astype(str).str.upper()
@@ -234,9 +216,17 @@ def _build_counters(result: dict[str, Any], results_dir: Path) -> dict[str, Any]
             pass
     counters["atr_stop_exit_count"] = atr_stop
     counters["atr_trail_exit_count"] = atr_trail
-    counters["atr_trail_update_count"] = atr_trail_update
+    counters["atr_trail_update_count"] = int(result.get("atr_trail_update_count", 0) or 0) or atr_trail_update
     counters["reversal_exit_count"] = reversal
     counters["time_exit_count"] = time_exit
+    counters["take_profit_exit_count"] = int(result.get("take_profit_exit_count", 0) or 0) or take_profit
+    counters["fixed_stop_loss_exit_count"] = int(result.get("fixed_stop_loss_exit_count", 0) or 0) or fixed_stop_loss
+    counters["dd_scale_08_count"] = int(result.get("dd_scale_08_count", 0) or 0)
+    counters["dd_scale_06_count"] = int(result.get("dd_scale_06_count", 0) or 0)
+    counters["dd_fixed_03_count"] = int(result.get("dd_fixed_03_count", 0) or 0)
+    counters["dd_stop_count"] = int(result.get("dd_stop_count", 0) or 0)
+    counters["dd_stop_block_count"] = int(result.get("dd_stop_block_count", 0) or 0)
+    counters["dd_stop_reset_count"] = int(result.get("dd_stop_reset_count", 0) or 0)
 
     # --- 从 candidate_diag_reason_counts 派生 constraint 计数器 ---
     diag = dict(result.get("candidate_diag_reason_counts") or {})
@@ -244,6 +234,28 @@ def _build_counters(result: dict[str, Any], results_dir: Path) -> dict[str, Any]
     counters["lot_skip_count"] = int(diag.get("SKIP_LOT_TOO_SMALL", 0) or 0)
     counters["cap_hit_single"] = int(diag.get("BLOCK_SINGLE_CAP", 0) or 0)
     counters["cap_hit_industry"] = int(diag.get("BLOCK_INDUSTRY_CAP", 0) or 0)
+    counters["min_hold_block_count"] = int(diag.get("BLOCK_MIN_HOLD", 0) or 0)
+    counters["cooldown_block_count"] = int(diag.get("BLOCK_COOLDOWN", 0) or 0)
+    counters["entry_above_slow_ma_block_count"] = int(result.get("entry_above_slow_ma_block_count", 0) or 0)
+    counters["entry_slope_block_count"] = int(result.get("entry_slope_block_count", 0) or 0)
+
+    # --- regime router 计数器 ---
+    counters["regime_trend_days"] = int(result.get("regime_trend_days", 0) or 0)
+    counters["regime_mr_days"] = int(result.get("regime_mr_days", 0) or 0)
+    counters["mr_rsi_oversold_buy_count"] = int(result.get("mr_rsi_oversold_buy_count", 0) or 0)
+    counters["mr_rsi_overbought_sell_count"] = int(result.get("mr_rsi_overbought_sell_count", 0) or 0)
+    counters["mr_stop_loss_count"] = int(result.get("mr_stop_loss_count", 0) or 0)
+    counters["mr_time_exit_count"] = int(result.get("mr_time_exit_count", 0) or 0)
+    counters["regime_filter_diagnostics"] = dict(result.get("regime_filter_diagnostics") or {})
+
+    # --- MA200 市场过滤器计数器 ---
+    counters["market_state_bull_days"] = int(result.get("market_state_bull_days", 0) or 0)
+    counters["market_state_bear_days"] = int(result.get("market_state_bear_days", 0) or 0)
+    counters["market_state_trans_down_days"] = int(result.get("market_state_trans_down_days", 0) or 0)
+    counters["market_state_trans_up_days"] = int(result.get("market_state_trans_up_days", 0) or 0)
+    counters["trade_mode_main_days"] = int(result.get("trade_mode_main_days", 0) or 0)
+    counters["trade_mode_light_days"] = int(result.get("trade_mode_light_days", 0) or 0)
+    counters["trade_mode_notrade_days"] = int(result.get("trade_mode_notrade_days", 0) or 0)
 
     # --- 派生字段 ---
     avg_pos = counters["avg_positions"]
@@ -251,6 +263,67 @@ def _build_counters(result: dict[str, Any], results_dir: Path) -> dict[str, Any]
     counters["slots_left"] = round(float(max_pos) - float(avg_pos), 1)
 
     return sanitize_json(counters)
+
+
+def _resolve_backtest_range(base_cfg: dict[str, Any], overrides: dict[str, Any]) -> tuple[str, str]:
+    uni = dict(base_cfg.get("universe") or {})
+    start = str(overrides.get("start_date") or uni.get("start") or "").strip()
+    end = str(overrides.get("end_date") or uni.get("end") or "").strip()
+    return start, end
+
+
+def _load_last_close_map(
+    *,
+    symbols: list[str],
+    start_date: str,
+    end_date: str,
+    base_cfg: dict[str, Any],
+) -> dict[str, float]:
+    if not symbols or not start_date or not end_date:
+        return {}
+    try:
+        import psycopg
+        from backend.core.data.mapping import safe_ident
+
+        ds = dict(base_cfg.get("data_source") or {})
+        sm = dict(base_cfg.get("schema_mapping") or {})
+        stocks_table = str(ds.get("stocks_table") or "pams_ohlcv_daily")
+        mp = dict(sm.get(stocks_table) or {})
+        date_col = str(mp.get("date") or "trade_date")
+        symbol_col = str(mp.get("symbol") or "symbol")
+        close_col = str(mp.get("close") or "close")
+
+        q = (
+            f"SELECT {safe_ident(symbol_col)} AS symbol, {safe_ident(date_col)} AS trade_date, {safe_ident(close_col)} AS close "
+            f"FROM {safe_ident(stocks_table)} "
+            f"WHERE {safe_ident(date_col)} >= %s AND {safe_ident(date_col)} <= %s "
+            f"AND {safe_ident(symbol_col)} = ANY(%s) "
+            f"ORDER BY {safe_ident(date_col)} ASC"
+        )
+        conn = psycopg.connect(
+            host=os.environ.get("PGHOST", os.environ.get("PAMS_PG_HOST", "pams-postgres")),
+            port=int(os.environ.get("PGPORT", os.environ.get("PAMS_PG_PORT", "5432"))),
+            dbname=os.environ.get("PGDATABASE", os.environ.get("PAMS_PG_DBNAME", "pams")),
+            user=os.environ.get("PGUSER", os.environ.get("PAMS_PG_USER", "pams")),
+            password=os.environ.get("PGPASSWORD", os.environ.get("PAMS_PG_PASSWORD", "")),
+            autocommit=True,
+        )
+        with conn.cursor() as cur:
+            cur.execute(q, (start_date, end_date, list({str(s).lower() for s in symbols})))
+            rows = cur.fetchall()
+        conn.close()
+        if not rows:
+            return {}
+        df = pd.DataFrame(rows, columns=["symbol", "trade_date", "close"])
+        df["symbol"] = df["symbol"].astype(str).str.lower()
+        df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
+        df["close"] = pd.to_numeric(df["close"], errors="coerce")
+        df = df.dropna(subset=["trade_date", "close"]).sort_values(["symbol", "trade_date"])
+        last_close = df.groupby("symbol", as_index=False).tail(1)
+        return {str(r.symbol): float(r.close) for r in last_close.itertuples(index=False)}
+    except Exception as exc:
+        logger.warning("load_last_close_map failed: %s", exc)
+        return {}
 
 
 def ensure_standard_artifacts(
@@ -261,6 +334,7 @@ def ensure_standard_artifacts(
     overrides: dict[str, Any],
 ) -> dict[str, Any]:
     results_dir.mkdir(parents=True, exist_ok=True)
+    missing_fields: list[str] = []
 
     perf_obj = {
         "total_return": _safe_float(result.get("total_return")),
@@ -268,13 +342,21 @@ def ensure_standard_artifacts(
         "cagr": _safe_float(result.get("cagr")),
         "sharpe": _safe_float(result.get("sharpe")),
         "calmar": _safe_float(result.get("calmar")),
+        "top10_profit_concentration": _safe_float(result.get("top10_profit_concentration")),
+        "tier": str(result.get("tier") or ""),
         "trades": _safe_int(result.get("trades")),
         "turnover": _safe_float(result.get("turnover")),
     }
-    perf_path = results_dir / "perf.json"
+    perf_path = results_dir / ARTIFACT_FILENAMES["perf"]
     perf_path.write_text(json.dumps(sanitize_json(perf_obj), ensure_ascii=False, indent=2), encoding="utf-8")
 
     nav_path = _write_nav_csv(results_dir, result)
+    try:
+        nav_df = pd.read_csv(nav_path)
+    except Exception:
+        nav_df = pd.DataFrame()
+    if nav_df.empty:
+        missing_fields.append(MISSING_FIELD_KEYS["nav"])
 
     # 从 result dict 取 funnel 数据；若为 0 则尝试从 portfolio_trades.csv 派生
     raw_signal = int(_safe_int(result.get("raw_signal")) or 0)
@@ -315,14 +397,17 @@ def ensure_standard_artifacts(
         "skipped": skipped,
         "closed_trades": closed_trades,
     }
-    funnel_path = results_dir / "funnel.csv"
+    funnel_path = results_dir / ARTIFACT_FILENAMES["funnel"]
     pd.DataFrame([funnel_obj]).to_csv(funnel_path, index=False)
+    if not any(result.get(k) is not None for k in ("raw_signal", "blocked", "orders", "skipped", "closed_trades")):
+        missing_fields.append(MISSING_FIELD_KEYS["funnel"])
 
-    reason_path = results_dir / "reason_codes.csv"
+    reason_path = results_dir / ARTIFACT_FILENAMES["reason_codes"]
     if reason_rows:
         pd.DataFrame(reason_rows).to_csv(reason_path, index=False)
     else:
         pd.DataFrame(columns=["reason_code", "count"]).to_csv(reason_path, index=False)
+        missing_fields.append(MISSING_FIELD_KEYS["reason_codes"])
 
     # stock_names.json — 从 trades 提取 symbols，查 DB 获取中文名
     stock_names: dict[str, str] = {}
@@ -337,7 +422,51 @@ def ensure_standard_artifacts(
     stock_names_path = results_dir / "stock_names.json"
     stock_names_path.write_text(json.dumps(stock_names, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    config_path = results_dir / "config.json"
+    symbol_perf_csv_path = results_dir / ARTIFACT_FILENAMES["symbol_performance"]
+    symbol_perf_json_path = results_dir / "symbol_performance.json"
+    try:
+        if trades_path.exists():
+            tdf_sp = pd.read_csv(trades_path)
+            if not tdf_sp.empty and "symbol" in tdf_sp.columns:
+                symbols = [str(x).lower() for x in tdf_sp["symbol"].dropna().unique().tolist()]
+                start_s, end_s = _resolve_backtest_range(base_cfg, overrides)
+                last_close_map = _load_last_close_map(
+                    symbols=symbols,
+                    start_date=start_s,
+                    end_date=end_s,
+                    base_cfg=base_cfg,
+                )
+                last_date = None
+                try:
+                    nav_df = pd.read_csv(nav_path)
+                    if not nav_df.empty and "date" in nav_df.columns:
+                        ts = pd.to_datetime(nav_df["date"], errors="coerce").dropna().max()
+                        last_date = ts.date() if pd.notna(ts) else None
+                except Exception:
+                    last_date = None
+                sp_df = build_symbol_performance(
+                    trades_df=tdf_sp,
+                    last_close_map=last_close_map,
+                    last_date=last_date,
+                )
+            else:
+                sp_df = pd.DataFrame()
+        else:
+            sp_df = pd.DataFrame()
+        sp_df.to_csv(symbol_perf_csv_path, index=False)
+        if sp_df.empty:
+            missing_fields.append(MISSING_FIELD_KEYS["symbol_performance"])
+        symbol_perf_json_path.write_text(
+            json.dumps({"rows": sanitize_json(sp_df.to_dict(orient="records"))}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.warning("build symbol_performance failed: %s", exc)
+        pd.DataFrame().to_csv(symbol_perf_csv_path, index=False)
+        symbol_perf_json_path.write_text(json.dumps({"rows": []}, ensure_ascii=False, indent=2), encoding="utf-8")
+        missing_fields.append(MISSING_FIELD_KEYS["symbol_performance"])
+
+    config_path = results_dir / ARTIFACT_FILENAMES["config"]
     config_path.write_text(
         json.dumps(
             sanitize_json({"base_config": base_cfg, "overrides": overrides}),
@@ -367,14 +496,29 @@ def ensure_standard_artifacts(
         "counters": _build_counters(result, results_dir),
         "price_adj_mode": str(result.get("price_adj_mode") or "hfq"),
         "adj_factor_stats": sanitize_json(result.get("adj_factor_stats") or {}),
+        "missing_fields": sorted(set(missing_fields)),
+        "legacy_hits": {"reason_codes_filename": 0, "counters_field_alias": 0},
     }
     # 注入 universe resolver 元数据（来自 experiment_runner）
     u_meta = result.get("universe_meta")
     if isinstance(u_meta, dict):
         run_meta_obj["universe"] = sanitize_json(u_meta)
         run_meta_obj["data"]["universe_mode"] = str(u_meta.get("universe_mode") or "CUSTOM")
-    run_meta_path = results_dir / "run_meta.json"
+    run_meta_path = results_dir / ARTIFACT_FILENAMES["run_meta"]
     run_meta_path.write_text(json.dumps(sanitize_json(run_meta_obj), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 写入 audit.json（审计检查点数据）
+    audit_data = (result.get("metrics") or {}).get("audit")
+    audit_rel = None
+    if isinstance(audit_data, dict):
+        try:
+            # 补充 exp_id（引擎阶段尚不知道）
+            audit_data["exp_id"] = str(result.get("exp_id") or "")
+            audit_path = results_dir / "audit.json"
+            audit_path.write_text(json.dumps(audit_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            audit_rel = _to_rel(audit_path, results_dir)
+        except Exception as exc:
+            logger.warning("Failed to write audit.json: %s", exc)
 
     artifacts = {
         "perf": _to_rel(perf_path, results_dir),
@@ -384,12 +528,14 @@ def ensure_standard_artifacts(
         "config": _to_rel(config_path, results_dir),
         "run_meta": _to_rel(run_meta_path, results_dir),
         "stock_names": _to_rel(stock_names_path, results_dir),
+        "symbol_performance": _to_rel(symbol_perf_csv_path, results_dir),
+        "audit": audit_rel,
     }
     # 如果引擎已写出 trades CSV，也加入 artifacts 映射
     if trades_path.exists():
         artifacts["trades"] = _to_rel(trades_path, results_dir)
     # 如果引擎已写出 daily CSV，也加入 artifacts 映射（供报告生成使用）
-    daily_path = results_dir / "portfolio_daily.csv"
+    daily_path = results_dir / ARTIFACT_FILENAMES["daily"]
     if daily_path.exists():
         artifacts["daily"] = _to_rel(daily_path, results_dir)
 

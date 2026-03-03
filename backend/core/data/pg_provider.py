@@ -136,7 +136,8 @@ class PostgresDataProvider(DataProvider):
         existing_cols = self._get_table_columns(self._source.stocks_table)
         cols = self._filter_existing_cols(
             mapping,
-            ["date", "symbol", "open", "high", "low", "close", "volume", "amount", "adj_factor"],
+            ["date", "symbol", "open", "high", "low", "close", "volume", "amount",
+             "limit_up", "limit_down", "is_suspended", "adj_factor"],
             existing_cols,
         )
         cols_sql = ", ".join(safe_ident(c) for c in cols)
@@ -308,6 +309,115 @@ class PostgresDataProvider(DataProvider):
         if raw_stk.empty or raw_stk.iloc[0]["prev_day"] is None:
             return None
         return pd.Timestamp(raw_stk.iloc[0]["prev_day"]).date()
+
+    def load_st_history(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
+        """Load ST history from pit_st_history table.
+
+        Returns DataFrame with columns: ts_code, start_date, end_date, st_type.
+        ts_code is in TS format (e.g. 600000.SH).
+        """
+        try:
+            existing = self._get_table_columns("pit_st_history")
+        except Exception:
+            return pd.DataFrame(columns=["ts_code", "start_date", "end_date", "st_type"])
+        if not existing:
+            return pd.DataFrame(columns=["ts_code", "start_date", "end_date", "st_type"])
+
+        q = (
+            "SELECT ts_code, start_date, end_date, st_type "
+            "FROM pit_st_history "
+            "WHERE ts_code = ANY(%s) "
+            "AND start_date <= %s "
+            "AND (end_date >= %s OR end_date IS NULL) "
+            "ORDER BY ts_code, start_date"
+        )
+        # Convert internal symbols (sh600000) to TS format (600000.SH) for query
+        ts_symbols = []
+        for s in symbols:
+            s_lower = s.strip().lower()
+            if s_lower.startswith(("sh", "sz")) and len(s_lower) == 8:
+                code = s_lower[2:]
+                exch = s_lower[:2].upper()
+                ts_symbols.append(f"{code}.{exch}")
+            elif "." in s:
+                ts_symbols.append(s.upper())
+            else:
+                ts_symbols.append(s)
+        raw = self._exec_df(
+            q,
+            (ts_symbols, end, start),
+            {
+                "provider": "postgres",
+                "source": "st_history",
+                "table": "pit_st_history",
+                "symbols": sorted(ts_symbols),
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+        )
+        return raw
+
+    def load_sector_indices(self, start: date, end: date) -> pd.DataFrame:
+        """加载申万 L1 行业指数日线 (801xxx.SI) 从 pit_index_daily。"""
+        idx_table = safe_ident(self._source.index_table)
+        idx_map = self._schema[self._source.index_table]
+        date_col = safe_ident(idx_map["date"])
+        sym_col = safe_ident(idx_map["symbol"])
+
+        q = (
+            f"SELECT {sym_col} AS index_code, {date_col} AS trade_date, "
+            f"open, high, low, close "
+            f"FROM {idx_table} "
+            f"WHERE {sym_col} LIKE '801%%.SI' "
+            f"AND {date_col} >= %s AND {date_col} <= %s "
+            f"ORDER BY {sym_col}, {date_col}"
+        )
+        return self._exec_df(
+            q,
+            (start, end),
+            {
+                "provider": "postgres",
+                "source": "sector_indices",
+                "table": self._source.index_table,
+                "symbols": ["801*.SI"],
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+        )
+
+    def load_industry_mapping(self, symbols: list[str]) -> dict[str, str]:
+        """加载股票→行业 L1 映射（最新有效记录）从 pit_industry_history。"""
+        ts_symbols = []
+        for s in symbols:
+            s_lower = s.strip().lower()
+            if s_lower.startswith(("sh", "sz")) and len(s_lower) == 8:
+                ts_symbols.append(s_lower)
+            elif "." in s:
+                code = s.split(".")[0]
+                exch = s.split(".")[1].lower()
+                ts_symbols.append(f"{exch}{code}")
+            else:
+                ts_symbols.append(s)
+
+        q = (
+            "SELECT DISTINCT ON (ts_code) ts_code, industry_l1 "
+            "FROM pit_industry_history "
+            "WHERE ts_code = ANY(%s) "
+            "ORDER BY ts_code, start_date DESC"
+        )
+        raw = self._exec_df(
+            q,
+            (ts_symbols,),
+            {
+                "provider": "postgres",
+                "source": "industry_mapping",
+                "table": "pit_industry_history",
+                "symbols": sorted(ts_symbols[:5]) + (["..."] if len(ts_symbols) > 5 else []),
+                "start": "",
+                "end": "",
+            },
+        )
+        return dict(zip(raw["ts_code"].astype(str), raw["industry_l1"].astype(str))) if not raw.empty else {}
 
     def load_instrument_rules(self, symbols: list[str]) -> pd.DataFrame:
         return load_rules_csv(self._rules_path, symbols)

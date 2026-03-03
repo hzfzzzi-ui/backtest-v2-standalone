@@ -62,12 +62,17 @@ TBD - created by syncing change polish-ui-and-export-report. Update Purpose afte
 - **THEN** §4 SHALL 显示信号漏斗：原始信号 → 被拦截 → 下单 → 跳过 → 已平仓
 
 ### Requirement: 报告包含持仓分析章节
-报告 §5 持仓分析 SHALL 包含持仓利用率和约束触发统计。
+报告 §5 持仓分析 SHALL 包含持仓利用率和约束触发统计。未实现的约束 SHALL 标注"未实现"而非显示 0。
 
 #### Scenario: 持仓统计
 - **WHEN** 报告生成且 counters 数据可用
 - **THEN** §5 SHALL 显示：平均持仓数、最大持仓数、空余仓位、仓位利用率（%）
-- **THEN** §5 SHALL 显示约束触发统计：个股上限触发、行业上限触发、资金不足跳过、最小手数跳过
+
+#### Scenario: 未实现的约束统计
+- **WHEN** 报告生成
+- **THEN** 个股上限触发行 SHALL 显示 `未实现` 而非数值 0
+- **THEN** 行业上限触发行 SHALL 显示 `未实现` 而非数值 0
+- **THEN** 资金不足跳过和最小手数跳过 SHALL 正常显示计数值（这些已实现）
 
 ### Requirement: 辅助函数 — 链式读取 workbench_config / base_config
 `buildConfigSummary()` 须定义辅助函数 `wcVal(path, fallback)` 实现两层链式读取：先从 `overrides.workbench_config` 按 path 取值，取不到时 fallback 到 `base_config` 对应字段，仍取不到时返回 `"-"`。
@@ -90,21 +95,18 @@ TBD - created by syncing change polish-ui-and-export-report. Update Purpose afte
 - 快线周期（wc.signal_generation.sma.fast_ma / bc.strategy.fast）
 - 慢线周期（wc.signal_generation.sma.slow_ma / bc.strategy.slow）
 - 入场缓冲（wc.signal_generation.sma.entry_buffer_pct）— 百分比显示
-- ATR 窗口（bc.strategy.params.atr_n）
-- ATR 倍数（wc.exit_rules.atr_stop.k / bc.strategy.params.atr_k）
 - 趋势过滤 MA（bc.strategy.params.trend_ma）
+
+ATR 窗口和 ATR 倍数 SHALL NOT 出现在信号策略子表中（这些是退出参数，已在退出规则子表中展示）。
 
 #### Scenario: SMA_CROSS 策略参数完整
 - **WHEN** config.json 中 wc.signal_generation.strategy = "SMA_CROSS"，sma.fast_ma = 5，sma.slow_ma = 20
 - **THEN** 信号策略表显示策略名「SMA_CROSS」、快线「5」、慢线「20」
-
-#### Scenario: 含 ATR 参数的策略
-- **WHEN** base_config.strategy.params 包含 atr_n = 14, atr_k = 2.0, trend_ma = 60
-- **THEN** 信号策略表额外显示「ATR 窗口 = 14」「ATR 倍数 = 2.0」「趋势过滤 MA = 60」
+- **THEN** 信号策略表 SHALL NOT 包含 ATR 窗口或 ATR 倍数行
 
 #### Scenario: params 字段不存在
 - **WHEN** base_config.strategy 不含 params 字段
-- **THEN** ATR 窗口、ATR 倍数、趋势过滤 MA 均显示 "-"
+- **THEN** 趋势过滤 MA 显示 "-"
 
 ### Requirement: 子表 2 — 退出规则
 报告 §6 须包含「退出规则」子表，展示以下字段：
@@ -195,24 +197,14 @@ TBD - created by syncing change polish-ui-and-export-report. Update Purpose afte
 - **THEN** T+1 显示「是」，手数显示「100」
 
 ### Requirement: 复合信号子表 — 条件渲染
-当 `wc.signal_composition.enabled === true` 且 `wc.signal_composition.modules.length > 0` 时，须额外渲染一个「复合信号」子表，列出：
-- 合成模式（wc.signal_composition.compose_mode）
-- 每个模块的 name / role / weight / priority
+当 `wc.signal_composition.enabled === true` 且 `wc.signal_composition.modules.length > 0` 时，须额外渲染一个「复合信号」子表。该子表 SHALL 标注"未实现"表明后端尚无复合信号逻辑。
 
 #### Scenario: 复合信号启用且有模块
-- **WHEN** wc.signal_composition.enabled = true, compose_mode = "WEIGHTED_SCORE", modules 包含 [{name: "momentum", role: "signal", weight: 0.6}, {name: "volume", role: "filter", weight: 0.4}]
-- **THEN** 渲染复合信号子表，标题显示「复合信号 (WEIGHTED_SCORE)」，表格列出两行模块
+- **WHEN** wc.signal_composition.enabled = true, modules 非空
+- **THEN** 渲染复合信号子表，标题后 SHALL 追加 `(未实现)` 标注
 
-#### Scenario: 复合信号启用但模块为空
-- **WHEN** wc.signal_composition.enabled = true, modules = []
-- **THEN** 不渲染复合信号子表
-
-#### Scenario: 复合信号禁用
-- **WHEN** wc.signal_composition.enabled = false
-- **THEN** 不渲染复合信号子表
-
-#### Scenario: 无 workbench_config
-- **WHEN** config.json 不含 workbench_config
+#### Scenario: 复合信号禁用或模块为空
+- **WHEN** wc.signal_composition.enabled = false 或 modules 为空
 - **THEN** 不渲染复合信号子表
 
 ### Requirement: 报告包含交易明细附录
@@ -281,3 +273,40 @@ TBD - created by syncing change polish-ui-and-export-report. Update Purpose afte
 #### Scenario: 数字列对齐
 - **WHEN** 交易明细表渲染
 - **THEN** 价格、数量、金额列 SHALL 右对齐并使用等宽字体
+
+### Requirement: perf.json 包含完整 KPI 字段
+perf.json SHALL 包含 calmar、top10_profit_concentration、tier 三个字段。
+
+#### Scenario: Calmar 比率计算
+- **WHEN** 回测完成且 max_drawdown ≠ 0
+- **THEN** perf.json 的 `calmar` SHALL 等于 `cagr / |max_drawdown|`
+
+#### Scenario: Calmar 比率边界值
+- **WHEN** max_drawdown = 0（无回撤）
+- **THEN** `calmar` SHALL 为 0.0
+
+#### Scenario: Top10 利润集中度
+- **WHEN** 回测完成且存在盈利交易
+- **THEN** `top10_profit_concentration` SHALL 等于利润最高的 10 只股票利润之和 / 全部正利润之和
+- **THEN** 值域 SHALL 为 [0, 1]
+
+#### Scenario: Top10 无盈利
+- **WHEN** 回测完成但无正利润
+- **THEN** `top10_profit_concentration` SHALL 为 0.0
+
+#### Scenario: 策略评级
+- **WHEN** 回测完成
+- **THEN** `tier` SHALL 基于 sharpe、max_drawdown、calmar 分级：
+  - T1: sharpe >= 1.0 且 max_drawdown > -0.20 且 calmar >= 1.0
+  - T2: sharpe >= 0.5 且 max_drawdown > -0.30
+  - T3: sharpe >= 0.0
+  - T4: 其他
+
+### Requirement: 前端 KPI 面板显示完整
+KPI 面板 SHALL 正确显示所有 8 个 KPI 字段的计算值。
+
+#### Scenario: KPI 非空显示
+- **WHEN** 回测完成且 perf.json 包含字段值
+- **THEN** 卡尔马比率 SHALL 显示数值（非 0.00 除非实际为 0）
+- **THEN** Top10集中度 SHALL 显示百分比（非 —）
+- **THEN** 评级 SHALL 显示 T1/T2/T3/T4（非 —）

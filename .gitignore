@@ -37,3 +37,4 @@ pgdata/
 
 # Temp files
 .tmp_*
+data_cache/

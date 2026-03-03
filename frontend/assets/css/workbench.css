@@ -42,8 +42,6 @@
   --wb-rail-w: 48px;
   --wb-drawer-w: 340px;
   --wb-cmd-h: 56px;
-  --wb-dock-h: 260px;
-
   /* Transitions */
   --wb-transition: .22s cubic-bezier(.4,0,.2,1);
 }
@@ -509,11 +507,66 @@ input[type="checkbox"] {
   display: flex; flex-direction: column;
   min-height: 0; overflow: hidden;
 }
-.wb-main-content {
+
+/* 顶部 Tab Bar */
+.wb-main-tabs {
+  flex-shrink: 0;
+  display: flex; gap: 0;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--wb-line-dim);
+  background: var(--wb-surface-2);
+}
+.wb-main-tabs button {
+  border: none; background: transparent;
+  color: var(--wb-text-soft); cursor: pointer;
+  font-size: 13px; font-weight: 500;
+  padding: 9px 18px;
+  border-bottom: 2px solid transparent;
+  transition: all var(--wb-transition);
+}
+.wb-main-tabs button:hover { color: var(--wb-text); }
+.wb-main-tabs button.active {
+  color: var(--wb-accent);
+  border-bottom-color: var(--wb-accent);
+  font-weight: 600;
+}
+
+/* Tab 面板 */
+.wb-main-panel {
+  display: none;
   flex: 1; overflow-y: auto; overflow-x: hidden;
   padding: 12px 16px;
-  display: flex; flex-direction: column; gap: var(--wb-gap-12);
+  flex-direction: column; gap: var(--wb-gap-12);
   min-height: 0;
+}
+.wb-main-panel.active {
+  display: flex;
+}
+
+/* 分析 Tab 子标签 */
+.wb-analysis-tabs {
+  flex-shrink: 0;
+  display: flex; gap: 0;
+  margin: -12px -16px 0;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--wb-line-dim);
+}
+.wb-analysis-tabs button {
+  border: none; background: transparent;
+  color: var(--wb-text-soft); cursor: pointer;
+  font-size: 12px; font-weight: 500;
+  padding: 9px 14px;
+  border-bottom: 2px solid transparent;
+  transition: all var(--wb-transition);
+}
+.wb-analysis-tabs button:hover { color: var(--wb-text); }
+.wb-analysis-tabs button.active {
+  color: var(--wb-accent);
+  border-bottom-color: var(--wb-accent);
+  font-weight: 600;
+}
+.wb-analysis-body {
+  flex: 1; min-height: 0; overflow: hidden;
 }
 
 /* Summary bar */
@@ -549,6 +602,26 @@ input[type="checkbox"] {
   grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 8px;
   flex-shrink: 0;
+}
+.wb-symbol-panel {
+  border: 1px solid var(--wb-line-dim);
+  border-radius: var(--wb-radius);
+  background: linear-gradient(180deg, var(--wb-surface), var(--wb-surface-2));
+  padding: 10px 12px;
+  flex-shrink: 0;
+}
+.wb-symbol-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wb-symbol-row.active {
+  background: rgba(82, 168, 255, 0.16) !important;
+}
+.wb-symbol-empty {
+  color: var(--wb-text-soft);
+  text-align: center;
 }
 .wb-kpi {
   border: 1px solid var(--wb-line-dim); border-radius: var(--wb-radius);
@@ -591,57 +664,7 @@ input[type="checkbox"] {
 .wb-chart-sub { height: 180px; margin-top: 6px; }
 .wb-chart > svg { width: 100%; height: 100%; display: block; }
 
-/* ── 12. Bottom Dock ── */
-.wb-dock {
-  flex-shrink: 0;
-  height: var(--wb-dock-h);
-  min-height: 120px;
-  border-top: 2px solid var(--wb-line);
-  background: var(--wb-surface-2);
-  display: flex; flex-direction: column;
-  overflow: hidden;
-  position: relative;
-}
-
-.wb-dock-resize {
-  position: absolute; top: -3px; left: 0; right: 0; height: 7px;
-  cursor: ns-resize; z-index: 5;
-  display: flex; align-items: center; justify-content: center;
-}
-.wb-dock-resize > span {
-  width: 36px; height: 3px;
-  border-radius: 2px; background: var(--wb-line);
-  transition: background var(--wb-transition);
-}
-.wb-dock-resize:hover > span { background: var(--wb-accent); }
-
-.wb-dock-head {
-  flex-shrink: 0; padding: 0 12px;
-  border-bottom: 1px solid var(--wb-line-dim);
-  display: flex; align-items: center;
-}
-
-.wb-dock-tabs {
-  display: flex; gap: 0;
-}
-.wb-dock-tabs button {
-  border: none; background: transparent;
-  color: var(--wb-text-soft); cursor: pointer;
-  font-size: 12px; font-weight: 500;
-  padding: 9px 14px;
-  border-bottom: 2px solid transparent;
-  transition: all var(--wb-transition);
-}
-.wb-dock-tabs button:hover { color: var(--wb-text); }
-.wb-dock-tabs button.active {
-  color: var(--wb-accent);
-  border-bottom-color: var(--wb-accent);
-  font-weight: 600;
-}
-
-.wb-dock-body {
-  flex: 1; min-height: 0; overflow: hidden;
-}
+/* ── 12. Analysis Panels (原 Dock，现为分析 Tab 子面板) ── */
 .wb-dock-panel {
   display: none; height: 100%; overflow-y: auto; padding: 10px 12px;
 }
@@ -767,7 +790,7 @@ input[type="checkbox"] {
 
 /* ── 16. Scrollbars ── */
 .wb-drawer::-webkit-scrollbar,
-.wb-main-content::-webkit-scrollbar,
+.wb-main-panel::-webkit-scrollbar,
 .wb-dock-panel::-webkit-scrollbar,
 .wb-table-wrap::-webkit-scrollbar,
 .wb-log::-webkit-scrollbar,
@@ -775,7 +798,7 @@ input[type="checkbox"] {
   width: 6px; height: 6px;
 }
 .wb-drawer::-webkit-scrollbar-track,
-.wb-main-content::-webkit-scrollbar-track,
+.wb-main-panel::-webkit-scrollbar-track,
 .wb-dock-panel::-webkit-scrollbar-track,
 .wb-table-wrap::-webkit-scrollbar-track,
 .wb-log::-webkit-scrollbar-track,
@@ -783,7 +806,7 @@ input[type="checkbox"] {
   background: transparent;
 }
 .wb-drawer::-webkit-scrollbar-thumb,
-.wb-main-content::-webkit-scrollbar-thumb,
+.wb-main-panel::-webkit-scrollbar-thumb,
 .wb-dock-panel::-webkit-scrollbar-thumb,
 .wb-table-wrap::-webkit-scrollbar-thumb,
 .wb-log::-webkit-scrollbar-thumb,
@@ -791,7 +814,7 @@ input[type="checkbox"] {
   background: var(--wb-line); border-radius: 3px;
 }
 .wb-drawer::-webkit-scrollbar-thumb:hover,
-.wb-main-content::-webkit-scrollbar-thumb:hover,
+.wb-main-panel::-webkit-scrollbar-thumb:hover,
 .wb-dock-panel::-webkit-scrollbar-thumb:hover,
 .wb-table-wrap::-webkit-scrollbar-thumb:hover,
 .wb-log::-webkit-scrollbar-thumb:hover,

@@ -35,8 +35,9 @@
     "perf": "groups/GROUP_A/perf.json",
     "nav": "groups/GROUP_A/nav.csv",
     "funnel": "groups/GROUP_A/funnel.csv",
-    "reason_codes": "groups/GROUP_A/reason_code_counts.csv",
-    "config": "groups/GROUP_A/config.json"
+    "reason_codes": "groups/GROUP_A/reason_codes.csv",
+    "config": "groups/GROUP_A/config.json",
+    "symbol_performance": "groups/GROUP_A/symbol_performance.csv"
   },
   "red_flags": ["NOT_EFFECTIVE_OR_NOT_INSTRUMENTED"]
 }
@@ -46,3 +47,4 @@
 - 允许新增字段；不得删除/改名上述字段。
 - 数值只允许 `number|null`，禁止字符串数值与 `NaN/Inf`。
 - 禁止 PowerShell `"@{...}"` 风格行对象。
+- `group_files.reason_codes` canonical 为 `reason_codes.csv`；读取侧可在兼容窗口内回退 `reason_code_counts.csv`。

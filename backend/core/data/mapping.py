@@ -113,9 +113,10 @@ def to_canonical(
         if col in out.columns:
             out[col] = pd.to_numeric(out[col], errors="coerce")
 
-    # adj_factor: Decimal→float, NULL→1.0（不复权等价）
+    # adj_factor: Decimal→float, 按股票前向填充（覆盖数据滞后场景），兜底 1.0
     if "adj_factor" in out.columns:
-        out["adj_factor"] = pd.to_numeric(out["adj_factor"], errors="coerce").fillna(1.0).astype(float)
+        out["adj_factor"] = pd.to_numeric(out["adj_factor"], errors="coerce")
+        out["adj_factor"] = out.groupby("symbol")["adj_factor"].ffill().fillna(1.0).astype(float)
 
     out = out.sort_values(["date", "symbol"]).reset_index(drop=True)
     return out, warnings

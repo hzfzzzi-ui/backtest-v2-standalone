@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 REASON_MAP = {
     "SMA_CROSS_UP": "均线金叉",
     "SMA_CROSS_DOWN": "均线死叉",
+    "EMA_CROSS_UP": "EMA金叉",
+    "EMA_CROSS_DOWN": "EMA死叉",
     "SIGNAL_REVERSE": "信号反转",
     "ATR_STOP_LOSS": "ATR止损",
     "ATR_TRAIL_STOP": "ATR追踪止损",
@@ -250,8 +252,8 @@ def _build_position_analysis(counters: dict) -> str:
     </table>
     <h4>约束触发统计</h4>
     <table>
-      <tr><td>个股上限触发</td><td>{_inum(counters.get('cap_hit_single', 0))}</td></tr>
-      <tr><td>行业上限触发</td><td>{_inum(counters.get('cap_hit_industry', 0))}</td></tr>
+      <tr><td>个股上限触发</td><td style="color:#999">未实现</td></tr>
+      <tr><td>行业上限触发</td><td style="color:#999">未实现</td></tr>
       <tr><td>资金不足跳过</td><td>{_inum(counters.get('cash_skip_count', 0))}</td></tr>
       <tr><td>最小手数跳过</td><td>{_inum(counters.get('lot_skip_count', 0))}</td></tr>
     </table>"""
@@ -259,7 +261,9 @@ def _build_position_analysis(counters: dict) -> str:
 
 def _build_config_summary(config: dict) -> str:
     bc = config.get("base_config") or config or {}
-    wc = (config.get("overrides") or {}).get("workbench_config")
+    # original_workbench_config 保留了前端原始结构（含 exit_rules 等）
+    # workbench_config 是编译后的 runtime config（结构不同）
+    wc = (config.get("overrides") or {}).get("original_workbench_config") or (config.get("overrides") or {}).get("workbench_config")
 
     def wv(wc_path, bc_path):
         return _wc_val(wc, bc, wc_path, bc_path)
@@ -268,21 +272,18 @@ def _build_config_summary(config: dict) -> str:
 
     # Sub-table 1: Signal strategy
     strat_name = wv("signal_generation.strategy", "strategy.name")
-    fast_ma = wv("signal_generation.sma.fast_ma", "strategy.fast")
-    slow_ma = wv("signal_generation.sma.slow_ma", "strategy.slow")
-    entry_buf = wv("signal_generation.sma.entry_buffer_pct", None)
-    atr_n = wv(None, "strategy.params.atr_n")
-    atr_k = wv("exit_rules.atr_stop.k", "strategy.params.atr_k")
+    strat_upper = str(strat_name).upper()
+    ma_cfg_key = "ema" if "EMA" in strat_upper else "sma"
+    fast_ma = wv(f"signal_generation.{ma_cfg_key}.fast_ma", "strategy.fast")
+    slow_ma = wv(f"signal_generation.{ma_cfg_key}.slow_ma", "strategy.slow")
+    entry_buf = wv(f"signal_generation.{ma_cfg_key}.entry_buffer_pct", None)
     trend_ma = wv(None, "strategy.params.trend_ma")
     entry_buf_str = f"{_n2(entry_buf)}%" if entry_buf != "-" else "-"
-    atr_k_str = _n2(atr_k) if atr_k != "-" else "-"
     html += f"""<h3>信号策略</h3><table>
       <tr><td>策略名称</td><td>{_e(strat_name)}</td></tr>
       <tr><td>快线周期</td><td>{_e(fast_ma)}</td></tr>
       <tr><td>慢线周期</td><td>{_e(slow_ma)}</td></tr>
       <tr><td>入场缓冲</td><td>{entry_buf_str}</td></tr>
-      <tr><td>ATR 窗口</td><td>{_e(atr_n)}</td></tr>
-      <tr><td>ATR 倍数</td><td>{atr_k_str}</td></tr>
       <tr><td>趋势过滤 MA</td><td>{_e(trend_ma)}</td></tr>
     </table>"""
 
@@ -411,7 +412,7 @@ def _build_config_summary(config: dict) -> str:
     modules = sig_comp.get("modules") or []
     if sig_comp.get("enabled") is True and modules:
         compose_mode = _e(sig_comp.get("compose_mode") or "-")
-        html += f'<h3>复合信号 ({compose_mode})</h3>'
+        html += f'<h3>复合信号 ({compose_mode}) <span style="color:#999;font-size:13px">(未实现)</span></h3>'
         html += "<table><thead><tr><th>模块名</th><th>角色</th><th>权重</th><th>优先级</th></tr></thead><tbody>"
         for m in modules:
             html += f"<tr><td>{_e(m.get('name', '-'))}</td><td>{_e(m.get('role', '-'))}</td><td>{_n2(m.get('weight'))}</td><td>{_e(m.get('priority', '-'))}</td></tr>"

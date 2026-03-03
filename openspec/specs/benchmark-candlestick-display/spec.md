@@ -3,9 +3,7 @@
 ## Purpose
 
 Render benchmark index data as a candlestick chart with strategy NAV line overlay using the lightweight-charts library in the frontend workbench.
-
 ## Requirements
-
 ### Requirement: 使用 lightweight-charts 渲染蜡烛图与折线叠加
 前端 `wbNavChart` 容器 SHALL 使用 lightweight-charts (TradingView) 库渲染图表，Benchmark 大盘指数以蜡烛图（CandlestickSeries）显示，Strategy NAV 以折线（LineSeries）叠加在同一图表中。
 
@@ -54,3 +52,19 @@ Render benchmark index data as a candlestick chart with strategy NAV line overla
 - **WHEN** 用户打开回测工作台页面
 - **THEN** lightweight-charts 库 SHALL 通过 CDN 加载成功
 - **THEN** 全局 SHALL 可用 `LightweightCharts` 或等效 API
+
+### Requirement: 主图必须支持个股模式与组合模式切换
+前端主图 MUST 支持在”组合净值模式”和”个股对照模式”之间切换。个股模式下展示选中 symbol 曲线，并保持基准显示开关行为不变。个股模式下 SHALL 传递停牌数据给图表渲染层，以便渲染停牌蒙版。
+
+#### Scenario: 用户切换到个股模式
+- **WHEN** 用户在结果页选择某个 symbol 并进入个股对照模式
+- **THEN** 主图 SHALL 使用该 symbol 的行情序列作为主曲线
+- **THEN** 基准开关开启时 SHALL 继续叠加基准曲线或 K 线
+- **THEN** 如果序列数据包含 `suspended: true` 的数据点，SHALL 将停牌区间折线渲染为灰色
+
+#### Scenario: 用户切换回组合模式
+- **WHEN** 用户退出个股模式并返回组合模式
+- **THEN** 主图 SHALL 恢复为策略组合净值与基准对照展示
+- **THEN** 原有图表交互与统计文本 SHALL 保持兼容
+- **THEN** 停牌灰色折线 SHALL 不显示（组合模式无停牌概念）
+
