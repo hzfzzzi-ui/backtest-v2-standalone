@@ -47,6 +47,12 @@ class BacktestV2ExperimentRequest(BaseModel):
     universe_mode: str = "CUSTOM"
     industries: list[str] = []
     price_adj: str = "hfq"
+    # 选股排序参数透传
+    enable_strength_rank: bool | None = None
+    strength_ma: int | None = None
+    strength_top_k_mode: str | None = None
+    enable_multifactor_rank: bool | None = None
+    mf_topk: int | None = None
 
 
 def _load_base_config(bt_root: Path) -> dict[str, Any]:
@@ -367,6 +373,17 @@ def _run_backtest_v2_experiment_sync(
         overrides["industries"] = list(body.industries)
     if body.price_adj:
         overrides["price_adj"] = str(body.price_adj)
+    # 选股排序参数透传
+    if body.enable_strength_rank is not None:
+        overrides["enable_strength_rank"] = bool(body.enable_strength_rank)
+    if body.strength_ma is not None:
+        overrides["strength_ma"] = int(body.strength_ma)
+    if body.strength_top_k_mode is not None:
+        overrides["strength_top_k_mode"] = str(body.strength_top_k_mode)
+    if body.enable_multifactor_rank is not None:
+        overrides["enable_multifactor_rank"] = bool(body.enable_multifactor_rank)
+    if body.mf_topk is not None:
+        overrides["mf_topk"] = int(body.mf_topk)
 
     env_backup = {
         "PAMS_PG_HOST": os.environ.get("PAMS_PG_HOST"),
