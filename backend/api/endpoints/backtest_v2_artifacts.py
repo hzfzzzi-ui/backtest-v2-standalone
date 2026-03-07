@@ -241,6 +241,165 @@ def _write_nav_csv(results_dir: Path, result: dict[str, Any]) -> Path:
     return out
 
 
+def _safe_read_csv(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _write_csv_alias(src: Path, dst: Path, empty_columns: list[str] | None = None) -> Path:
+    df = _safe_read_csv(src)
+    if df.empty and empty_columns is not None:
+        df = pd.DataFrame(columns=list(empty_columns))
+    df.to_csv(dst, index=False)
+    return dst
+
+
+def _coerce_bool_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return not math.isnan(float(value)) and float(value) != 0.0
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"", "0", "false", "no", "n", "off", "nan", "none", "null"}:
+        return False
+    return bool(text)
+
+
+def _bool_series(df: pd.DataFrame, column: str, default: bool = False) -> pd.Series:
+    if column not in df.columns:
+        return pd.Series([bool(default)] * len(df), index=df.index, dtype=bool)
+    return df[column].map(_coerce_bool_value).astype(bool)
+
+
+def _build_candidate_signals(results_dir: Path) -> tuple[Path, pd.DataFrame]:
+    src = results_dir / "portfolio_candidates.csv"
+    out = results_dir / ARTIFACT_FILENAMES["candidate_signals"]
+    required_cols = [
+        "date",
+        "symbol",
+        "alpha_source",
+        "residual_strength_score",
+        "sector_strength_score",
+        "volume_price_quality_score",
+        "final_score",
+        "selected_flag",
+    ]
+    df = _safe_read_csv(src)
+    if df.empty:
+        empty_df = pd.DataFrame(columns=required_cols)
+        empty_df.to_csv(out, index=False)
+        return out, empty_df
+
+    if "selected_flag" not in df.columns:
+        if "selected" in df.columns:
+            df["selected_flag"] = _bool_series(df, "selected")
+        else:
+            df["selected_flag"] = False
+    if "final_score" not in df.columns and "mf_score" in df.columns:
+        df["final_score"] = pd.to_numeric(df["mf_score"], errors="coerce")
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = None
+    df["selected_flag"] = _bool_series(df, "selected_flag")
+    df.to_csv(out, index=False)
+    return out, df
+
+
+def _build_alpha_funnel(results_dir: Path, candidate_df: pd.DataFrame) -> Path:
+    out = results_dir / ARTIFACT_FILENAMES["alpha_funnel"]
+    columns = ["date", "alpha_source", "candidate_count", "selected_count", "rejected_count"]
+    if candidate_df.empty:
+        pd.DataFrame(columns=columns).to_csv(out, index=False)
+        return out
+
+    df = candidate_df.copy()
+    if "is_candidate" in df.columns:
+        try:
+            df = df[df["is_candidate"].astype(bool)]
+        except Exception:
+            pass
+    if df.empty:
+        pd.DataFrame(columns=columns).to_csv(out, index=False)
+        return out
+    if "selected_flag" not in df.columns:
+        df["selected_flag"] = False
+    if "alpha_source" not in df.columns:
+        df["alpha_source"] = "unknown"
+    df["selected_flag"] = _bool_series(df, "selected_flag")
+    df["alpha_source"] = df["alpha_source"].fillna("unknown").astype(str)
+
+    grouped = (
+        df.groupby(["date", "alpha_source"], dropna=False)
+        .agg(
+            candidate_count=("symbol", "count"),
+            selected_count=("selected_flag", lambda s: int(pd.Series(s).sum())),
+        )
+        .reset_index()
+    )
+    grouped["rejected_count"] = grouped["candidate_count"] - grouped["selected_count"]
+    grouped = grouped[columns]
+    grouped = grouped.sort_values(["date", "alpha_source"], ascending=[True, True]).reset_index(drop=True)
+    grouped.to_csv(out, index=False)
+    return out
+
+
+def _build_score_diagnostics(results_dir: Path, candidate_df: pd.DataFrame) -> Path:
+    out = results_dir / ARTIFACT_FILENAMES["score_diagnostics"]
+    columns = [
+        "date",
+        "candidate_rank",
+        "symbol",
+        "alpha_source",
+        "final_score",
+        "residual_strength_score",
+        "sector_strength_score",
+        "volume_price_quality_score",
+        "selected_flag",
+    ]
+    if candidate_df.empty:
+        pd.DataFrame(columns=columns).to_csv(out, index=False)
+        return out
+
+    df = candidate_df.copy()
+    if "is_candidate" in df.columns:
+        try:
+            df = df[df["is_candidate"].astype(bool)]
+        except Exception:
+            pass
+    if df.empty or "date" not in df.columns or "symbol" not in df.columns:
+        pd.DataFrame(columns=columns).to_csv(out, index=False)
+        return out
+
+    if "selected_flag" not in df.columns:
+        df["selected_flag"] = False
+    if "alpha_source" not in df.columns:
+        df["alpha_source"] = "unknown"
+    if "final_score" not in df.columns and "mf_score" in df.columns:
+        df["final_score"] = pd.to_numeric(df["mf_score"], errors="coerce")
+    for score_col in ("final_score", "residual_strength_score", "sector_strength_score", "volume_price_quality_score"):
+        if score_col not in df.columns:
+            df[score_col] = None
+        else:
+            df[score_col] = pd.to_numeric(df[score_col], errors="coerce")
+    df["selected_flag"] = _bool_series(df, "selected_flag")
+    df["alpha_source"] = df["alpha_source"].fillna("unknown").astype(str)
+
+    df = df.sort_values(["date", "final_score", "symbol"], ascending=[True, False, True]).copy()
+    df["candidate_rank"] = df.groupby("date").cumcount() + 1
+    df = df[df["candidate_rank"] <= 10]
+    df = df[columns]
+    df.to_csv(out, index=False)
+    return out
+
+
 def _build_counters(
     result: dict[str, Any],
     results_dir: Path,
@@ -520,6 +679,20 @@ def ensure_standard_artifacts(
             trade_st_flags = {}
     trade_st_flags_path.write_text(json.dumps(trade_st_flags, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    trades_alias_path = _write_csv_alias(
+        trades_path,
+        results_dir / ARTIFACT_FILENAMES["trades_alias"],
+        empty_columns=["date", "symbol", "side", "price", "qty", "reason_code"],
+    )
+    orders_path = _write_csv_alias(
+        trades_path,
+        results_dir / ARTIFACT_FILENAMES["orders"],
+        empty_columns=["date", "symbol", "side", "price", "qty", "reason_code"],
+    )
+    candidate_signals_path, candidate_signals_df = _build_candidate_signals(results_dir)
+    alpha_funnel_path = _build_alpha_funnel(results_dir, candidate_signals_df)
+    score_diagnostics_path = _build_score_diagnostics(results_dir, candidate_signals_df)
+
     symbol_perf_csv_path = results_dir / ARTIFACT_FILENAMES["symbol_performance"]
     symbol_perf_json_path = results_dir / "symbol_performance.json"
     try:
@@ -631,7 +804,6 @@ def ensure_standard_artifacts(
         "price_adj_mode": str(result.get("price_adj_mode") or "hfq"),
         "adj_factor_stats": sanitize_json(result.get("adj_factor_stats") or {}),
         "missing_fields": sorted(set(missing_fields)),
-        "legacy_hits": {"reason_codes_filename": 0, "counters_field_alias": 0},
         "report_consistency": {
             "sources": {
                 "start": start_src,
@@ -653,6 +825,9 @@ def ensure_standard_artifacts(
     if isinstance(u_meta, dict):
         run_meta_obj["universe"] = sanitize_json(u_meta)
         run_meta_obj["data"]["universe_mode"] = str(u_meta.get("universe_mode") or "CUSTOM")
+    candidate_ctx = overrides.get("candidate_context")
+    if isinstance(candidate_ctx, dict) and candidate_ctx:
+        run_meta_obj["candidate"] = sanitize_json(candidate_ctx)
     run_meta_path = results_dir / ARTIFACT_FILENAMES["run_meta"]
     run_meta_path.write_text(json.dumps(sanitize_json(run_meta_obj), ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -679,6 +854,11 @@ def ensure_standard_artifacts(
         "stock_names": _to_rel(stock_names_path, results_dir),
         "trade_st_flags": _to_rel(trade_st_flags_path, results_dir),
         "symbol_performance": _to_rel(symbol_perf_csv_path, results_dir),
+        "trades_alias": _to_rel(trades_alias_path, results_dir),
+        "orders": _to_rel(orders_path, results_dir),
+        "candidate_signals": _to_rel(candidate_signals_path, results_dir),
+        "alpha_funnel": _to_rel(alpha_funnel_path, results_dir),
+        "score_diagnostics": _to_rel(score_diagnostics_path, results_dir),
         "audit": audit_rel,
     }
     # 如果引擎已写出 trades CSV，也加入 artifacts 映射
