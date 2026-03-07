@@ -92,6 +92,7 @@ def to_canonical(
         "limit_up": mapping.get("limit_up", ""),
         "limit_down": mapping.get("limit_down", ""),
         "is_suspended": mapping.get("is_suspended", ""),
+        "is_st": mapping.get("is_st", ""),
         "adj_factor": mapping.get("adj_factor", ""),
     }
     for key, src_col in optional_cols.items():
@@ -99,7 +100,7 @@ def to_canonical(
             out[key] = df[src_col]
 
     base_cols = ["date", "symbol", "open", "high", "low", "close", "volume", "amount"]
-    keep_cols = base_cols + [c for c in ("limit_up", "limit_down", "is_suspended", "adj_factor") if c in out.columns]
+    keep_cols = base_cols + [c for c in ("limit_up", "limit_down", "is_suspended", "is_st", "adj_factor") if c in out.columns]
     out = out[keep_cols]
     out["date"] = pd.to_datetime(out["date"]).dt.normalize()
 

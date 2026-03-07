@@ -16,11 +16,26 @@ class EMACrossStrategy(Strategy):
     slow: int = 20
     order_size: int = 1000
     ma_type: str = "EMA"
+    # Universe 过滤
+    min_price: float = 0.0
+    # 市场环境
+    regime_ma: int = 60
+    # V2 个股趋势过滤
+    enable_v2_trend_filter: bool = False
+    v2_trend_short_ma: int = 20
+    v2_trend_long_ma: int = 60
     enable_trend_accel: bool = False
     enable_atr_stop: bool = False
     atr_stop_k: float = 2.0
     enable_atr_trail: bool = False
     atr_trail_k: float = 3.0
+    # 止盈 / 固定止损
+    enable_take_profit: bool = False
+    take_profit_mode: str = "pct"
+    take_profit_pct: float = 0.10
+    take_profit_atr_k: float = 3.0
+    enable_fixed_stop_loss: bool = False
+    fixed_stop_loss_pct: float = 0.05
     # 入场趋势过滤（基于信号 slow_ma）
     enable_entry_above_slow_ma: bool = False
     enable_entry_slow_ma_slope: bool = False
@@ -30,7 +45,16 @@ class EMACrossStrategy(Strategy):
     # 持仓约束 / 再入场约束
     min_hold_days: int = 0
     cooldown_days: int = 0
-    min_hold_exempt_reasons: list[str] = field(default_factory=lambda: ["ATR_STOP_LOSS", "ATR_TRAIL_EXIT", "RISK_OFF_EXIT", "TREND_BREAK_EXIT"])
+    min_hold_exempt_reasons: list[str] = field(default_factory=lambda: ["ATR_STOP_LOSS", "FIXED_STOP_LOSS", "ATR_TRAIL_EXIT", "RISK_OFF_EXIT", "TREND_BREAK_EXIT"])
+    # 趋势退出
+    enable_ma20_exit: bool = False
+    enable_low10_exit: bool = False
+    # 动量排名选股
+    momentum_top_pct: float = 0.0
+    # 行业趋势门控
+    enable_sector_gate: bool = False
+    sector_rank_window: int = 60
+    sector_top_pct: float = 0.30
 
     def __post_init__(self) -> None:
         Strategy.__init__(self)

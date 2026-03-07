@@ -69,6 +69,10 @@ class SizingConfig:
     # "LOT100_MIN1LOT": dynamic order_value ensures at least 1 lot purchasable when cash allows.
     # "ODDLOT_1": research-only odd-lot mode.
     univote_lot_mode: str = "OFF"
+    # Portfolio weight mode: "equal" (default) or "inverse_vol"
+    weight_mode: str = "equal"
+    # Minimum position count for sizing denominator (prevents over-concentration)
+    min_positions: int = 10
 
 
 @dataclass(slots=True)
@@ -114,6 +118,8 @@ class ExitConfig:
     atr_stop_k: float = 2.0
     enable_atr_trail: bool = False
     atr_trail_k: float = 3.0
+    enable_ma20_exit: bool = False
+    enable_low10_exit: bool = False
 
 
 @dataclass(slots=True)
@@ -124,15 +130,9 @@ class RiskConfig:
 @dataclass(slots=True)
 class RiskBudgetConfig:
     enabled: bool = False
-    base_portfolio_risk: float = 0.06
-    trend_multiplier: float = 1.0
-    dd_scale_10: float = 0.8
-    dd_scale_15: float = 0.6
-    dd_fixed_20: float = 0.03
-    dd_stop_pct: float = 0.25
-    dd_stop_cooldown_days: int = 120
-    dd_stop_protect_days: int = 60
-    min_active_ratio: float = 0.6
+    # DD > dd_reduce_pct → scale max_positions by dd_reduce_scale
+    dd_reduce_pct: float = 0.10
+    dd_reduce_scale: float = 0.5
     atr_stop_k: float = 2.0
 
 
@@ -143,6 +143,10 @@ class MarketFilterConfig:
     slope_ma_period: int = 50
     bull_multiplier: float = 1.5
     light_multiplier: float = 0.6
+    # Optional per-state multipliers. When None, fallback to legacy behavior.
+    trans_down_multiplier: float | None = None
+    trans_up_multiplier: float | None = None
+    bear_multiplier: float | None = None
     ema_light_fast: int = 5
     ema_light_slow: int = 20
 

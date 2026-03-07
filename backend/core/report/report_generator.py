@@ -1,8 +1,4 @@
-"""Generate a self-contained HTML backtest report from experiment artifacts.
-
-Equivalent to the frontend generateReport() in backtest_v2.js, but runs
-server-side so the report can be persisted and served via API.
-"""
+﻿"""Generate a self-contained HTML backtest report from experiment artifacts."""
 from __future__ import annotations
 
 import json
@@ -24,7 +20,8 @@ REASON_MAP = {
     "EMA_CROSS_DOWN": "EMA死叉",
     "SIGNAL_REVERSE": "信号反转",
     "ATR_STOP_LOSS": "ATR止损",
-    "ATR_TRAIL_STOP": "ATR追踪止损",
+    "ATR_TRAIL_STOP": "ATR跟踪止损",
+    "ATR_TRAIL_EXIT": "ATR跟踪止盈",
     "TIME_EXIT": "到期平仓",
     "TREND_REVERSE": "趋势反转",
     "TREND_BREAK_EXIT": "趋势破位平仓",
@@ -33,11 +30,10 @@ REASON_MAP = {
     "MAX_HOLD_DAYS": "持仓到期",
     "TAKE_PROFIT": "止盈",
     "STOP_LOSS": "止损",
+    "LOW10_EXIT": "LOW10退出",
+    "MA20_EXIT": "MA20退出",
 }
 
-# ---------------------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------------------
 
 def _e(v: Any) -> str:
     return _html_escape(str(v if v is not None else ""))
@@ -91,16 +87,6 @@ def _dig(obj: dict | None, path: str | None) -> Any:
     return cur
 
 
-def _wc_val(wc: dict | None, bc: dict | None, wc_path: str | None, bc_path: str | None) -> Any:
-    v = _dig(wc, wc_path)
-    if v is not None and v != "":
-        return v
-    fb = _dig(bc, bc_path)
-    if fb is not None and fb != "":
-        return fb
-    return "-"
-
-
 def _yes_no(v: Any) -> str:
     if v is True:
         return "是"
@@ -123,9 +109,36 @@ def _price_adj_label(label: Any) -> str:
     return mapping.get(s, s) or "-"
 
 
-# ---------------------------------------------------------------------------
-# Section builders
-# ---------------------------------------------------------------------------
+def _load_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+
+
+def _load_csv_rows(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    try:
+        df = pd.read_csv(path)
+        if df.empty:
+            return []
+        return df.where(df.notna(), None).to_dict("records")
+    except Exception:
+        return []
+
+
+def _pick_first(candidates: list[tuple[Any, str]]) -> tuple[Any, str, bool]:
+    for value, source in candidates:
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value, source, source != candidates[0][1]
+    return None, "missing", True
+
 
 def _build_monthly_returns(daily: list[dict]) -> str:
     if not daily:
@@ -193,11 +206,11 @@ def _build_drawdown_analysis(daily: list[dict], perf: dict) -> str:
       <tr><td>回撤起始日</td><td>{_e(dd_start)}</td></tr>
       <tr><td>回撤最低点日</td><td>{_e(dd_bottom)}</td></tr>
       <tr><td>夏普比率</td><td>{_n2(perf.get('sharpe'))}</td></tr>
-      <tr><td>卡尔马比率</td><td>{_n2(perf.get('calmar'))}</td></tr>
+      <tr><td>卡尔玛比率</td><td>{_n2(perf.get('calmar'))}</td></tr>
     </table>"""
 
 
-def _build_trade_analysis(trades: list[dict], funnel: dict, counters: dict) -> str:
+def _build_trade_analysis(trades: list[dict], funnel: dict, counters: dict, funnel_source: str) -> str:
     buys = [t for t in trades if str(t.get("side") or "").upper() == "BUY"]
     sells = [t for t in trades if str(t.get("side") or "").upper() == "SELL"]
 
@@ -220,13 +233,21 @@ def _build_trade_analysis(trades: list[dict], funnel: dict, counters: dict) -> s
             html += f"<tr><td>{_e(_rzh(code))}</td><td>{_inum(cnt)}</td><td>{_pct(ratio)}</td></tr>"
         html += "</tbody></table>"
 
-    f_raw = int(funnel.get("raw_signal") or counters.get("raw_signal") or 0)
-    f_blocked = int(funnel.get("blocked") or counters.get("blocked") or 0)
-    f_orders = int(funnel.get("orders") or counters.get("orders") or 0)
-    f_skipped = int(funnel.get("skipped") or counters.get("skipped") or 0)
-    f_closed = int(funnel.get("closed_trades") or counters.get("closed_trades") or 0)
+    f_raw = int(funnel.get("raw_signal") if funnel else 0)
+    f_blocked = int(funnel.get("blocked") if funnel else 0)
+    f_orders = int(funnel.get("orders") if funnel else 0)
+    f_skipped = int(funnel.get("skipped") if funnel else 0)
+    f_closed = int(funnel.get("closed_trades") if funnel else 0)
+
+    if not funnel:
+        f_raw = int(counters.get("raw_signal") or 0)
+        f_blocked = int(counters.get("blocked") or 0)
+        f_orders = int(counters.get("orders") or 0)
+        f_skipped = int(counters.get("skipped") or 0)
+        f_closed = int(counters.get("closed_trades") or 0)
+
     if f_raw or f_orders or f_closed:
-        html += f"""<h4>信号漏斗</h4><table>
+        html += f"""<h4>信号漏斗</h4><p style="color:#666;font-size:12px">数据源: {_e(funnel_source)}</p><table>
         <tr><td>原始信号</td><td>{_inum(f_raw)}</td></tr>
         <tr><td>被拦截</td><td>{_inum(f_blocked)}</td></tr>
         <tr><td>下单</td><td>{_inum(f_orders)}</td></tr>
@@ -259,229 +280,205 @@ def _build_position_analysis(counters: dict) -> str:
     </table>"""
 
 
-def _build_config_summary(config: dict) -> str:
+def _build_config_summary(config: dict, run_config: dict, resolved_symbol_count: int) -> str:
     bc = config.get("base_config") or config or {}
-    # original_workbench_config 保留了前端原始结构（含 exit_rules 等）
-    # workbench_config 是编译后的 runtime config（结构不同）
-    wc = (config.get("overrides") or {}).get("original_workbench_config") or (config.get("overrides") or {}).get("workbench_config")
+    overrides = config.get("overrides") or {}
+    wc = overrides.get("original_workbench_config") or overrides.get("workbench_config") or {}
+    rc = run_config if isinstance(run_config, dict) else {}
 
-    def wv(wc_path, bc_path):
-        return _wc_val(wc, bc, wc_path, bc_path)
+    sig_w = wc.get("signal_generation") if isinstance(wc.get("signal_generation"), dict) else {}
+    bo_w = sig_w.get("breakout") if isinstance(sig_w.get("breakout"), dict) else {}
+    pr_w = wc.get("position_risk") if isinstance(wc.get("position_risk"), dict) else {}
+    ex_w = wc.get("exit_rules") if isinstance(wc.get("exit_rules"), dict) else {}
+    u_w = wc.get("universe") if isinstance(wc.get("universe"), dict) else {}
+    filters = u_w.get("filters") if isinstance(u_w.get("filters"), dict) else {}
+
+    strategy = (sig_w.get("strategy") or _dig(rc, "strategy.name") or "UNKNOWN").upper()
+    params = _dig(rc, "strategy.params") or {}
 
     html = ""
 
-    # Sub-table 1: Signal strategy
-    strat_name = wv("signal_generation.strategy", "strategy.name")
-    strat_upper = str(strat_name).upper()
-    ma_cfg_key = "ema" if "EMA" in strat_upper else "sma"
-    fast_ma = wv(f"signal_generation.{ma_cfg_key}.fast_ma", "strategy.fast")
-    slow_ma = wv(f"signal_generation.{ma_cfg_key}.slow_ma", "strategy.slow")
-    entry_buf = wv(f"signal_generation.{ma_cfg_key}.entry_buffer_pct", None)
-    trend_ma = wv(None, "strategy.params.trend_ma")
-    entry_buf_str = f"{_n2(entry_buf)}%" if entry_buf != "-" else "-"
-    html += f"""<h3>信号策略</h3><table>
-      <tr><td>策略名称</td><td>{_e(strat_name)}</td></tr>
-      <tr><td>快线周期</td><td>{_e(fast_ma)}</td></tr>
-      <tr><td>慢线周期</td><td>{_e(slow_ma)}</td></tr>
-      <tr><td>入场缓冲</td><td>{entry_buf_str}</td></tr>
-      <tr><td>趋势过滤 MA</td><td>{_e(trend_ma)}</td></tr>
+    if strategy == "BREAKOUT_TREND" or str(_dig(rc, "strategy.name") or "").lower() == "breakout_trend":
+        bw = bo_w.get("breakout_window")
+        if bw is None:
+            bw = params.get("breakout_window")
+        confirm_mode = bo_w.get("entry_confirm_mode")
+        if confirm_mode is None:
+            confirm_mode = params.get("entry_confirm_mode")
+        delay_mode = bo_w.get("entry_delay_mode")
+        if delay_mode is None:
+            delay_mode = params.get("entry_delay_mode")
+        portfolio_mode = pr_w.get("portfolio_mode")
+        if portfolio_mode is None:
+            portfolio_mode = params.get("portfolio_mode")
+        html += f"""<h3>信号策略</h3><table>
+      <tr><td>策略名称</td><td>{_e(strategy)}</td></tr>
+      <tr><td>突破窗口</td><td>{_e(bw if bw is not None else '-')}</td></tr>
+      <tr><td>入场确认模式</td><td>{_e(confirm_mode if confirm_mode is not None else '-')}</td></tr>
+      <tr><td>延迟入场模式</td><td>{_e(delay_mode if delay_mode is not None else '-')}</td></tr>
+      <tr><td>组合模式</td><td>{_e(portfolio_mode if portfolio_mode is not None else '-')}</td></tr>
+    </table>"""
+    else:
+        fast_ma = sig_w.get("ema", {}).get("fast_ma") or sig_w.get("sma", {}).get("fast_ma") or _dig(rc, "strategy.fast")
+        slow_ma = sig_w.get("ema", {}).get("slow_ma") or sig_w.get("sma", {}).get("slow_ma") or _dig(rc, "strategy.slow")
+        entry_buf = sig_w.get("ema", {}).get("entry_buffer_pct") or sig_w.get("sma", {}).get("entry_buffer_pct")
+        html += f"""<h3>信号策略</h3><table>
+      <tr><td>策略名称</td><td>{_e(strategy)}</td></tr>
+      <tr><td>快线周期</td><td>{_e(fast_ma if fast_ma is not None else '-')}</td></tr>
+      <tr><td>慢线周期</td><td>{_e(slow_ma if slow_ma is not None else '-')}</td></tr>
+      <tr><td>入场缓冲</td><td>{_n2(entry_buf) + '%' if entry_buf is not None else '-'}</td></tr>
     </table>"""
 
-    # Sub-table 2: Exit rules
-    exit_rules = (wc or {}).get("exit_rules") or {}
-    sig_reverse = exit_rules.get("signal_reverse")
-    atr_stop = exit_rules.get("atr_stop") or {}
-    trailing = exit_rules.get("trailing") or {}
-    time_exit = exit_rules.get("time_exit") or {}
-    exit_pri = (wc or {}).get("exit_priority") or []
-
-    atr_stop_txt = "-"
-    if atr_stop.get("enabled") is True:
-        atr_stop_txt = f"启用 (k={_n2(atr_stop.get('k'))})"
-    elif atr_stop.get("enabled") is False:
-        atr_stop_txt = "禁用"
-
-    trailing_txt = "-"
-    if trailing.get("enabled") is True:
-        trailing_txt = f"启用 (k={_n2(trailing.get('k'))})"
-    elif trailing.get("enabled") is False:
-        trailing_txt = "禁用"
-
-    time_exit_txt = "-"
-    if time_exit.get("enabled") is True:
-        time_exit_txt = f"启用 ({time_exit.get('n_days', '-')} 天)"
-    elif time_exit.get("enabled") is False:
-        time_exit_txt = "禁用"
-
-    exit_pri_str = _e(" → ".join(exit_pri)) if exit_pri else "-"
+    atr_stop = ex_w.get("atr_stop") if isinstance(ex_w.get("atr_stop"), dict) else {}
+    trailing = ex_w.get("trailing") if isinstance(ex_w.get("trailing"), dict) else {}
+    low10_exit = ex_w.get("low10_exit") if isinstance(ex_w.get("low10_exit"), dict) else {}
     html += f"""<h3>退出规则</h3><table>
-      <tr><td>反转退出</td><td>{_enabled_txt(sig_reverse)}</td></tr>
-      <tr><td>ATR 止损</td><td>{atr_stop_txt}</td></tr>
-      <tr><td>追踪止损</td><td>{trailing_txt}</td></tr>
-      <tr><td>时间退出</td><td>{time_exit_txt}</td></tr>
-      <tr><td>退出优先级</td><td>{exit_pri_str}</td></tr>
+      <tr><td>反转退出</td><td>{_enabled_txt(ex_w.get('signal_reverse'))}</td></tr>
+      <tr><td>ATR 止损</td><td>{'启用 (k=' + _n2(atr_stop.get('k')) + ')' if atr_stop.get('enabled') else '禁用'}</td></tr>
+      <tr><td>跟踪止损</td><td>{'启用 (k=' + _n2(trailing.get('k')) + ')' if trailing.get('enabled') else '禁用'}</td></tr>
+      <tr><td>LOW10 退出</td><td>{_enabled_txt(low10_exit.get('enabled'))}</td></tr>
+      <tr><td>最短持有天数</td><td>{_e((_dig(ex_w, 'hold_constraint.min_hold_days')) if _dig(ex_w, 'hold_constraint.min_hold_days') is not None else '-')}</td></tr>
+      <tr><td>冷却天数</td><td>{_e((_dig(ex_w, 'hold_constraint.cooldown_days')) if _dig(ex_w, 'hold_constraint.cooldown_days') is not None else '-')}</td></tr>
     </table>"""
 
-    # Sub-table 3: Position & risk
-    risk_gate = (wc or {}).get("risk_gate") or {}
-    max_pos_v = wv("position_risk.max_positions", None)
-    single_cap = _dig(wc, "position_risk.single_stock_cap")
-    ind_cap = _dig(wc, "position_risk.industry_cap")
-    lot_v = wv("position_risk.lot", "execution.lot_size")
-    cash_policy = wv("position_risk.cash_shortage_policy", None)
-
-    risk_gate_txt = "-"
-    if risk_gate.get("enabled") is True:
-        dd = risk_gate.get("drawdown_threshold")
-        dd_n = _safe_float(dd)
-        dd_pct = f"{abs(dd_n * 100):.0f}%" if dd_n is not None else "-"
-        action = _e(risk_gate.get("action") or "-")
-        cooldown = risk_gate.get("cooldown_days", "-")
-        risk_gate_txt = f"启用 — 回撤阈值 {dd_pct}, 动作 {action}, 冷却 {cooldown} 天"
-    elif risk_gate.get("enabled") is False:
-        risk_gate_txt = "禁用"
-
-    single_cap_str = f"{float(single_cap) * 100:.0f}%" if single_cap is not None else "-"
-    ind_cap_str = f"{float(ind_cap) * 100:.0f}%" if ind_cap is not None else "-"
-    html += f"""<h3>仓位与风控</h3><table>
-      <tr><td>最大持仓数</td><td>{_e(max_pos_v)}</td></tr>
-      <tr><td>单票仓位上限</td><td>{single_cap_str}</td></tr>
-      <tr><td>行业仓位上限</td><td>{ind_cap_str}</td></tr>
-      <tr><td>手数</td><td>{_e(lot_v)}</td></tr>
-      <tr><td>现金不足策略</td><td>{_e(cash_policy)}</td></tr>
-      <tr><td>风险门</td><td>{risk_gate_txt}</td></tr>
+    single_cap = pr_w.get("single_stock_cap")
+    ind_cap = pr_w.get("industry_cap")
+    html += f"""<h3>仓位与风险</h3><table>
+      <tr><td>最大持仓数</td><td>{_e(pr_w.get('max_positions', '-'))}</td></tr>
+      <tr><td>单票上限</td><td>{f'{float(single_cap) * 100:.0f}%' if single_cap is not None else '-'}</td></tr>
+      <tr><td>行业上限</td><td>{f'{float(ind_cap) * 100:.0f}%' if ind_cap is not None else '-'}</td></tr>
+      <tr><td>现金不足策略</td><td>{_e(pr_w.get('cash_shortage_policy', '-'))}</td></tr>
+      <tr><td>组合模式</td><td>{_e(pr_w.get('portfolio_mode', params.get('portfolio_mode', '-')))}</td></tr>
     </table>"""
-
-    # Sub-table 4: Universe & filters
-    overrides = config.get("overrides") or {}
-    uni_mode_val = _dig(wc, "universe_mode") or overrides.get("universe_mode") or "-"
-    uni_symbols = _dig(wc, "universe.symbols") or (bc.get("universe") or {}).get("symbols") or []
-    filters = (_dig(wc, "universe.filters") or {}) if wc else {}
 
     turnover_20d = filters.get("min_avg_turnover_20d")
-    if turnover_20d is not None:
-        tn = _safe_float(turnover_20d)
-        turnover_display = f"{int(tn / 10000):,} 万" if tn is not None else "-"
-    else:
-        turnover_display = "-"
-
+    tn = _safe_float(turnover_20d)
+    turnover_display = f"{int(tn / 10000):,} 万" if tn is not None else "-"
     price_min = filters.get("price_min", "-")
     price_max = filters.get("price_max", "-")
     price_range = f"{price_min} ~ {price_max}" if (price_min != "-" or price_max != "-") else "-"
-    adj_val = _dig(wc, "universe.price_adj") or overrides.get("price_adj") or "-"
-    adj_display = f"{_price_adj_label(adj_val)} ({adj_val})"
+    adj_val = u_w.get("price_adj") or overrides.get("price_adj") or _dig(rc, "universe.price_adj") or "-"
 
     html += f"""<h3>选股范围</h3><table>
-      <tr><td>选股模式</td><td>{_e(uni_mode_val)}</td></tr>
-      <tr><td>标的数量</td><td>{_inum(len(uni_symbols))}</td></tr>
+      <tr><td>选股模式</td><td>{_e(wc.get('universe_mode') or overrides.get('universe_mode') or '-')}</td></tr>
+      <tr><td>标的数量</td><td>{_inum(resolved_symbol_count)}</td></tr>
       <tr><td>排除 ST</td><td>{_yes_no(filters.get('exclude_st'))}</td></tr>
       <tr><td>排除停牌</td><td>{_yes_no(filters.get('exclude_suspended'))}</td></tr>
       <tr><td>最小上市天数</td><td>{_inum(filters.get('min_list_days')) if filters.get('min_list_days') is not None else '-'}</td></tr>
       <tr><td>日均成交额下限</td><td>{turnover_display}</td></tr>
       <tr><td>价格区间</td><td>{_e(price_range)}</td></tr>
-      <tr><td>ATR 波动区间</td><td>{_e(filters.get('atr_pct_range') or '-')}</td></tr>
       <tr><td>涨跌停规则</td><td>{_e(filters.get('limit_rule') or '-')}</td></tr>
-      <tr><td>价格口径</td><td>{_e(adj_display)}</td></tr>
+      <tr><td>价格口径</td><td>{_e(_price_adj_label(adj_val))} ({_e(adj_val)})</td></tr>
     </table>"""
 
-    # Sub-table 5: Execution assumptions
     costs = bc.get("costs") or {}
     execution = bc.get("execution") or {}
     comm_rate = _safe_float(costs.get("commission_rate"))
     stamp_rate = _safe_float(costs.get("stamp_tax_rate"))
     comm_rate_str = f"{comm_rate * 10000:.0f}‱" if comm_rate is not None else "-"
     stamp_rate_str = f"{stamp_rate * 1000:.0f}‰" if stamp_rate is not None else "-"
-    comm_min = costs.get("commission_min")
-    slip_bps = costs.get("slippage_bps")
-    lot_size = execution.get("lot_size")
-    t_plus_one = execution.get("t_plus_one")
-    init_cap = bc.get("initial_capital")
 
     html += f"""<h3>执行假设</h3><table>
       <tr><td>佣金率</td><td>{comm_rate_str}</td></tr>
-      <tr><td>最低佣金</td><td>{_n2(comm_min) if comm_min is not None else '-'}</td></tr>
+      <tr><td>最低佣金</td><td>{_n2(costs.get('commission_min')) if costs.get('commission_min') is not None else '-'}</td></tr>
       <tr><td>印花税率</td><td>{stamp_rate_str}</td></tr>
-      <tr><td>滑点</td><td>{_n2(slip_bps) + ' bps' if slip_bps is not None else '-'}</td></tr>
-      <tr><td>手数</td><td>{_inum(lot_size) if lot_size is not None else '-'}</td></tr>
-      <tr><td>T+1</td><td>{_yes_no(t_plus_one)}</td></tr>
-      <tr><td>初始资金</td><td>{f'{int(init_cap):,}' if init_cap is not None else '-'}</td></tr>
+      <tr><td>滑点</td><td>{_n2(costs.get('slippage_bps')) + ' bps' if costs.get('slippage_bps') is not None else '-'}</td></tr>
+      <tr><td>手数</td><td>{_inum(execution.get('lot_size')) if execution.get('lot_size') is not None else '-'}</td></tr>
+      <tr><td>T+1</td><td>{_yes_no(execution.get('t_plus_one'))}</td></tr>
+      <tr><td>初始资金</td><td>{f"{int(bc.get('initial_capital')):,}" if bc.get('initial_capital') is not None else '-'}</td></tr>
     </table>"""
-
-    # Optional: Composite signal
-    sig_comp = (wc or {}).get("signal_composition") or {}
-    modules = sig_comp.get("modules") or []
-    if sig_comp.get("enabled") is True and modules:
-        compose_mode = _e(sig_comp.get("compose_mode") or "-")
-        html += f'<h3>复合信号 ({compose_mode}) <span style="color:#999;font-size:13px">(未实现)</span></h3>'
-        html += "<table><thead><tr><th>模块名</th><th>角色</th><th>权重</th><th>优先级</th></tr></thead><tbody>"
-        for m in modules:
-            html += f"<tr><td>{_e(m.get('name', '-'))}</td><td>{_e(m.get('role', '-'))}</td><td>{_n2(m.get('weight'))}</td><td>{_e(m.get('priority', '-'))}</td></tr>"
-        html += "</tbody></table>"
 
     return html
 
 
-def _build_trade_appendix(trades: list[dict], stock_names: dict[str, str]) -> str:
+def _build_trade_appendix(
+    trades: list[dict],
+    stock_names: dict[str, str],
+    trade_st_flags: dict[str, str] | None = None,
+) -> str:
     if not trades:
         return "<p>无交易记录</p>"
 
-    html = '<table><thead><tr><th>日期</th><th>标的</th><th>方向</th><th style="text-align:right">成交价</th><th style="text-align:right">数量</th><th style="text-align:right">金额</th><th style="text-align:right">佣金</th><th style="text-align:right">印花税</th><th style="text-align:right">净额</th><th>原因</th></tr></thead><tbody>'
+    flags = dict(trade_st_flags or {})
+    html = '<table><thead><tr><th>日期</th><th>标的</th><th>方向</th><th style="text-align:right">成交价</th><th style="text-align:right">数量</th><th style="text-align:right">金额</th><th style="text-align:right">佣金</th><th style="text-align:right">印花税</th><th style="text-align:right">净额</th><th>原因</th><th>ST判定</th></tr></thead><tbody>'
     for t in trades:
         is_buy = str(t.get("side") or "").upper() == "BUY"
-        if is_buy:
-            side = '<span style="color:#2e7d32;font-weight:600">买入</span>'
-        else:
-            side = '<span style="color:#c62828;font-weight:600">卖出</span>'
+        side = '<span style="color:#2e7d32;font-weight:600">买入</span>' if is_buy else '<span style="color:#c62828;font-weight:600">卖出</span>'
 
         sym = str(t.get("symbol") or "")
         display_name = stock_names.get(sym, sym)
-        if display_name != sym:
-            symbol_cell = f'<span title="{_e(sym)}">{_e(display_name)}</span>'
-        else:
-            symbol_cell = _e(sym)
+        symbol_cell = f'<span title="{_e(sym)}">{_e(display_name)}</span>' if display_name != sym else _e(sym)
 
         fp_raw = t.get("fill_price")
         fp = f"{float(fp_raw):.3f}" if fp_raw is not None else f"{float(t.get('price') or 0):.3f}"
         comm = _mnum(t.get("commission")) if t.get("commission") is not None else "-"
         stax = _mnum(t.get("stamp_tax")) if t.get("stamp_tax") is not None else "-"
         net_amt = _mnum(t.get("net_amount")) if t.get("net_amount") is not None else _mnum(t.get("value"))
+        date_str = str(t.get("date", ""))
+        st_flag = flags.get(f"{date_str}|{sym.lower()}", "-")
 
-        html += f'<tr><td>{_e(t.get("date", ""))}</td><td>{symbol_cell}</td><td>{side}</td><td style="text-align:right">{fp}</td><td style="text-align:right">{_inum(t.get("qty"))}</td><td style="text-align:right">{_mnum(t.get("value"))}</td><td style="text-align:right">{comm}</td><td style="text-align:right">{stax}</td><td style="text-align:right">{net_amt}</td><td>{_e(_rzh(t.get("reason_code")))}</td></tr>'
+        html += f'<tr><td>{_e(date_str)}</td><td>{symbol_cell}</td><td>{side}</td><td style="text-align:right">{fp}</td><td style="text-align:right">{_inum(t.get("qty"))}</td><td style="text-align:right">{_mnum(t.get("value"))}</td><td style="text-align:right">{comm}</td><td style="text-align:right">{stax}</td><td style="text-align:right">{net_amt}</td><td>{_e(_rzh(t.get("reason_code")))}</td><td>{_e(st_flag)}</td></tr>'
     html += "</tbody></table>"
     return html
 
 
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
-
 def generate_report(results_dir: str) -> str:
-    """Read experiment artifacts from *results_dir* and return self-contained HTML."""
     rd = Path(results_dir)
 
-    # Load artifacts
     perf = _load_json(rd / "perf.json")
     run_meta = _load_json(rd / "run_meta.json")
     config = _load_json(rd / "config.json")
+    run_config = _load_json(rd / "run_config.json")
     stock_names = _load_json(rd / "stock_names.json")
+    trade_st_flags = _load_json(rd / "trade_st_flags.json")
+
     counters = run_meta.get("counters") or {}
     tier = run_meta.get("tier") or "-"
-
     daily = _load_csv_rows(rd / "portfolio_daily.csv")
     trades = _load_csv_rows(rd / "portfolio_trades.csv")
     funnel_rows = _load_csv_rows(rd / "funnel.csv")
     funnel = funnel_rows[0] if funnel_rows else {}
 
+    data = run_meta.get("data") if isinstance(run_meta.get("data"), dict) else {}
+    universe_meta = run_meta.get("universe") if isinstance(run_meta.get("universe"), dict) else {}
+    overrides = config.get("overrides") if isinstance(config.get("overrides"), dict) else {}
+    wc = overrides.get("original_workbench_config") if isinstance(overrides.get("original_workbench_config"), dict) else {}
+    wc_u = wc.get("universe") if isinstance(wc.get("universe"), dict) else {}
+    rc_u = run_config.get("universe") if isinstance(run_config.get("universe"), dict) else {}
+
+    start, start_src, start_fallback = _pick_first([
+        (rc_u.get("start"), "run_config.universe.start"),
+        (wc_u.get("start"), "original_workbench_config.universe.start"),
+        (data.get("start"), "run_meta.data.start"),
+    ])
+    end, end_src, end_fallback = _pick_first([
+        (rc_u.get("end"), "run_config.universe.end"),
+        (wc_u.get("end"), "original_workbench_config.universe.end"),
+        (data.get("end"), "run_meta.data.end"),
+    ])
+    benchmark, benchmark_src, benchmark_fallback = _pick_first([
+        (rc_u.get("benchmark"), "run_config.universe.benchmark"),
+        (wc_u.get("benchmark"), "original_workbench_config.universe.benchmark"),
+        (data.get("benchmark"), "run_meta.data.benchmark"),
+    ])
+
+    symbol_count_val, symbol_count_src, symbol_count_fallback = _pick_first([
+        (universe_meta.get("raw_count"), "run_meta.universe.raw_count"),
+        (universe_meta.get("after_filters_symbols"), "run_meta.universe.after_filters_symbols"),
+        (len(wc_u.get("symbols") or []), "original_workbench_config.universe.symbols"),
+    ])
+    resolved_symbol_count = int(symbol_count_val or 0)
+
+    funnel_source = "funnel.csv" if funnel else "run_meta.counters"
+
     exp_id = run_meta.get("exp_id") or rd.name
-    data = run_meta.get("data") or {}
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Build KPI cards
     kpi_items = [
         ("年化收益", _pct(perf.get("cagr"))),
         ("最大回撤", _pct(perf.get("max_drawdown"))),
         ("夏普比率", _n2(perf.get("sharpe"))),
-        ("卡尔马比率", _n2(perf.get("calmar"))),
+        ("卡尔玛比率", _n2(perf.get("calmar"))),
         ("交易次数", _inum(perf.get("trades"))),
         ("换手率", _pct(perf.get("turnover"))),
         ("累计收益", _pct(perf.get("total_return"))),
@@ -492,6 +489,15 @@ def generate_report(results_dir: str) -> str:
         val_str = str(val)
         cls = "negative" if val_str.startswith("-") and val_str != "-" else ("positive" if val_str and val_str[0].isdigit() else "")
         kpi_html += f'<div class="kpi-card"><div class="kpi-label">{label}</div><div class="kpi-value {cls}">{val}</div></div>'
+
+    source_diag = [
+        ("区间开始", f"{_e(start_src)}{' (fallback)' if start_fallback else ''}"),
+        ("区间结束", f"{_e(end_src)}{' (fallback)' if end_fallback else ''}"),
+        ("基准", f"{_e(benchmark_src)}{' (fallback)' if benchmark_fallback else ''}"),
+        ("标的数量", f"{_e(symbol_count_src)}{' (fallback)' if symbol_count_fallback else ''}"),
+        ("漏斗", funnel_source),
+        ("配置冲突策略", _e((run_meta.get("report_consistency") or {}).get("config_conflict_policy") or overrides.get("config_conflict_policy") or "-")),
+    ]
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -524,10 +530,10 @@ def generate_report(results_dir: str) -> str:
 
 <h2>§1 概览</h2>
 <table>
-  <tr><td>回测区间</td><td>{_e(data.get('start', '-'))} ~ {_e(data.get('end', '-'))}</td></tr>
-  <tr><td>基准指数</td><td>{_e(data.get('benchmark', '-'))}</td></tr>
+  <tr><td>回测区间</td><td>{_e(start or '-')} ~ {_e(end or '-')}</td></tr>
+  <tr><td>基准指数</td><td>{_e(benchmark or '-')}</td></tr>
   <tr><td>对照指数</td><td>{_e(data.get('compare_symbol', '-'))}</td></tr>
-  <tr><td>股票池数量</td><td>{_inum(data.get('universe_limit', '-'))}</td></tr>
+  <tr><td>股票池数量</td><td>{_inum(resolved_symbol_count)}</td></tr>
 </table>
 <div class="kpi-grid">
   {kpi_html}
@@ -541,49 +547,30 @@ def generate_report(results_dir: str) -> str:
 {_build_drawdown_analysis(daily, perf)}
 
 <h2>§4 交易分析</h2>
-{_build_trade_analysis(trades, funnel, counters)}
+{_build_trade_analysis(trades, funnel, counters, funnel_source)}
 
 <h2>§5 持仓分析</h2>
 {_build_position_analysis(counters)}
 
 <h2>§6 策略参数</h2>
-{_build_config_summary(config)}
+{_build_config_summary(config, run_config, resolved_symbol_count)}
 
 <h2>§7 附录：全部交易明细</h2>
 <p style="color:#666;font-size:12px;margin-bottom:8px">共 {_inum(len(trades))} 条交易记录</p>
-{_build_trade_appendix(trades, stock_names)}
+{_build_trade_appendix(trades, stock_names, trade_st_flags)}
+
+<h2>§8 口径诊断</h2>
+<table>
+  <thead><tr><th>字段</th><th>来源</th></tr></thead>
+  <tbody>
+    {''.join(f'<tr><td>{_e(k)}</td><td>{_e(v)}</td></tr>' for k, v in source_diag)}
+  </tbody>
+</table>
 
 </body>
 </html>"""
 
-    # Write to file
     report_path = rd / "report.html"
     report_path.write_text(html, encoding="utf-8")
     logger.info("Report generated: %s", report_path)
     return str(report_path)
-
-
-# ---------------------------------------------------------------------------
-# File loaders
-# ---------------------------------------------------------------------------
-
-def _load_json(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _load_csv_rows(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    try:
-        df = pd.read_csv(path)
-        if df.empty:
-            return []
-        # Convert NaN to None for clean JSON handling
-        return df.where(df.notna(), None).to_dict("records")
-    except Exception:
-        return []

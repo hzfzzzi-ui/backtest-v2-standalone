@@ -167,7 +167,18 @@ class RegimeRouterSignalProvider:
         hist["symbol"] = hist["symbol"].astype(str).str.lower()
         hist = hist.sort_values(["date", "symbol"]).reset_index(drop=True)
 
-        self._mx = build_ohlc_matrices_from_history(hist, trading_days, st_history=st_history)
+        _uf = dict(getattr(strategy, "state", {}).get("universe_filters") or {})
+        _min_price = float(_uf.get("min_price", getattr(strategy, "min_price", 0.0) or getattr(trend_strat, "min_price", 0.0)) or 0.0)
+        _min_list_days = int(_uf.get("min_list_days", 0) or 0)
+        _min_avg_turnover_20d = float(_uf.get("min_avg_turnover_20d", 0.0) or 0.0)
+        self._mx = build_ohlc_matrices_from_history(
+            hist,
+            trading_days,
+            st_history=st_history,
+            min_price=_min_price,
+            min_list_days=_min_list_days,
+            min_avg_turnover_20d=_min_avg_turnover_20d,
+        )
         mx = self._mx
         t, n = mx.close.shape
         if n == 0:

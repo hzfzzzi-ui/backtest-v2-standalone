@@ -98,6 +98,9 @@ class CachedDataProvider(DataProvider):
     def load_industry_mapping(self, symbols: list[str]) -> dict[str, str]:
         return self._inner.load_industry_mapping(symbols)
 
+    def load_security_master(self, symbols: list[str]) -> pd.DataFrame:
+        return self._inner.load_security_master(symbols)
+
     @property
     def query_audit(self) -> list[dict]:
         return self._inner.query_audit
@@ -122,9 +125,11 @@ class CachedDataProvider(DataProvider):
         ordered_keys = [
             "date", "symbol", "open", "high", "low", "close",
             "volume", "amount", "limit_up", "limit_down",
-            "is_suspended", "adj_factor",
+            "is_suspended", "is_st", "adj_factor",
         ]
         cols = self._inner._filter_existing_cols(mapping, ordered_keys, existing)
+        if "is_st" not in cols and "is_st" in existing:
+            cols.append("is_st")
         cols_sql = ", ".join(safe_ident(c) for c in cols)
         date_col = safe_ident(mapping["date"])
         sym_col = safe_ident(mapping["symbol"])

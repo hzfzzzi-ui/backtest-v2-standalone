@@ -287,19 +287,21 @@ input[type="checkbox"] {
 
 /* ── 8. Icon Rail ── */
 .wb-rail {
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 8px 6px;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 4px 4px;
   background: #111826;
   border-right: 1px solid var(--wb-line-dim);
   overflow-y: auto;
   z-index: 10;
 }
 .wb-rail-btn {
-  width: 36px; height: 36px;
-  border-radius: var(--wb-radius-sm); border: 1px solid transparent;
+  width: 40px; height: 32px;
+  border-radius: var(--wb-radius-xs); border: 1px solid transparent;
   background: transparent; color: var(--wb-text-soft);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: all var(--wb-transition);
+  font-size: 11px; font-weight: 500;
+  gap: 1px; flex-shrink: 0;
 }
 .wb-rail-btn:hover {
   background: rgba(82,168,255,.06); color: var(--wb-text);
@@ -309,6 +311,19 @@ input[type="checkbox"] {
   background: color-mix(in srgb, var(--wb-accent) 18%, transparent);
   color: var(--wb-accent);
   border-color: color-mix(in srgb, var(--wb-accent) 35%, var(--wb-line));
+}
+/* Stage badge number */
+.wb-rail-stage {
+  flex-direction: column; gap: 0; line-height: 1;
+}
+.wb-rail-num {
+  font-size: 12px; font-weight: 700; line-height: 1;
+}
+/* Rail separator between S1-S9 and JSON/History */
+.wb-rail-sep {
+  height: 1px; margin: 4px 4px;
+  background: var(--wb-line-dim);
+  flex-shrink: 0;
 }
 
 /* ── 9. Drawer ── */

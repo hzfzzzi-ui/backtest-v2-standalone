@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Callable
+import re
 
 import pandas as pd
 
@@ -25,10 +26,15 @@ class UniverseLoadError(RuntimeError):
 @dataclass(frozen=True)
 class UniverseFilterConfig:
     exclude_st: bool = True
+    exclude_delisted: bool = True
     exclude_suspended: bool = True
     min_list_days: int = 120
     min_avg_turnover_20d: float = 1e8
     exclude_limit_lock: bool = False
+    min_price: float = 5.0
+
+
+_ST_NAME_PAT = re.compile(r"(^\*?ST)|(^ST)|退", re.IGNORECASE)
 
 
 def load_constituents_from_db(
@@ -167,9 +173,11 @@ def apply_universe_filters(
         ("in_hs300", False),
         ("in_csi500", False),
         ("is_st", False),
+        ("is_delisted", False),
         ("is_suspended", False),
         ("list_days", 9999),
         ("avg_turnover_20d", 0.0),
+        ("last_close", 0.0),
         ("limit_lock", False),
     ]:
         if col not in df.columns:
@@ -181,6 +189,8 @@ def apply_universe_filters(
         reason = ""
         if cfg.exclude_st and bool(r.get("is_st", False)):
             reason = "EXCLUDE_ST"
+        elif cfg.exclude_delisted and bool(r.get("is_delisted", False)):
+            reason = "EXCLUDE_DELISTED"
         elif cfg.exclude_suspended and bool(r.get("is_suspended", False)):
             reason = "EXCLUDE_SUSPENDED"
         elif int(r.get("list_days", 0) or 0) < int(cfg.min_list_days):
@@ -189,6 +199,8 @@ def apply_universe_filters(
             reason = "EXCLUDE_LOW_TURNOVER"
         elif cfg.exclude_limit_lock and bool(r.get("limit_lock", False)):
             reason = "EXCLUDE_LIMIT_LOCK"
+        elif cfg.min_price > 0 and float(r.get("last_close", 0.0) or 0.0) < cfg.min_price:
+            reason = "EXCLUDE_LOW_PRICE"
         reasons.append(reason)
         tradable.append(reason == "")
 
@@ -207,31 +219,125 @@ def apply_universe_filters(
     return filtered, snapshot, excluded_counts
 
 
-def build_candidates_from_ohlcv(ohlcv: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
+def _to_internal_symbol(raw: Any) -> str:
+    s = str(raw or "").strip().lower()
+    if not s:
+        return ""
+    if s.startswith(("sh", "sz")) and len(s) == 8:
+        return s
+    if "." in s:
+        code, exch = s.split(".", 1)
+        if exch in {"sh", "sz"} and len(code) == 6:
+            return f"{exch}{code}"
+    try:
+        return normalize_stock_symbol(s)
+    except Exception:
+        return s
+
+
+def _build_active_st_symbols(st_history: pd.DataFrame, as_of: pd.Timestamp) -> set[str]:
+    if st_history is None or st_history.empty:
+        return set()
+    active: set[str] = set()
+    as_of_ts = pd.Timestamp(as_of).normalize()
+    for row in st_history.itertuples(index=False):
+        ts_code = getattr(row, "ts_code", getattr(row, "symbol", ""))
+        symbol = _to_internal_symbol(ts_code)
+        if not symbol:
+            continue
+        start_date = pd.to_datetime(getattr(row, "start_date", None), errors="coerce")
+        end_date = pd.to_datetime(getattr(row, "end_date", None), errors="coerce")
+        if pd.isna(start_date):
+            continue
+        if pd.notna(end_date):
+            if start_date <= as_of_ts <= end_date:
+                active.add(symbol)
+        elif start_date <= as_of_ts:
+            active.add(symbol)
+    return active
+
+
+def _build_security_master_map(security_master: pd.DataFrame) -> dict[str, tuple[pd.Timestamp | None, pd.Timestamp | None]]:
+    if security_master is None or security_master.empty:
+        return {}
+    out: dict[str, tuple[pd.Timestamp | None, pd.Timestamp | None]] = {}
+    for row in security_master.itertuples(index=False):
+        symbol = _to_internal_symbol(getattr(row, "symbol", ""))
+        if not symbol:
+            continue
+        list_date = pd.to_datetime(getattr(row, "list_date", None), errors="coerce")
+        delist_date = pd.to_datetime(getattr(row, "delist_date", None), errors="coerce")
+        out[symbol] = (
+            None if pd.isna(list_date) else pd.Timestamp(list_date).normalize(),
+            None if pd.isna(delist_date) else pd.Timestamp(delist_date).normalize(),
+        )
+    return out
+
+
+def _build_security_name_map(security_master: pd.DataFrame) -> dict[str, str]:
+    if security_master is None or security_master.empty or "name" not in security_master.columns:
+        return {}
+    out: dict[str, str] = {}
+    for row in security_master.itertuples(index=False):
+        symbol = _to_internal_symbol(getattr(row, "symbol", ""))
+        if not symbol:
+            continue
+        name = str(getattr(row, "name", "") or "").strip()
+        if name:
+            out[symbol] = name
+    return out
+
+
+def build_candidates_from_ohlcv(
+    ohlcv: pd.DataFrame,
+    as_of: pd.Timestamp,
+    st_history: pd.DataFrame | None = None,
+    security_master: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     if ohlcv.empty:
         return pd.DataFrame()
     df = ohlcv.copy()
     df["date"] = pd.to_datetime(df["date"])
+    df["symbol"] = df["symbol"].astype(str).map(_to_internal_symbol)
     use = df[df["date"] <= as_of].copy()
     if use.empty:
         return pd.DataFrame()
+    st_symbols = _build_active_st_symbols(st_history if st_history is not None else pd.DataFrame(), as_of)
+    sm_map = _build_security_master_map(security_master if security_master is not None else pd.DataFrame())
+    sm_name_map = _build_security_name_map(security_master if security_master is not None else pd.DataFrame())
+    as_of_ts = pd.Timestamp(as_of).normalize()
     out_rows: list[dict[str, Any]] = []
     for symbol, g in use.groupby("symbol"):
         g = g.sort_values("date")
         list_days = int(len(g))
-        avg_turnover = float(g.tail(20).get("amount", pd.Series([0.0] * min(20, len(g)))).fillna(0.0).mean())
+        turn_col = "amount" if "amount" in g.columns else ("turnover" if "turnover" in g.columns else "")
+        if turn_col:
+            avg_turnover = float(pd.to_numeric(g.tail(20)[turn_col], errors="coerce").fillna(0.0).mean())
+        else:
+            avg_turnover = 0.0
         last = g.iloc[-1]
+        sm_list_date, sm_delist_date = sm_map.get(str(symbol), (None, None))
+        if sm_list_date is not None:
+            list_days = max(0, int((as_of_ts - sm_list_date).days) + 1)
         is_suspended = bool(float(last.get("volume", 0.0) or 0.0) <= 0.0)
+        last_close = float(last.get("close", 0.0) or 0.0)
+        sec_name = sm_name_map.get(str(symbol), "")
+        is_st_by_name = bool(_ST_NAME_PAT.search(sec_name)) if sec_name else False
+        is_st = str(symbol) in st_symbols or is_st_by_name
+        is_delisted = bool(sm_delist_date is not None and sm_delist_date <= as_of_ts)
         out_rows.append(
             {
                 "date": as_of.date().isoformat(),
                 "symbol": str(symbol),
                 "in_hs300": True,
                 "in_csi500": True,
-                "is_st": False,
+                "is_st": is_st,
+                "is_delisted": is_delisted,
+                "security_name": sec_name,
                 "is_suspended": is_suspended,
                 "list_days": list_days,
                 "avg_turnover_20d": avg_turnover,
+                "last_close": last_close,
                 "limit_lock": False,
             }
         )

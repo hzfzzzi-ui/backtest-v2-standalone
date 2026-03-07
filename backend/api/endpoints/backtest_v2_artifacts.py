@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -87,6 +88,80 @@ def _resolve_stock_names(symbols: list[str]) -> dict[str, str]:
         return {}
 
 
+_ST_NAME_PAT = re.compile(r"(^\*?ST)|(^ST)|退", re.IGNORECASE)
+
+
+def _resolve_trade_st_flags(trades_df: pd.DataFrame, stock_names: dict[str, str]) -> dict[str, str]:
+    """Build per-trade ST status keyed by 'YYYY-MM-DD|symbol'."""
+    if trades_df.empty or "date" not in trades_df.columns or "symbol" not in trades_df.columns:
+        return {}
+    tdf = trades_df.copy()
+    tdf["date"] = pd.to_datetime(tdf["date"], errors="coerce").dt.date
+    tdf["symbol"] = tdf["symbol"].astype(str).str.lower()
+    tdf = tdf.dropna(subset=["date", "symbol"])
+    if tdf.empty:
+        return {}
+
+    out: dict[str, str] = {}
+    for r in tdf.itertuples(index=False):
+        k = f"{r.date.isoformat()}|{str(r.symbol).lower()}"
+        out[k] = "-"
+
+    symbols = sorted(set(tdf["symbol"].astype(str).tolist()))
+    min_d = tdf["date"].min()
+    max_d = tdf["date"].max()
+    st_periods: dict[str, list[tuple[Any, Any]]] = {}
+    try:
+        import psycopg
+
+        conn = psycopg.connect(
+            host=os.environ.get("PGHOST", os.environ.get("PAMS_PG_HOST", "pams-postgres")),
+            port=int(os.environ.get("PGPORT", os.environ.get("PAMS_PG_PORT", "5432"))),
+            dbname=os.environ.get("PGDATABASE", os.environ.get("PAMS_PG_DBNAME", "pams")),
+            user=os.environ.get("PGUSER", os.environ.get("PAMS_PG_USER", "pams")),
+            password=os.environ.get("PGPASSWORD", os.environ.get("PAMS_PG_PASSWORD", "")),
+            autocommit=True,
+        )
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT ts_code, start_date, end_date
+                FROM pit_st_history
+                WHERE ts_code = ANY(%s)
+                  AND start_date <= %s
+                  AND (end_date IS NULL OR end_date >= %s)
+                """,
+                (symbols, max_d, min_d),
+            )
+            for sym, sdt, edt in cur.fetchall():
+                ss = str(sym).lower()
+                st_periods.setdefault(ss, []).append((sdt, edt))
+        conn.close()
+    except Exception as exc:
+        logger.warning("resolve_trade_st_flags pit_st_history failed: %s", exc)
+
+    for r in tdf.itertuples(index=False):
+        sym = str(r.symbol).lower()
+        d = r.date
+        k = f"{d.isoformat()}|{sym}"
+        tagged = False
+        for sdt, edt in st_periods.get(sym, []):
+            s = pd.to_datetime(sdt, errors="coerce").date() if sdt is not None else None
+            e = pd.to_datetime(edt, errors="coerce").date() if edt is not None else None
+            if s is None:
+                continue
+            if d >= s and (e is None or d <= e):
+                out[k] = "PIT_ST"
+                tagged = True
+                break
+        if tagged:
+            continue
+        nm = str(stock_names.get(sym, ""))
+        if nm and _ST_NAME_PAT.search(nm):
+            out[k] = "NAME_ST_FALLBACK"
+    return out
+
+
 def _generate_experiment_label(base_cfg: dict[str, Any], overrides: dict[str, Any]) -> str:
     """Generate a human-readable label like 'SMA_CROSS 5/20 | CUSTOM 2只 | HFQ | 2024-01~06'."""
     wc = overrides.get("workbench_config") or {}
@@ -166,7 +241,11 @@ def _write_nav_csv(results_dir: Path, result: dict[str, Any]) -> Path:
     return out
 
 
-def _build_counters(result: dict[str, Any], results_dir: Path) -> dict[str, Any]:
+def _build_counters(
+    result: dict[str, Any],
+    results_dir: Path,
+    funnel_obj: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """从 result dict 和 results_dir 下的产物文件中提取完整 counters。"""
     counters: dict[str, Any] = {}
 
@@ -176,11 +255,12 @@ def _build_counters(result: dict[str, Any], results_dir: Path) -> dict[str, Any]
     counters["trend_slope_block_count"] = int(result.get("trend_slope_block_count", 0) or 0)
     counters["mf_rank_applied_rate"] = float(result.get("mf_rank_applied_rate", 0.0) or 0.0)
     counters["gate_on_rate"] = float(result.get("mf_gate_on_rate", result.get("gate_on_rate", 0.0)) or 0.0)
-    counters["raw_signal"] = int(result.get("raw_signal", 0) or 0)
-    counters["blocked"] = int(result.get("blocked", 0) or 0)
-    counters["orders"] = int(result.get("orders", 0) or 0)
-    counters["skipped"] = int(result.get("skipped", 0) or 0)
-    counters["closed_trades"] = int(result.get("closed_trades", 0) or 0)
+    _f = dict(funnel_obj or {})
+    counters["raw_signal"] = int(_f.get("raw_signal", result.get("raw_signal", 0)) or 0)
+    counters["blocked"] = int(_f.get("blocked", result.get("blocked", 0)) or 0)
+    counters["orders"] = int(_f.get("orders", result.get("orders", 0)) or 0)
+    counters["skipped"] = int(_f.get("skipped", result.get("skipped", 0)) or 0)
+    counters["closed_trades"] = int(_f.get("closed_trades", result.get("closed_trades", 0)) or 0)
 
     # --- 从 portfolio_trades.csv 派生 exit 计数器 ---
     trades_path = results_dir / ARTIFACT_FILENAMES["trades"]
@@ -221,12 +301,7 @@ def _build_counters(result: dict[str, Any], results_dir: Path) -> dict[str, Any]
     counters["time_exit_count"] = time_exit
     counters["take_profit_exit_count"] = int(result.get("take_profit_exit_count", 0) or 0) or take_profit
     counters["fixed_stop_loss_exit_count"] = int(result.get("fixed_stop_loss_exit_count", 0) or 0) or fixed_stop_loss
-    counters["dd_scale_08_count"] = int(result.get("dd_scale_08_count", 0) or 0)
-    counters["dd_scale_06_count"] = int(result.get("dd_scale_06_count", 0) or 0)
-    counters["dd_fixed_03_count"] = int(result.get("dd_fixed_03_count", 0) or 0)
-    counters["dd_stop_count"] = int(result.get("dd_stop_count", 0) or 0)
-    counters["dd_stop_block_count"] = int(result.get("dd_stop_block_count", 0) or 0)
-    counters["dd_stop_reset_count"] = int(result.get("dd_stop_reset_count", 0) or 0)
+    counters["dd_reduced_count"] = int(result.get("dd_reduced_count", 0) or 0)
 
     # --- 从 candidate_diag_reason_counts 派生 constraint 计数器 ---
     diag = dict(result.get("candidate_diag_reason_counts") or {})
@@ -270,6 +345,19 @@ def _resolve_backtest_range(base_cfg: dict[str, Any], overrides: dict[str, Any])
     start = str(overrides.get("start_date") or uni.get("start") or "").strip()
     end = str(overrides.get("end_date") or uni.get("end") or "").strip()
     return start, end
+
+
+def _load_runtime_universe(results_dir: Path) -> dict[str, Any]:
+    """Load compiled runtime universe from run_config.json when available."""
+    p = results_dir / "run_config.json"
+    if not p.exists():
+        return {}
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    u = obj.get("universe")
+    return dict(u) if isinstance(u, dict) else {}
 
 
 def _load_last_close_map(
@@ -421,6 +509,16 @@ def ensure_standard_artifacts(
             pass
     stock_names_path = results_dir / "stock_names.json"
     stock_names_path.write_text(json.dumps(stock_names, ensure_ascii=False, indent=2), encoding="utf-8")
+    trade_st_flags_path = results_dir / "trade_st_flags.json"
+    trade_st_flags: dict[str, str] = {}
+    if trades_path.exists():
+        try:
+            tdf_st = pd.read_csv(trades_path)
+            trade_st_flags = _resolve_trade_st_flags(tdf_st, stock_names)
+        except Exception as exc:
+            logger.warning("build trade_st_flags failed: %s", exc)
+            trade_st_flags = {}
+    trade_st_flags_path.write_text(json.dumps(trade_st_flags, ensure_ascii=False, indent=2), encoding="utf-8")
 
     symbol_perf_csv_path = results_dir / ARTIFACT_FILENAMES["symbol_performance"]
     symbol_perf_json_path = results_dir / "symbol_performance.json"
@@ -476,15 +574,51 @@ def ensure_standard_artifacts(
         encoding="utf-8",
     )
 
+    runtime_uni = _load_runtime_universe(results_dir)
+    original_wb = dict((overrides.get("original_workbench_config") or {})) if isinstance(overrides.get("original_workbench_config"), dict) else {}
+    wb_uni = dict(original_wb.get("universe") or {}) if isinstance(original_wb.get("universe"), dict) else {}
+    base_uni = dict(base_cfg.get("universe") or {})
+
+    def _pick_with_source(candidates: list[tuple[Any, str]]) -> tuple[Any, str, bool]:
+        if not candidates:
+            return None, "missing", True
+        primary = candidates[0][1]
+        for value, source in candidates:
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            return value, source, source != primary
+        return None, "missing", True
+
+    start_v, start_src, start_fallback = _pick_with_source([
+        (runtime_uni.get("start"), "run_config.universe.start"),
+        (wb_uni.get("start"), "original_workbench_config.universe.start"),
+        (overrides.get("start_date"), "overrides.start_date"),
+        (base_uni.get("start"), "base_config.universe.start"),
+    ])
+    end_v, end_src, end_fallback = _pick_with_source([
+        (runtime_uni.get("end"), "run_config.universe.end"),
+        (wb_uni.get("end"), "original_workbench_config.universe.end"),
+        (overrides.get("end_date"), "overrides.end_date"),
+        (base_uni.get("end"), "base_config.universe.end"),
+    ])
+    benchmark_v, benchmark_src, benchmark_fallback = _pick_with_source([
+        (runtime_uni.get("benchmark"), "run_config.universe.benchmark"),
+        (wb_uni.get("benchmark"), "original_workbench_config.universe.benchmark"),
+        (overrides.get("benchmark"), "overrides.benchmark"),
+        (base_uni.get("benchmark"), "base_config.universe.benchmark"),
+    ])
+
     run_meta_obj = {
         "exp_id": str(result.get("exp_id") or ""),
         "tier": str(result.get("tier") or "T0"),
         "status": str(result.get("status") or "OK"),
         "created_at": datetime.now().isoformat(),
         "data": {
-            "start": overrides.get("start_date") or base_cfg.get("universe", {}).get("start"),
-            "end": overrides.get("end_date") or base_cfg.get("universe", {}).get("end"),
-            "benchmark": overrides.get("benchmark") or base_cfg.get("universe", {}).get("benchmark"),
+            "start": start_v,
+            "end": end_v,
+            "benchmark": benchmark_v,
             "compare_symbol": overrides.get("compare_symbol") or base_cfg.get("universe", {}).get("benchmark_compare_symbol"),
             "universe_limit": _safe_int(overrides.get("universe_limit")),
         },
@@ -493,11 +627,26 @@ def ensure_standard_artifacts(
             "execution_profile": str(overrides.get("execution_profile") or "tradable"),
             "fast_mode": bool(overrides.get("fast_mode", True)),
         },
-        "counters": _build_counters(result, results_dir),
+        "counters": _build_counters(result, results_dir, funnel_obj),
         "price_adj_mode": str(result.get("price_adj_mode") or "hfq"),
         "adj_factor_stats": sanitize_json(result.get("adj_factor_stats") or {}),
         "missing_fields": sorted(set(missing_fields)),
         "legacy_hits": {"reason_codes_filename": 0, "counters_field_alias": 0},
+        "report_consistency": {
+            "sources": {
+                "start": start_src,
+                "end": end_src,
+                "benchmark": benchmark_src,
+                "funnel": "funnel.csv",
+            },
+            "fallbacks": {
+                "start": bool(start_fallback),
+                "end": bool(end_fallback),
+                "benchmark": bool(benchmark_fallback),
+            },
+            "config_source": str(overrides.get("config_source") or "unknown"),
+            "config_conflict_policy": str(overrides.get("config_conflict_policy") or ""),
+        },
     }
     # 注入 universe resolver 元数据（来自 experiment_runner）
     u_meta = result.get("universe_meta")
@@ -528,6 +677,7 @@ def ensure_standard_artifacts(
         "config": _to_rel(config_path, results_dir),
         "run_meta": _to_rel(run_meta_path, results_dir),
         "stock_names": _to_rel(stock_names_path, results_dir),
+        "trade_st_flags": _to_rel(trade_st_flags_path, results_dir),
         "symbol_performance": _to_rel(symbol_perf_csv_path, results_dir),
         "audit": audit_rel,
     }

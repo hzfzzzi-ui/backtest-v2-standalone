@@ -134,12 +134,18 @@ class PostgresDataProvider(DataProvider):
         table = safe_ident(self._source.stocks_table)
         mapping = self._schema[self._source.stocks_table]
         existing_cols = self._get_table_columns(self._source.stocks_table)
-        cols = self._filter_existing_cols(
-            mapping,
-            ["date", "symbol", "open", "high", "low", "close", "volume", "amount",
-             "limit_up", "limit_down", "is_suspended", "adj_factor"],
-            existing_cols,
-        )
+        ohlcv_keys = [
+            "date", "symbol", "open", "high", "low", "close", "volume", "amount",
+            "limit_up", "limit_down", "is_suspended", "adj_factor",
+        ]
+        cols = self._filter_existing_cols(mapping, ohlcv_keys, existing_cols)
+        # Optional daily ST flag fallback: when schema mapping does not expose is_st,
+        # auto-detect physical column "is_st".
+        st_col = mapping.get("is_st")
+        if st_col and st_col in existing_cols:
+            cols.append(st_col)
+        elif "is_st" in existing_cols:
+            cols.append("is_st")
         cols_sql = ", ".join(safe_ident(c) for c in cols)
         q = (
             f"SELECT {cols_sql} FROM {table} "
@@ -162,6 +168,9 @@ class PostgresDataProvider(DataProvider):
             },
         )
         out, warnings = to_canonical(raw, mapping)
+        # If mapping has no is_st but query selected raw is_st, forward it explicitly.
+        if "is_st" not in out.columns and "is_st" in raw.columns:
+            out["is_st"] = raw["is_st"]
         out["symbol"] = out["symbol"].astype(str).str.lower()
         self._audit[-1]["warnings"] = warnings
         return out
@@ -418,6 +427,56 @@ class PostgresDataProvider(DataProvider):
             },
         )
         return dict(zip(raw["ts_code"].astype(str), raw["industry_l1"].astype(str))) if not raw.empty else {}
+
+    def load_security_master(self, symbols: list[str]) -> pd.DataFrame:
+        """Load symbol/list_date/delist_date/name from pit_security_master."""
+        if not symbols:
+            return pd.DataFrame(columns=["symbol", "list_date", "delist_date", "name"])
+
+        try:
+            existing = self._get_table_columns("pit_security_master")
+        except Exception:
+            return pd.DataFrame(columns=["symbol", "list_date", "delist_date", "name"])
+        if not existing:
+            return pd.DataFrame(columns=["symbol", "list_date", "delist_date", "name"])
+
+        cols = ["symbol", "list_date", "delist_date"]
+        if "name" in existing:
+            cols.append("name")
+        cols_sql = ", ".join(cols)
+
+        q = (
+            f"SELECT {cols_sql} "
+            "FROM pit_security_master "
+            "WHERE symbol = ANY(%s)"
+        )
+        query_symbols: set[str] = set()
+        for s in symbols:
+            s_lower = str(s).strip().lower()
+            if s_lower:
+                query_symbols.add(s_lower)
+            if s_lower.startswith(("sh", "sz")) and len(s_lower) == 8:
+                code = s_lower[2:]
+                exch = s_lower[:2].upper()
+                query_symbols.add(f"{code}.{exch}")
+            elif "." in s_lower:
+                query_symbols.add(str(s).upper())
+            else:
+                query_symbols.add(str(s))
+        symbols_param = sorted(query_symbols)
+        raw = self._exec_df(
+            q,
+            (symbols_param,),
+            {
+                "provider": "postgres",
+                "source": "security_master",
+                "table": "pit_security_master",
+                "symbols": symbols_param,
+                "start": "",
+                "end": "",
+            },
+        )
+        return raw
 
     def load_instrument_rules(self, symbols: list[str]) -> pd.DataFrame:
         return load_rules_csv(self._rules_path, symbols)

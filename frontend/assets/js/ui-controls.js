@@ -1,4 +1,4 @@
-/* ── ui-controls.js ── UI interactions, config building, drawer, dock tabs ── */
+﻿/* ── ui-controls.js ── UI interactions, config building, drawer, dock tabs ── */
 /* Globals used: state, byId, esc, num, pct, fmtInt, fmtMoney, setTextById, setHtmlById,
    getStrategySelector, getStrategyPackValue, COMPOSE_MODULES, reasonZh, addLog,
    apiRequestJson, setStatusItems, _apiTag,
@@ -52,12 +52,24 @@ function getSelectedIndustries() {
 }
 
 function setDrawerPanel(panel) {
-  state.drawer_panel = panel || 'universe';
+  state.drawer_panel = panel || 's1';
   document.querySelectorAll('.wb-rail-btn').forEach((btn) => btn.classList.toggle('active', btn.getAttribute('data-panel') === state.drawer_panel));
   document.querySelectorAll('.wb-module').forEach((m) => m.classList.toggle('active', m.getAttribute('data-module') === state.drawer_panel));
   const titleEl = byId('wbDrawerTitle');
   if (titleEl) {
-    const titles = { universe: 'Universe', signal: 'Signal', compose: 'Composition', risk: 'Risk & Exit', json: 'JSON', history: '实验历史' };
+    const titles = {
+      s1: 'S1 股票池',
+      s2: 'S2 大盘环境',
+      s3: 'S3 行业趋势',
+      s4: 'S4 个股趋势',
+      s5: 'S5 个股排序',
+      s6: 'S6 入场信号',
+      s7: 'S7 组合构建',
+      s8: 'S8 风险控制',
+      s9: 'S9 退出',
+      json: 'JSON',
+      history: '实验历史',
+    };
     titleEl.textContent = titles[state.drawer_panel] || state.drawer_panel;
   }
 }

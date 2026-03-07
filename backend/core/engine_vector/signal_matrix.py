@@ -26,6 +26,9 @@ def build_signal_matrices(
     enable_entry_above_slow_ma: bool = False,
     enable_entry_slow_ma_slope: bool = False,
     entry_slope_lookback: int = 5,
+    # V2 个股趋势过滤 (close > sma60 AND sma20 > sma60)
+    sma20: np.ndarray | None = None,
+    sma60: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     t, n = close.shape
     cross_up = np.zeros((t, n), dtype=bool)
@@ -138,6 +141,17 @@ def build_signal_matrices(
                 & (slow_ma_diff > 0.0)
             )
 
+    # V2 个股趋势过滤：close > sma60 AND sma20 > sma60
+    v2_trend_ok = np.ones((t, n), dtype=bool)
+    if sma20 is not None and sma60 is not None:
+        v2_trend_ok = (
+            ~np.isnan(close)
+            & ~np.isnan(sma20)
+            & ~np.isnan(sma60)
+            & (close > sma60)
+            & (sma20 > sma60)
+        )
+
     return {
         "cross_up": cross_up,
         "cross_down": cross_down,
@@ -152,4 +166,5 @@ def build_signal_matrices(
         "risk_on_matrix": risk_on_matrix,
         "entry_above_slow_ma": entry_above_slow_ma,
         "entry_slow_ma_slope_pos": entry_slow_ma_slope_pos,
+        "v2_trend_ok": v2_trend_ok,
     }

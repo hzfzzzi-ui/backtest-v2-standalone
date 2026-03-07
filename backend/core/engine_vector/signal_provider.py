@@ -26,6 +26,8 @@ class ExitCounts:
     atr_trail: int = 0
     take_profit: int = 0
     fixed_stop_loss: int = 0
+    ma20_exit: int = 0
+    low10_exit: int = 0
 
 
 @dataclass(slots=True)
@@ -108,12 +110,15 @@ def evaluate_engine_exits(
     exit_cfg: ExitConfig,
     get_atr: Callable[[str, date], float | None],
     risk_on: bool = True,
+    enable_risk_off_exit: bool = True,
     max_hold_days: int = 0,
     atr_stop_k: float = 2.0,
+    check_ma20_exit: Callable[[str], bool] | None = None,
+    check_low10_exit: Callable[[str], bool] | None = None,
 ) -> tuple[list[Signal], set[str], ExitCounts]:
     """评估所有持仓的引擎级退出规则。
 
-    按优先级：RISK_OFF > ATR_STOP > FIXED_STOP > TAKE_PROFIT > ATR_TRAIL > TIME_EXIT。
+    按优先级：RISK_OFF > ATR_STOP > FIXED_STOP > TAKE_PROFIT > ATR_TRAIL > MA20_EXIT > LOW10_EXIT > TIME_EXIT。
     原地更新 peak_state。
     返回 (exit_signals, exit_syms_set, exit_counts)。
     """
@@ -137,7 +142,7 @@ def evaluate_engine_exits(
         atr_v = get_atr(sym, day)
 
         reason = ""
-        if not risk_on:
+        if enable_risk_off_exit and not risk_on:
             reason = "RISK_OFF_EXIT"
         elif exit_cfg.enable_atr_stop and atr_v is not None and cclose <= float(avg_cost - atr_stop_k * atr_v):
             reason = "ATR_STOP_LOSS"
@@ -154,6 +159,12 @@ def evaluate_engine_exits(
         elif exit_cfg.enable_atr_trail and atr_v is not None and cclose <= float(peak_state.get(sym, cclose) - exit_cfg.atr_trail_k * atr_v):
             reason = "ATR_TRAIL_EXIT"
             counts.atr_trail += 1
+        elif check_ma20_exit is not None and exit_cfg.enable_ma20_exit and check_ma20_exit(sym):
+            reason = "TREND_EXIT_MA20"
+            counts.ma20_exit += 1
+        elif check_low10_exit is not None and exit_cfg.enable_low10_exit and check_low10_exit(sym):
+            reason = "TREND_EXIT_LOW10"
+            counts.low10_exit += 1
         elif max_hold_days > 0 and sym in entry_day and (day - entry_day[sym]).days >= max_hold_days:
             reason = "TIME_EXIT"
 

@@ -142,6 +142,7 @@ def build_rebalance_orders(
     mf_concentrate_scale: float = 1.5,
     mf_gate_on_today: bool = True,
     mf_score_map: dict[str, float | None] | None = None,
+    momentum_top_pct: float = 0.0,
     decision_date: date | None = None,
     candidate_audit: list[dict[str, Any]] | None = None,
     debug_plan: dict[str, Any] | None = None,
@@ -149,6 +150,10 @@ def build_rebalance_orders(
     sizing_cfg: SizingConfig | None = None,
     risk_amount: float = 0.0,
     atr_stop_k: float = 2.0,
+    weight_mode: str = "equal",
+    min_positions: int = 10,
+    atr_close_map: dict[str, tuple[float, float]] | None = None,
+    min_trade_price: float = 0.0,
 ) -> list[PortfolioOrder]:
     orders: list[PortfolioOrder] = []
     future_positions = dict(positions)
@@ -220,6 +225,21 @@ def build_rebalance_orders(
                     }
                 )
             continue
+        if float(min_trade_price) > 0 and px < float(min_trade_price):
+            if candidate_audit is not None:
+                candidate_audit.append(
+                    {
+                        "date": decision_date_s,
+                        "symbol": sym,
+                        "is_candidate": False,
+                        "strength": None,
+                        "strength_ma": int(strength_ma),
+                        "selected": False,
+                        "selected_rank": None,
+                        "reject_reason": "SKIP_MIN_PRICE_AT_ORDER",
+                    }
+                )
+            continue
         meta = sig.meta if isinstance(sig.meta, dict) else {}
         close_v = float(meta.get("close", 0.0) or 0.0)
         slow_v = float(meta.get("slow_ma", 0.0) or 0.0)
@@ -266,7 +286,14 @@ def build_rebalance_orders(
         if len(ranked) > int(slots):
             mf_rank_triggered = True
             ranked.sort(key=lambda x: (-float(x.get("mf_score", 0.5)), str(x.get("symbol", "")).lower()))
-            topk_n = max(0, int(mf_topk))
+            # percentage-based selection when momentum_top_pct > 0
+            if float(momentum_top_pct) > 0:
+                topk_n = max(1, int(len(ranked) * float(momentum_top_pct)))
+                # cap at mf_topk if set
+                if int(mf_topk) > 0:
+                    topk_n = min(topk_n, int(mf_topk))
+            else:
+                topk_n = max(0, int(mf_topk))
             if topk_n > 0 and topk_n >= int(slots):
                 for item in ranked[topk_n:]:
                     forced_not_in_topk_symbols.add(str(item.get("symbol", "")).lower())
@@ -287,8 +314,30 @@ def build_rebalance_orders(
             order_pos = {s: i for i, s in enumerate(order)}
             ranked.sort(key=lambda x: int(order_pos.get(str(x.get("symbol", "")).lower(), 10**9)))
 
+    # ── Sizing denominator with min_positions floor ──
+    _min_pos = max(1, int(min_positions))
+    _sizing_denom = max(_min_pos, int(max_positions)) if int(max_positions) > 0 else _min_pos
     cfg_order_value = float(base_order_value)
-    target_amount = cfg_order_value if cfg_order_value > 0 else (float(nav_close) / float(max_positions) if max_positions > 0 else 0.0)
+    target_amount = cfg_order_value if cfg_order_value > 0 else (float(nav_close) / float(_sizing_denom) if _sizing_denom > 0 else 0.0)
+
+    # ── Inverse-vol weights (precomputed for all candidates) ──
+    _inv_vol_weights: dict[str, float] = {}
+    _acm = dict(atr_close_map or {})
+    if str(weight_mode).lower() == "inverse_vol" and _acm:
+        _inv_sigmas: dict[str, float] = {}
+        for _item in ranked:
+            _sym = str(_item.get("symbol", "")).lower()
+            _pair = _acm.get(_sym)
+            if _pair is not None:
+                _atr_val, _close_val = float(_pair[0]), float(_pair[1])
+                if _close_val > 1e-8 and _atr_val > 1e-8:
+                    _sigma = _atr_val / _close_val
+                    _inv_sigmas[_sym] = 1.0 / _sigma
+        _total_inv = sum(_inv_sigmas.values())
+        if _total_inv > 1e-12:
+            for _sym, _inv_s in _inv_sigmas.items():
+                _inv_vol_weights[_sym] = _inv_s / _total_inv
+
     selected_n = 0
     buy_exec_plan: list[dict[str, Any]] = []
     reject_reason_counts: dict[str, int] = {}
@@ -296,6 +345,10 @@ def build_rebalance_orders(
         sig = item["signal"]
         sym = str(item["symbol"]).lower()
         px = float(item["price"] or 0.0)
+        if float(min_trade_price) > 0 and px < float(min_trade_price):
+            item["reject_reason"] = "SKIP_MIN_PRICE_AT_ORDER"
+            reject_reason_counts[item["reject_reason"]] = int(reject_reason_counts.get(item["reject_reason"], 0)) + 1
+            continue
         if sym in forced_not_in_topk_symbols:
             item["reject_reason"] = "NOT_IN_TOPK"
             reject_reason_counts[item["reject_reason"]] = int(reject_reason_counts.get(item["reject_reason"], 0)) + 1
@@ -342,7 +395,10 @@ def build_rebalance_orders(
                     target_amount_scaled = _cap_value
             else:
                 # ATR 不可用 → 降级为等权
-                target_amount_scaled = float(nav_close) / float(max_positions) if max_positions > 0 else 0.0
+                target_amount_scaled = float(nav_close) / float(_sizing_denom) if _sizing_denom > 0 else 0.0
+        elif sym in _inv_vol_weights:
+            # 反波动率加权路径
+            target_amount_scaled = float(nav_close) * float(_inv_vol_weights[sym]) * float(order_value_scale)
         else:
             # 等权路径（risk_budget 关闭）
             target_amount_scaled = float(target_amount) * float(order_value_scale)
@@ -463,6 +519,7 @@ def run_portfolio_backtest(
     mf_concentrate_topn: int = 3,
     mf_concentrate_scale: float = 1.5,
     mf_rank_gate_mode: str = "ALWAYS_ON",
+    momentum_top_pct: float = 0.0,
     cost_cfg: CostConfig | None = None,
     exit_cfg: ExitConfig | None = None,
     risk_cfg: RiskConfig | None = None,
@@ -500,6 +557,7 @@ def run_portfolio_backtest(
             mf_concentrate_topn=int(mf_concentrate_topn),
             mf_concentrate_scale=float(mf_concentrate_scale),
             mf_rank_gate_mode=str(mf_rank_gate_mode),
+            momentum_top_pct=float(momentum_top_pct),
             cost_cfg=cost_cfg,
             exit_cfg=exit_cfg,
             risk_cfg=risk_cfg,
@@ -810,6 +868,7 @@ def run_portfolio_backtest(
             decision_date=day,
             candidate_audit=day_candidate_rows,
             debug_plan=debug_plan,
+            min_trade_price=float(getattr(strategy, "min_price", 0.0) or 0.0),
         )
         if debug_first_divergence:
             rank_pos_map: dict[str, int] = {}

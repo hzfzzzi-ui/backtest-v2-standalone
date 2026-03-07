@@ -16,6 +16,7 @@ from .bollinger_breakout import BollingerBreakoutStrategy
 from .adaptive_regime import AdaptiveRegimeStrategy
 from .rsi_reversal import RSIReversalStrategy
 from .regime_router import RegimeDetector, RegimeRouter
+from .breakout_trend import BreakoutTrendStrategy
 from .composite_strategy import CompositeStrategy
 
 
@@ -23,36 +24,70 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
     name = cfg.name.lower()
     params = dict(cfg.params or {})
     if name == "sma_cross":
-        _default_exempt = ["ATR_STOP_LOSS", "ATR_TRAIL_EXIT", "RISK_OFF_EXIT", "TREND_BREAK_EXIT"]
+        _default_exempt = ["ATR_STOP_LOSS", "FIXED_STOP_LOSS", "ATR_TRAIL_EXIT", "RISK_OFF_EXIT", "TREND_BREAK_EXIT"]
         return SMACrossStrategy(
             fast=int(params.get("fast", cfg.fast)),
             slow=int(params.get("slow", cfg.slow)),
             order_size=int(params.get("order_size", cfg.order_size)),
+            min_price=float(params.get("min_price", 0.0)),
+            regime_ma=int(params.get("regime_ma", 60)),
+            enable_v2_trend_filter=bool(params.get("enable_v2_trend_filter", False)),
+            v2_trend_short_ma=int(params.get("v2_trend_short_ma", 20)),
+            v2_trend_long_ma=int(params.get("v2_trend_long_ma", 60)),
             enable_atr_stop=bool(params.get("enable_atr_stop", False)),
             atr_stop_k=float(params.get("atr_stop_k", 2.0)),
             enable_atr_trail=bool(params.get("enable_atr_trail", False)),
             atr_trail_k=float(params.get("atr_trail_k", 3.0)),
+            enable_take_profit=bool(params.get("enable_take_profit", False)),
+            take_profit_mode=str(params.get("take_profit_mode", "pct")),
+            take_profit_pct=float(params.get("take_profit_pct", 0.10)),
+            take_profit_atr_k=float(params.get("take_profit_atr_k", 3.0)),
+            enable_fixed_stop_loss=bool(params.get("enable_fixed_stop_loss", False)),
+            fixed_stop_loss_pct=float(params.get("fixed_stop_loss_pct", 0.05)),
             max_hold_days=int(params.get("max_hold_days", 0)),
             min_hold_days=int(params.get("min_hold_days", 0)),
             cooldown_days=int(params.get("cooldown_days", 0)),
             min_hold_exempt_reasons=list(params.get("min_hold_exempt_reasons", _default_exempt)),
+            enable_ma20_exit=bool(params.get("enable_ma20_exit", False)),
+            enable_low10_exit=bool(params.get("enable_low10_exit", False)),
+            momentum_top_pct=float(params.get("momentum_top_pct", 0.0)),
+            enable_sector_gate=bool(params.get("enable_sector_gate", False)),
+            sector_rank_window=int(params.get("sector_rank_window", 60)),
+            sector_top_pct=float(params.get("sector_top_pct", 0.30)),
         )
     if name == "ema_cross":
         return EMACrossStrategy(
             fast=int(params.get("fast", cfg.fast)),
             slow=int(params.get("slow", cfg.slow)),
             order_size=int(params.get("order_size", cfg.order_size)),
+            min_price=float(params.get("min_price", 0.0)),
+            regime_ma=int(params.get("regime_ma", 60)),
+            enable_v2_trend_filter=bool(params.get("enable_v2_trend_filter", False)),
+            v2_trend_short_ma=int(params.get("v2_trend_short_ma", 20)),
+            v2_trend_long_ma=int(params.get("v2_trend_long_ma", 60)),
             enable_atr_stop=bool(params.get("enable_atr_stop", False)),
             atr_stop_k=float(params.get("atr_stop_k", 2.0)),
             enable_atr_trail=bool(params.get("enable_atr_trail", False)),
             atr_trail_k=float(params.get("atr_trail_k", 3.0)),
+            enable_take_profit=bool(params.get("enable_take_profit", False)),
+            take_profit_mode=str(params.get("take_profit_mode", "pct")),
+            take_profit_pct=float(params.get("take_profit_pct", 0.10)),
+            take_profit_atr_k=float(params.get("take_profit_atr_k", 3.0)),
+            enable_fixed_stop_loss=bool(params.get("enable_fixed_stop_loss", False)),
+            fixed_stop_loss_pct=float(params.get("fixed_stop_loss_pct", 0.05)),
             enable_entry_above_slow_ma=bool(params.get("enable_entry_above_slow_ma", False)),
             enable_entry_slow_ma_slope=bool(params.get("enable_entry_slow_ma_slope", False)),
             entry_slope_lookback=int(params.get("entry_slope_lookback", 5)),
             max_hold_days=int(params.get("max_hold_days", 0)),
             min_hold_days=int(params.get("min_hold_days", 0)),
             cooldown_days=int(params.get("cooldown_days", 0)),
-            min_hold_exempt_reasons=list(params.get("min_hold_exempt_reasons", ["ATR_STOP_LOSS", "ATR_TRAIL_EXIT", "RISK_OFF_EXIT", "TREND_BREAK_EXIT"])),
+            min_hold_exempt_reasons=list(params.get("min_hold_exempt_reasons", ["ATR_STOP_LOSS", "FIXED_STOP_LOSS", "ATR_TRAIL_EXIT", "RISK_OFF_EXIT", "TREND_BREAK_EXIT"])),
+            enable_ma20_exit=bool(params.get("enable_ma20_exit", False)),
+            enable_low10_exit=bool(params.get("enable_low10_exit", False)),
+            momentum_top_pct=float(params.get("momentum_top_pct", 0.0)),
+            enable_sector_gate=bool(params.get("enable_sector_gate", False)),
+            sector_rank_window=int(params.get("sector_rank_window", 60)),
+            sector_top_pct=float(params.get("sector_top_pct", 0.30)),
         )
     if name == "ma_trend_filter":
         return MATrendFilterStrategy(
@@ -176,6 +211,45 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
             mr_max_hold_days=int(params.get("mr_max_hold_days", 5)),
             mr_stop_loss_pct=float(params.get("mr_stop_loss_pct", 0.03)),
             order_size=int(params.get("order_size", cfg.order_size)),
+        )
+    if name == "breakout_trend":
+        _default_exempt = ["ATR_STOP_LOSS", "FIXED_STOP_LOSS", "ATR_TRAIL_EXIT", "RISK_OFF_EXIT"]
+        return BreakoutTrendStrategy(
+            breakout_window=int(params.get("breakout_window", 20)),
+            enable_dual_breakout=bool(params.get("enable_dual_breakout", False)),
+            breakout_window_short=int(params.get("breakout_window_short", 20)),
+            breakout_window_long=int(params.get("breakout_window_long", 55)),
+            breakout_entry_buffer_pct=float(params.get("breakout_entry_buffer_pct", 0.0)),
+            entry_confirm_mode=str(params.get("entry_confirm_mode", "none")),
+            entry_delay_mode=str(params.get("entry_delay_mode", "none")),
+            portfolio_mode=str(params.get("portfolio_mode", "equal_10")),
+            order_size=int(params.get("order_size", cfg.order_size)),
+            min_price=float(params.get("min_price", 0.0)),
+            regime_ma=int(params.get("regime_ma", 60)),
+            enable_v2_trend_filter=bool(params.get("enable_v2_trend_filter", True)),
+            v2_trend_short_ma=int(params.get("v2_trend_short_ma", 20)),
+            v2_trend_long_ma=int(params.get("v2_trend_long_ma", 60)),
+            enable_atr_stop=bool(params.get("enable_atr_stop", True)),
+            atr_stop_k=float(params.get("atr_stop_k", 2.0)),
+            enable_atr_trail=bool(params.get("enable_atr_trail", False)),
+            atr_trail_k=float(params.get("atr_trail_k", 3.0)),
+            enable_take_profit=bool(params.get("enable_take_profit", False)),
+            take_profit_mode=str(params.get("take_profit_mode", "pct")),
+            take_profit_pct=float(params.get("take_profit_pct", 0.10)),
+            take_profit_atr_k=float(params.get("take_profit_atr_k", 3.0)),
+            enable_fixed_stop_loss=bool(params.get("enable_fixed_stop_loss", False)),
+            fixed_stop_loss_pct=float(params.get("fixed_stop_loss_pct", 0.05)),
+            max_hold_days=int(params.get("max_hold_days", 0)),
+            min_hold_days=int(params.get("min_hold_days", 0)),
+            cooldown_days=int(params.get("cooldown_days", 0)),
+            min_hold_exempt_reasons=list(params.get("min_hold_exempt_reasons", _default_exempt)),
+            enable_ma20_exit=bool(params.get("enable_ma20_exit", False)),
+            enable_low10_exit=bool(params.get("enable_low10_exit", False)),
+            enable_risk_off_exit=bool(params.get("enable_risk_off_exit", False)),
+            momentum_top_pct=float(params.get("momentum_top_pct", 0.0)),
+            enable_sector_gate=bool(params.get("enable_sector_gate", False)),
+            sector_rank_window=int(params.get("sector_rank_window", 60)),
+            sector_top_pct=float(params.get("sector_top_pct", 0.30)),
         )
     if name == "regime_router":
         trend_name = str(params.get("trend_strategy", "sma_cross")).lower()

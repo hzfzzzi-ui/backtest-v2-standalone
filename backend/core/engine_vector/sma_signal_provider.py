@@ -246,7 +246,7 @@ class SMASignalProvider:
         self._atr_stop_k = float(kwargs.get("atr_stop_k", getattr(strategy, "atr_stop_k", 2.0)))
         self._atr_trail_k = float(getattr(strategy, "atr_trail_k", 3.0))
         self._order_size = int(getattr(strategy, "order_size", 1000))
-        regime_ma = int(getattr(strategy, "regime_ma", 120))
+        regime_ma = int(getattr(strategy, "regime_ma", 60))
         self._ma_type = str(getattr(strategy, "ma_type", "SMA")).upper()
         self._cross_up_code = f"{self._ma_type}_CROSS_UP"
         self._cross_down_code = f"{self._ma_type}_CROSS_DOWN"
@@ -264,7 +264,18 @@ class SMASignalProvider:
         hist["symbol"] = hist["symbol"].astype(str).str.lower()
         hist = hist.sort_values(["date", "symbol"]).reset_index(drop=True)
 
-        self._mx = build_ohlc_matrices_from_history(hist, trading_days, st_history=st_history)
+        _uf = dict(getattr(strategy, "state", {}).get("universe_filters") or {})
+        _min_price = float(_uf.get("min_price", getattr(strategy, "min_price", 0.0)) or 0.0)
+        _min_list_days = int(_uf.get("min_list_days", 0) or 0)
+        _min_avg_turnover_20d = float(_uf.get("min_avg_turnover_20d", 0.0) or 0.0)
+        self._mx = build_ohlc_matrices_from_history(
+            hist,
+            trading_days,
+            st_history=st_history,
+            min_price=_min_price,
+            min_list_days=_min_list_days,
+            min_avg_turnover_20d=_min_avg_turnover_20d,
+        )
         mx = self._mx
         t, n = mx.close.shape
         if n == 0:

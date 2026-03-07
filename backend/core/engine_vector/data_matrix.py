@@ -66,6 +66,9 @@ def build_ohlc_matrices_from_history(
     history: pd.DataFrame,
     trading_days: list[date],
     st_history: pd.DataFrame | None = None,
+    min_price: float = 0.0,
+    min_list_days: int = 0,
+    min_avg_turnover_20d: float = 0.0,
 ) -> OhlcMatrices:
     hist = history.copy()
     hist["date"] = pd.to_datetime(hist["date"])
@@ -84,9 +87,11 @@ def build_ohlc_matrices_from_history(
     low_m = np.full((t, n), np.nan, dtype=float)
     close_m = np.full((t, n), np.nan, dtype=float)
     volume_m = np.full((t, n), np.nan, dtype=float)
+    amount_m = np.full((t, n), np.nan, dtype=float)
     tradable = np.zeros((t, n), dtype=bool)
 
     has_suspended = "is_suspended" in hist.columns
+    has_is_st = "is_st" in hist.columns
     st_lookup = _build_st_lookup(st_history, sym_to_col) if st_history is not None and not st_history.empty else {}
 
     # 向量化行/列索引构建
@@ -103,6 +108,12 @@ def build_ohlc_matrices_from_history(
     low_m[r_arr, c_arr] = pd.to_numeric(v["low"], errors="coerce").to_numpy(dtype=float)
     close_m[r_arr, c_arr] = pd.to_numeric(v["close"], errors="coerce").to_numpy(dtype=float)
     volume_m[r_arr, c_arr] = pd.to_numeric(v["volume"], errors="coerce").to_numpy(dtype=float)
+    if "amount" in v.columns:
+        amount_m[r_arr, c_arr] = pd.to_numeric(v["amount"], errors="coerce").to_numpy(dtype=float)
+    elif "turnover" in v.columns:
+        amount_m[r_arr, c_arr] = pd.to_numeric(v["turnover"], errors="coerce").to_numpy(dtype=float)
+    else:
+        amount_m[r_arr, c_arr] = close_m[r_arr, c_arr] * volume_m[r_arr, c_arr]
 
     # tradable 向量化：valid OHLC + has volume
     ok_price = (
@@ -120,6 +131,39 @@ def build_ohlc_matrices_from_history(
             susp_r = r_arr[is_susp.to_numpy()]
             susp_c = c_arr[is_susp.to_numpy()]
             tradable[susp_r, susp_c] = False
+
+    # 日级 ST 硬拦截（优先使用行情表 is_st，弥补 pit_st_history 缺口）
+    if has_is_st:
+        st_vals = v["is_st"]
+        is_st = st_vals.notna() & st_vals.astype(bool)
+        if is_st.any():
+            st_r = r_arr[is_st.to_numpy()]
+            st_c = c_arr[is_st.to_numpy()]
+            tradable[st_r, st_c] = False
+
+    # 低价过滤：close < min_price 的日期设为不可交易
+    if min_price > 0:
+        tradable &= ~(close_m < min_price) | np.isnan(close_m)
+
+    # 动态上市天数过滤：在满足 min_list_days 前不可交易
+    if int(min_list_days) > 0 and t > 0 and n > 0:
+        has_bar = ~np.isnan(close_m)
+        first_idx = np.full(n, -1, dtype=int)
+        for c in range(n):
+            idxs = np.flatnonzero(has_bar[:, c])
+            if idxs.size > 0:
+                first_idx[c] = int(idxs[0])
+        for c in range(n):
+            fi = int(first_idx[c])
+            if fi < 0:
+                tradable[:, c] = False
+                continue
+            tradable[np.arange(t, dtype=int) < (fi + int(min_list_days) - 1), c] = False
+
+    # 动态20日均成交额过滤：达标后才可交易
+    if float(min_avg_turnover_20d) > 0 and t > 0 and n > 0:
+        amt20 = pd.DataFrame(amount_m).rolling(20, min_periods=20).mean().to_numpy(dtype=float)
+        tradable &= (~np.isnan(amt20)) & (amt20 >= float(min_avg_turnover_20d))
 
     # ST 过滤（按区间清除）
     if st_lookup:
@@ -150,6 +194,7 @@ def build_ohlc_matrices(
     end: date,
     cache: dict[tuple[Any, ...], OhlcMatrices] | None = None,
     enable_st_filter: bool = True,
+    min_price: float = 0.0,
 ) -> OhlcMatrices:
     key = ("ohlc_mx", tuple(sorted([str(s).lower() for s in symbols])), str(start), str(end))
     if cache is not None and key in cache:
@@ -165,8 +210,7 @@ def build_ohlc_matrices(
         except Exception:
             st_history = None
 
-    out = build_ohlc_matrices_from_history(history, days, st_history=st_history)
+    out = build_ohlc_matrices_from_history(history, days, st_history=st_history, min_price=min_price)
     if cache is not None:
         cache[key] = out
     return out
-

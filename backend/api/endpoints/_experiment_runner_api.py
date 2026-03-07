@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .backtest_v2_artifacts import stabilize_experiment_result
-from ._paths import _bt_root, _results_root
+from ._paths import _bt_root, _results_root, _configs_root
 from ._utils import sanitize_json, _sanitize_for_json
 from ._job_store import (
     _JOBS,
@@ -53,6 +53,7 @@ class BacktestV2ExperimentRequest(BaseModel):
     strength_top_k_mode: str | None = None
     enable_multifactor_rank: bool | None = None
     mf_topk: int | None = None
+    momentum_top_pct: float | None = None
 
 
 def _load_base_config(bt_root: Path) -> dict[str, Any]:
@@ -73,17 +74,48 @@ def _build_runtime_cfg_from_workbench(
     base_cfg: dict[str, Any],
     body: BacktestV2ExperimentRequest,
     wb_cfg: dict[str, Any],
+    use_body_universe_fields: bool = True,
 ) -> dict[str, Any]:
     cfg = json.loads(json.dumps(base_cfg))
+    # Preserve explicit initial_capital from workbench config when present.
+    if wb_cfg.get("initial_capital") is not None:
+        try:
+            cfg["initial_capital"] = float(wb_cfg.get("initial_capital"))
+        except Exception:
+            pass
     universe = cfg.setdefault("universe", {})
-    if body.start_date:
-        universe["start"] = str(body.start_date)
-    if body.end_date:
-        universe["end"] = str(body.end_date)
-    if body.benchmark:
-        universe["benchmark"] = str(body.benchmark)
-    if body.symbols:
-        universe["symbols"] = list(body.symbols)
+    wb_universe = wb_cfg.get("universe") if isinstance(wb_cfg.get("universe"), dict) else {}
+    wb_filters = wb_universe.get("filters") if isinstance(wb_universe.get("filters"), dict) else {}
+    if wb_universe.get("start"):
+        universe["start"] = str(wb_universe.get("start"))
+    if wb_universe.get("end"):
+        universe["end"] = str(wb_universe.get("end"))
+    if wb_universe.get("benchmark"):
+        universe["benchmark"] = str(wb_universe.get("benchmark"))
+    if isinstance(wb_universe.get("symbols"), list):
+        universe["symbols"] = list(wb_universe.get("symbols") or [])
+    if use_body_universe_fields:
+        if body.start_date:
+            universe["start"] = str(body.start_date)
+        if body.end_date:
+            universe["end"] = str(body.end_date)
+        if body.benchmark:
+            universe["benchmark"] = str(body.benchmark)
+        if body.symbols:
+            universe["symbols"] = list(body.symbols)
+    # Keep universe filter config in runtime cfg for actual engine-side filtering.
+    if wb_filters:
+        universe["filters"] = {
+            "exclude_st": bool(wb_filters.get("exclude_st", True)),
+            "exclude_delisted": bool(wb_filters.get("exclude_delisted", True)),
+            "exclude_suspended": bool(wb_filters.get("exclude_suspended", True)),
+            "min_list_days": int(wb_filters.get("min_list_days", 120)),
+            "min_avg_turnover_20d": float(wb_filters.get("min_avg_turnover_20d", 1e8)),
+            "price_min": float(wb_filters.get("price_min", 0.0)),
+            "price_max": float(wb_filters.get("price_max", 99999.0)),
+            "atr_pct_range": str(wb_filters.get("atr_pct_range", "0,100")),
+            "limit_rule": str(wb_filters.get("limit_rule", "ignore")),
+        }
 
     sig = wb_cfg.get("signal_generation") if isinstance(wb_cfg.get("signal_generation"), dict) else {}
     strategy_pack = str(sig.get("strategy") or wb_cfg.get("strategy_pack") or "SMA_CROSS").strip().upper()
@@ -92,6 +124,7 @@ def _build_runtime_cfg_from_workbench(
         "EMA_CROSS": "ema_cross",
         "ADAPTIVE_REGIME": "adaptive_regime",
         "REGIME_ROUTER": "regime_router",
+        "BREAKOUT_TREND": "breakout_trend",
     }
     strategy_name = strategy_name_map.get(strategy_pack)
     if strategy_name is None:
@@ -166,7 +199,28 @@ def _build_runtime_cfg_from_workbench(
         }
         # fall through to shared exit_rules compilation
 
-    if strategy_name not in ("regime_router", "adaptive_regime"):
+    if strategy_name == "breakout_trend":
+        bo_cfg = sig.get("breakout") if isinstance(sig.get("breakout"), dict) else {}
+        pos_risk_cfg = wb_cfg.get("position_risk") if isinstance(wb_cfg.get("position_risk"), dict) else {}
+        strategy = cfg.setdefault("strategy", {})
+        order_size = _to_int_or_default(strategy.get("order_size"), 1000)
+        strategy["name"] = "breakout_trend"
+        strategy["order_size"] = order_size
+        strategy["params"] = {
+            **dict(strategy.get("params") or {}),
+            "breakout_window": _to_int_or_default(bo_cfg.get("breakout_window"), 20),
+            "enable_dual_breakout": bool(bo_cfg.get("enable_dual_breakout", False)),
+            "breakout_window_short": _to_int_or_default(bo_cfg.get("breakout_window_short"), 20),
+            "breakout_window_long": _to_int_or_default(bo_cfg.get("breakout_window_long"), 55),
+            "breakout_entry_buffer_pct": float(bo_cfg.get("breakout_entry_buffer_pct", 0.0)),
+            "entry_confirm_mode": str(bo_cfg.get("entry_confirm_mode", "none")),
+            "entry_delay_mode": str(bo_cfg.get("entry_delay_mode", "none")),
+            "portfolio_mode": str(pos_risk_cfg.get("portfolio_mode", "equal_10")),
+            "order_size": order_size,
+            "enable_v2_trend_filter": True,
+        }
+
+    if strategy_name not in ("regime_router", "adaptive_regime", "breakout_trend"):
         ma_key = "ema" if strategy_pack == "EMA_CROSS" else "sma"
         ma_cfg = sig.get(ma_key) if isinstance(sig.get(ma_key), dict) else {}
 
@@ -212,9 +266,18 @@ def _build_runtime_cfg_from_workbench(
         strategy["params"]["min_hold_days"] = int(hold_constraint.get("min_hold_days", 0))
         strategy["params"]["cooldown_days"] = int(hold_constraint.get("cooldown_days", 0))
 
-    # 止盈 + 固定止损 + ATR止损/移动止盈 → exit config
+    # 止盈 + 固定止损 → strategy.params（引擎通过 getattr(strategy, ...) 读取）
     take_profit = exit_rules.get("take_profit") if isinstance(exit_rules.get("take_profit"), dict) else {}
     fixed_stop = exit_rules.get("fixed_stop") if isinstance(exit_rules.get("fixed_stop"), dict) else {}
+    if take_profit:
+        strategy.setdefault("params", {})["enable_take_profit"] = bool(take_profit.get("enabled", False))
+        strategy["params"]["take_profit_mode"] = str(take_profit.get("mode", "pct"))
+        strategy["params"]["take_profit_pct"] = float(take_profit.get("pct", 0.10))
+        strategy["params"]["take_profit_atr_k"] = float(take_profit.get("atr_k", 3.0))
+    if fixed_stop:
+        strategy.setdefault("params", {})["enable_fixed_stop_loss"] = bool(fixed_stop.get("enabled", False))
+        strategy["params"]["fixed_stop_loss_pct"] = float(fixed_stop.get("pct", 0.05))
+    # 止盈 + 固定止损 + ATR止损/移动止盈 → exit config（冗余备份，供 report 层读取）
     exit_cfg = cfg.setdefault("exit", {})
     if take_profit:
         exit_cfg["enable_take_profit"] = bool(take_profit.get("enabled", False))
@@ -230,6 +293,43 @@ def _build_runtime_cfg_from_workbench(
     if trailing:
         exit_cfg["enable_atr_trail"] = bool(trailing.get("enabled", False))
         exit_cfg["atr_trail_k"] = float(trailing.get("k", 3.0))
+    # 趋势退出 (MA20 / LOW10)
+    ma20_exit = exit_rules.get("ma20_exit") if isinstance(exit_rules.get("ma20_exit"), dict) else {}
+    low10_exit = exit_rules.get("low10_exit") if isinstance(exit_rules.get("low10_exit"), dict) else {}
+    if ma20_exit:
+        strategy.setdefault("params", {})["enable_ma20_exit"] = bool(ma20_exit.get("enabled", False))
+        exit_cfg["enable_ma20_exit"] = bool(ma20_exit.get("enabled", False))
+    if low10_exit:
+        strategy.setdefault("params", {})["enable_low10_exit"] = bool(low10_exit.get("enabled", False))
+        exit_cfg["enable_low10_exit"] = bool(low10_exit.get("enabled", False))
+
+    # Universe 过滤 → strategy.params（引擎通过 getattr(strategy, ...) 读取）
+    universe_filter = wb_cfg.get("universe_filter") if isinstance(wb_cfg.get("universe_filter"), dict) else {}
+    if universe_filter:
+        strategy.setdefault("params", {})["min_price"] = float(universe_filter.get("min_price", 5.0))
+
+    # 市场环境 regime_ma → strategy.params（引擎通过 getattr(strategy, ...) 读取）
+    _rd = sig.get("regime_detection") if isinstance(sig.get("regime_detection"), dict) else {}
+    strategy.setdefault("params", {}).setdefault("regime_ma", _to_int_or_default(_rd.get("regime_ma"), 60))
+
+    # 动量排名百分比选股 → strategy.params
+    ranking = sig.get("ranking") if isinstance(sig.get("ranking"), dict) else {}
+    if ranking:
+        strategy.setdefault("params", {})["momentum_top_pct"] = float(ranking.get("momentum_top_pct", 0.0))
+
+    # V2 个股趋势过滤 → strategy.params
+    stock_trend = wb_cfg.get("stock_trend_filter") if isinstance(wb_cfg.get("stock_trend_filter"), dict) else {}
+    if stock_trend:
+        strategy.setdefault("params", {})["enable_v2_trend_filter"] = bool(stock_trend.get("enabled", False))
+        strategy["params"]["v2_trend_short_ma"] = int(stock_trend.get("short_ma", 20))
+        strategy["params"]["v2_trend_long_ma"] = int(stock_trend.get("long_ma", 60))
+
+    # 行业趋势门控 → strategy.params
+    sector_gate = wb_cfg.get("sector_gate") if isinstance(wb_cfg.get("sector_gate"), dict) else {}
+    if sector_gate:
+        strategy.setdefault("params", {})["enable_sector_gate"] = bool(sector_gate.get("enabled", False))
+        strategy["params"]["sector_rank_window"] = int(sector_gate.get("rank_window", 60))
+        strategy["params"]["sector_top_pct"] = float(sector_gate.get("top_pct", 0.30))
 
     # 风险预算 → risk_budget config
     pos_risk = wb_cfg.get("position_risk") if isinstance(wb_cfg.get("position_risk"), dict) else {}
@@ -237,15 +337,8 @@ def _build_runtime_cfg_from_workbench(
     if rb_cfg:
         risk_budget = cfg.setdefault("risk_budget", {})
         risk_budget["enabled"] = bool(rb_cfg.get("enabled", False))
-        risk_budget["base_portfolio_risk"] = float(rb_cfg.get("base_portfolio_risk", 0.06))
-        risk_budget["trend_multiplier"] = float(rb_cfg.get("trend_multiplier", 1.0))
-        risk_budget["dd_scale_10"] = float(rb_cfg.get("dd_scale_10", 0.8))
-        risk_budget["dd_scale_15"] = float(rb_cfg.get("dd_scale_15", 0.6))
-        risk_budget["dd_fixed_20"] = float(rb_cfg.get("dd_fixed_20", 0.03))
-        risk_budget["dd_stop_pct"] = float(rb_cfg.get("dd_stop_pct", 0.25))
-        risk_budget["dd_stop_cooldown_days"] = int(rb_cfg.get("dd_stop_cooldown_days", 120))
-        risk_budget["dd_stop_protect_days"] = int(rb_cfg.get("dd_stop_protect_days", 60))
-        risk_budget["min_active_ratio"] = float(rb_cfg.get("min_active_ratio", 0.6))
+        risk_budget["dd_reduce_pct"] = float(rb_cfg.get("dd_reduce_pct", 0.10))
+        risk_budget["dd_reduce_scale"] = float(rb_cfg.get("dd_reduce_scale", 0.5))
         # atr_stop_k: prefer risk_budget value, fallback to exit_rules.atr_stop.k
         _rb_atr_k = rb_cfg.get("atr_stop_k")
         if _rb_atr_k is not None:
@@ -262,11 +355,28 @@ def _build_runtime_cfg_from_workbench(
         market_filter["slope_ma_period"] = int(mf_cfg.get("slope_ma_period", 50))
         market_filter["bull_multiplier"] = float(mf_cfg.get("bull_multiplier", 1.5))
         market_filter["light_multiplier"] = float(mf_cfg.get("light_multiplier", 0.6))
+        if mf_cfg.get("trans_down_multiplier") is not None:
+            market_filter["trans_down_multiplier"] = float(mf_cfg.get("trans_down_multiplier"))
+        if mf_cfg.get("trans_up_multiplier") is not None:
+            market_filter["trans_up_multiplier"] = float(mf_cfg.get("trans_up_multiplier"))
+        if mf_cfg.get("bear_multiplier") is not None:
+            market_filter["bear_multiplier"] = float(mf_cfg.get("bear_multiplier"))
         market_filter["ema_light_fast"] = int(mf_cfg.get("ema_light_fast", 5))
         market_filter["ema_light_slow"] = int(mf_cfg.get("ema_light_slow", 20))
 
     # ── Benchmark Regime 过滤器 ──
     br_cfg = wb_cfg.get("benchmark_regime") if isinstance(wb_cfg.get("benchmark_regime"), dict) else {}
+    if not br_cfg:
+        rd = sig.get("regime_detection") if isinstance(sig.get("regime_detection"), dict) else {}
+        # Fallback: if user only configured stage-2 regime_ma, expose it as benchmark_regime too.
+        if rd:
+            _rm = int(rd.get("regime_ma", 60))
+            br_cfg = {
+                "enabled": bool(rd.get("enabled", False)),
+                "fast_period": max(5, min(_rm, 120)),
+                "slow_period": max(60, _rm),
+                "slope_window": 5,
+            }
     if br_cfg:
         br = cfg.setdefault("benchmark_regime", {})
         br["enabled"] = bool(br_cfg.get("enabled", False))
@@ -295,6 +405,13 @@ def _build_runtime_cfg_from_workbench(
         breadth["gate_quantile_pct"] = float(breadth_cfg.get("gate_quantile_pct", 0.20))
         breadth["gate_persist_days"] = int(breadth_cfg.get("gate_persist_days", 3))
         breadth["size_scale_floor"] = float(breadth_cfg.get("size_scale_floor", 0.3))
+
+    # ── Portfolio sizing ──
+    sizing_wb = wb_cfg.get("sizing") if isinstance(wb_cfg.get("sizing"), dict) else {}
+    if sizing_wb:
+        sizing = cfg.setdefault("sizing", {})
+        sizing["weight_mode"] = str(sizing_wb.get("weight_mode", "equal"))
+        sizing["min_positions"] = int(sizing_wb.get("min_positions", 10))
 
     # ── 交易成本覆盖 ──
     cost_cfg = wb_cfg.get("costs") if isinstance(wb_cfg.get("costs"), dict) else {}
@@ -336,54 +453,102 @@ def _run_backtest_v2_experiment_sync(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"invalid config json: {cfg_path} ({exc})")
 
+    # Resolve workbench config precedence:
+    # script config (config_id) > frontend draft (workbench_config)
+    script_wb_cfg: dict[str, Any] | None = None
+    cfg_id = str(body.config_id or "").strip()
+    if cfg_id:
+        cfg_file = (_configs_root() / f"{cfg_id}.json").resolve()
+        if cfg_file.exists():
+            try:
+                cfg_obj = json.loads(cfg_file.read_text(encoding="utf-8-sig"))
+                cfg_json = cfg_obj.get("config_json")
+                if isinstance(cfg_json, dict):
+                    script_wb_cfg = sanitize_json(dict(cfg_json))
+            except Exception:
+                script_wb_cfg = None
+
+    effective_wb_cfg: dict[str, Any] | None = None
+    config_source = "none"
+    if script_wb_cfg is not None:
+        effective_wb_cfg = script_wb_cfg
+        config_source = "config_id"
+    elif isinstance(body.workbench_config, dict):
+        effective_wb_cfg = sanitize_json(dict(body.workbench_config))
+        config_source = "workbench_config"
+
+    use_script_cfg = script_wb_cfg is not None
+
     overrides: dict[str, Any] = {}
-    if body.symbols:
-        overrides["symbols"] = list(body.symbols)
-    if body.start_date:
-        overrides["start_date"] = body.start_date
-    if body.end_date:
-        overrides["end_date"] = body.end_date
-    if body.benchmark:
-        overrides["benchmark"] = body.benchmark
-    if body.compare_symbol:
-        overrides["compare_symbol"] = body.compare_symbol
-    if body.initial_capital is not None:
-        overrides["initial_capital"] = float(body.initial_capital)
-    if body.max_positions is not None:
-        overrides["max_positions"] = int(body.max_positions)
-    if body.base_order_value is not None:
-        overrides["base_order_value"] = float(body.base_order_value)
-    if body.lot_size is not None:
-        overrides["lot_size"] = int(body.lot_size)
-    if body.universe_limit is not None:
-        overrides["universe_limit"] = int(body.universe_limit)
+    if not use_script_cfg:
+        if body.symbols:
+            overrides["symbols"] = list(body.symbols)
+        if body.start_date:
+            overrides["start_date"] = body.start_date
+        if body.end_date:
+            overrides["end_date"] = body.end_date
+        if body.benchmark:
+            overrides["benchmark"] = body.benchmark
+        if body.compare_symbol:
+            overrides["compare_symbol"] = body.compare_symbol
+        if body.initial_capital is not None:
+            overrides["initial_capital"] = float(body.initial_capital)
+        if body.max_positions is not None:
+            overrides["max_positions"] = int(body.max_positions)
+        if body.base_order_value is not None:
+            overrides["base_order_value"] = float(body.base_order_value)
+        if body.lot_size is not None:
+            overrides["lot_size"] = int(body.lot_size)
+        if body.universe_limit is not None:
+            overrides["universe_limit"] = int(body.universe_limit)
     if body.fast_mode is not None:
         overrides["fast_mode"] = bool(body.fast_mode)
-    if body.config_id:
-        overrides["config_id"] = str(body.config_id)
+    if cfg_id:
+        overrides["config_id"] = cfg_id
+    overrides["config_source"] = config_source
     if body.workbench_mode:
         overrides["workbench_mode"] = str(body.workbench_mode)
-    if isinstance(body.workbench_config, dict):
-        wb_cfg = sanitize_json(dict(body.workbench_config))
-        overrides["workbench_config"] = _build_runtime_cfg_from_workbench(base_cfg, body, wb_cfg)
+    if isinstance(effective_wb_cfg, dict):
+        wb_cfg = effective_wb_cfg
+        if body.initial_capital is None and wb_cfg.get("initial_capital") is not None:
+            try:
+                overrides["initial_capital"] = float(wb_cfg.get("initial_capital"))
+            except Exception:
+                pass
+        overrides["workbench_config"] = _build_runtime_cfg_from_workbench(
+            base_cfg,
+            body,
+            wb_cfg,
+            use_body_universe_fields=not use_script_cfg,
+        )
         overrides["original_workbench_config"] = wb_cfg
-    if body.universe_mode:
-        overrides["universe_mode"] = str(body.universe_mode)
-    if body.industries:
-        overrides["industries"] = list(body.industries)
-    if body.price_adj:
-        overrides["price_adj"] = str(body.price_adj)
-    # 选股排序参数透传
-    if body.enable_strength_rank is not None:
-        overrides["enable_strength_rank"] = bool(body.enable_strength_rank)
-    if body.strength_ma is not None:
-        overrides["strength_ma"] = int(body.strength_ma)
-    if body.strength_top_k_mode is not None:
-        overrides["strength_top_k_mode"] = str(body.strength_top_k_mode)
-    if body.enable_multifactor_rank is not None:
-        overrides["enable_multifactor_rank"] = bool(body.enable_multifactor_rank)
-    if body.mf_topk is not None:
-        overrides["mf_topk"] = int(body.mf_topk)
+    if use_script_cfg:
+        wb_uni = script_wb_cfg.get("universe") if isinstance(script_wb_cfg.get("universe"), dict) else {}
+        overrides["universe_mode"] = str(script_wb_cfg.get("universe_mode") or body.universe_mode or "CUSTOM")
+        overrides["industries"] = list(script_wb_cfg.get("industries") or [])
+        overrides["price_adj"] = str(wb_uni.get("price_adj") or body.price_adj or "hfq")
+        if isinstance(body.workbench_config, dict):
+            overrides["config_conflict_policy"] = "config_id_overrides_workbench"
+    else:
+        if body.universe_mode:
+            overrides["universe_mode"] = str(body.universe_mode)
+        if body.industries:
+            overrides["industries"] = list(body.industries)
+        if body.price_adj:
+            overrides["price_adj"] = str(body.price_adj)
+        # ????????
+        if body.enable_strength_rank is not None:
+            overrides["enable_strength_rank"] = bool(body.enable_strength_rank)
+        if body.strength_ma is not None:
+            overrides["strength_ma"] = int(body.strength_ma)
+        if body.strength_top_k_mode is not None:
+            overrides["strength_top_k_mode"] = str(body.strength_top_k_mode)
+        if body.enable_multifactor_rank is not None:
+            overrides["enable_multifactor_rank"] = bool(body.enable_multifactor_rank)
+        if body.mf_topk is not None:
+            overrides["mf_topk"] = int(body.mf_topk)
+        if body.momentum_top_pct is not None:
+            overrides["momentum_top_pct"] = float(body.momentum_top_pct)
 
     env_backup = {
         "PAMS_PG_HOST": os.environ.get("PAMS_PG_HOST"),

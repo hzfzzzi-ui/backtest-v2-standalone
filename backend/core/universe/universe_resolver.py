@@ -100,6 +100,45 @@ def _resolve_hs300_zz500(
     }
 
 
+def _resolve_csi1000(
+    as_of: date,
+    db: DBConfig,
+    runtime: DBRuntimeConfig,
+    universe_limit: int | None = None,
+) -> tuple[list[str], dict[str, Any]]:
+    """CSI1000 mode: query CSI1000 constituents from pit_index_constituents."""
+    sql = """
+        SELECT DISTINCT symbol
+        FROM public.pit_index_constituents
+        WHERE index_code = '000852.SH'
+          AND start_date <= %s
+          AND (end_date IS NULL OR end_date > %s)
+        ORDER BY symbol
+    """
+    symbols = _query_pit_symbols(db, runtime, sql, (as_of, as_of))
+
+    if not symbols:
+        raise UniverseLoadError(
+            status="EMPTY:INDEX_CONSTITUENTS",
+            message="pit_index_constituents has no matching 000852.SH records",
+            meta={"universe_mode": "CSI1000", "raw_count": 0},
+        )
+
+    raw_count = len(symbols)
+    if universe_limit is not None:
+        symbols = symbols[:universe_limit]
+
+    return symbols, {
+        "universe_mode": "CSI1000",
+        "symbols_source": "pit_index_constituents",
+        "raw_count": raw_count,
+        "constituents_load_status": "OK",
+        "load_table": "pit_index_constituents",
+        "index_code": "000852.SH",
+        "as_of": str(as_of),
+    }
+
+
 def _resolve_industry(
     as_of: date,
     db: DBConfig,
@@ -194,6 +233,8 @@ def resolve_universe_by_mode(
         return _resolve_all_a(as_of, db, runtime, universe_limit)
     elif mode_upper == "HS300_ZZ500":
         return _resolve_hs300_zz500(as_of, db, runtime, universe_limit)
+    elif mode_upper == "CSI1000":
+        return _resolve_csi1000(as_of, db, runtime, universe_limit)
     elif mode_upper == "INDUSTRY":
         return _resolve_industry(as_of, db, runtime, industries or [], universe_limit)
     elif mode_upper == "CUSTOM":

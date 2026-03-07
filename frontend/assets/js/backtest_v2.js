@@ -1,4 +1,4 @@
-/* Inlined from ui.js to avoid ES-module scope isolation */
+﻿/* Inlined from ui.js to avoid ES-module scope isolation */
 function setActiveNav() {
   const path = (location.pathname || '/').split('/').pop() || 'index.html';
   document.querySelectorAll('[data-nav]')?.forEach(a => {
@@ -24,7 +24,7 @@ const state = {
   manual_status_items: [],
   api_status: {},
   status_open: false,
-  drawer_panel: 'universe',
+  drawer_panel: 's1',
   drawer_pinned: false,
   main_tab: 'overview',
   dock_tab: 'explain',
@@ -204,7 +204,7 @@ function bindEvents() {
   });
   byId('wbEntryAboveSlowMa')?.addEventListener('change', buildConfigDraft);
   document.querySelectorAll('.wb-rail-btn').forEach((btn) => btn.addEventListener('click', () => {
-    const panel = btn.getAttribute('data-panel') || 'universe';
+    const panel = btn.getAttribute('data-panel') || 's1';
     setDrawerPanel(panel);
     /* open drawer if collapsed */
     const app = document.querySelector('.wb-app');
@@ -394,7 +394,7 @@ function init() {
   if (byId('wbChartMode')) byId('wbChartMode').value = 'portfolio';
   if (byId('wbSymbolSort')) byId('wbSymbolSort').value = 'return_desc';
   bindEvents();
-  setDrawerPanel('universe');
+  setDrawerPanel('s1');
   switchMainTab('overview');
   switchDockTab('explain');
   updateUniverseInputVisibility();

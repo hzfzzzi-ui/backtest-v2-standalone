@@ -49,6 +49,13 @@ class DataProvider(ABC):
         """
         return {}
 
+    def load_security_master(self, symbols: list[str]) -> pd.DataFrame:
+        """Return security master rows with at least symbol/list_date/delist_date.
+
+        Default implementation returns empty DataFrame when source is unavailable.
+        """
+        return pd.DataFrame(columns=["symbol", "list_date", "delist_date"])
+
     @property
     @abstractmethod
     def query_audit(self) -> list[dict]:
