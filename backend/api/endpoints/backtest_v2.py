@@ -10,9 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from pandas.errors import EmptyDataError
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
 
 from .backtest_v2_protocol import (
     normalize_counters as protocol_normalize_counters,
@@ -25,14 +23,31 @@ from ._utils import (
     _hash_json,
     _sanitize_for_json,
 )
-from ._config_governance import resolve_runtime_config_source
 from ._paths import (
-    _repo_root,
     _bt_root,
     _results_root,
     _execution_root,
 )
-from backend.core.universe.lineage import annotate_universe_meta, resolve_universe_timing
+from backend.core.tools.experiment_artifact_access import (
+    experiment_surface_flags,
+    load_manifest as load_experiment_manifest,
+    manifest_artifact_rel,
+    resolve_declared_artifact_path,
+    resolve_experiment_dir_by_id,
+)
+from ._public_contracts import (
+    PublicBacktestV2ArtifactReadRequest,
+    PublicBacktestV2ExecutionPreviewRequest,
+)
+from backend.core.tools.runtime_data_access import (
+    list_runtime_industries,
+    load_benchmark_series_frame,
+    load_runtime_data_access,
+    load_symbol_series_frame,
+    resolve_stock_names as resolve_runtime_stock_names,
+    resolve_validation_universe,
+)
+from backend.core.universe.lineage import annotate_universe_meta
 from . import _config_store
 from . import _experiment_runner_api
 from . import _experiment_history
@@ -45,37 +60,13 @@ router.include_router(_experiment_history.router)
 logger = logging.getLogger(__name__)
 
 
-def _inject_db_env(cfg_obj: Any) -> None:
-    """Override DB credentials from environment variables (Docker runtime)."""
-    db = cfg_obj.db
-    if not db.password:
-        db.password = os.environ.get("PGPASSWORD", os.environ.get("PAMS_PG_PASSWORD", ""))
-    if os.environ.get("PGHOST"):
-        db.host = os.environ["PGHOST"]
-    if os.environ.get("PGPORT"):
-        db.port = int(os.environ["PGPORT"])
-    if os.environ.get("PGUSER"):
-        db.user = os.environ["PGUSER"]
-    if os.environ.get("PGDATABASE"):
-        db.dbname = os.environ["PGDATABASE"]
-
-
 # ── Pydantic models (main-file-only) ───────────────────────────────────────
 
 
-class BacktestV2ExecutionPreviewRequest(BaseModel):
-    config_id: str | None = None
-    runtime_config_json: dict[str, Any] | None = None
-    config_json: dict[str, Any] | None = None
-    exp_id: str | None = None
-    results_dir: str | None = None
-    as_of_date: str | None = None
-    top_n: int = 10
+BacktestV2ExecutionPreviewRequest = PublicBacktestV2ExecutionPreviewRequest
 
 
-class BacktestV2ArtifactReadRequest(BaseModel):
-    results_dir: str
-    rel_path: str
+BacktestV2ArtifactReadRequest = PublicBacktestV2ArtifactReadRequest
 
 
 # ── Helper functions (main-file-only) ──────────────────────────────────────
@@ -253,29 +244,44 @@ def _build_universe_stats(
         }
     )
 
-
-def _list_recent_experiments(limit: int = 20) -> list[Path]:
-    root = _results_root() / "experiments"
-    if not root.exists():
-        return []
-    dirs = [p for p in root.iterdir() if p.is_dir()]
-    dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-    return dirs[: max(1, int(limit))]
+def _validate_public_execution_preview_request(body: BacktestV2ExecutionPreviewRequest) -> None:
+    if not isinstance(body.config_json, dict):
+        raise HTTPException(status_code=400, detail="execution preview requires config_json")
+    if not str(body.exp_id or "").strip():
+        raise HTTPException(status_code=400, detail="execution preview requires exp_id")
 
 
-def _resolve_experiment_dir(exp_id: str | None = None, results_dir: str | None = None) -> Path | None:
-    if results_dir:
-        p = Path(str(results_dir))
-        if not p.is_absolute():
-            p = (_repo_root() / p).resolve()
-        if p.exists() and p.is_dir():
-            return p
-    if exp_id:
-        p = (_results_root() / "experiments" / str(exp_id)).resolve()
-        if p.exists() and p.is_dir():
-            return p
-    recent = _list_recent_experiments(limit=1)
-    return recent[0] if recent else None
+def _load_manifest_or_404(exp_id: str) -> tuple[Path, dict[str, Any]]:
+    results_dir = resolve_experiment_dir_by_id(exp_id)
+    if results_dir is None:
+        raise HTTPException(status_code=404, detail=f"experiment not found: {exp_id}")
+    manifest = load_experiment_manifest(results_dir)
+    if not manifest:
+        raise HTTPException(status_code=404, detail=f"manifest not found: {results_dir / 'manifest.json'}")
+    return results_dir, manifest
+
+
+def _read_declared_artifact_payload(results_dir: Path, manifest: dict[str, Any], rel: str) -> dict[str, Any]:
+    target = resolve_declared_artifact_path(results_dir, manifest, rel)
+    if target is None:
+        raise HTTPException(status_code=400, detail=f"artifact path is not declared by manifest: {rel}")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"artifact not found: {target}")
+    ext = target.suffix.lower()
+    if ext == ".json":
+        try:
+            obj = json.loads(target.read_text(encoding="utf-8-sig"))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"json parse failed: {exc}")
+        return _sanitize_for_json({"kind": "json", "path": rel, "data": obj})
+    if ext == ".csv":
+        try:
+            df = pd.read_csv(target)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"csv parse failed: {exc}")
+        return _sanitize_for_json({"kind": "csv", "path": rel, "rows": df.to_dict(orient="records"), "columns": list(df.columns)})
+    text = target.read_text(encoding="utf-8", errors="ignore")
+    return _sanitize_for_json({"kind": "text", "path": rel, "text": text[:200000]})
 
 
 def _parse_symbols_from_query(request: Request) -> list[str]:
@@ -320,95 +326,6 @@ def _parse_float_from_query(request: Request, key: str, default: float = 0.0) ->
     n = _coerce_number(request.query_params.get(key))
     return float(n) if n is not None else float(default)
 
-
-def _load_runtime_cfg_obj():
-    from backend.core.config.loader import load_config
-
-    bt_root = _bt_root()
-    cfg_path = bt_root / "configs" / "pams_cn_pg.json"
-    if not cfg_path.exists():
-        cfg_path = bt_root.parent / "configs" / "pams_cn_pg.json"
-    if not cfg_path.exists():
-        raise HTTPException(status_code=500, detail=f"config not found: {cfg_path}")
-    cfg_obj, _ = load_config(str(cfg_path))
-    _inject_db_env(cfg_obj)
-    return cfg_obj, cfg_path
-
-
-def _read_result(out_dir: Path) -> dict[str, Any]:
-    report_path = out_dir / "report.json"
-    summary_path = out_dir / "report_summary.json"
-    trades_path = out_dir / "trades.csv"
-    orders_path = out_dir / "orders.csv"
-    equity_path = out_dir / "equity_curve.csv"
-    warnings_path = out_dir / "warnings.json"
-    conclusions_path = out_dir / "conclusions_10.json"
-    benchmark_curve_path = out_dir / "benchmark_curve.csv"
-    trade_pnl_path = out_dir / "trade_pnl.csv"
-    signals_path = out_dir / "signals.csv"
-    if not report_path.exists():
-        raise HTTPException(status_code=500, detail=f"missing report file: {report_path}")
-
-    report = json.loads(report_path.read_text(encoding="utf-8-sig"))
-    report_summary: dict[str, Any] | None = None
-    if summary_path.exists():
-        try:
-            report_summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
-        except Exception:
-            report_summary = None
-
-    conclusions_10: dict[str, Any] | None = None
-    if conclusions_path.exists():
-        try:
-            conclusions_10 = json.loads(conclusions_path.read_text(encoding="utf-8-sig"))
-        except Exception:
-            conclusions_10 = None
-
-    benchmark_curve_preview: list[dict[str, Any]] = []
-    if benchmark_curve_path.exists():
-        try:
-            cdf = pd.read_csv(benchmark_curve_path).head(2000)
-            benchmark_curve_preview = cdf.to_dict(orient="records")
-        except EmptyDataError:
-            benchmark_curve_preview = []
-
-    trade_concentration = {}
-    if report_summary and isinstance(report_summary.get("trade_concentration"), dict):
-        trade_concentration = report_summary.get("trade_concentration") or {}
-    trades_preview: list[dict[str, Any]] = []
-    if trades_path.exists():
-        try:
-            tdf = pd.read_csv(trades_path).head(200)
-            trades_preview = tdf.to_dict(orient="records")
-        except EmptyDataError:
-            trades_preview = []
-
-    return {
-        "report": report,
-        "summary": report.get("summary", {}),
-        "report_summary": report_summary,
-        "conclusions_10": conclusions_10 or (report_summary or {}).get("conclusions_10"),
-        "chart": (report_summary or {}).get("chart", {}),
-        "trade_concentration": trade_concentration,
-        "benchmark_curve_preview": benchmark_curve_preview,
-        "cost_breakdown": report.get("cost_breakdown", {}),
-        "audit_rules": report.get("audit_rules", {}),
-        "trades_preview": trades_preview,
-        "files": {
-            "report": str(report_path),
-            "report_summary": str(summary_path),
-            "trades": str(trades_path),
-            "orders": str(orders_path),
-            "equity": str(equity_path),
-            "warnings": str(warnings_path),
-            "conclusions_10": str(conclusions_path),
-            "benchmark_curve": str(benchmark_curve_path),
-            "trade_pnl": str(trade_pnl_path),
-            "signals": str(signals_path),
-        },
-    }
-
-
 def _read_reason_top_codes(path: Path, top_n: int = 5) -> list[str]:
     if not path.exists():
         return []
@@ -450,23 +367,7 @@ def _latest_trade_date_from_results(results_dir: Path) -> str | None:
 @router.get("/api/backtest_v2/industries")
 def get_industries():
     """返回 pit_industry_history 中所有不重复的 L1 行业名列表。"""
-    try:
-        import psycopg
-        conn = psycopg.connect(
-            host=os.environ.get("PGHOST", os.environ.get("PAMS_PG_HOST", "pams-postgres")),
-            port=int(os.environ.get("PGPORT", os.environ.get("PAMS_PG_PORT", "5432"))),
-            dbname=os.environ.get("PGDATABASE", os.environ.get("PAMS_PG_DBNAME", "pams")),
-            user=os.environ.get("PGUSER", os.environ.get("PAMS_PG_USER", "pams")),
-            password=os.environ.get("PGPASSWORD", os.environ.get("PAMS_PG_PASSWORD", "")),
-            autocommit=True,
-        )
-        with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT industry_l1 FROM public.pit_industry_history ORDER BY industry_l1")
-            industries = [r[0] for r in cur.fetchall()]
-        conn.close()
-    except Exception:
-        industries = []
-    return {"industries": industries}
+    return {"industries": list_runtime_industries(bt_root=_bt_root())}
 
 
 @router.get("/api/backtest_v2/series/benchmark")
@@ -481,29 +382,10 @@ def get_benchmark_series(
     except Exception:
         raise HTTPException(status_code=422, detail="start/end must be YYYY-MM-DD")
 
-    from backend.core.config.loader import load_config
-    from backend.core.data.pg_provider import PostgresDataProvider
     from backend.core.data.errors import DatabaseConnectionError
 
-    bt_root = _bt_root()
-    cfg_path = bt_root / "configs" / "pams_cn_pg.json"
-    if not cfg_path.exists():
-        cfg_path = bt_root.parent / "configs" / "pams_cn_pg.json"
-        if not cfg_path.exists():
-            raise HTTPException(status_code=500, detail=f"config not found: {cfg_path}")
-    cfg_obj, _ = load_config(str(cfg_path))
-    _inject_db_env(cfg_obj)
-
-    provider = PostgresDataProvider(
-        db=cfg_obj.db,
-        runtime=cfg_obj.db_runtime,
-        data_source=cfg_obj.data_source,
-        schema_mapping=cfg_obj.schema_mapping,
-        rules_path=cfg_path.parent / "instrument_rules_cn.csv",
-    )
-
     try:
-        df = provider.load_benchmark_daily(symbol, start_d, end_d)
+        df = load_benchmark_series_frame(symbol=symbol, start=start_d, end=end_d, bt_root=_bt_root())
     except DatabaseConnectionError:
         raise HTTPException(status_code=503, detail="database connection failed")
     except (ValueError, Exception) as exc:
@@ -552,8 +434,6 @@ def get_symbol_series(
     except Exception:
         raise HTTPException(status_code=422, detail="start/end must be YYYY-MM-DD")
 
-    from backend.core.config.loader import load_config
-    from backend.core.data.pg_provider import PostgresDataProvider
     from backend.core.data.errors import DatabaseConnectionError
     from backend.core.data.mapping import normalize_stock_symbol
 
@@ -566,25 +446,10 @@ def get_symbol_series(
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"invalid symbol: {exc}")
 
-    bt_root = _bt_root()
-    cfg_path = bt_root / "configs" / "pams_cn_pg.json"
-    if not cfg_path.exists():
-        cfg_path = bt_root.parent / "configs" / "pams_cn_pg.json"
-        if not cfg_path.exists():
-            raise HTTPException(status_code=500, detail=f"config not found: {cfg_path}")
-    cfg_obj, _ = load_config(str(cfg_path))
-    _inject_db_env(cfg_obj)
-
-    provider = PostgresDataProvider(
-        db=cfg_obj.db,
-        runtime=cfg_obj.db_runtime,
-        data_source=cfg_obj.data_source,
-        schema_mapping=cfg_obj.schema_mapping,
-        rules_path=cfg_path.parent / "instrument_rules_cn.csv",
-    )
+    access = load_runtime_data_access(_bt_root())
 
     try:
-        df = provider.load_ohlcv_daily([norm_symbol], start_d, end_d, source="stocks")
+        df = load_symbol_series_frame(symbol=norm_symbol, start=start_d, end=end_d, access=access)
     except DatabaseConnectionError:
         raise HTTPException(status_code=503, detail="database connection failed")
     except Exception as exc:
@@ -606,7 +471,7 @@ def get_symbol_series(
     sdf["date"] = pd.to_datetime(sdf["date"]).dt.normalize()
     original_dates = set(sdf["date"].tolist())
     try:
-        cal = provider.load_trading_calendar_cn(start_d, end_d)
+        cal = access.provider.load_trading_calendar_cn(start_d, end_d)
     except Exception:
         cal = pd.DatetimeIndex([])
     if len(cal) > 0:
@@ -630,21 +495,22 @@ def get_symbol_series(
     fc = float(first_close)
     points = []
     for _, row in sdf.iterrows():
-        _c = round(float(row["close"]) / fc, 6)
+        close_abs = round(float(row["close"]), 6)
+        _c = round(close_abs / fc, 6)
         p = {
             "date": str(row["date"])[:10],
             "nav": _c,
-            "close": _c,
+            "close": close_abs,
             "suspended": bool(row.get("suspended", False)),
         }
         if has_ohlc:
-            p["open"] = round(float(row["open"]) / fc, 6)
-            p["high"] = round(float(row["high"]) / fc, 6)
-            p["low"] = round(float(row["low"]) / fc, 6)
+            p["open"] = round(float(row["open"]), 6)
+            p["high"] = round(float(row["high"]), 6)
+            p["low"] = round(float(row["low"]), 6)
         else:
-            p["open"] = _c
-            p["high"] = _c
-            p["low"] = _c
+            p["open"] = close_abs
+            p["high"] = close_abs
+            p["low"] = close_abs
         points.append(p)
     return _sanitize_for_json({"points": points, "source": "api", "symbol": norm_symbol})
 
@@ -655,34 +521,7 @@ def get_stock_names(body: dict):
     symbols = body.get("symbols") or []
     if not symbols:
         return {"names": {}}
-    from backend.core.config.loader import load_config
-    bt_root = _bt_root()
-    cfg_path = bt_root / "configs" / "pams_cn_pg.json"
-    if not cfg_path.exists():
-        cfg_path = bt_root.parent / "configs" / "pams_cn_pg.json"
-    if not cfg_path.exists():
-        return {"names": {}}
-    cfg_obj, _ = load_config(str(cfg_path))
-    try:
-        import psycopg
-        db_password = cfg_obj.db.password or os.environ.get("PGPASSWORD", "") or os.environ.get("POSTGRES_PASSWORD", "")
-        conn = psycopg.connect(
-            host=cfg_obj.db.host,
-            port=cfg_obj.db.port,
-            dbname=cfg_obj.db.dbname,
-            user=cfg_obj.db.user,
-            password=db_password,
-        )
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT symbol, name FROM pit_security_master WHERE symbol = ANY(%s) AND name IS NOT NULL AND name != ''",
-            (list(symbols),),
-        )
-        names = {row[0]: row[1] for row in cur.fetchall()}
-        conn.close()
-        return {"names": names}
-    except Exception:
-        return {"names": {}}
+    return {"names": resolve_runtime_stock_names(list(symbols), bt_root=_bt_root())}
 
 
 # ── Validate data route ────────────────────────────────────────────────────
@@ -711,14 +550,7 @@ def validate_backtest_v2_data(
         raise HTTPException(status_code=500, detail=f"backtest_V2 root not found: {bt_root}")
 
     from backend.core.data.validate_pg import PGConnConfig, validate_data  # type: ignore
-    from backend.core.data.pg_provider import PostgresDataProvider
-    from backend.core.universe.universe_resolver import resolve_universe_by_mode
-    from backend.core.universe.hs300_csi500 import (
-        UniverseFilterConfig,
-        UniverseLoadError,
-        apply_universe_filters,
-        build_candidates_from_ohlcv,
-    )
+    from backend.core.universe.hs300_csi500 import UniverseLoadError
 
     universe_mode = str(request.query_params.get("universe_mode") or ("CUSTOM" if _parse_symbols_from_query(request) else "ALL_A")).strip().upper()
     symbols = _parse_symbols_from_query(request)
@@ -736,32 +568,22 @@ def validate_backtest_v2_data(
     if universe_mode == "CUSTOM" and not symbols:
         raise HTTPException(status_code=400, detail="symbols is required for CUSTOM universe_mode")
 
-    cfg_obj, cfg_path = _load_runtime_cfg_obj()
-    provider = PostgresDataProvider(
-        db=cfg_obj.db,
-        runtime=cfg_obj.db_runtime,
-        data_source=cfg_obj.data_source,
-        schema_mapping=cfg_obj.schema_mapping,
-        rules_path=cfg_path.parent / "instrument_rules_cn.csv",
-    )
-
-    resolve_asof, dynamic_all_a_entry = resolve_universe_timing(
-        universe_mode,
-        start=start_d,
-        end=end_d,
-    )
-    resolved_symbols: list[str] = []
-    resolved_meta: dict[str, Any] = {}
-
     try:
-        resolved_symbols, resolved_meta = resolve_universe_by_mode(
-            mode=universe_mode,
-            as_of=resolve_asof,
-            db=cfg_obj.db,
-            runtime=cfg_obj.db_runtime,
-            industries=industries,
+        validation_snapshot = resolve_validation_universe(
+            bt_root=bt_root,
+            universe_mode=universe_mode,
             symbols=symbols,
+            industries=industries,
             universe_limit=universe_limit,
+            start=start_d,
+            end=end_d,
+            exclude_st=exclude_st,
+            exclude_suspended=exclude_suspended,
+            min_list_days=min_list_days,
+            min_avg_turnover_20d=min_avg_turnover_20d,
+            price_min=price_min,
+            price_max=price_max,
+            limit_rule=limit_rule,
         )
     except UniverseLoadError as exc:
         failed_meta = dict(exc.meta or {})
@@ -796,94 +618,10 @@ def validate_backtest_v2_data(
         }
         result["universe_stats"] = _build_universe_stats(result, [], resolved_meta=failed_meta)
         return _sanitize_for_json(result)
-
-    resolved_meta = annotate_universe_meta(
-        resolved_meta,
-        mode=universe_mode,
-        start=start_d,
-        end=end_d,
-    )
-    resolved_meta.setdefault("tradable_symbols", int(len(resolved_symbols)))
-    resolved_meta.setdefault("after_filters_symbols", int(len(resolved_symbols)))
-
-    universe_filters_raw = {
-        "exclude_st": exclude_st,
-        "exclude_delisted": True,
-        "exclude_suspended": exclude_suspended,
-        "min_list_days": min_list_days,
-        "min_avg_turnover_20d": min_avg_turnover_20d,
-        "price_min": price_min,
-        "price_max": price_max,
-        "limit_rule": limit_rule,
-    }
-    resolved_meta["filters_config"] = dict(universe_filters_raw)
-
-    if universe_filters_raw and not dynamic_all_a_entry and resolved_symbols:
-        filter_asof = pd.Timestamp(start_d)
-        history_for_filter = provider.load_ohlcv_daily(
-            resolved_symbols,
-            start_d,
-            end_d,
-            source="stocks",
-        )
-        need_lookback = bool(min_list_days > 1 or min_avg_turnover_20d > 0.0)
-        if need_lookback:
-            lookback_days = max(260, min_list_days * 3)
-            filter_start = (filter_asof - pd.Timedelta(days=lookback_days)).date()
-            history_for_filter = provider.load_ohlcv_daily(
-                resolved_symbols,
-                filter_start,
-                start_d,
-                source="stocks",
-            )
-        filter_asof_date = filter_asof.date()
-        try:
-            st_history_for_filter = provider.load_st_history(resolved_symbols, filter_asof_date, filter_asof_date)
-        except Exception:
-            st_history_for_filter = pd.DataFrame(columns=["ts_code", "start_date", "end_date", "st_type"])
-        try:
-            security_master = provider.load_security_master(resolved_symbols)
-        except Exception:
-            security_master = pd.DataFrame(columns=["symbol", "list_date", "delist_date"])
-
-        candidates = build_candidates_from_ohlcv(
-            history_for_filter,
-            filter_asof,
-            st_history=st_history_for_filter,
-            security_master=security_master,
-        )
-        filter_cfg = UniverseFilterConfig(
-            exclude_st=exclude_st,
-            exclude_delisted=True,
-            exclude_suspended=exclude_suspended,
-            min_list_days=min_list_days,
-            min_avg_turnover_20d=min_avg_turnover_20d,
-            exclude_limit_lock=limit_rule in {"forbid", "skip"},
-            min_price=price_min,
-        )
-        filtered_candidates, _snapshot, excluded_counts = apply_universe_filters(candidates, filter_cfg)
-        filtered_symbols = sorted(
-            {
-                str(s).strip().lower()
-                for s in filtered_candidates.get("symbol", pd.Series(dtype=str)).tolist()
-                if str(s).strip()
-            }
-        )
-        before_count = int(len(resolved_symbols))
-        after_count = int(len(filtered_symbols))
-        resolved_meta["excluded_counts"] = excluded_counts
-        resolved_meta["tradable_symbols"] = after_count
-        resolved_meta["after_filters_symbols"] = after_count
-        if after_count > 0:
-            resolved_symbols = filtered_symbols
-        else:
-            resolved_meta["filter_warning"] = "all symbols filtered out; fallback to pre-filter universe"
-            resolved_meta["after_filters_symbols"] = before_count
-    elif universe_filters_raw and dynamic_all_a_entry:
-        resolved_meta["excluded_counts"] = {}
-        resolved_meta["tradable_symbols"] = int(len(resolved_symbols))
-        resolved_meta["after_filters_symbols"] = int(len(resolved_symbols))
-        resolved_meta["filter_mode"] = "dynamic_daily_gate"
+    resolved_symbols = list(validation_snapshot.resolved_symbols)
+    resolved_meta = dict(validation_snapshot.resolved_meta)
+    resolve_asof = validation_snapshot.resolve_asof
+    dynamic_all_a_entry = validation_snapshot.dynamic_all_a_entry
 
     if not resolved_symbols:
         result = {
@@ -951,31 +689,35 @@ def validate_backtest_v2_data(
 # ── Results / execution preview / artifact read routes ─────────────────────
 
 
-@router.get("/api/backtest_v2/results/{run_id}")
-def get_backtest_v2_result(run_id: str):
-    out_dir = _results_root() / run_id
-    if not out_dir.exists():
-        raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
-    payload = _sanitize_for_json(_read_result(out_dir))
-    payload["run_id"] = run_id
-    return payload
-
-
 @router.post("/api/backtest_v2/execution/preview")
 def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
-    resolution = resolve_runtime_config_source(
-        config_id=body.config_id,
-        runtime_config=body.runtime_config_json,
-        draft_config=body.config_json,
+    _validate_public_execution_preview_request(body)
+    base_cfg = _experiment_runner_api._load_base_config(_bt_root())
+    semantic_compile = _experiment_runner_api._compile_semantic_config_bundle(
+        base_cfg=base_cfg,
+        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+        semantic_cfg=body.config_json,
+        config_source="config_json",
+        use_body_universe_fields=False,
     )
-    cfg_obj = dict(resolution.get("effective_config_json") or {})
+    resolution = {
+        "config_source": "config_json",
+        "resolved_config_mode": "semantic_config_preview",
+        "resolved_config_id": None,
+        "resolved_config_hash": semantic_compile.get("config_hash"),
+        "resolved_config_meta": {
+            "source_type": "frontend_semantic",
+            "owner": "manual",
+            "schema_version": semantic_compile.get("schema_version"),
+            "config_source": semantic_compile.get("config_source"),
+            "config_hash": semantic_compile.get("config_hash"),
+        },
+        "config_conflict_policy": "config_json_preferred",
+    }
+    compiled_plan = semantic_compile.get("compiled_plan") if isinstance(semantic_compile.get("compiled_plan"), dict) else {}
+    cfg_obj = dict(compiled_plan.get("runtime_config") or {})
 
-    results_dir = _resolve_experiment_dir(exp_id=body.exp_id, results_dir=body.results_dir)
-    if results_dir is None:
-        raise HTTPException(status_code=404, detail="no experiment results found for execution preview")
-    manifest = _load_json_file(results_dir / "manifest.json")
-    if not manifest:
-        raise HTTPException(status_code=404, detail=f"manifest not found: {results_dir / 'manifest.json'}")
+    results_dir, manifest = _load_manifest_or_404(str(body.exp_id or "").strip())
 
     as_of = str(body.as_of_date or "").strip()
     if not as_of:
@@ -1055,9 +797,11 @@ def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
         target_positions.append({"symbol": item["symbol"], "target_weight": round(float(tw), 6), "cap_reason": cap_reason})
 
     out_obj = {
+        "experiment_id": str(body.exp_id or "").strip(),
+        "exp_id": str(body.exp_id or "").strip(),
         "as_of_date_used": as_of,
         "source": source,
-        "results_dir": str(results_dir),
+        "config_source": str(resolution.get("config_source") or "none"),
         "resolved_config_mode": str(resolution.get("resolved_config_mode") or "none"),
         "resolved_config_id": resolution.get("resolved_config_id"),
         "resolved_config_hash": resolution.get("resolved_config_hash"),
@@ -1068,6 +812,12 @@ def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
         "candidates": candidates,
         "target_positions": target_positions,
     }
+    if isinstance(semantic_compile, dict):
+        out_obj["config_compiler"] = {
+            "schema_version": str(semantic_compile.get("schema_version") or ""),
+            "config_hash": str(semantic_compile.get("config_hash") or ""),
+            "config_source": str(semantic_compile.get("config_source") or ""),
+        }
     cfg_hash = _hash_json(cfg_obj) if cfg_obj else "na"
     key = hashlib.sha1(f"{results_dir}|{as_of}|{top_n}|{cfg_hash}".encode("utf-8")).hexdigest()[:12]
     out_path = _execution_root() / f"execution_list_{key}.json"
@@ -1076,37 +826,25 @@ def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
     return _sanitize_for_json(out_obj)
 
 
+@router.get("/api/backtest_v2/experiments/{exp_id}/manifest")
+def get_backtest_v2_manifest(exp_id: str):
+    _, manifest = _load_manifest_or_404(exp_id)
+    return _sanitize_for_json(manifest)
+
+
+@router.get("/api/backtest_v2/experiments/{exp_id}/artifacts/{rel_path:path}")
+def get_backtest_v2_artifact(exp_id: str, rel_path: str):
+    results_dir, manifest = _load_manifest_or_404(exp_id)
+    rel = str(rel_path or "").strip().replace("\\", "/").lstrip("/")
+    if not rel:
+        raise HTTPException(status_code=400, detail="rel_path is required")
+    return _read_declared_artifact_payload(results_dir, manifest, rel)
+
+
 @router.post("/api/backtest_v2/artifacts/read")
 def read_backtest_v2_artifact(body: BacktestV2ArtifactReadRequest):
-    raw_dir = str(body.results_dir or "")
-    p = Path(raw_dir)
-    if not p.is_absolute():
-        p = (_results_root() / raw_dir).resolve()
-    else:
-        p = p.resolve()
-    results_dir = p
-    if not results_dir.exists():
-        raise HTTPException(status_code=404, detail=f"results_dir not found: {results_dir}")
+    results_dir, manifest = _load_manifest_or_404(str(body.exp_id or "").strip())
     rel = str(body.rel_path or "").strip().replace("\\", "/").lstrip("/")
     if not rel:
         raise HTTPException(status_code=400, detail="rel_path is required")
-    target = (results_dir / rel).resolve()
-    if not str(target).startswith(str(results_dir)):
-        raise HTTPException(status_code=400, detail="invalid rel_path")
-    if not target.exists():
-        raise HTTPException(status_code=404, detail=f"artifact not found: {target}")
-    ext = target.suffix.lower()
-    if ext == ".json":
-        try:
-            obj = json.loads(target.read_text(encoding="utf-8-sig"))
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"json parse failed: {exc}")
-        return _sanitize_for_json({"kind": "json", "path": rel, "data": obj})
-    if ext == ".csv":
-        try:
-            df = pd.read_csv(target)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"csv parse failed: {exc}")
-        return _sanitize_for_json({"kind": "csv", "path": rel, "rows": df.to_dict(orient="records"), "columns": list(df.columns)})
-    text = target.read_text(encoding="utf-8", errors="ignore")
-    return _sanitize_for_json({"kind": "text", "path": rel, "text": text[:200000]})
+    return _read_declared_artifact_payload(results_dir, manifest, rel)

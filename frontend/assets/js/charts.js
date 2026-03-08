@@ -231,14 +231,41 @@ function renderLineChart(containerId, series, yFmt = (v) => num(v, 4)) {
   `;
 }
 
+function clearChartValueBadge(container) {
+  if (!container) return;
+  container.querySelectorAll('.wb-chart-value-badge').forEach((node) => node.remove());
+}
+
+function renderChartValueBadge(container, seriesApi, value, label) {
+  if (!container || !Number.isFinite(Number(value)) || !label) return;
+  clearChartValueBadge(container);
+  const badge = document.createElement('div');
+  badge.className = 'wb-chart-value-badge';
+  badge.textContent = label;
+  container.appendChild(badge);
+  const applyPosition = () => {
+    let top = 12;
+    try {
+      const y = typeof seriesApi?.priceToCoordinate === 'function' ? seriesApi.priceToCoordinate(Number(value)) : null;
+      if (Number.isFinite(y)) top = Math.max(10, Math.min((container.clientHeight || 520) - 34, y - 12));
+    } catch (_) {
+      // badge position fallback
+    }
+    badge.style.top = `${top}px`;
+  };
+  requestAnimationFrame(applyPosition);
+}
+
 function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts = {}) {
   const container = document.getElementById(containerId);
   if (!container) return;
+  clearChartValueBadge(container);
 
   const hasNav = Array.isArray(navSeries) && navSeries.length > 0;
   const hasBench = Array.isArray(benchOhlc) && benchOhlc.length > 0;
   const mode = String(opts.mode || 'portfolio');
   const markers = Array.isArray(opts.markers) ? opts.markers : [];
+  const useRelativeBenchLine = mode === 'symbol' && showBenchmark && hasBench;
 
 
   // 无任何数据时显示空状态
@@ -271,6 +298,7 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
       horzLines: { color: 'rgba(51,65,85,0.4)' },
     },
     crosshair: { mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 0 },
+    leftPriceScale: { visible: useRelativeBenchLine, borderColor: '#334155' },
     rightPriceScale: { borderColor: '#334155' },
     timeScale: {
       borderColor: '#334155',
@@ -281,36 +309,61 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
     },
   });
   _lwChartNav = chart;
+  let symbolBadgeUpdater = null;
 
   // Benchmark 蜡烛图（兼容 v4.0+ 和 v4.2+ API）
   if (showBenchmark && hasBench) {
-    const candleSeries = typeof chart.addCandlestickSeries === 'function'
-      ? chart.addCandlestickSeries({
-          upColor: '#26a69a', downColor: '#ef5350',
-          borderDownColor: '#ef5350', borderUpColor: '#26a69a',
-          wickDownColor: '#ef5350', wickUpColor: '#26a69a',
-        })
-      : chart.addSeries(LWC.CandlestickSeries, {
-          upColor: '#26a69a', downColor: '#ef5350',
-          borderDownColor: '#ef5350', borderUpColor: '#26a69a',
-          wickDownColor: '#ef5350', wickUpColor: '#26a69a',
-        });
-    candleSeries.setData(benchOhlc);
+    if (useRelativeBenchLine) {
+      const benchFirstClose = Number(benchOhlc[0]?.close) || 1;
+      const benchLineData = benchOhlc.map((p) => ({ time: p.time, value: Number(p.close) / benchFirstClose }));
+      const benchLine = typeof chart.addLineSeries === 'function'
+        ? chart.addLineSeries({
+            color: '#58a6ff',
+            lineWidth: 2,
+            priceScaleId: 'left',
+            crosshairMarkerVisible: false,
+            priceLineVisible: false,
+          })
+        : chart.addSeries(LWC.LineSeries, {
+            color: '#58a6ff',
+            lineWidth: 2,
+            priceScaleId: 'left',
+            crosshairMarkerVisible: false,
+            priceLineVisible: false,
+          });
+      benchLine.setData(benchLineData);
+    } else {
+      const candleSeries = typeof chart.addCandlestickSeries === 'function'
+        ? chart.addCandlestickSeries({
+            upColor: '#26a69a', downColor: '#ef5350',
+            borderDownColor: '#ef5350', borderUpColor: '#26a69a',
+            wickDownColor: '#ef5350', wickUpColor: '#26a69a',
+          })
+        : chart.addSeries(LWC.CandlestickSeries, {
+            upColor: '#26a69a', downColor: '#ef5350',
+            borderDownColor: '#ef5350', borderUpColor: '#26a69a',
+            wickDownColor: '#ef5350', wickUpColor: '#26a69a',
+          });
+      candleSeries.setData(benchOhlc);
+    }
   }
 
   // Strategy NAV 折线（归一化后与 Benchmark 同量级）
   if (hasNav) {
     // NAV 可能是原始组合价值（如 100000），需要归一化为从 1.0 开始
     const firstVal = navSeries[0]?.value || 1;
-    const lineData = navSeries.map((p) => ({ time: p.date, value: p.value / firstVal }));
+    const lineData = navSeries.map((p) => ({
+      time: p.date,
+      value: mode === 'symbol' ? Number(p.value) : (Number(p.value) / firstVal),
+    }));
 
     // 停牌区间分段：个股模式下用灰色停牌段 + 橙色正常段
     const suspRanges = Array.isArray(opts.suspensionRanges) ? opts.suspensionRanges : [];
     const hasSuspension = mode === 'symbol' && suspRanges.length > 0;
 
     const _addLine = (color) => typeof chart.addLineSeries === 'function'
-      ? chart.addLineSeries({ color, lineWidth: 2, crosshairMarkerVisible: !hasSuspension, priceLineVisible: false, lastValueVisible: !hasSuspension })
-      : chart.addSeries(LWC.LineSeries, { color, lineWidth: 2, crosshairMarkerVisible: !hasSuspension, priceLineVisible: false, lastValueVisible: !hasSuspension });
+      ? chart.addLineSeries({ color, lineWidth: 2, crosshairMarkerVisible: !hasSuspension, priceLineVisible: false, lastValueVisible: !hasSuspension && mode !== 'symbol' })
+      : chart.addSeries(LWC.LineSeries, { color, lineWidth: 2, crosshairMarkerVisible: !hasSuspension, priceLineVisible: false, lastValueVisible: !hasSuspension && mode !== 'symbol' });
 
     let primaryLine;
     if (hasSuspension) {
@@ -350,9 +403,17 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
       suspLine.setData(dedup(suspData));
       primaryLine = _addLine('#f59e0b');
       primaryLine.setData(dedup(normalData));
+      if (mode === 'symbol') {
+        const lastValue = Number(lineData[lineData.length - 1]?.value);
+        symbolBadgeUpdater = () => renderChartValueBadge(container, primaryLine, lastValue, `个股净值 ${num(lastValue, 2)}x`);
+      }
     } else {
       primaryLine = _addLine(mode === 'symbol' ? '#f59e0b' : '#58a6ff');
       primaryLine.setData(lineData);
+      if (mode === 'symbol') {
+        const lastValue = Number(lineData[lineData.length - 1]?.value);
+        symbolBadgeUpdater = () => renderChartValueBadge(container, primaryLine, lastValue, `个股净值 ${num(lastValue, 2)}x`);
+      }
     }
 
     if (markers.length) {
@@ -377,6 +438,15 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
         }
       } catch (_) { /* primitive API optional */ }
     }
+    if (mode === 'symbol' && primaryLine && lineData.length) {
+      const lastValue = Number(lineData[lineData.length - 1]?.value);
+      const lastClose = Number(opts?.symbolLastClose);
+      const label = Number.isFinite(lastClose)
+        ? `个股收盘价 ${num(lastClose, 2)}`
+        : `个股净值 ${num(lastValue, 2)}x`;
+      symbolBadgeUpdater = () => renderChartValueBadge(container, primaryLine, lastValue, label);
+    }
+    if (typeof symbolBadgeUpdater === 'function') requestAnimationFrame(symbolBadgeUpdater);
   }
 
   // 数据量大时只显示最近一段，保证蜡烛清晰可见；数据少时全部显示
@@ -388,11 +458,13 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
   } else {
     chart.timeScale().fitContent();
   }
+  if (typeof symbolBadgeUpdater === 'function') requestAnimationFrame(symbolBadgeUpdater);
 
   // 响应容器大小变化
   const ro = new ResizeObserver(() => {
     if (_lwChartNav === chart) {
       chart.applyOptions({ width: container.clientWidth, height: container.clientHeight || 420 });
+      if (typeof symbolBadgeUpdater === 'function') requestAnimationFrame(symbolBadgeUpdater);
     }
   });
   ro.observe(container);

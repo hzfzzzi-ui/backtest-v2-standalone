@@ -55,33 +55,59 @@ async function _readHttpErrorDetail(response) {
   return `${response.status} ${response.statusText}`;
 }
 
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function apiRequestJson(key, url, options = {}) {
-  const method = String(options.method || 'GET').toUpperCase();
+  const requestOptions = { ...options };
+  const method = String(requestOptions.method || 'GET').toUpperCase();
+  const retryCount = Number.isFinite(Number(requestOptions.retryCount))
+    ? Math.max(0, Number(requestOptions.retryCount))
+    : (method === 'GET' ? 1 : 0);
+  const retryDelayMs = Number.isFinite(Number(requestOptions.retryDelayMs))
+    ? Math.max(0, Number(requestOptions.retryDelayMs))
+    : 350;
+  delete requestOptions.retryCount;
+  delete requestOptions.retryDelayMs;
+
+  let lastError = null;
   const startedAt = Date.now();
   _setApiLoading(key, url, method);
-  try {
-    const r = await fetch(url, options);
-    const durationMs = Date.now() - startedAt;
-    if (!r.ok) {
-      const detail = await _readHttpErrorDetail(r);
-      _setApiFailed(key, url, method, r.status, durationMs, detail);
-      const err = new Error(`${r.status} ${detail}`);
-      err.httpStatus = r.status;
-      err.endpoint = url;
-      throw err;
+
+  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    try {
+      const r = await fetch(url, requestOptions);
+      const durationMs = Date.now() - startedAt;
+      if (!r.ok) {
+        const detail = await _readHttpErrorDetail(r);
+        const err = new Error(`${r.status} ${detail}`);
+        err.httpStatus = r.status;
+        err.endpoint = url;
+        throw err;
+      }
+      const payload = await r.json();
+      _setApiSuccess(key, url, method, r.status, durationMs);
+      setStatusItems(state.manual_status_items || []);
+      return payload;
+    } catch (e) {
+      lastError = e;
+      const durationMs = Date.now() - startedAt;
+      const httpStatus = Number.isFinite(Number(e?.httpStatus)) ? Number(e.httpStatus) : null;
+      const isFinalAttempt = attempt >= retryCount;
+      if (isFinalAttempt) {
+        _setApiFailed(key, url, method, httpStatus, durationMs, e?.message || String(e));
+        setStatusItems(state.manual_status_items || []);
+        throw e;
+      }
+      await _sleep(retryDelayMs);
     }
-    const payload = await r.json();
-    _setApiSuccess(key, url, method, r.status, durationMs);
-    setStatusItems(state.manual_status_items || []);
-    return payload;
-  } catch (e) {
-    const durationMs = Date.now() - startedAt;
-    if (!state.api_status[key] || state.api_status[key].status !== 'failed') {
-      _setApiFailed(key, url, method, null, durationMs, e?.message || String(e));
-    }
-    setStatusItems(state.manual_status_items || []);
-    throw e;
   }
+
+  const durationMs = Date.now() - startedAt;
+  _setApiFailed(key, url, method, null, durationMs, lastError?.message || '未知错误');
+  setStatusItems(state.manual_status_items || []);
+  throw lastError || new Error('未知错误');
 }
 
 function setStatusItems(items) {

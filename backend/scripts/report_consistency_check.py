@@ -1,31 +1,28 @@
 ﻿from __future__ import annotations
 
 import csv
-import json
-import re
+import sys
 from pathlib import Path
 from typing import Any
 
-from backend.core.report.report_generator import generate_report
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-
-def _load_json(p: Path) -> dict[str, Any]:
-    if not p.exists():
-        return {}
-    try:
-        return json.loads(p.read_text(encoding="utf-8-sig"))
-    except Exception:
-        return {}
-
-
+from backend.scripts._internal_helper import (
+    ensure_optional_report,
+    open_experiment_handle,
+    read_json_artifact,
+)
 def _check_exp(rd: Path) -> dict[str, Any]:
-    exp_id = rd.name
-    run_config = _load_json(rd / "run_config.json")
-    run_meta = _load_json(rd / "run_meta.json")
-    perf = _load_json(rd / "perf.json")
+    resolved_dir, _manifest = open_experiment_handle(results_dir=rd)
+    exp_id = resolved_dir.name
+    run_config = read_json_artifact(results_dir=resolved_dir, rel_path="run_config.json", fallback_rel_path="run_config.json")
+    run_meta = read_json_artifact(results_dir=resolved_dir, artifact_key="run_meta", fallback_rel_path="run_meta.json")
+    perf = read_json_artifact(results_dir=resolved_dir, artifact_key="perf", fallback_rel_path="perf.json")
 
-    report_path = Path(generate_report(str(rd)))
-    report_html = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+    report_path = ensure_optional_report(results_dir=resolved_dir, generate_if_missing=True)
+    report_html = report_path.read_text(encoding="utf-8") if report_path and report_path.exists() else ""
 
     uni = run_config.get("universe") if isinstance(run_config.get("universe"), dict) else {}
     data = run_meta.get("data") if isinstance(run_meta.get("data"), dict) else {}
@@ -44,7 +41,7 @@ def _check_exp(rd: Path) -> dict[str, Any]:
         cagr_text = f"{float(cagr) * 100:.2f}%"
         perf_ok = cagr_text in report_html
 
-    funnel_exists = (rd / "funnel.csv").exists()
+    funnel_exists = (resolved_dir / "funnel.csv").exists()
     funnel_source_ok = ("数据源: funnel.csv" in report_html) if funnel_exists else True
 
     report_consistency = run_meta.get("report_consistency") if isinstance(run_meta.get("report_consistency"), dict) else {}

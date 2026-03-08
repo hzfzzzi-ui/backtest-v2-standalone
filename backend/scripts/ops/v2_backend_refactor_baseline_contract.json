@@ -1,0 +1,80 @@
+{
+  "contract_name": "v2_backend_refactor_foundation",
+  "version": "1.0",
+  "baseline_exp_id": "exp_20260308_021045840_cde0",
+  "protected_artifacts": {
+    "exact_file_hash": [
+      "portfolio_daily.csv",
+      "portfolio_trades.csv",
+      "portfolio_candidates.csv"
+    ],
+    "summary_json": {
+      "perf.json": [
+        "total_return",
+        "max_drawdown",
+        "cagr",
+        "sharpe",
+        "calmar",
+        "trades",
+        "turnover"
+      ]
+    },
+    "summary_csv": {
+      "nav.csv": [
+        "rows",
+        "first_date",
+        "last_date",
+        "first_nav",
+        "terminal_nav",
+        "file_hash"
+      ]
+    },
+    "semantic_surfaces": [
+      "run_meta_core",
+      "run_meta_universe",
+      "config_truth",
+      "manifest"
+    ],
+    "diagnostic_only": [
+      "report.html"
+    ]
+  },
+  "allowed_drift_fields": {
+    "run_meta.json": [
+      "exp_id",
+      "created_at",
+      "report_consistency.sources",
+      "report_consistency.fallbacks",
+      "report_consistency.resolved_config_meta.saved_at",
+      "report_consistency.resolved_config_schema_version",
+      "report_consistency.resolved_config_source",
+      "report_consistency.resolved_config_compiler_hash",
+      "report_consistency.resolved_config_meta.schema_version",
+      "report_consistency.resolved_config_meta.config_source",
+      "report_consistency.resolved_config_meta.config_hash"
+    ],
+    "manifest.json": [
+      "exp_id",
+      "experiment_id",
+      "created_at",
+      "schema_version",
+      "config_snapshots",
+      "stage_pipeline",
+      "stage_summary",
+      "artifacts.baseline_compare",
+      "artifacts.audit",
+      "artifacts.input_config",
+      "artifacts.resolved_config",
+      "artifacts.compiled_plan",
+      "artifacts.stage_summary",
+      "baseline_compare_status"
+    ],
+    "config_truth": [
+      "saved_config_meta.saved_at"
+    ]
+  },
+  "non_blocking_categories": [
+    "diagnostic_drift"
+  ],
+  "verification_command": "python backend/scripts/baseline_regression_check.py --rerun --write-to-candidate"
+}

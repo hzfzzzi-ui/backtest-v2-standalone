@@ -3,7 +3,6 @@
 import json
 import math
 import os
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,12 +10,18 @@ from typing import Any
 import logging
 import pandas as pd
 
+from backend.core.audit.experiment_audit import merge_experiment_audit
 from backend.core.analytics.symbol_performance import build_symbol_performance
+from backend.core.tools.runtime_data_access import (
+    resolve_stock_names as resolve_runtime_stock_names,
+    resolve_trade_st_flags as resolve_runtime_trade_st_flags,
+)
 from .backtest_v2_protocol import ARTIFACT_FILENAMES, MISSING_FIELD_KEYS
 from ._utils import sanitize_json
 from ._paths import _repo_root, _results_root
 
 logger = logging.getLogger(__name__)
+MANIFEST_SCHEMA_VERSION = "backtest_v2_experiment_manifest@2"
 
 
 def _safe_float(v: Any) -> float | None:
@@ -47,6 +52,75 @@ def _to_rel(path: Path, root: Path) -> str:
         return str(path).replace("\\", "/")
 
 
+def _manifest_config_snapshots(results_dir: Path, artifacts: dict[str, Any]) -> dict[str, str]:
+    snapshots: dict[str, str] = {}
+    for key, filename in (
+        ("input_config", "input_config.json"),
+        ("resolved_config", "resolved_config.json"),
+        ("compiled_plan", "compiled_plan.json"),
+    ):
+        rel = str(artifacts.get(key) or "").strip()
+        if rel:
+            snapshots[key] = rel
+            continue
+        path = results_dir / filename
+        if path.exists():
+            snapshots[key] = _to_rel(path, results_dir)
+    return snapshots
+
+
+def _baseline_compare_status(results_dir: Path) -> str:
+    path = results_dir / "baseline_compare.json"
+    if not path.exists():
+        return "NOT_RUN"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return "UNKNOWN"
+    status = str(payload.get("status") or "").strip().upper()
+    return status or "UNKNOWN"
+
+
+def _extract_stage_summary(result: dict[str, Any]) -> dict[str, Any] | None:
+    direct = result.get("stage_summary")
+    if isinstance(direct, dict) and direct:
+        return sanitize_json(dict(direct))
+    metrics = result.get("metrics")
+    if isinstance(metrics, dict):
+        nested = metrics.get("stage_summary")
+        if isinstance(nested, dict) and nested:
+            return sanitize_json(dict(nested))
+    return None
+
+
+def _extract_stage_pipeline_summary(
+    result: dict[str, Any],
+    stage_summary: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    direct = result.get("stage_pipeline")
+    if isinstance(direct, dict) and direct:
+        return sanitize_json(dict(direct))
+    metrics = result.get("metrics")
+    if isinstance(metrics, dict):
+        nested = metrics.get("stage_pipeline")
+        if isinstance(nested, dict) and nested:
+            return sanitize_json(dict(nested))
+    if not isinstance(stage_summary, dict) or not stage_summary:
+        return None
+    return sanitize_json(
+        {
+            "schema_version": stage_summary.get("schema_version"),
+            "execution_shell": stage_summary.get("execution_shell"),
+            "daily_loop_mode": stage_summary.get("daily_loop_mode"),
+            "route_id": stage_summary.get("route_id"),
+            "stage_order": list(stage_summary.get("stage_order") or ()),
+            "enabled_stages": list(stage_summary.get("enabled_stages") or ()),
+            "warnings": list(stage_summary.get("warnings") or ()),
+            "trading_days": _safe_int(stage_summary.get("trading_days")),
+        }
+    )
+
+
 def _resolve_runtime_path(raw: str | None, bt_root: Path) -> Path | None:
     if not raw:
         return None
@@ -62,104 +136,19 @@ def _resolve_runtime_path(raw: str | None, bt_root: Path) -> Path | None:
 
 
 def _resolve_stock_names(symbols: list[str]) -> dict[str, str]:
-    """Query DB for Chinese stock names. Returns {symbol: name} mapping."""
-    if not symbols:
-        return {}
     try:
-        import psycopg
-        conn = psycopg.connect(
-            host=os.environ.get("PGHOST", os.environ.get("PAMS_PG_HOST", "pams-postgres")),
-            port=int(os.environ.get("PGPORT", os.environ.get("PAMS_PG_PORT", "5432"))),
-            dbname=os.environ.get("PGDATABASE", os.environ.get("PAMS_PG_DBNAME", "pams")),
-            user=os.environ.get("PGUSER", os.environ.get("PAMS_PG_USER", "pams")),
-            password=os.environ.get("PGPASSWORD", os.environ.get("PAMS_PG_PASSWORD", "")),
-            autocommit=True,
-        )
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT symbol, name FROM pit_security_master WHERE symbol = ANY(%s) AND name IS NOT NULL AND name != ''",
-                (list(symbols),),
-            )
-            names = {row[0]: row[1] for row in cur.fetchall()}
-        conn.close()
-        return names
+        return resolve_runtime_stock_names(symbols)
     except Exception as exc:
         logger.warning("resolve_stock_names failed: %s", exc)
         return {}
 
 
-_ST_NAME_PAT = re.compile(r"(^\*?ST)|(^ST)|退", re.IGNORECASE)
-
-
 def _resolve_trade_st_flags(trades_df: pd.DataFrame, stock_names: dict[str, str]) -> dict[str, str]:
-    """Build per-trade ST status keyed by 'YYYY-MM-DD|symbol'."""
-    if trades_df.empty or "date" not in trades_df.columns or "symbol" not in trades_df.columns:
-        return {}
-    tdf = trades_df.copy()
-    tdf["date"] = pd.to_datetime(tdf["date"], errors="coerce").dt.date
-    tdf["symbol"] = tdf["symbol"].astype(str).str.lower()
-    tdf = tdf.dropna(subset=["date", "symbol"])
-    if tdf.empty:
-        return {}
-
-    out: dict[str, str] = {}
-    for r in tdf.itertuples(index=False):
-        k = f"{r.date.isoformat()}|{str(r.symbol).lower()}"
-        out[k] = "-"
-
-    symbols = sorted(set(tdf["symbol"].astype(str).tolist()))
-    min_d = tdf["date"].min()
-    max_d = tdf["date"].max()
-    st_periods: dict[str, list[tuple[Any, Any]]] = {}
     try:
-        import psycopg
-
-        conn = psycopg.connect(
-            host=os.environ.get("PGHOST", os.environ.get("PAMS_PG_HOST", "pams-postgres")),
-            port=int(os.environ.get("PGPORT", os.environ.get("PAMS_PG_PORT", "5432"))),
-            dbname=os.environ.get("PGDATABASE", os.environ.get("PAMS_PG_DBNAME", "pams")),
-            user=os.environ.get("PGUSER", os.environ.get("PAMS_PG_USER", "pams")),
-            password=os.environ.get("PGPASSWORD", os.environ.get("PAMS_PG_PASSWORD", "")),
-            autocommit=True,
-        )
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT ts_code, start_date, end_date
-                FROM pit_st_history
-                WHERE ts_code = ANY(%s)
-                  AND start_date <= %s
-                  AND (end_date IS NULL OR end_date >= %s)
-                """,
-                (symbols, max_d, min_d),
-            )
-            for sym, sdt, edt in cur.fetchall():
-                ss = str(sym).lower()
-                st_periods.setdefault(ss, []).append((sdt, edt))
-        conn.close()
+        return resolve_runtime_trade_st_flags(trades_df, stock_names)
     except Exception as exc:
-        logger.warning("resolve_trade_st_flags pit_st_history failed: %s", exc)
-
-    for r in tdf.itertuples(index=False):
-        sym = str(r.symbol).lower()
-        d = r.date
-        k = f"{d.isoformat()}|{sym}"
-        tagged = False
-        for sdt, edt in st_periods.get(sym, []):
-            s = pd.to_datetime(sdt, errors="coerce").date() if sdt is not None else None
-            e = pd.to_datetime(edt, errors="coerce").date() if edt is not None else None
-            if s is None:
-                continue
-            if d >= s and (e is None or d <= e):
-                out[k] = "PIT_ST"
-                tagged = True
-                break
-        if tagged:
-            continue
-        nm = str(stock_names.get(sym, ""))
-        if nm and _ST_NAME_PAT.search(nm):
-            out[k] = "NAME_ST_FALLBACK"
-    return out
+        logger.warning("resolve_trade_st_flags failed: %s", exc)
+        return {}
 
 
 def _generate_experiment_label(base_cfg: dict[str, Any], overrides: dict[str, Any]) -> str:
@@ -494,7 +483,7 @@ def _build_buy_stage_funnel(
         "S4 个股趋势",
         tradable_symbol_days,
         raw_buy_signal,
-        "从全回测期可交易标的日频事件收缩到原始买入信号",
+        "从全回测期可交易股票-日期事件收缩到原始买点事件；大多数事件并未触发 breakout/pullback 买点",
         available=tradable_symbol_days is not None and raw_buy_signal is not None,
     ))
     rows.append(stage_row(
@@ -502,26 +491,26 @@ def _build_buy_stage_funnel(
         "S5 个股排序",
         raw_buy_signal,
         buy_candidates,
-        "候选排序与可交易预筛后的保留数量",
+        "原始买点事件经过排序与候选预筛后的保留数量",
         available=raw_buy_signal is not None and buy_candidates is not None,
     ))
     rows.append(stage_row(
         "s6",
         "S6 入场信号",
         buy_candidates,
-        after_held,
-        "去除已持仓/重复信号后的可入场候选",
-        available=buy_candidates is not None and after_held is not None,
+        buy_orders_count,
+        "当前基线稳定口径直接落到最终 entry orders；55 日突破等入场事件在本层收口为实际开仓次数",
+        available=buy_candidates is not None,
     ))
     rows.append(stage_row(
         "s7",
-        "S7 组合构建",
-        after_held,
+        "S7 仓位控制",
+        buy_orders_count,
         after_slot if after_slot_measured else buy_orders_count,
-        "仓位槽位与组合容量约束后的候选数量"
+        "仓位槽位与组合容量约束后的保留数量"
         if after_slot_measured
-        else "当前引擎未稳定输出 slot stage，直接落到实际 BUY orders",
-        available=after_held is not None,
+        else "当前基线未稳定输出独立 slot stage 计数，沿用最终开仓数量展示仓位控制层",
+        available=buy_orders_count is not None,
     ))
     rows.append(stage_row(
         "s8",
@@ -969,6 +958,16 @@ def ensure_standard_artifacts(
     if resolved_config_meta is not None and resolved_universe_mode and not resolved_config_meta.get("universe_mode"):
         resolved_config_meta = dict(resolved_config_meta)
         resolved_config_meta["universe_mode"] = resolved_universe_mode
+    stage_summary_obj = _extract_stage_summary(result)
+    stage_pipeline_obj = _extract_stage_pipeline_summary(result, stage_summary_obj)
+    stage_summary_rel = None
+    if isinstance(stage_summary_obj, dict) and stage_summary_obj:
+        stage_summary_path = results_dir / ARTIFACT_FILENAMES["stage_summary"]
+        stage_summary_path.write_text(
+            json.dumps(sanitize_json(stage_summary_obj), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        stage_summary_rel = _to_rel(stage_summary_path, results_dir)
 
     run_meta_obj = {
         "exp_id": str(result.get("exp_id") or ""),
@@ -1010,6 +1009,9 @@ def ensure_standard_artifacts(
             "resolved_config_hash": resolved_config_hash or None,
             "resolved_config_source_type": str((resolved_config_meta or {}).get("source_type") or ""),
             "resolved_config_owner": str((resolved_config_meta or {}).get("owner") or ""),
+            "resolved_config_schema_version": str((resolved_config_meta or {}).get("schema_version") or ""),
+            "resolved_config_source": str((resolved_config_meta or {}).get("config_source") or overrides.get("config_source") or ""),
+            "resolved_config_compiler_hash": str((resolved_config_meta or {}).get("config_hash") or resolved_config_hash or ""),
             "resolved_config_meta": resolved_config_meta,
         },
     }
@@ -1018,19 +1020,30 @@ def ensure_standard_artifacts(
     if isinstance(u_meta, dict):
         run_meta_obj["universe"] = sanitize_json(u_meta)
         run_meta_obj["data"]["universe_mode"] = str(u_meta.get("universe_mode") or "CUSTOM")
+    data_bundle = result.get("data_bundle")
+    if isinstance(data_bundle, dict):
+        run_meta_obj["data_bundle"] = sanitize_json(data_bundle)
     candidate_ctx = overrides.get("candidate_context")
     if isinstance(candidate_ctx, dict) and candidate_ctx:
         run_meta_obj["candidate"] = sanitize_json(candidate_ctx)
+    if isinstance(stage_pipeline_obj, dict) and stage_pipeline_obj:
+        run_meta_obj["stage_pipeline"] = sanitize_json(stage_pipeline_obj)
     run_meta_path = results_dir / ARTIFACT_FILENAMES["run_meta"]
     run_meta_path.write_text(json.dumps(sanitize_json(run_meta_obj), ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 写入 audit.json（审计检查点数据）
     audit_data = (result.get("metrics") or {}).get("audit")
+    if not isinstance(audit_data, dict):
+        audit_data = {}
+    audit_data = merge_experiment_audit(
+        audit_data,
+        stage_pipeline=stage_pipeline_obj if isinstance(stage_pipeline_obj, dict) else None,
+        stage_summary=stage_summary_obj if isinstance(stage_summary_obj, dict) else None,
+        exp_id=str(result.get("exp_id") or ""),
+    )
     audit_rel = None
-    if isinstance(audit_data, dict):
+    if isinstance(audit_data, dict) and audit_data:
         try:
-            # 补充 exp_id（引擎阶段尚不知道）
-            audit_data["exp_id"] = str(result.get("exp_id") or "")
             audit_path = results_dir / "audit.json"
             audit_path.write_text(json.dumps(audit_data, ensure_ascii=False, indent=2), encoding="utf-8")
             audit_rel = _to_rel(audit_path, results_dir)
@@ -1053,6 +1066,7 @@ def ensure_standard_artifacts(
         "alpha_funnel": _to_rel(alpha_funnel_path, results_dir),
         "score_diagnostics": _to_rel(score_diagnostics_path, results_dir),
         "audit": audit_rel,
+        "stage_summary": stage_summary_rel,
     }
     # 如果引擎已写出 trades CSV，也加入 artifacts 映射
     if trades_path.exists():
@@ -1061,6 +1075,10 @@ def ensure_standard_artifacts(
     daily_path = results_dir / ARTIFACT_FILENAMES["daily"]
     if daily_path.exists():
         artifacts["daily"] = _to_rel(daily_path, results_dir)
+    for extra_name in ("input_config.json", "resolved_config.json", "compiled_plan.json", "baseline_compare.json"):
+        extra_path = results_dir / extra_name
+        if extra_path.exists():
+            artifacts[extra_name.replace(".json", "")] = _to_rel(extra_path, results_dir)
 
     out = dict(result)
     out["status"] = str(out.get("status") or "OK")
@@ -1069,11 +1087,53 @@ def ensure_standard_artifacts(
 
 
 def write_manifest(results_dir: Path, result: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
+    artifacts = dict(result.get("artifacts") or {})
+    baseline_compare_path = results_dir / "baseline_compare.json"
+    if baseline_compare_path.exists():
+        artifacts.setdefault("baseline_compare", _to_rel(baseline_compare_path, results_dir))
+    config_snapshots = _manifest_config_snapshots(results_dir, artifacts)
+    core_keys = (
+        "perf",
+        "nav",
+        "funnel",
+        "reason_codes",
+        "config",
+        "run_meta",
+        "trades",
+        "daily",
+        "input_config",
+        "resolved_config",
+        "compiled_plan",
+        "baseline_compare",
+        "audit",
+        "stage_summary",
+    )
+    core_artifacts = {
+        key: str(artifacts.get(key) or "")
+        for key in core_keys
+        if str(artifacts.get(key) or "").strip()
+    }
+    report_rel = str(artifacts.get("report") or "").strip() or None
+    optional_artifacts = {
+        "report": {
+            "path": report_rel,
+            "available": bool(report_rel and (results_dir / report_rel).exists()),
+            "kind": "html_export",
+        }
+    }
+    stage_summary = _extract_stage_summary(result)
+    stage_pipeline = _extract_stage_pipeline_summary(result, stage_summary)
     manifest = {
         "exp_id": str(result.get("exp_id") or ""),
+        "experiment_id": str(result.get("exp_id") or ""),
         "status": str(result.get("status") or "OK"),
         "created_at": datetime.now().isoformat(),
-        "artifacts": dict(result.get("artifacts") or {}),
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "artifacts": artifacts,
+        "config_snapshots": config_snapshots,
+        "core_artifacts": core_artifacts,
+        "optional_artifacts": optional_artifacts,
+        "baseline_compare_status": _baseline_compare_status(results_dir),
         "metrics": {
             "total_return": _safe_float(result.get("total_return")),
             "max_drawdown": _safe_float(result.get("max_drawdown")),
@@ -1083,6 +1143,15 @@ def write_manifest(results_dir: Path, result: dict[str, Any]) -> tuple[Path, dic
             "turnover": _safe_float(result.get("turnover")),
         },
     }
+    if isinstance(stage_pipeline, dict) and stage_pipeline:
+        manifest["stage_pipeline"] = sanitize_json(stage_pipeline)
+    if isinstance(stage_summary, dict) and stage_summary:
+        manifest["stage_summary"] = sanitize_json(
+            {
+                "artifact": str(artifacts.get("stage_summary") or ""),
+                "schema_version": stage_summary.get("schema_version"),
+            }
+        )
     path = results_dir / "manifest.json"
     path.write_text(json.dumps(sanitize_json(manifest), ensure_ascii=False, indent=2), encoding="utf-8")
     return path, manifest
@@ -1121,6 +1190,7 @@ def _append_to_experiment_index(
         "max_drawdown": _safe_float(result.get("max_drawdown")),
         "sharpe": _safe_float(result.get("sharpe")),
         "trades": _safe_int(result.get("trades")),
+        "has_manifest": (results_dir / "manifest.json").exists(),
         "has_report": has_report,
     }
 

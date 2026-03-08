@@ -31,7 +31,7 @@ function selectedExperimentPreset(defaultPreset = 'single') {
 }
 
 function syncPresetHint() {
-  const hint = byId('wbConfigCenterHint') || byId('wbPresetHint');
+  const hint = byId('wbPresetHint');
   if (!hint) return;
   const executionMode = state.mode === 'execution';
   const preset = String(state.selected_locked_candidate_preset || '').trim();
@@ -51,7 +51,7 @@ function syncPresetHint() {
   if (meta?.config_id && mode === 'loaded-clean') {
     const display = meta.display_name || meta.name || meta.config_id;
     hint.textContent = `当前：${display}`;
-    hint.title = `配置中心当前已锁定 ${display}；运行与预览共用同一 runtime config json`;
+    hint.title = `当前已加载 ${display}；运行与预览共用同一 runtime config json`;
     return;
   }
   if (meta?.config_id && mode === 'loaded-dirty') {
@@ -128,7 +128,7 @@ function setDrawerPanel(panel) {
       s4: 'S4 个股趋势',
       s5: 'S5 个股排序',
       s6: 'S6 入场信号',
-      s7: 'S7 组合构建',
+      s7: 'S7 仓位控制',
       s8: 'S8 风险控制',
       s9: 'S9 退出',
       json: 'JSON',
@@ -173,11 +173,12 @@ function switchDockTab(tab) {
   };
   const accId = accordionMap[next];
   const details = accId ? byId(accId) : null;
-  if (details && details.tagName === 'DETAILS') {
+  if (details) {
     document.querySelectorAll('.wb-result-acc').forEach((node) => {
-      if (node !== details) node.open = false;
+      const body = node.querySelector(':scope > .wb-result-acc-body');
+      node.classList.toggle('wb-open', node === details);
+      if (body) body.hidden = node !== details;
     });
-    details.open = true;
     requestAnimationFrame(() => {
       details.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
@@ -522,7 +523,11 @@ function buildConfigDraft() {
   if (byId('wbStrategyPack')) byId('wbStrategyPack').value = draft.strategy_pack;
   refreshConfigPanels();
   syncConfigSourceUI();
-  renderSummaryBar();
+  if (typeof syncResultsWorkbenchSurface === 'function') {
+    syncResultsWorkbenchSurface({ perf: false, explain: false, execution: false });
+  } else {
+    renderSummaryBar();
+  }
   return draft;
 }
 
@@ -549,66 +554,8 @@ function setMode(mode) {
   syncPresetHint();
 }
 
-function estimatedTier() {
-  const u = Number(byId('wbUniverseLimit')?.value || 0);
-  if (u >= 700) return 'T3?';
-  if (u >= 300) return 'T2?';
-  if (u >= 50) return 'T1?';
-  return 'T0?';
-}
-
 function renderRunHints() {
-  byId('wbEstimatedGroups').textContent = '运行模式: Single Run';
-  byId('wbEstimatedTier').textContent = `Tier预估: ${estimatedTier()}`;
-}
-
-function renderUniverseStats(stats) {
-  const el = byId('wbUniverseStats');
-  if (!el) return;
-  if (!stats) {
-    el.textContent = '等待 validate_data...';
-    return;
-  }
-  const funnel = (stats.filter_breakdown || []).map((x) => `${x.name}:${x.before}→${x.after}`).join(' | ');
-  const scope = stats.scope_label ? `${esc(stats.scope_label)} | ` : '';
-  el.innerHTML = `${scope}全市场 ${stats.total_symbols} → 可交易 ${stats.tradable_symbols} → 流动性过滤 ${stats.after_filters_symbols} → 最终 ${stats.universe_size}<br>
-    交易日=${stats.trading_days} | 缺失率=${pct(stats.missing_rate)} | 数据快照=${esc(stats.data_snapshot_id || '无')}<br>${esc(funnel)}`;
-}
-
-function currentSymbolsForValidate() {
-  const mode = byId('wbUniverseMode')?.value || 'ALL_A';
-  const custom = (byId('wbSymbols')?.value || '').split(',').map((s) => s.trim()).filter(Boolean);
-  if (mode === 'CUSTOM') return custom;
-  return [];
-}
-
-async function doValidate() {
-  buildConfigDraft();
-  const q = new URLSearchParams();
-  const syms = currentSymbolsForValidate();
-  if (syms.length) q.set('symbols', syms.join(','));
-  q.set('start', byId('wbStartDate')?.value || '2021-01-01');
-  q.set('end', byId('wbEndDate')?.value || '2026-02-01');
-  q.set('benchmark', byId('wbBenchmark')?.value || '000300.SH');
-  q.set('universe_mode', byId('wbUniverseMode')?.value || 'ALL_A');
-  q.set('industries', getSelectedIndustries().join(','));
-  q.set('universe_limit', String(Number(byId('wbUniverseLimit')?.value || 0) || 0));
-  q.set('strict_suspended', String(!!byId('wbExcludeSuspended')?.checked));
-  q.set('exclude_st', String(!!byId('wbExcludeSt')?.checked));
-  q.set('exclude_suspended', String(!!byId('wbExcludeSuspended')?.checked));
-  q.set('min_list_days', String(Number(byId('wbMinListDays')?.value || 120)));
-  q.set('min_avg_turnover_20d', String(Number(byId('wbMinTurnover')?.value || 1e8)));
-  q.set('price_min', String(Number(byId('wbPriceMin')?.value || 0)));
-  q.set('price_max', String(Number(byId('wbPriceMax')?.value || 99999)));
-  q.set('limit_rule', byId('wbLimitRule')?.value || 'ignore');
-  q.set('audit_dump', 'true');
-  const url = `/api/backtest_v2/validate_data?${q.toString()}`;
-  byId('wbRunStatus').textContent = '数据验收中...';
-  addLog(`GET ${url}`);
-  const j = await apiRequestJson('validate_data', url);
-  state.universe_stats = j.universe_stats || null;
-  renderUniverseStats(state.universe_stats);
-  byId('wbRunStatus').textContent = j.pass ? `验收通过 request_id=${j.request_id}` : `验收未通过 request_id=${j.request_id}`;
+  // 左侧股票池验收提示区已下线，保留空函数以兼容旧调用点。
 }
 
 async function pollJob(jobId) {
@@ -674,15 +621,12 @@ function resolveRuntimeConfigHandoff(preset) {
     return {
       preset: requestedPreset,
       fast_mode: true,
-      workbench_mode: state.mode,
     };
   }
   const d = buildConfigDraft();
   const payload = {
       preset: requestedPreset,
-      config_id: effectiveConfigIdForExecution(),
-      runtime_config_json: d,
-      workbench_mode: state.mode,
+      config_json: d,
       fast_mode: true,
   };
   return payload;
@@ -702,6 +646,7 @@ async function runExperiment(presetOverride = null) {
   const result = await pollJob(q.job_id);
   state.active_exp = result;
   state.active_result = result;
+  if (typeof syncExperimentIdToUrl === 'function') syncExperimentIdToUrl(result?.exp_id || result?.experiment_id || '');
   await loadActiveArtifacts();
   if (isLockedCandidatePreset(requestedPreset) && !state.active_artifacts?.run_meta?.candidate) {
     throw new Error(`candidate preset mismatch: ${result?.exp_id || '-'} did not return locked candidate artifacts`);
@@ -746,13 +691,6 @@ function runtimeStrategySummary(cfg, art) {
     return `${strategyName} | 快线=${strategy.fast ?? '-'} 慢线=${strategy.slow ?? '-'}${brTag} | 最大持仓=${maxPositions}`;
   }
   return `${strategyName || 'STRATEGY'} | 最大持仓=${maxPositions}`;
-}
-
-function compactResultsDir(path) {
-  const text = String(path || '').trim();
-  if (!text) return '-';
-  const parts = text.replaceAll('\\', '/').split('/').filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : text;
 }
 
 function runtimeStrategyOverview(cfg, art) {
@@ -803,6 +741,10 @@ function runtimeStrategyOverview(cfg, art) {
 }
 
 function renderSummaryBar() {
+  if (window.resultsWorkbenchBridge?.isMounted?.()) {
+    if (typeof publishResultsWorkbenchSnapshot === 'function') publishResultsWorkbenchSnapshot();
+    return;
+  }
   const row = state.active_result || {};
   const art = state.active_artifacts || {};
   const cfg = resolveSummaryConfig();
@@ -830,7 +772,6 @@ function renderSummaryBar() {
   setTextById('wbOverviewExpId', row.exp_id || '-');
   setTextById('wbOverviewStatus', row.exp_id ? (row.status || '-') : '等待运行');
   setTextById('wbOverviewConfigSource', String(configSource || '-'));
-  setTextById('wbOverviewResultsDir', compactResultsDir(row.results_dir || state.active_exp?.results_dir || ''));
   setTextById('wbSummaryUniverse', `${start} ~ ${end}`);
   setTextById('wbOverviewBenchmark', benchmark);
   setTextById('wbOverviewUniverseMode', universeMode);
@@ -1186,11 +1127,12 @@ async function openConfigCenterDropdown(anchorEl = null) {
 
 async function previewExecution() {
   buildConfigDraft();
+  if (!state.active_exp?.exp_id) {
+    throw new Error('execution preview 需要先运行或加载一个实验');
+  }
   const body = {
-    config_id: effectiveConfigIdForExecution(),
-    runtime_config_json: state.config_draft,
+    config_json: state.config_draft,
     exp_id: state.active_exp?.exp_id || null,
-    results_dir: state.active_exp?.results_dir || null,
     as_of_date: byId('wbExecDate')?.value || null,
     top_n: Number(state.config_draft?.position_risk?.max_positions || 10),
   };
@@ -1205,14 +1147,16 @@ async function previewExecution() {
     const httpStatus = e?.httpStatus;
     if (httpStatus === 404 || httpStatus === 405) {
       state.execution_api_enabled = false;
-      renderExecutionPanel();
+      if (typeof syncResultsWorkbenchExecution === 'function') syncResultsWorkbenchExecution();
+      else renderExecutionPanel();
       throw new Error('后端未启用 execution preview');
     }
     throw e;
   }
   state.execution_api_enabled = true;
   state.execution_preview = payload;
-  renderExecutionPanel();
+  if (typeof syncResultsWorkbenchExecution === 'function') syncResultsWorkbenchExecution();
+  else renderExecutionPanel();
   if (state.execution_preview?.files?.execution_list_json_path) addLog(`execution_list: ${state.execution_preview.files.execution_list_json_path}`);
 }
 

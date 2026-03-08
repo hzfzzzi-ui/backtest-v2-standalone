@@ -20,22 +20,16 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.api.endpoints._candidate_presets import (  # noqa: E402
-    BREAKOUT_ATR_STOP_K10_CANDIDATE,
-    BREAKOUT_BR35_ATR10_CANDIDATE,
-    _build_static_t1_guard,
-    assess_breakout_atr_stop_k10_candidate_results,
-    assess_breakout_br35_atr10_candidate_results,
-    build_breakout_atr_stop_k10_candidate_cfg,
-    build_breakout_br35_atr10_candidate_cfg,
-    load_locked_baseline_config,
-    load_locked_baseline_meta,
-    write_breakout_atr_stop_k10_candidate_artifacts,
-    write_breakout_br35_atr10_candidate_artifacts,
-)
-from backend.api.endpoints.backtest_v2_artifacts import stabilize_experiment_result  # noqa: E402
 from backend.core.data.cached_provider import clear_ohlcv_cache_files, get_ohlcv_cache_paths  # noqa: E402
+from backend.scripts._internal_helper import (  # noqa: E402
+    candidate_presets_api,
+    read_json_artifact,
+    resolve_internal_results_dir,
+    stabilize_internal_experiment_result,
+)
 from backend.core.tools.experiment_runner import run_experiment  # noqa: E402
+
+CANDIDATE_PRESETS = candidate_presets_api()
 
 
 BASELINE_REF_EXP_ID = "exp_20260307_051743747_77d8"
@@ -107,8 +101,8 @@ def _historical_metrics(exp_id: str) -> dict[str, Any]:
 
 
 def _current_metrics(result: dict[str, Any], results_dir: Path) -> dict[str, Any]:
-    perf = _load_json(results_dir / "perf.json")
-    run_meta = _load_json(results_dir / "run_meta.json")
+    perf = read_json_artifact(results_dir=results_dir, artifact_key="perf", fallback_rel_path="perf.json")
+    run_meta = read_json_artifact(results_dir=results_dir, artifact_key="run_meta", fallback_rel_path="run_meta.json")
     counters = dict(run_meta.get("counters") or {})
     return {
         "exp_id": str(result.get("exp_id") or ""),
@@ -157,7 +151,7 @@ def _run_one(
 
     try:
         result = run_experiment(tmp_path, preset="single", overrides=overrides, progress_hook=progress)
-        stabilized = stabilize_experiment_result(
+        stabilized = stabilize_internal_experiment_result(
             bt_root=ROOT,
             result=result if isinstance(result, dict) else {},
             base_cfg=stabilize_cfg,
@@ -167,7 +161,10 @@ def _run_one(
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
-    results_dir = Path(str(stabilized.get("results_dir") or "")).resolve()
+    results_dir = resolve_internal_results_dir(
+        exp_id=str(stabilized.get("exp_id") or "") or None,
+        results_dir=str(stabilized.get("results_dir") or "") or None,
+    )
     metrics = _current_metrics(stabilized, results_dir)
     print(
         "  CAGR={cagr:+.2%}  MaxDD={max_drawdown:.2%}  Sharpe={sharpe:.2f}  Trades={trades}".format(
@@ -237,16 +234,16 @@ def _write_summary(
 
 
 def main() -> None:
-    baseline_cfg = load_locked_baseline_config(BREAKOUT_ATR_STOP_K10_CANDIDATE)
-    baseline_meta = load_locked_baseline_meta(BREAKOUT_ATR_STOP_K10_CANDIDATE)
-    atr_cfg, atr_candidate_meta = build_breakout_atr_stop_k10_candidate_cfg()
-    br35_cfg, br35_candidate_meta = build_breakout_br35_atr10_candidate_cfg()
+    baseline_cfg = CANDIDATE_PRESETS.load_locked_baseline_config(CANDIDATE_PRESETS.BREAKOUT_ATR_STOP_K10_CANDIDATE)
+    baseline_meta = CANDIDATE_PRESETS.load_locked_baseline_meta(CANDIDATE_PRESETS.BREAKOUT_ATR_STOP_K10_CANDIDATE)
+    atr_cfg, atr_candidate_meta = CANDIDATE_PRESETS.build_breakout_atr_stop_k10_candidate_cfg()
+    br35_cfg, br35_candidate_meta = CANDIDATE_PRESETS.build_breakout_br35_atr10_candidate_cfg()
 
     cache_info = {
         "removed": clear_ohlcv_cache_files(),
         "paths": get_ohlcv_cache_paths(),
     }
-    static_audit = _build_static_t1_guard()
+    static_audit = CANDIDATE_PRESETS._build_static_t1_guard()
     overrides = _build_overrides(baseline_cfg, baseline_meta)
 
     baseline_result, baseline_dir = _run_one(
@@ -268,7 +265,7 @@ def main() -> None:
         ),
         progress_prefix="run",
     )
-    atr_candidate_artifacts = write_breakout_atr_stop_k10_candidate_artifacts(
+    atr_candidate_artifacts = CANDIDATE_PRESETS.write_breakout_atr_stop_k10_candidate_artifacts(
         results_dir=atr_dir,
         result=atr_result,
         candidate_meta=atr_candidate_meta,
@@ -285,7 +282,7 @@ def main() -> None:
         ),
         progress_prefix="run",
     )
-    br35_candidate_artifacts = write_breakout_br35_atr10_candidate_artifacts(
+    br35_candidate_artifacts = CANDIDATE_PRESETS.write_breakout_br35_atr10_candidate_artifacts(
         results_dir=br35_dir,
         result=br35_result,
         candidate_meta=br35_candidate_meta,
@@ -299,7 +296,7 @@ def main() -> None:
         "candidate_status": None,
     }
     atr_row = {
-        "variant": BREAKOUT_ATR_STOP_K10_CANDIDATE,
+        "variant": CANDIDATE_PRESETS.BREAKOUT_ATR_STOP_K10_CANDIDATE,
         "historical_exp_id": ATR_REF_EXP_ID,
         **_historical_metrics(ATR_REF_EXP_ID),
         **_current_metrics(atr_result, atr_dir),
@@ -307,10 +304,10 @@ def main() -> None:
         "candidate_summary_path": str(atr_candidate_artifacts.get("candidate_summary_path") or ""),
         "candidate_summary_json_path": str(atr_candidate_artifacts.get("candidate_summary_json_path") or ""),
         "candidate_assessment_path": str((atr_dir / "candidate_summary.json")),
-        "assessment": assess_breakout_atr_stop_k10_candidate_results(atr_dir),
+        "assessment": CANDIDATE_PRESETS.assess_breakout_atr_stop_k10_candidate_results(atr_dir),
     }
     br35_row = {
-        "variant": BREAKOUT_BR35_ATR10_CANDIDATE,
+        "variant": CANDIDATE_PRESETS.BREAKOUT_BR35_ATR10_CANDIDATE,
         "historical_exp_id": BR35_REF_EXP_ID,
         **_historical_metrics(BR35_REF_EXP_ID),
         **_current_metrics(br35_result, br35_dir),
@@ -318,7 +315,7 @@ def main() -> None:
         "candidate_summary_path": str(br35_candidate_artifacts.get("candidate_summary_path") or ""),
         "candidate_summary_json_path": str(br35_candidate_artifacts.get("candidate_summary_json_path") or ""),
         "candidate_assessment_path": str((br35_dir / "candidate_summary.json")),
-        "assessment": assess_breakout_br35_atr10_candidate_results(br35_dir),
+        "assessment": CANDIDATE_PRESETS.assess_breakout_br35_atr10_candidate_results(br35_dir),
     }
 
     out_dir = ROOT / "outputs" / "ops" / f"clean_data_standard_rerun_{datetime.now().strftime('%Y%m%d_%H%M%S')}"

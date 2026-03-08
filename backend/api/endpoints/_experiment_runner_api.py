@@ -13,12 +13,17 @@ from pydantic import BaseModel
 from .backtest_v2_artifacts import stabilize_experiment_result
 from ._paths import _bt_root, _results_root
 from ._utils import sanitize_json, _sanitize_for_json
-from ._candidate_presets import (
+from ._semantic_config_compiler import (
+    SEMANTIC_CONFIG_SCHEMA_VERSION,
+    compile_semantic_config_json,
+    validate_semantic_config_json,
+)
+from backend.core.tools.locked_candidate_presets import (
     build_locked_candidate_cfg,
     is_locked_candidate_preset,
     write_locked_candidate_artifacts,
 )
-from ._config_governance import resolve_runtime_config_source
+from backend.core.tools.saved_config_access import resolve_runtime_config_source
 from ._job_store import (
     _JOBS,
     _JOBS_LOCK,
@@ -29,12 +34,14 @@ from ._job_store import (
     _load_job_from_disk,
     _job_payload,
 )
+from ._public_contracts import PublicBacktestV2ExperimentRequest, to_internal_experiment_request
 
 router = APIRouter(tags=["backtest_v2"])
 
 
 class BacktestV2ExperimentRequest(BaseModel):
     preset: str = "G1-G4"
+    config_json: dict[str, Any] | None = None
     symbols: list[str] | None = None
     start_date: str | None = None
     end_date: str | None = None
@@ -52,9 +59,9 @@ class BacktestV2ExperimentRequest(BaseModel):
     runtime_config_json: dict[str, Any] | None = None
     workbench_mode: str | None = None
     workbench_config: dict[str, Any] | None = None
-    universe_mode: str = "CUSTOM"
-    industries: list[str] = []
-    price_adj: str = "hfq"
+    universe_mode: str | None = None
+    industries: list[str] | None = None
+    price_adj: str | None = None
     # 选股排序参数透传
     enable_strength_rank: bool | None = None
     strength_ma: int | None = None
@@ -64,10 +71,104 @@ class BacktestV2ExperimentRequest(BaseModel):
     momentum_top_pct: float | None = None
 
 
+def _public_run_rejected_fields(body: BacktestV2ExperimentRequest) -> list[str]:
+    rejected: list[str] = []
+    candidates = (
+        ("symbols", bool(body.symbols)),
+        ("start_date", bool(body.start_date)),
+        ("end_date", bool(body.end_date)),
+        ("benchmark", bool(body.benchmark)),
+        ("compare_symbol", bool(body.compare_symbol)),
+        ("initial_capital", body.initial_capital is not None),
+        ("max_positions", body.max_positions is not None),
+        ("base_order_value", body.base_order_value is not None),
+        ("univote_lot_mode", body.univote_lot_mode is not None),
+        ("lot_size", body.lot_size is not None),
+        ("universe_limit", body.universe_limit is not None),
+        ("config_path", bool(str(body.config_path or "").strip())),
+        ("config_id", bool(str(body.config_id or "").strip())),
+        ("runtime_config_json", isinstance(body.runtime_config_json, dict)),
+        ("workbench_config", isinstance(body.workbench_config, dict)),
+        ("universe_mode", body.universe_mode is not None and str(body.universe_mode or "").strip().upper() != "CUSTOM"),
+        ("industries", body.industries is not None and bool(body.industries)),
+        ("price_adj", body.price_adj is not None and str(body.price_adj or "").strip().lower() != "hfq"),
+        ("enable_strength_rank", body.enable_strength_rank is not None),
+        ("strength_ma", body.strength_ma is not None),
+        ("strength_top_k_mode", body.strength_top_k_mode is not None),
+        ("enable_multifactor_rank", body.enable_multifactor_rank is not None),
+        ("mf_topk", body.mf_topk is not None),
+        ("momentum_top_pct", body.momentum_top_pct is not None),
+    )
+    for field, present in candidates:
+        if present:
+            rejected.append(field)
+    return rejected
+
+
+def _validate_public_run_request(body: BacktestV2ExperimentRequest) -> None:
+    if is_locked_candidate_preset(body.preset):
+        _assert_locked_candidate_request_supported(body)
+        return
+    if not isinstance(body.config_json, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "status": "rejected",
+                "reason": "config_json_required",
+                "message": "public run endpoint requires config_json",
+                "required_field": "config_json",
+            },
+        )
+    rejected = _public_run_rejected_fields(body)
+    if rejected:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "status": "rejected",
+                "reason": "legacy_config_fields_not_allowed",
+                "message": "public run endpoint only accepts config_json as configuration truth",
+                "rejected_fields": rejected,
+            },
+        )
+
+
+def _attach_public_experiment_id(result: dict[str, Any]) -> dict[str, Any]:
+    payload = sanitize_json(dict(result or {}))
+    exp_id = str(payload.get("exp_id") or payload.get("experiment_id") or "").strip()
+    payload["exp_id"] = exp_id
+    payload["experiment_id"] = exp_id or None
+    return payload
+
+
+def _public_experiment_result_response(result: dict[str, Any] | None) -> dict[str, Any]:
+    payload = dict(result or {})
+    exp_id = str(payload.get("exp_id") or payload.get("experiment_id") or "").strip()
+    manifest = payload.get("manifest") if isinstance(payload.get("manifest"), dict) else {}
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    report_rel = str(artifacts.get("report") or "").strip()
+    return sanitize_json(
+        {
+            "experiment_id": exp_id or None,
+            "exp_id": exp_id or None,
+            "status": str(payload.get("status") or "OK"),
+            "baseline_compare_status": manifest.get("baseline_compare_status"),
+            "has_report": bool(report_rel),
+            "endpoints": {
+                "manifest": f"/api/backtest_v2/experiments/{exp_id}/manifest" if exp_id else None,
+                "report": f"/api/backtest_v2/experiments/{exp_id}/report" if exp_id else None,
+            },
+        }
+    )
+
+
 def _load_base_config(bt_root: Path) -> dict[str, Any]:
     cfg_path = bt_root / "configs" / "pams_cn_pg.json"
     if not cfg_path.exists():
-        raise HTTPException(status_code=500, detail=f"missing config template: {cfg_path}")
+        cfg_path_alt = bt_root.parent / "configs" / "pams_cn_pg.json"
+        if cfg_path_alt.exists():
+            cfg_path = cfg_path_alt
+        else:
+            raise HTTPException(status_code=500, detail=f"missing config template: {cfg_path}")
     return json.loads(cfg_path.read_text(encoding="utf-8-sig"))
 
 
@@ -108,6 +209,8 @@ def _assert_locked_candidate_request_supported(body: BacktestV2ExperimentRequest
         forbidden.append("config_id")
     if body.runtime_config_json is not None:
         forbidden.append("runtime_config_json")
+    if body.config_json is not None:
+        forbidden.append("config_json")
     if body.workbench_config is not None:
         forbidden.append("workbench_config")
     if body.enable_strength_rank is not None:
@@ -515,6 +618,73 @@ def _build_runtime_cfg_from_workbench(
     return cfg
 
 
+def _compile_semantic_config_bundle(
+    *,
+    base_cfg: dict[str, Any],
+    body: BacktestV2ExperimentRequest | None,
+    semantic_cfg: dict[str, Any],
+    config_source: str,
+    use_body_universe_fields: bool,
+) -> dict[str, Any]:
+    request_body = body if body is not None else BacktestV2ExperimentRequest()
+    compiled = compile_semantic_config_json(
+        semantic_cfg,
+        compiled_plan_payload={},
+        config_source=config_source,
+    )
+    resolved_semantic_cfg = (
+        ((compiled.get("resolved_config") or {}).get("config_json"))
+        if isinstance(compiled.get("resolved_config"), dict)
+        else None
+    )
+    runtime_cfg = _build_runtime_cfg_from_workbench(
+        base_cfg,
+        request_body,
+        resolved_semantic_cfg if isinstance(resolved_semantic_cfg, dict) else semantic_cfg,
+        use_body_universe_fields=use_body_universe_fields,
+    )
+    compiled["compiled_plan"] = sanitize_json(
+        {
+            **dict(compiled.get("compiled_plan") or {}),
+            "runtime_config": sanitize_json(dict(runtime_cfg)),
+        }
+    )
+    compiled["runtime_config"] = sanitize_json(dict(runtime_cfg))
+    return compiled
+
+
+def _execution_override_snapshot(overrides: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "symbols",
+        "start_date",
+        "end_date",
+        "benchmark",
+        "compare_symbol",
+        "initial_capital",
+        "max_positions",
+        "base_order_value",
+        "lot_size",
+        "universe_limit",
+        "fast_mode",
+        "universe_mode",
+        "industries",
+        "price_adj",
+        "enable_strength_rank",
+        "strength_ma",
+        "strength_top_k_mode",
+        "enable_multifactor_rank",
+        "mf_topk",
+        "momentum_top_pct",
+    )
+    return sanitize_json({key: overrides.get(key) for key in keys if key in overrides})
+
+
+def _looks_like_backend_runtime_config(cfg: dict[str, Any] | None) -> bool:
+    if not isinstance(cfg, dict):
+        return False
+    return isinstance(cfg.get("db"), dict) and isinstance(cfg.get("schema_mapping"), dict)
+
+
 def _run_locked_candidate_preset_sync(
     *,
     body: BacktestV2ExperimentRequest,
@@ -579,6 +749,7 @@ def _run_locked_candidate_preset_sync(
         raise HTTPException(status_code=500, detail=f"artifact stabilization failed: {exc}")
 
     result.setdefault("exp_id", "")
+    result["experiment_id"] = str(result.get("exp_id") or "") or None
     result.setdefault("results_dir", "")
     result.setdefault("status", "OK")
     result["requested_preset"] = str(body.preset or "").strip()
@@ -616,7 +787,7 @@ def _run_locked_candidate_preset_sync(
         blockers = ", ".join(str(item) for item in (candidate_artifacts.get("blockers") or []) if str(item).strip())
         raise HTTPException(status_code=500, detail=f"candidate audit blocked: {blockers or 'unknown blockers'}")
 
-    return sanitize_json(result)
+    return _attach_public_experiment_id(result)
 
 
 def _run_backtest_v2_experiment_sync(
@@ -655,22 +826,55 @@ def _run_backtest_v2_experiment_sync(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"invalid config json: {cfg_path} ({exc})")
 
-    resolution = resolve_runtime_config_source(
-        config_id=body.config_id,
-        runtime_config=body.runtime_config_json,
-        draft_config=body.workbench_config,
-    )
-    effective_wb_cfg = resolution.get("effective_config_json") if isinstance(resolution.get("effective_config_json"), dict) else None
-    config_source = str(resolution.get("config_source") or "none")
-    resolved_config_mode = str(resolution.get("resolved_config_mode") or "none")
-    resolved_config_id = str(resolution.get("resolved_config_id") or body.config_id or "").strip()
-    resolved_config_hash = str(resolution.get("resolved_config_hash") or "").strip()
-    resolved_config_meta = resolution.get("resolved_config_meta") if isinstance(resolution.get("resolved_config_meta"), dict) else None
-    use_script_cfg = resolved_config_mode == "saved_config_run"
-    runtime_config_supplied = isinstance(body.runtime_config_json, dict)
+    semantic_cfg_input = validate_semantic_config_json(body.config_json) if isinstance(body.config_json, dict) else None
+    semantic_compile: dict[str, Any] | None = None
+    if isinstance(semantic_cfg_input, dict):
+        legacy_inputs_present = [
+            field
+            for field, present in (
+                ("config_id", bool(str(body.config_id or "").strip())),
+                ("runtime_config_json", isinstance(body.runtime_config_json, dict)),
+                ("workbench_config", isinstance(body.workbench_config, dict)),
+                ("config_path", bool(str(body.config_path or "").strip())),
+            )
+            if present
+        ]
+        effective_wb_cfg = semantic_cfg_input
+        config_source = "config_json"
+        resolved_config_mode = "semantic_config_run"
+        resolved_config_id = ""
+        resolved_config_hash = ""
+        resolved_config_meta = sanitize_json(
+            {
+                "source_type": "frontend_semantic",
+                "owner": "manual",
+                "schema_version": SEMANTIC_CONFIG_SCHEMA_VERSION,
+                "config_source": "config_json",
+                "legacy_inputs_present": legacy_inputs_present,
+            }
+        )
+        use_script_cfg = False
+        runtime_config_supplied = False
+        conflict_policy = "config_json_preferred"
+    else:
+        draft_config = body.workbench_config
+        resolution = resolve_runtime_config_source(
+            config_id=body.config_id,
+            runtime_config=body.runtime_config_json,
+            draft_config=draft_config,
+        )
+        effective_wb_cfg = resolution.get("effective_config_json") if isinstance(resolution.get("effective_config_json"), dict) else None
+        config_source = str(resolution.get("config_source") or "none")
+        resolved_config_mode = str(resolution.get("resolved_config_mode") or "none")
+        resolved_config_id = str(resolution.get("resolved_config_id") or body.config_id or "").strip()
+        resolved_config_hash = str(resolution.get("resolved_config_hash") or "").strip()
+        resolved_config_meta = resolution.get("resolved_config_meta") if isinstance(resolution.get("resolved_config_meta"), dict) else None
+        use_script_cfg = resolved_config_mode == "saved_config_run"
+        runtime_config_supplied = isinstance(body.runtime_config_json, dict)
+        conflict_policy = str(resolution.get("config_conflict_policy") or "none")
 
     overrides: dict[str, Any] = {}
-    if not use_script_cfg and not runtime_config_supplied:
+    if not use_script_cfg and not runtime_config_supplied and not isinstance(semantic_cfg_input, dict):
         if body.symbols:
             overrides["symbols"] = list(body.symbols)
         if body.start_date:
@@ -701,31 +905,55 @@ def _run_backtest_v2_experiment_sync(
         overrides["resolved_config_hash"] = resolved_config_hash
     if resolved_config_meta is not None:
         overrides["resolved_config_meta"] = sanitize_json(dict(resolved_config_meta))
-    conflict_policy = str(resolution.get("config_conflict_policy") or "none")
     if conflict_policy != "none":
         overrides["config_conflict_policy"] = conflict_policy
     if body.workbench_mode:
         overrides["workbench_mode"] = str(body.workbench_mode)
     if isinstance(effective_wb_cfg, dict):
         wb_cfg = effective_wb_cfg
+        if not _looks_like_backend_runtime_config(wb_cfg):
+            semantic_compile = _compile_semantic_config_bundle(
+                base_cfg=base_cfg,
+                body=body,
+                semantic_cfg=wb_cfg,
+                config_source=config_source,
+                use_body_universe_fields=not (use_script_cfg or runtime_config_supplied or isinstance(semantic_cfg_input, dict)),
+            )
+            resolved_config_hash = str(semantic_compile.get("config_hash") or resolved_config_hash or "").strip()
+            if resolved_config_hash:
+                overrides["resolved_config_hash"] = resolved_config_hash
+            resolved_config_meta_payload = dict(resolved_config_meta or {})
+            resolved_config_meta_payload.setdefault("schema_version", SEMANTIC_CONFIG_SCHEMA_VERSION)
+            resolved_config_meta_payload.setdefault("config_source", config_source)
+            resolved_config_meta_payload["config_hash"] = resolved_config_hash or resolved_config_meta_payload.get("config_hash")
+            resolved_config_meta = sanitize_json(resolved_config_meta_payload)
+            overrides["resolved_config_meta"] = resolved_config_meta
         if body.initial_capital is None and wb_cfg.get("initial_capital") is not None:
             try:
                 overrides["initial_capital"] = float(wb_cfg.get("initial_capital"))
             except Exception:
                 pass
-        overrides["workbench_config"] = _build_runtime_cfg_from_workbench(
-            base_cfg,
-            body,
-            wb_cfg,
-            use_body_universe_fields=not (use_script_cfg or runtime_config_supplied),
-        )
-        overrides["original_workbench_config"] = wb_cfg
+        if isinstance(semantic_compile, dict):
+            overrides["workbench_config"] = semantic_compile.get("runtime_config")
+            overrides["original_workbench_config"] = semantic_compile.get("input_config")
+        else:
+            overrides["workbench_config"] = wb_cfg
+            overrides["original_workbench_config"] = semantic_cfg_input if isinstance(semantic_cfg_input, dict) else wb_cfg
     if use_script_cfg or runtime_config_supplied:
         wb_uni = effective_wb_cfg.get("universe") if isinstance(effective_wb_cfg.get("universe"), dict) else {}
         overrides["universe_mode"] = str(effective_wb_cfg.get("universe_mode") or body.universe_mode or "CUSTOM")
         overrides["industries"] = list(effective_wb_cfg.get("industries") or [])
         overrides["price_adj"] = str(wb_uni.get("price_adj") or body.price_adj or "hfq")
     else:
+        wb_uni = effective_wb_cfg.get("universe") if isinstance(effective_wb_cfg.get("universe"), dict) else {}
+        wb_universe_mode = str(effective_wb_cfg.get("universe_mode") or "").strip()
+        if wb_universe_mode:
+            overrides["universe_mode"] = wb_universe_mode
+        if isinstance(effective_wb_cfg.get("industries"), list):
+            overrides["industries"] = list(effective_wb_cfg.get("industries") or [])
+        wb_price_adj = str(wb_uni.get("price_adj") or "").strip()
+        if wb_price_adj:
+            overrides["price_adj"] = wb_price_adj
         if body.universe_mode and not runtime_config_supplied:
             overrides["universe_mode"] = str(body.universe_mode)
         if body.industries and not runtime_config_supplied:
@@ -745,6 +973,13 @@ def _run_backtest_v2_experiment_sync(
             overrides["mf_topk"] = int(body.mf_topk)
         if body.momentum_top_pct is not None and not runtime_config_supplied:
             overrides["momentum_top_pct"] = float(body.momentum_top_pct)
+    if semantic_compile is not None:
+        semantic_compile["compiled_plan"] = sanitize_json(
+            {
+                **dict(semantic_compile.get("compiled_plan") or {}),
+                "execution_overrides": _execution_override_snapshot(overrides),
+            }
+        )
 
     env_backup = {
         "PAMS_PG_HOST": os.environ.get("PAMS_PG_HOST"),
@@ -777,6 +1012,28 @@ def _run_backtest_v2_experiment_sync(
         pass
 
     try:
+        _write_config_snapshots(
+            result=result if isinstance(result, dict) else {},
+            input_config=(
+                semantic_compile.get("input_config")
+                if isinstance(semantic_compile, dict)
+                else (body.workbench_config if isinstance(body.workbench_config, dict) else None)
+            ),
+            resolved_config=(
+                semantic_compile.get("resolved_config")
+                if isinstance(semantic_compile, dict)
+                else effective_wb_cfg
+            ),
+            compiled_plan=(
+                semantic_compile.get("compiled_plan")
+                if isinstance(semantic_compile, dict)
+                else (overrides.get("workbench_config") if isinstance(overrides.get("workbench_config"), dict) else None)
+            ),
+        )
+    except Exception:
+        pass
+
+    try:
         result = stabilize_experiment_result(
             bt_root=bt_root,
             result=result if isinstance(result, dict) else {},
@@ -788,6 +1045,7 @@ def _run_backtest_v2_experiment_sync(
         raise HTTPException(status_code=500, detail=f"artifact stabilization failed: {exc}")
 
     result.setdefault("exp_id", "")
+    result["experiment_id"] = str(result.get("exp_id") or "") or None
     result.setdefault("results_dir", "")
     result.setdefault("status", "OK")
     result["requested_preset"] = requested_preset
@@ -799,7 +1057,32 @@ def _run_backtest_v2_experiment_sync(
         result["resolved_config_meta"] = sanitize_json(dict(resolved_config_meta))
         result["resolved_config_source_type"] = str(resolved_config_meta.get("source_type") or "")
         result["resolved_config_owner"] = str(resolved_config_meta.get("owner") or "")
-    return sanitize_json(result)
+    return _attach_public_experiment_id(result)
+
+
+def _write_config_snapshots(
+    *,
+    result: dict[str, Any],
+    input_config: dict[str, Any] | None,
+    resolved_config: dict[str, Any] | None,
+    compiled_plan: dict[str, Any] | None,
+) -> None:
+    results_dir_raw = str(result.get("results_dir") or "").strip()
+    if not results_dir_raw:
+        return
+    results_dir = Path(results_dir_raw)
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    snapshots = {
+        "input_config.json": sanitize_json(dict(input_config or {})),
+        "resolved_config.json": sanitize_json(dict(resolved_config or {})),
+        "compiled_plan.json": sanitize_json(dict(compiled_plan or {})),
+    }
+    for filename, payload in snapshots.items():
+        (results_dir / filename).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
 def _attach_run_profile_summary(result: dict[str, Any]) -> None:
     if not isinstance(result, dict):
@@ -886,26 +1169,30 @@ def _run_backtest_v2_experiment_job(job_id: str, body: BacktestV2ExperimentReque
 
 
 @router.post("/api/backtest_v2/experiment/run")
-def run_backtest_v2_experiment(body: BacktestV2ExperimentRequest):
-    return _run_backtest_v2_experiment_sync(body)
+def run_backtest_v2_experiment(body: PublicBacktestV2ExperimentRequest):
+    internal_body = to_internal_experiment_request(body)
+    _validate_public_run_request(internal_body)
+    return _public_experiment_result_response(_run_backtest_v2_experiment_sync(internal_body))
 
 
 @router.post("/api/backtest_v2/experiment/run_async")
-def run_backtest_v2_experiment_async(body: BacktestV2ExperimentRequest):
-    preset_key = str(body.preset or "").strip().upper()
+def run_backtest_v2_experiment_async(body: PublicBacktestV2ExperimentRequest):
+    internal_body = to_internal_experiment_request(body)
+    _validate_public_run_request(internal_body)
+    preset_key = str(internal_body.preset or "").strip().upper()
     eta = 480
-    if is_locked_candidate_preset(body.preset):
+    if is_locked_candidate_preset(internal_body.preset):
         eta = 240
     elif preset_key in {"G1-G4", "REGIME_BUFFER_2X2", "ATR_RISK_2X2", "ATR_PORTFOLIO_VALIDATE_V1", "PORTFOLIO_FILL_VALIDATE_V1", "TREND_FILTER_VALIDATE_V1", "TREND_TIER_VALIDATE_V1", "TREND_ACCEL_BRAKE_VALIDATE_V1", "TREND_BRAKE_CONFIRM_VALIDATE_V1", "STRENGTH_RANK_VALIDATE_V1", "FULL_RANGE_VALIDATE_V1", "CANDIDATE_DIAG_VALIDATE_V1", "SLOT_DEBUG_VALIDATE_V1", "MAX_POSITION_EXPAND_VALIDATE_V1", "STRONG_ONLY_VALIDATE_V1", "MULTIFACTOR_RANKING_VALIDATE_V1", "MULTIFACTOR_RANKING_WALKFORWARD_V1", "MF_RANK_REGIME_GATE_VALIDATE_V1", "MULTIFACTOR_BALANCED_V1", "MULTIFACTOR_FUSION_COMPARE_V1", "MULTIFACTOR_INCREMENTAL_V1", "MULTIFACTOR_INCREMENTAL_V1_6_1A", "EXPERIMENT_6_1A", "6.1A", "MULTIFACTOR_INCREMENTAL_V1_6_1B", "EXPERIMENT_6_1B", "6.1B", "MULTIFACTOR_INCREMENTAL_V1_6_1_LIMIT", "MULTIFACTOR_INCREMENTAL_V1_6_4", "EXPERIMENT_6_4", "6.4", "EXPERIMENT_6_1_LIMIT", "6.1L"}:
         eta = 240
     elif preset_key in {"STRENGTH_RANK_VALIDATE_V2", "STRENGTH_RANK_VALIDATE_V2A", "STRENGTH_RANK_VALIDATE_V2B", "ENGINE_PERF_COMPARE_V1", "ENGINE_PERF_COMPARE_V2"}:
-        eta = 180 if bool(body.fast_mode) else 360
+        eta = 180 if bool(internal_body.fast_mode) else 360
     elif preset_key in {"ATR_PARAM_SCAN_V1"}:
         eta = 1200
     elif preset_key in {"ATR_PARAM_VALIDATE_UNIVOTE", "ATR_PARAM_VALIDATE_UNIVOTE_V2"}:
         eta = 900
     job_id = _create_job("experiment", eta_seconds=eta)
-    th = threading.Thread(target=_run_backtest_v2_experiment_job, args=(job_id, body), daemon=True)
+    th = threading.Thread(target=_run_backtest_v2_experiment_job, args=(job_id, internal_body), daemon=True)
     th.start()
     return {"job_id": job_id, "status": "queued"}
 
@@ -921,6 +1208,8 @@ def get_backtest_v2_job(job_id: str):
         payload = _job_payload(dict(disk_job))
     else:
         payload = _job_payload(dict(job))
+    if str(payload.get("status") or "").strip().lower() == "success" and isinstance(payload.get("result"), dict):
+        payload["result"] = _public_experiment_result_response(payload.get("result"))
     return _sanitize_for_json(payload)
 
 

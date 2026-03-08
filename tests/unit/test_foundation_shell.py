@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+from datetime import date
+from types import SimpleNamespace
+
+import pandas as pd
+
+from backend.core.engine_compat import foundation_shell as mod
+from backend.core.portfolio.portfolio_builder import PortfolioBacktestResult
+from backend.core.stage_pipeline.adapters import LegacyStagePipelineBacktestResult
+from backend.core.stage_pipeline.context import DayContext, PortfolioState
+from backend.core.stage_pipeline.shell import StageDayResult, StagePipelineResult
+
+
+def test_run_foundation_compatibility_shell_delegates_to_stage_pipeline_adapter(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_legacy_stage_pipeline_backtest(request):
+        captured["request"] = request
+        pipeline_result = StagePipelineResult(
+            execution_shell="stage_pipeline_shell_legacy_adapter",
+            daily_loop_mode="single_day_loop",
+            daily_results=(
+                StageDayResult(
+                    day_context=DayContext(
+                        day_index=0,
+                        trading_day=date(2026, 3, 2),
+                        previous_trading_day=None,
+                        next_trading_day=date(2026, 3, 3),
+                        is_first_day=True,
+                        is_last_day=False,
+                    ),
+                    filled_orders=(),
+                    scheduled_for_next_day=({"symbol": "sh600000"},),
+                    stage_order=("S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"),
+                    enabled_stages=("S1", "S2", "S4", "S5", "S6", "S9", "S8", "S7"),
+                    stage_fragments={"S7": {"mode": "legacy_order_planner"}},
+                    warnings=(),
+                ),
+                StageDayResult(
+                    day_context=DayContext(
+                        day_index=1,
+                        trading_day=date(2026, 3, 3),
+                        previous_trading_day=date(2026, 3, 2),
+                        next_trading_day=None,
+                        is_first_day=False,
+                        is_last_day=True,
+                    ),
+                    filled_orders=({"symbol": "sh600000"},),
+                    scheduled_for_next_day=(),
+                    stage_order=("S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"),
+                    enabled_stages=("S1", "S2", "S4", "S5", "S6", "S9", "S8", "S7"),
+                    stage_fragments={"S2": {"mode": "legacy_embedded"}},
+                    warnings=("market_filter_warn",),
+                ),
+            ),
+            summary={
+                "schema_version": "stage_pipeline_summary@1",
+                "execution_shell": "stage_pipeline_shell_legacy_adapter",
+                "daily_loop_mode": "single_day_loop",
+                "stage_order": ["S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"],
+                "enabled_stages": ["S1", "S2", "S4", "S5", "S6", "S9", "S8", "S7"],
+                "warnings": ["market_filter_warn"],
+                "trading_days": 2,
+            },
+            final_state=PortfolioState.empty(cash=100000.0),
+        )
+        return LegacyStagePipelineBacktestResult(
+            portfolio_result=PortfolioBacktestResult(
+                daily=pd.DataFrame([{"date": "2026-03-02", "nav": 1.0}]),
+                trades=pd.DataFrame(columns=["date", "symbol", "side"]),
+                candidates=pd.DataFrame(columns=["date", "symbol"]),
+                metrics={"total_return": 0.1},
+            ),
+            pipeline_result=pipeline_result,
+            route_id="provider_breakout_runtime",
+        )
+
+    monkeypatch.setattr(mod, "run_legacy_stage_pipeline_backtest", _fake_run_legacy_stage_pipeline_backtest)
+
+    request = mod.FoundationCompatibilityRequest(
+        compiled_plan={
+            "runtime_config": {
+                "initial_capital": 200000.0,
+                "execution": {"lot_size": 200},
+                "sizing": {"order_value": 25000.0},
+            },
+            "execution_overrides": {
+                "max_positions": 7,
+                "fast_mode": True,
+                "enable_strength_rank": True,
+                "strength_ma": 55,
+                "strength_top_k_mode": "TOP_K",
+                "enable_multifactor_rank": True,
+                "mf_topk": 8,
+                "mf_concentrate_topn": 2,
+                "mf_concentrate_scale": 1.2,
+                "mf_rank_gate_mode": "RISK_ON_ONLY",
+                "momentum_top_pct": 0.15,
+            },
+        },
+        data_bundle=SimpleNamespace(),
+        cfg_obj=SimpleNamespace(
+            initial_capital=100000.0,
+            execution=SimpleNamespace(lot_size=100),
+            sizing=SimpleNamespace(order_value=10000.0),
+            costs=SimpleNamespace(),
+            exit=SimpleNamespace(),
+            risk=SimpleNamespace(),
+            risk_budget=SimpleNamespace(),
+            market_filter=SimpleNamespace(),
+            benchmark_regime=SimpleNamespace(),
+            breadth=SimpleNamespace(),
+            universe=SimpleNamespace(benchmark="000300.SH"),
+        ),
+        strategy=SimpleNamespace(),
+    )
+
+    result = mod.run_foundation_compatibility_shell(request)
+
+    adapter_request = captured["request"]
+    assert adapter_request.max_positions == 7
+    assert adapter_request.lot_size == 200
+    assert adapter_request.base_order_value == 25000.0
+    assert adapter_request.enable_strength_rank is True
+    assert adapter_request.enable_multifactor_rank is True
+    assert adapter_request.mf_rank_gate_mode == "RISK_ON_ONLY"
+    assert adapter_request.momentum_top_pct == 0.15
+
+    stage_summary = result.metrics["stage_summary"]
+    assert stage_summary["route_id"] == "provider_breakout_runtime"
+    assert stage_summary["days_with_fills"] == 1
+    assert stage_summary["days_with_scheduled_orders"] == 1
+    assert stage_summary["days_with_warnings"] == 1
+    assert stage_summary["warnings"] == ["market_filter_warn"]
+
+    stage_pipeline = result.metrics["stage_pipeline"]
+    assert stage_pipeline["execution_shell"] == "stage_pipeline_shell_legacy_adapter"
+    assert stage_pipeline["enabled_stages"] == ["S1", "S2", "S4", "S5", "S6", "S9", "S8", "S7"]
+    assert result.metrics["audit"]["stage_pipeline"]["route_id"] == "provider_breakout_runtime"

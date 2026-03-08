@@ -19,6 +19,7 @@ ARTIFACT_FILENAMES: dict[str, str] = {
     "alpha_funnel": "alpha_funnel.csv",
     "score_diagnostics": "score_diagnostics.csv",
     "symbol_performance": "symbol_performance.csv",
+    "stage_summary": "stage_summary.json",
 }
 
 COUNTER_CANONICAL_FIELDS: tuple[str, ...] = (

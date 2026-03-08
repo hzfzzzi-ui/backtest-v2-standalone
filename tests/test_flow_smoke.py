@@ -123,12 +123,7 @@ def test_step_2_launch_experiment(client: TestClient, flow_state: dict):
         "/api/backtest_v2/experiment/run_async",
         json={
             "preset": "G1-G4",
-            "symbols": SMOKE_CONFIG["universe"]["symbols"],
-            "start_date": SMOKE_CONFIG["universe"]["start"],
-            "end_date": SMOKE_CONFIG["universe"]["end"],
-            "benchmark": SMOKE_CONFIG["universe"]["benchmark"],
-            "config_path": "configs/pams_cn_pg.json",
-            "workbench_config": SMOKE_CONFIG,
+            "config_json": SMOKE_CONFIG,
         },
     )
     assert resp.status_code == 200, f"run_async returned {resp.status_code}: {resp.text}"
@@ -179,22 +174,42 @@ def test_step_3_poll_to_success(client: TestClient, flow_state: dict):
 
 
 def test_step_4_verify_artifacts(client: TestClient, flow_state: dict):
-    """Check experiment result uses flat single-run schema."""
+    """Check public result surface is experiment_id-first and manifest-driven."""
     result = flow_state.get("job_result", {})
     assert result, "Skipped: no job_result from step 3"
 
-    assert "rows" not in result, "flat result should not include rows[]"
     assert result.get("status") == "OK", f"unexpected status: {result.get('status')!r}"
+    exp_id = result.get("experiment_id") or result.get("exp_id")
+    assert exp_id, f"run result missing experiment_id: {result}"
+    assert not result.get("results_dir"), "public run result should not require results_dir"
 
-    for field in ("sharpe", "max_drawdown", "cagr"):
-        val = result.get(field)
-        assert val is not None, f"missing top-level field: {field}"
-        assert isinstance(val, (int, float)), f"{field} is not numeric ({val!r})"
+    manifest_resp = client.get(f"/api/backtest_v2/experiments/{exp_id}/manifest")
+    assert manifest_resp.status_code == 200, f"manifest returned {manifest_resp.status_code}: {manifest_resp.text}"
+    manifest = manifest_resp.json()
+    flow_state["manifest"] = manifest
 
-    artifacts = result.get("artifacts", {})
-    assert isinstance(artifacts, dict), "result.artifacts should be a dict"
-    for key in ("perf", "nav", "funnel", "reason_codes", "config", "run_meta"):
-        assert artifacts.get(key), f"result.artifacts missing '{key}'"
+    assert manifest.get("experiment_id") == exp_id
+    core_artifacts = manifest.get("core_artifacts", {})
+    for key in ("perf", "nav", "run_meta", "config"):
+        assert core_artifacts.get(key), f"manifest.core_artifacts missing '{key}'"
+
+    perf_resp = client.post(
+        "/api/backtest_v2/artifacts/read",
+        json={"exp_id": exp_id, "rel_path": core_artifacts["perf"]},
+    )
+    assert perf_resp.status_code == 200, f"perf artifact read returned {perf_resp.status_code}: {perf_resp.text}"
+    perf_payload = perf_resp.json()
+    assert perf_payload.get("kind") == "json"
+    assert isinstance(perf_payload.get("data"), dict)
+
+    nav_resp = client.post(
+        "/api/backtest_v2/artifacts/read",
+        json={"exp_id": exp_id, "rel_path": core_artifacts["nav"]},
+    )
+    assert nav_resp.status_code == 200, f"nav artifact read returned {nav_resp.status_code}: {nav_resp.text}"
+    nav_payload = nav_resp.json()
+    assert nav_payload.get("kind") == "csv"
+    assert isinstance(nav_payload.get("rows"), list)
 
 
 # ---------------------------------------------------------------------------

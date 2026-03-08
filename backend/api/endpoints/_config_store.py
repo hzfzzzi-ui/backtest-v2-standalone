@@ -6,13 +6,19 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from ._paths import _configs_root
 from ._utils import sanitize_json, _sanitize_for_json
-from ._config_governance import (
+from backend.core.tools.saved_config_access import (
+    configs_root as _shared_configs_root,
     create_saved_config_record,
     load_saved_config_record,
     normalize_saved_config_record,
     write_saved_config_record,
+)
+from backend.core.tools.baseline_access import (
+    ensure_default_baseline_v1,
+    list_baseline_records,
+    load_baseline_record,
+    write_baseline_record,
 )
 
 router = APIRouter(tags=["backtest_v2"])
@@ -25,6 +31,10 @@ _C4_CHAMPION_CONFIG_ID = "cfg_champion_0407_c4"
 _CLEAN_BASELINE_CSI800_10Y_CONFIG_ID = "cfg_clean_baseline_csi800_10y"
 # Keep the legacy config_id for compatibility with existing references.
 _BR35_ATR10_CSI800_10Y_CONFIG_ID = "cfg_br35_atr10_csi800_10y"
+
+
+def _configs_root():
+    return _shared_configs_root()
 
 
 def _flow_script_config_json() -> dict[str, Any]:
@@ -902,6 +912,16 @@ class BacktestV2ConfigSaveRequest(BaseModel):
     baseline_of: str | None = None
 
 
+class BacktestV2BaselineSaveRequest(BaseModel):
+    baseline_id: str | None = None
+    name: str | None = None
+    display_name: str | None = None
+    config_json: dict[str, Any]
+    linked_exp_id: str | None = None
+    owner: str | None = None
+    locked: bool | None = None
+
+
 @router.post("/api/backtest_v2/configs")
 def save_backtest_v2_config(body: BacktestV2ConfigSaveRequest):
     record = create_saved_config_record(
@@ -964,3 +984,34 @@ def list_backtest_v2_configs(latest: int = Query(20, ge=1, le=200)):
         reverse=True,
     )
     return _sanitize_for_json({"items": rows[: int(latest)]})
+
+
+@router.get("/api/backtest_v2/baselines")
+def list_backtest_v2_baselines():
+    ensure_default_baseline_v1()
+    return _sanitize_for_json({"items": list_baseline_records()})
+
+
+@router.get("/api/backtest_v2/baselines/{baseline_id}")
+def get_backtest_v2_baseline(baseline_id: str):
+    ensure_default_baseline_v1()
+    record = load_baseline_record(baseline_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"baseline not found: {baseline_id}")
+    return _sanitize_for_json(record)
+
+
+@router.post("/api/backtest_v2/baselines")
+def save_backtest_v2_baseline(body: BacktestV2BaselineSaveRequest):
+    record = write_baseline_record(
+        {
+            "baseline_id": str(body.baseline_id or body.display_name or body.name or "").strip(),
+            "name": str(body.name or body.display_name or body.baseline_id or "").strip(),
+            "display_name": str(body.display_name or body.name or body.baseline_id or "").strip(),
+            "config_json": sanitize_json(body.config_json),
+            "linked_exp_id": str(body.linked_exp_id or "").strip() or None,
+            "owner": str(body.owner or "manual"),
+            "locked": True if body.locked is None else bool(body.locked),
+        }
+    )
+    return _sanitize_for_json(record)

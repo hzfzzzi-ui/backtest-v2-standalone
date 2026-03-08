@@ -6,9 +6,10 @@ from pathlib import Path
 import pandas as pd
 
 from backend.api.endpoints import _config_store
-from backend.api.endpoints._config_governance import create_saved_config_record, load_saved_config_record
 from backend.api.endpoints.backtest_v2 import _extract_reason_code_counts, _normalized_run_meta_counters
 from backend.api.endpoints.backtest_v2_artifacts import stabilize_experiment_result
+from backend.core.tools import saved_config_access
+from backend.core.tools.saved_config_access import create_saved_config_record, load_saved_config_record
 
 
 def test_canonical_artifact_contract_and_missing_fields(tmp_path: Path) -> None:
@@ -104,6 +105,7 @@ def test_builtin_config_metadata_refreshes_even_when_hash_is_unchanged(
     configs_root = tmp_path / "configs"
     configs_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(_config_store, "_configs_root", lambda: configs_root)
+    monkeypatch.setattr(saved_config_access, "configs_root", lambda: configs_root)
 
     stale = create_saved_config_record(
         _config_store._br35_atr10_csi800_10y_config_json(),
@@ -178,3 +180,83 @@ def test_run_meta_report_consistency_includes_resolved_config_details(tmp_path: 
     assert consistency.get("resolved_config_hash") == "abc123"
     assert (consistency.get("resolved_config_meta") or {}).get("display_name") == "BR35+ATR1.0+HS300+ZZ500+10Y"
     assert (consistency.get("resolved_config_meta") or {}).get("universe_mode") == "HS300_ZZ500"
+
+
+def test_stage_summary_artifact_is_written_and_indexed(tmp_path: Path) -> None:
+    bt_root = tmp_path / "backtest_V2"
+    bt_root.mkdir(parents=True, exist_ok=True)
+    results_dir = tmp_path / "exp_case_stage_summary"
+
+    base_cfg = {
+        "universe": {"start": "2024-01-01", "end": "2024-12-31", "benchmark": "000300.SH"},
+        "signal": {"strategy": "EMA_CROSS"},
+    }
+    result = {
+        "exp_id": "exp_case_stage_summary",
+        "results_dir": str(results_dir),
+        "status": "OK",
+        "total_return": 0.03,
+        "max_drawdown": -0.08,
+        "cagr": 0.03,
+        "sharpe": 0.6,
+        "trades": 2,
+        "raw_signal": 4,
+        "blocked": 1,
+        "orders": 2,
+        "skipped": 0,
+        "closed_trades": 1,
+        "stage_summary": {
+            "schema_version": "stage_pipeline_summary@1",
+            "execution_shell": "stage_pipeline_shell_legacy_adapter",
+            "daily_loop_mode": "single_day_loop",
+            "route_id": "provider_breakout_runtime",
+            "stage_order": ["S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"],
+            "enabled_stages": ["S1", "S2", "S4", "S5", "S6", "S9", "S8", "S7"],
+            "warnings": ["market_filter_warn"],
+            "trading_days": 2,
+            "days_with_warnings": 1,
+            "days_with_fills": 1,
+            "days_with_scheduled_orders": 1,
+        },
+        "stage_pipeline": {
+            "schema_version": "stage_pipeline_summary@1",
+            "execution_shell": "stage_pipeline_shell_legacy_adapter",
+            "daily_loop_mode": "single_day_loop",
+            "route_id": "provider_breakout_runtime",
+            "stage_order": ["S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"],
+            "enabled_stages": ["S1", "S2", "S4", "S5", "S6", "S9", "S8", "S7"],
+            "warnings": ["market_filter_warn"],
+            "trading_days": 2,
+        },
+        "metrics": {
+            "audit": {
+                "legacy_kernel": "strict_core",
+            },
+        },
+    }
+
+    out = stabilize_experiment_result(
+        bt_root=bt_root,
+        result=result,
+        base_cfg=base_cfg,
+        overrides={},
+        run_profile_summary=None,
+    )
+
+    artifacts = dict(out.get("artifacts") or {})
+    assert artifacts.get("stage_summary") == "stage_summary.json"
+
+    stage_summary = json.loads((results_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    assert stage_summary["execution_shell"] == "stage_pipeline_shell_legacy_adapter"
+    assert stage_summary["route_id"] == "provider_breakout_runtime"
+
+    run_meta = json.loads((results_dir / "run_meta.json").read_text(encoding="utf-8"))
+    assert (run_meta.get("stage_pipeline") or {}).get("execution_shell") == "stage_pipeline_shell_legacy_adapter"
+
+    audit = json.loads((results_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit.get("legacy_kernel") == "strict_core"
+    assert (audit.get("stage_pipeline") or {}).get("stage_order") == ["S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"]
+
+    manifest = json.loads((results_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["artifacts"]["stage_summary"] == "stage_summary.json"
+    assert (manifest.get("stage_pipeline") or {}).get("route_id") == "provider_breakout_runtime"
