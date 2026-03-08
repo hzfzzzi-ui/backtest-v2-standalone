@@ -109,6 +109,14 @@ def _price_adj_label(label: Any) -> str:
     return mapping.get(s, s) or "-"
 
 
+def _render_enabled_k(enabled: Any, k: Any) -> str:
+    if enabled is True:
+        return f"启用 (k={_n2(k)})" if k is not None else "启用"
+    if enabled is False:
+        return "禁用"
+    return "-"
+
+
 def _load_json(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -247,7 +255,7 @@ def _build_trade_analysis(trades: list[dict], funnel: dict, counters: dict, funn
         f_closed = int(counters.get("closed_trades") or 0)
 
     if f_raw or f_orders or f_closed:
-        html += f"""<h4>信号漏斗</h4><p style="color:#666;font-size:12px">数据源: {_e(funnel_source)}</p><table>
+        html += f"""<h4>信号漏斗</h4><p style="color:#666;font-size:12px">数据源: {_e(funnel_source)}；当前表格展示的是引擎事件级聚合计数，字段名未进一步区分 symbol-level 或 portfolio-level 口径。</p><table>
         <tr><td>原始信号</td><td>{_inum(f_raw)}</td></tr>
         <tr><td>被拦截</td><td>{_inum(f_blocked)}</td></tr>
         <tr><td>下单</td><td>{_inum(f_orders)}</td></tr>
@@ -285,16 +293,29 @@ def _build_config_summary(config: dict, run_config: dict, resolved_symbol_count:
     overrides = config.get("overrides") or {}
     wc = overrides.get("original_workbench_config") or overrides.get("workbench_config") or {}
     rc = run_config if isinstance(run_config, dict) else {}
+    rc_exit = rc.get("exit") if isinstance(rc.get("exit"), dict) else {}
+    rc_risk_budget = rc.get("risk_budget") if isinstance(rc.get("risk_budget"), dict) else {}
+    rc_sizing = rc.get("sizing") if isinstance(rc.get("sizing"), dict) else {}
 
     sig_w = wc.get("signal_generation") if isinstance(wc.get("signal_generation"), dict) else {}
     bo_w = sig_w.get("breakout") if isinstance(sig_w.get("breakout"), dict) else {}
     pr_w = wc.get("position_risk") if isinstance(wc.get("position_risk"), dict) else {}
     ex_w = wc.get("exit_rules") if isinstance(wc.get("exit_rules"), dict) else {}
     u_w = wc.get("universe") if isinstance(wc.get("universe"), dict) else {}
+    sizing_w = wc.get("sizing") if isinstance(wc.get("sizing"), dict) else {}
+    benchmark_regime_w = wc.get("benchmark_regime") if isinstance(wc.get("benchmark_regime"), dict) else {}
+    stock_trend_w = wc.get("stock_trend_filter") if isinstance(wc.get("stock_trend_filter"), dict) else {}
+    sector_gate_w = wc.get("sector_gate") if isinstance(wc.get("sector_gate"), dict) else {}
     filters = u_w.get("filters") if isinstance(u_w.get("filters"), dict) else {}
 
     strategy = (sig_w.get("strategy") or _dig(rc, "strategy.name") or "UNKNOWN").upper()
     params = _dig(rc, "strategy.params") or {}
+    regime_det = sig_w.get("regime_detection") if isinstance(sig_w.get("regime_detection"), dict) else {}
+    regime_filter = regime_det.get("regime_filter") if isinstance(regime_det.get("regime_filter"), dict) else {}
+    ranking_w = sig_w.get("ranking") if isinstance(sig_w.get("ranking"), dict) else {}
+    risk_budget_w = pr_w.get("risk_budget") if isinstance(pr_w.get("risk_budget"), dict) else {}
+    market_filter_w = pr_w.get("market_filter") if isinstance(pr_w.get("market_filter"), dict) else {}
+    breadth_w = pr_w.get("breadth") if isinstance(pr_w.get("breadth"), dict) else {}
 
     html = ""
 
@@ -329,16 +350,75 @@ def _build_config_summary(config: dict, run_config: dict, resolved_symbol_count:
       <tr><td>入场缓冲</td><td>{_n2(entry_buf) + '%' if entry_buf is not None else '-'}</td></tr>
     </table>"""
 
+    regime_enabled = regime_det.get("enabled")
+    if regime_enabled is None:
+        regime_enabled = strategy == "REGIME_ROUTER"
+    benchmark_regime_enabled = benchmark_regime_w.get("enabled")
+    if benchmark_regime_enabled is None:
+        benchmark_regime_enabled = _dig(rc, "benchmark_regime.enabled")
+    stock_trend_enabled = stock_trend_w.get("enabled")
+    if stock_trend_enabled is None:
+        stock_trend_enabled = params.get("enable_v2_trend_filter")
+    sector_gate_enabled = sector_gate_w.get("enabled")
+    if sector_gate_enabled is None:
+        sector_gate_enabled = params.get("enable_sector_gate")
+    html += f"""<h3>Stage 2-5 过滤</h3><table>
+      <tr><td>Regime Router</td><td>{_enabled_txt(regime_enabled)}</td></tr>
+      <tr><td>regime_ma</td><td>{_e(regime_det.get('regime_ma', params.get('regime_ma', '-')))}</td></tr>
+      <tr><td>Regime Filter</td><td>{_enabled_txt(regime_filter.get('enabled'))}</td></tr>
+      <tr><td>regime_threshold</td><td>{_e(regime_filter.get('regime_threshold', '-'))}</td></tr>
+      <tr><td>Benchmark Regime</td><td>{_enabled_txt(benchmark_regime_enabled)}</td></tr>
+      <tr><td>BR fast / slow / slope</td><td>{_e(benchmark_regime_w.get('fast_period', _dig(rc, 'benchmark_regime.fast_period') if _dig(rc, 'benchmark_regime.fast_period') is not None else '-'))} / {_e(benchmark_regime_w.get('slow_period', _dig(rc, 'benchmark_regime.slow_period') if _dig(rc, 'benchmark_regime.slow_period') is not None else '-'))} / {_e(benchmark_regime_w.get('slope_window', _dig(rc, 'benchmark_regime.slope_window') if _dig(rc, 'benchmark_regime.slope_window') is not None else '-'))}</td></tr>
+      <tr><td>个股趋势过滤</td><td>{_enabled_txt(stock_trend_enabled)}</td></tr>
+      <tr><td>STF short / long</td><td>{_e(stock_trend_w.get('short_ma', params.get('v2_trend_short_ma', '-')))} / {_e(stock_trend_w.get('long_ma', params.get('v2_trend_long_ma', '-')))}</td></tr>
+      <tr><td>行业趋势门控</td><td>{_enabled_txt(sector_gate_enabled)}</td></tr>
+      <tr><td>Sector rank / top_pct</td><td>{_e(sector_gate_w.get('rank_window', params.get('sector_rank_window', '-')))} / {_e(sector_gate_w.get('top_pct', params.get('sector_top_pct', '-')))}</td></tr>
+      <tr><td>momentum_top_pct</td><td>{_e(ranking_w.get('momentum_top_pct', params.get('momentum_top_pct', '-')))}</td></tr>
+    </table>"""
+
     atr_stop = ex_w.get("atr_stop") if isinstance(ex_w.get("atr_stop"), dict) else {}
     trailing = ex_w.get("trailing") if isinstance(ex_w.get("trailing"), dict) else {}
     low10_exit = ex_w.get("low10_exit") if isinstance(ex_w.get("low10_exit"), dict) else {}
+    ma20_exit = ex_w.get("ma20_exit") if isinstance(ex_w.get("ma20_exit"), dict) else {}
+    strategy_atr_stop_enabled = params.get("enable_atr_stop")
+    strategy_atr_stop_k = params.get("atr_stop_k")
+    strategy_atr_trail_enabled = params.get("enable_atr_trail")
+    strategy_atr_trail_k = params.get("atr_trail_k")
+    exit_atr_stop_enabled = atr_stop.get("enabled")
+    if exit_atr_stop_enabled is None:
+        exit_atr_stop_enabled = rc_exit.get("enable_atr_stop")
+    exit_atr_stop_k = atr_stop.get("k")
+    if exit_atr_stop_k is None:
+        exit_atr_stop_k = rc_exit.get("atr_stop_k")
+    exit_atr_trail_enabled = trailing.get("enabled")
+    if exit_atr_trail_enabled is None:
+        exit_atr_trail_enabled = rc_exit.get("enable_atr_trail")
+    exit_atr_trail_k = trailing.get("k")
+    if exit_atr_trail_k is None:
+        exit_atr_trail_k = rc_exit.get("atr_trail_k")
+    low10_enabled = low10_exit.get("enabled")
+    if low10_enabled is None:
+        low10_enabled = rc_exit.get("enable_low10_exit", params.get("enable_low10_exit"))
+    ma20_enabled = ma20_exit.get("enabled")
+    if ma20_enabled is None:
+        ma20_enabled = rc_exit.get("enable_ma20_exit", params.get("enable_ma20_exit"))
+    min_hold_days = _dig(ex_w, "hold_constraint.min_hold_days")
+    if min_hold_days is None:
+        min_hold_days = params.get("min_hold_days")
+    cooldown_days = _dig(ex_w, "hold_constraint.cooldown_days")
+    if cooldown_days is None:
+        cooldown_days = params.get("cooldown_days")
     html += f"""<h3>退出规则</h3><table>
       <tr><td>反转退出</td><td>{_enabled_txt(ex_w.get('signal_reverse'))}</td></tr>
-      <tr><td>ATR 止损</td><td>{'启用 (k=' + _n2(atr_stop.get('k')) + ')' if atr_stop.get('enabled') else '禁用'}</td></tr>
-      <tr><td>跟踪止损</td><td>{'启用 (k=' + _n2(trailing.get('k')) + ')' if trailing.get('enabled') else '禁用'}</td></tr>
-      <tr><td>LOW10 退出</td><td>{_enabled_txt(low10_exit.get('enabled'))}</td></tr>
-      <tr><td>最短持有天数</td><td>{_e((_dig(ex_w, 'hold_constraint.min_hold_days')) if _dig(ex_w, 'hold_constraint.min_hold_days') is not None else '-')}</td></tr>
-      <tr><td>冷却天数</td><td>{_e((_dig(ex_w, 'hold_constraint.cooldown_days')) if _dig(ex_w, 'hold_constraint.cooldown_days') is not None else '-')}</td></tr>
+      <tr><td>策略层 ATR 止损</td><td>{_render_enabled_k(strategy_atr_stop_enabled, strategy_atr_stop_k)}</td></tr>
+      <tr><td>策略层 ATR 跟踪</td><td>{_render_enabled_k(strategy_atr_trail_enabled, strategy_atr_trail_k)}</td></tr>
+      <tr><td>Exit 层 ATR 止损</td><td>{_render_enabled_k(exit_atr_stop_enabled, exit_atr_stop_k)}</td></tr>
+      <tr><td>Exit 层 ATR 跟踪</td><td>{_render_enabled_k(exit_atr_trail_enabled, exit_atr_trail_k)}</td></tr>
+      <tr><td>MA20 退出</td><td>{_enabled_txt(ma20_enabled)}</td></tr>
+      <tr><td>LOW10 退出</td><td>{_enabled_txt(low10_enabled)}</td></tr>
+      <tr><td>最短持有天数</td><td>{_e(min_hold_days if min_hold_days is not None else '-')}</td></tr>
+      <tr><td>冷却天数</td><td>{_e(cooldown_days if cooldown_days is not None else '-')}</td></tr>
+      <tr><td>参数来源</td><td>runtime config 优先，workbench draft 仅回退</td></tr>
     </table>"""
 
     single_cap = pr_w.get("single_stock_cap")
@@ -349,6 +429,22 @@ def _build_config_summary(config: dict, run_config: dict, resolved_symbol_count:
       <tr><td>行业上限</td><td>{f'{float(ind_cap) * 100:.0f}%' if ind_cap is not None else '-'}</td></tr>
       <tr><td>现金不足策略</td><td>{_e(pr_w.get('cash_shortage_policy', '-'))}</td></tr>
       <tr><td>组合模式</td><td>{_e(pr_w.get('portfolio_mode', params.get('portfolio_mode', '-')))}</td></tr>
+      <tr><td>weight_mode</td><td>{_e(sizing_w.get('weight_mode', rc_sizing.get('weight_mode', 'equal')))}</td></tr>
+      <tr><td>min_positions</td><td>{_e(sizing_w.get('min_positions', rc_sizing.get('min_positions', '-')))}</td></tr>
+    </table>"""
+
+    html += f"""<h3>风控扩展</h3><table>
+      <tr><td>Risk Budget</td><td>{_enabled_txt(risk_budget_w.get('enabled', rc_risk_budget.get('enabled')))}</td></tr>
+      <tr><td>RB atr_stop_k</td><td>{_e(risk_budget_w.get('atr_stop_k', rc_risk_budget.get('atr_stop_k', '-')))}</td></tr>
+      <tr><td>RB base_portfolio_risk</td><td>{_e(risk_budget_w.get('base_portfolio_risk', '-'))}</td></tr>
+      <tr><td>RB legacy dd_reduce_pct</td><td>{_e(risk_budget_w.get('dd_reduce_pct', rc_risk_budget.get('dd_reduce_pct', '-')))}</td></tr>
+      <tr><td>RB legacy dd_reduce_scale</td><td>{_e(risk_budget_w.get('dd_reduce_scale', rc_risk_budget.get('dd_reduce_scale', '-')))}</td></tr>
+      <tr><td>Market Filter</td><td>{_enabled_txt(market_filter_w.get('enabled', _dig(rc, 'market_filter.enabled')))}</td></tr>
+      <tr><td>MF slope_ma / slope_window</td><td>{_e(market_filter_w.get('slope_ma_period', _dig(rc, 'market_filter.slope_ma_period') if _dig(rc, 'market_filter.slope_ma_period') is not None else '-'))} / {_e(market_filter_w.get('slope_window', _dig(rc, 'market_filter.slope_window') if _dig(rc, 'market_filter.slope_window') is not None else '-'))}</td></tr>
+      <tr><td>Breadth</td><td>{_enabled_txt(breadth_w.get('enabled', _dig(rc, 'breadth.enabled')))}</td></tr>
+      <tr><td>Breadth mode</td><td>{_e(breadth_w.get('mode', _dig(rc, 'breadth.mode') if _dig(rc, 'breadth.mode') is not None else '-'))}</td></tr>
+      <tr><td>Breadth min/max positions</td><td>{_e(breadth_w.get('min_positions', _dig(rc, 'breadth.min_positions') if _dig(rc, 'breadth.min_positions') is not None else '-'))} / {_e(breadth_w.get('max_positions', _dig(rc, 'breadth.max_positions') if _dig(rc, 'breadth.max_positions') is not None else '-'))}</td></tr>
+      <tr><td>风险参数来源</td><td>runtime config 优先，workbench draft 仅回退</td></tr>
     </table>"""
 
     turnover_20d = filters.get("min_avg_turnover_20d")
@@ -468,6 +564,17 @@ def generate_report(results_dir: str) -> str:
         (len(wc_u.get("symbols") or []), "original_workbench_config.universe.symbols"),
     ])
     resolved_symbol_count = int(symbol_count_val or 0)
+    report_consistency = dict(run_meta.get("report_consistency") or {})
+    resolved_config_mode = str(report_consistency.get("resolved_config_mode") or "-")
+    resolved_config_id = str(report_consistency.get("resolved_config_id") or "-")
+    resolved_config_hash = str(report_consistency.get("resolved_config_hash") or "-")
+    resolved_config_meta = dict(report_consistency.get("resolved_config_meta") or {})
+    resolved_universe_mode = str(
+        resolved_config_meta.get("universe_mode")
+        or data.get("universe_mode")
+        or universe_meta.get("universe_mode")
+        or "-"
+    )
 
     funnel_source = "funnel.csv" if funnel else "run_meta.counters"
 
@@ -496,7 +603,11 @@ def generate_report(results_dir: str) -> str:
         ("基准", f"{_e(benchmark_src)}{' (fallback)' if benchmark_fallback else ''}"),
         ("标的数量", f"{_e(symbol_count_src)}{' (fallback)' if symbol_count_fallback else ''}"),
         ("漏斗", funnel_source),
-        ("配置冲突策略", _e((run_meta.get("report_consistency") or {}).get("config_conflict_policy") or overrides.get("config_conflict_policy") or "-")),
+        ("配置冲突策略", _e(report_consistency.get("config_conflict_policy") or overrides.get("config_conflict_policy") or "-")),
+        ("解析配置模式", _e(resolved_config_mode)),
+        ("解析配置ID", _e(resolved_config_id)),
+        ("解析配置Hash", _e(resolved_config_hash)),
+        ("解析配置股票池", _e(resolved_universe_mode)),
     ]
 
     html = f"""<!DOCTYPE html>
@@ -533,7 +644,9 @@ def generate_report(results_dir: str) -> str:
   <tr><td>回测区间</td><td>{_e(start or '-')} ~ {_e(end or '-')}</td></tr>
   <tr><td>基准指数</td><td>{_e(benchmark or '-')}</td></tr>
   <tr><td>对照指数</td><td>{_e(data.get('compare_symbol', '-'))}</td></tr>
+  <tr><td>股票池模式</td><td>{_e(resolved_universe_mode)}</td></tr>
   <tr><td>股票池数量</td><td>{_inum(resolved_symbol_count)}</td></tr>
+  <tr><td>解析配置</td><td>{_e(f"{resolved_config_mode} | {resolved_config_id}")}</td></tr>
 </table>
 <div class="kpi-grid">
   {kpi_html}

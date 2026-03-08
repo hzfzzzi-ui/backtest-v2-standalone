@@ -62,6 +62,27 @@ class BreakoutTrendStrategy(Strategy):
     enable_sector_gate: bool = False
     sector_rank_window: int = 60
     sector_top_pct: float = 0.30
+    # Multi-alpha candidate expansion
+    enable_pullback_candidates: bool = False
+    pullback_variant_mode: str = "pb_reclaim_ma20"
+    pullback_touch_lookback: int = 12
+    pullback_reclaim_window: int = 3
+    pullback_ma20_touch_band_pct: float = 0.01
+    pullback_low_lookback: int = 10
+    pullback_low_band_pct: float = 0.02
+    pullback_box_window: int = 5
+    pullback_box_range_pct_max: float = 0.08
+    # Unified ranking
+    enable_residual_ranking: bool = False
+    residual_window: int = 60
+    source_aware_residual_mode: str = "off"
+    enable_sector_quality_ranking: bool = False
+    sector_strength_window_short: int = 20
+    sector_strength_window_long: int = 60
+    volume_quality_window: int = 20
+    residual_weight: float = 0.5
+    sector_weight: float = 0.3
+    quality_weight: float = 0.2
 
     def __post_init__(self) -> None:
         Strategy.__init__(self)

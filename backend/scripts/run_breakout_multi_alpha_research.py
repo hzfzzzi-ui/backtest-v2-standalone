@@ -65,9 +65,9 @@ PHASE_CONTRACTS: dict[str, dict[str, set[str]]] = {
             "strategy.params.sector_strength_window_short",
             "strategy.params.sector_strength_window_long",
             "strategy.params.volume_quality_window",
-            "strategy.params.alpha_score_weight_residual",
-            "strategy.params.alpha_score_weight_sector",
-            "strategy.params.alpha_score_weight_quality",
+            "strategy.params.residual_weight",
+            "strategy.params.sector_weight",
+            "strategy.params.quality_weight",
         },
         "override_paths": {
             "enable_multifactor_rank",
@@ -210,9 +210,9 @@ def _build_phase_cfg(base_cfg: dict[str, Any], phase_name: str) -> tuple[dict[st
         params["sector_strength_window_short"] = 20
         params["sector_strength_window_long"] = 60
         params["volume_quality_window"] = 20
-        params["alpha_score_weight_residual"] = 0.5
-        params["alpha_score_weight_sector"] = 0.3
-        params["alpha_score_weight_quality"] = 0.2
+        params["residual_weight"] = 0.5
+        params["sector_weight"] = 0.3
+        params["quality_weight"] = 0.2
         overrides.update(
             {
                 "enable_multifactor_rank": True,
@@ -363,6 +363,8 @@ def _run_one(
     runtime_cfg: dict[str, Any],
     overrides: dict[str, Any],
 ) -> dict[str, Any]:
+    from backend.api.endpoints.backtest_v2_artifacts import ensure_standard_artifacts
+
     execution_cfg = deepcopy(runtime_cfg)
     _normalize_db_runtime(execution_cfg)
 
@@ -384,6 +386,20 @@ def _run_one(
         result = run_experiment(tmp_path, preset="single", overrides=overrides, progress_hook=progress)
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+    results_dir = Path(str(result.get("results_dir") or ""))
+    if results_dir.exists():
+        result = ensure_standard_artifacts(
+            results_dir=results_dir,
+            result=result,
+            base_cfg=execution_cfg,
+            overrides=overrides,
+        )
+        try:
+            from backend.core.report.report_generator import generate_report
+
+            generate_report(str(results_dir))
+        except Exception:
+            pass
     return _collect_phase_metrics(phase_name, result)
 
 

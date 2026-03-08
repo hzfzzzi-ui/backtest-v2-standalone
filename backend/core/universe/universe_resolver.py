@@ -10,6 +10,12 @@ from typing import Any
 from backend.core.config.models import DBConfig, DBRuntimeConfig
 from backend.core.data.mapping import normalize_stock_symbol
 from backend.core.universe.hs300_csi500 import UniverseLoadError, load_constituents_from_db
+from backend.core.universe.lineage import (
+    ALL_A_SYMBOLS_SOURCE,
+    INDEX_CONSTITUENTS_SYMBOLS_SOURCE,
+    INDUSTRY_HISTORY_SYMBOLS_SOURCE,
+    USER_INPUT_SYMBOLS_SOURCE,
+)
 
 try:
     import psycopg
@@ -56,7 +62,7 @@ def _resolve_all_a(
     return symbols, {
         **meta,
         "universe_mode": "ALL_A",
-        "symbols_source": "pit_security_master+pams_ohlcv_daily",
+        "symbols_source": ALL_A_SYMBOLS_SOURCE,
     }
 
 
@@ -91,7 +97,7 @@ def _resolve_hs300_zz500(
 
     return symbols, {
         "universe_mode": "HS300_ZZ500",
-        "symbols_source": "pit_index_constituents",
+        "symbols_source": INDEX_CONSTITUENTS_SYMBOLS_SOURCE,
         "raw_count": raw_count,
         "constituents_load_status": "OK",
         "load_table": "pit_index_constituents",
@@ -130,7 +136,7 @@ def _resolve_csi1000(
 
     return symbols, {
         "universe_mode": "CSI1000",
-        "symbols_source": "pit_index_constituents",
+        "symbols_source": INDEX_CONSTITUENTS_SYMBOLS_SOURCE,
         "raw_count": raw_count,
         "constituents_load_status": "OK",
         "load_table": "pit_index_constituents",
@@ -180,7 +186,7 @@ def _resolve_industry(
 
     return symbols, {
         "universe_mode": "INDUSTRY",
-        "symbols_source": "pit_industry_history",
+        "symbols_source": INDUSTRY_HISTORY_SYMBOLS_SOURCE,
         "raw_count": raw_count,
         "constituents_load_status": "OK",
         "load_table": "pit_industry_history",
@@ -208,7 +214,7 @@ def _resolve_custom(
 
     return normalized, {
         "universe_mode": "CUSTOM",
-        "symbols_source": "user_input",
+        "symbols_source": USER_INPUT_SYMBOLS_SOURCE,
         "raw_count": raw_count,
         "constituents_load_status": "OK",
     }

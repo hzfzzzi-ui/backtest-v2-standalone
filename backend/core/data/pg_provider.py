@@ -428,6 +428,43 @@ class PostgresDataProvider(DataProvider):
         )
         return dict(zip(raw["ts_code"].astype(str), raw["industry_l1"].astype(str))) if not raw.empty else {}
 
+    def load_industry_history(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
+        """加载股票→行业历史映射（PIT-safe 区间记录）从 pit_industry_history。"""
+        if not symbols:
+            return pd.DataFrame(columns=["ts_code", "start_date", "end_date", "industry_l1"])
+
+        ts_symbols: list[str] = []
+        for s in symbols:
+            s_lower = s.strip().lower()
+            if s_lower.startswith(("sh", "sz")) and len(s_lower) == 8:
+                ts_symbols.append(s_lower)
+            elif "." in s:
+                code, exch = s.split(".", 1)
+                ts_symbols.append(f"{exch.lower()}{code}")
+            else:
+                ts_symbols.append(s_lower)
+
+        q = (
+            "SELECT ts_code, start_date, end_date, industry_l1 "
+            "FROM pit_industry_history "
+            "WHERE ts_code = ANY(%s) "
+            "AND start_date <= %s "
+            "AND (end_date IS NULL OR end_date >= %s) "
+            "ORDER BY ts_code, start_date"
+        )
+        return self._exec_df(
+            q,
+            (ts_symbols, end, start),
+            {
+                "provider": "postgres",
+                "source": "industry_history",
+                "table": "pit_industry_history",
+                "symbols": sorted(ts_symbols[:5]) + (["..."] if len(ts_symbols) > 5 else []),
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+        )
+
     def load_security_master(self, symbols: list[str]) -> pd.DataFrame:
         """Load symbol/list_date/delist_date/name from pit_security_master."""
         if not symbols:

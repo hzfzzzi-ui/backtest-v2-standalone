@@ -5,6 +5,70 @@
    renderPerfPanel, renderNavChartLW, renderDdChartLW,
    loadActiveArtifacts, renderRightInspector, renderArtifacts (from other modules) */
 
+const LOCKED_CANDIDATE_PRESETS = {
+  'v2-breakout-atr-stop-k10-candidate': {
+    hint: '候选：锁定 baseline，仅覆盖 atr_stop_k=1.0',
+    title: '显式 candidate preset；忽略当前草稿参数，仍保持 locked baseline 成本、股票池、成交与评价口径',
+  },
+  'v2-breakout-br35-atr10-candidate': {
+    hint: '候选：锁定 ATR1.0 底座，仅覆盖 breakout_window=35',
+    title: '显式 candidate preset；忽略当前草稿参数，保持 ATR1.0 底座、股票池、成本、成交与评价口径不变',
+  },
+};
+
+function lockedCandidatePresetMeta(preset) {
+  const key = String(preset || '').trim().toLowerCase();
+  return LOCKED_CANDIDATE_PRESETS[key] || null;
+}
+
+function isLockedCandidatePreset(preset) {
+  return !!lockedCandidatePresetMeta(preset);
+}
+
+function selectedExperimentPreset(defaultPreset = 'single') {
+  const selected = String(state.selected_locked_candidate_preset || '').trim();
+  return selected || defaultPreset || 'single';
+}
+
+function syncPresetHint() {
+  const hint = byId('wbConfigCenterHint') || byId('wbPresetHint');
+  if (!hint) return;
+  const executionMode = state.mode === 'execution';
+  const preset = String(state.selected_locked_candidate_preset || '').trim();
+  if (executionMode) {
+    hint.textContent = preset ? '执行预览不消费锁定候选；将使用当前草稿 / 已加载配置' : '当前：草稿 / 已加载配置';
+    hint.title = preset ? 'execution mode 只生成执行预览；locked candidate 仅用于回测运行' : '执行预览与回测运行共用同一 runtime config handoff';
+    return;
+  }
+  const candidateMeta = lockedCandidatePresetMeta(preset);
+  if (candidateMeta) {
+    hint.textContent = `当前：${candidateMeta.hint}`;
+    hint.title = candidateMeta.title;
+    return;
+  }
+  const meta = state.loaded_config_meta;
+  const mode = currentConfigSourceMode();
+  if (meta?.config_id && mode === 'loaded-clean') {
+    const display = meta.display_name || meta.name || meta.config_id;
+    hint.textContent = `当前：${display}`;
+    hint.title = `配置中心当前已锁定 ${display}；运行与预览共用同一 runtime config json`;
+    return;
+  }
+  if (meta?.config_id && mode === 'loaded-dirty') {
+    hint.textContent = `当前：草稿（偏离 ${meta.config_id}）`;
+    hint.title = '已加载配置仅保留 provenance；运行与预览将基于当前草稿 runtime config json';
+    return;
+  }
+  hint.textContent = '当前：草稿';
+  hint.title = '默认入口按当前草稿运行 / 预览';
+}
+
+function setSelectedLockedCandidatePreset(preset) {
+  state.selected_locked_candidate_preset = String(preset || '').trim();
+  syncPresetHint();
+  syncConfigSourceUI();
+}
+
 function updateUniverseInputVisibility() {
   const mode = byId('wbUniverseMode')?.value || 'ALL_A';
   const symbolsWrap = byId('wbSymbolsWrap');
@@ -82,10 +146,43 @@ function toggleDrawer(force = null) {
 }
 
 function switchDockTab(tab) {
-  const next = tab || 'explain';
+  const aliases = {
+    perf: 'buy_funnel',
+    runner: 'buy_funnel',
+    explain: 'buy_funnel',
+    buy: 'buy_funnel',
+    buy_funnel: 'buy_funnel',
+    sell: 'sell_funnel',
+    sell_funnel: 'sell_funnel',
+    exec: 'execution',
+    execution: 'execution',
+    trades: 'execution',
+    logs: 'logs',
+  };
+  const next = aliases[String(tab || 'buy_funnel').toLowerCase()] || 'buy_funnel';
   state.dock_tab = next;
-  document.querySelectorAll('.wb-analysis-tabs button[data-dock]').forEach((b) => b.classList.toggle('active', b.getAttribute('data-dock') === next));
+  document.querySelectorAll('.wb-analysis-tabs button[data-dock], .wb-dock-tabs button[data-dock]').forEach((b) => {
+    b.classList.toggle('active', b.getAttribute('data-dock') === next);
+  });
   document.querySelectorAll('.wb-dock-panel').forEach((p) => p.classList.remove('active'));
+  const accordionMap = {
+    buy_funnel: 'wbAccBuyFunnel',
+    sell_funnel: 'wbAccSellFunnel',
+    execution: 'wbAccTrades',
+    logs: 'wbAccLogs',
+  };
+  const accId = accordionMap[next];
+  const details = accId ? byId(accId) : null;
+  if (details && details.tagName === 'DETAILS') {
+    document.querySelectorAll('.wb-result-acc').forEach((node) => {
+      if (node !== details) node.open = false;
+    });
+    details.open = true;
+    requestAnimationFrame(() => {
+      details.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return;
+  }
   const capFirst = next.charAt(0).toUpperCase() + next.slice(1);
   const panel = byId(`wbDock${capFirst}`);
   if (panel) panel.classList.add('active');
@@ -104,6 +201,8 @@ function defaultComposeRows() {
 function validateConfigDraft(draft) {
   const errors = [];
   const trend = draft?.signal_generation?.trend || draft?.signal_generation?.sma || {};
+  const strategyPack = String(draft?.strategy_pack || draft?.signal_generation?.strategy || '').toUpperCase();
+  const regimeOn = !!draft?.signal_generation?.regime_detection?.enabled;
   const fast = Number(trend.fast_ma);
   const slow = Number(trend.slow_ma);
   if (!(Number.isFinite(fast) && Number.isFinite(slow) && fast < slow)) errors.push('fast_ma 必须小于 slow_ma');
@@ -115,6 +214,10 @@ function validateConfigDraft(draft) {
   if (!(Number.isFinite(indPct) && indPct >= 0 && indPct <= 100)) errors.push('行业上限% 必须在 0-100');
   const entry = Number((draft?.signal_generation?.trend || draft?.signal_generation?.sma || {}).entry_buffer_pct);
   if (!(Number.isFinite(entry) && entry >= 0 && entry <= 5)) errors.push('entry_buffer% 必须在 0-5');
+  if (strategyPack === 'RSI_REVERSAL' && !regimeOn) errors.push('RSI_REVERSAL 主策略未接入主实验编译链，当前仅支持作为 Regime Router 的 MR 臂');
+  if (regimeOn && !['EMA_CROSS', 'SMA_CROSS'].includes(String(trend.strategy || '').toUpperCase())) {
+    errors.push('Regime Router 趋势臂当前只支持 EMA_CROSS / SMA_CROSS');
+  }
   return errors;
 }
 
@@ -178,6 +281,21 @@ function refreshConfigPanels() {
 }
 
 function buildConfigDraft() {
+  const loadedBase = cloneJson(state.loaded_config_json) || {};
+  const loadedUniverse = loadedBase.universe || {};
+  const loadedUniverseFilters = loadedUniverse.filters || {};
+  const loadedSignalGeneration = loadedBase.signal_generation || {};
+  const loadedExitRules = loadedBase.exit_rules || {};
+  const loadedPositionRisk = loadedBase.position_risk || {};
+  const loadedRiskBudget = loadedPositionRisk.risk_budget || {};
+  const loadedMarketFilter = loadedPositionRisk.market_filter || {};
+  const loadedBreadth = loadedPositionRisk.breadth || {};
+  const loadedSizing = loadedBase.sizing || {};
+  const breadthEnabled = !!byId('wbBreadthEnabled')?.checked;
+  const weightMode = byId('wbWeightMode')?.value || loadedSizing.weight_mode || 'equal';
+  const minPositions = Number(byId('wbMinPositions')?.value || loadedSizing.min_positions || 10);
+  const includeBreadth = !!loadedPositionRisk.breadth || breadthEnabled;
+  const includeSizing = !!loadedBase.sizing || weightMode !== 'equal' || minPositions !== 10;
   const compose = [];
   document.querySelectorAll('#wbComposeRows tr').forEach((tr) => {
     compose.push({
@@ -189,11 +307,14 @@ function buildConfigDraft() {
     });
   });
   const draft = {
+    ...loadedBase,
     mode: state.mode,
     strategy_pack: getStrategyPackValue(),
     universe_mode: byId('wbUniverseMode')?.value || 'ALL_A',
     industries: getSelectedIndustries(),
+    initial_capital: Number(loadedBase.initial_capital ?? state.config_draft?.initial_capital ?? 100000),
     universe: {
+      ...loadedUniverse,
       start: byId('wbStartDate')?.value || '2021-01-01',
       end: byId('wbEndDate')?.value || '2026-02-01',
       benchmark: byId('wbBenchmark')?.value || '000300.SH',
@@ -201,6 +322,7 @@ function buildConfigDraft() {
       limit: Number(byId('wbUniverseLimit')?.value || 1000),
       price_adj: byId('wbPriceAdj')?.value || 'hfq',
       filters: {
+        ...loadedUniverseFilters,
         exclude_st: !!byId('wbExcludeSt')?.checked,
         exclude_suspended: !!byId('wbExcludeSuspended')?.checked,
         min_list_days: Number(byId('wbMinListDays')?.value || 120),
@@ -212,6 +334,7 @@ function buildConfigDraft() {
       },
     },
     signal_generation: {
+      ...loadedSignalGeneration,
       enabled: !!byId('wbEnableSignal')?.checked,
       strategy: getStrategyPackValue(),
       regime_detection: {
@@ -249,18 +372,52 @@ function buildConfigDraft() {
         slow_ma: Number(byId('wbSlowMa')?.value || 60),
         entry_buffer_pct: Number(byId('wbEntryBuffer')?.value || 1),
       },
+      breakout: {
+        breakout_window: Number(byId('wbBreakoutWindow')?.value || 55),
+        enable_dual_breakout: !!byId('wbDualBreakout')?.checked,
+        breakout_window_short: Number(byId('wbBreakoutWindowShort')?.value || 20),
+        breakout_window_long: Number(byId('wbBreakoutWindowLong')?.value || 55),
+        breakout_entry_buffer_pct: Number(byId('wbBreakoutBuffer')?.value || 0),
+        entry_confirm_mode: byId('wbEntryConfirmMode')?.value || 'none',
+        entry_delay_mode: byId('wbEntryDelayMode')?.value || 'none',
+      },
       entry_filter: {
         enable_entry_above_slow_ma: !!byId('wbEntryAboveSlowMa')?.checked,
         enable_entry_slow_ma_slope: !!byId('wbEntrySlowMaSlope')?.checked,
         entry_slope_lookback: Number(byId('wbEntrySlopeLookback')?.value || 5),
       },
+      ranking: {
+        momentum_top_pct: Number(byId('wbMomentumTopPct')?.value || 0),
+      },
+    },
+    benchmark_regime: {
+      ...(loadedBase.benchmark_regime || {}),
+      enabled: !!byId('wbBenchmarkRegimeEnabled')?.checked,
+      fast_period: Number(byId('wbBenchmarkRegimeFast')?.value || 20),
+      slow_period: Number(byId('wbBenchmarkRegimeSlow')?.value || 120),
+      slope_window: Number(byId('wbBenchmarkRegimeSlope')?.value || 5),
+    },
+    stock_trend_filter: {
+      ...(loadedBase.stock_trend_filter || {}),
+      enabled: !!byId('wbStockTrendEnabled')?.checked,
+      short_ma: Number(byId('wbStockTrendShortMa')?.value || 20),
+      long_ma: Number(byId('wbStockTrendLongMa')?.value || 60),
+    },
+    sector_gate: {
+      ...(loadedBase.sector_gate || {}),
+      enabled: !!byId('wbSectorGateEnabled')?.checked,
+      rank_window: Number(byId('wbSectorRankWindow')?.value || 60),
+      top_pct: Number(byId('wbSectorTopPct')?.value || 0.3),
     },
     signal_composition: {
+      ...(loadedBase.signal_composition || {}),
       enabled: !!byId('wbEnableComposition')?.checked,
       compose_mode: byId('wbComposeMode')?.value || 'WEIGHTED_SCORE',
+      score_threshold: Number(byId('wbScoreThreshold')?.value || 0.6),
       modules: compose,
     },
     exit_rules: {
+      ...loadedExitRules,
       enabled: !!byId('wbEnableExit')?.checked,
       signal_reverse: !!byId('wbExitReverse')?.checked,
       atr_stop: { enabled: !!byId('wbExitAtr')?.checked, k: Number(byId('wbAtrK')?.value || 0.8) },
@@ -280,15 +437,28 @@ function buildConfigDraft() {
         enabled: !!byId('wbExitFixedStop')?.checked,
         pct: Number(byId('wbFixedStopPct')?.value || 5) / 100,
       },
+      ma20_exit: {
+        enabled: !!byId('wbExitMa20')?.checked,
+      },
+      low10_exit: {
+        enabled: !!byId('wbExitLow10')?.checked,
+      },
+    },
+    universe_filter: {
+      ...(loadedBase.universe_filter || {}),
+      min_price: Number(byId('wbPriceMin')?.value || 0),
     },
     position_risk: {
+      ...loadedPositionRisk,
       enabled: !!byId('wbEnableRisk')?.checked,
       max_positions: Number(byId('wbMaxPositions')?.value || 10),
       single_stock_cap: Number(byId('wbSingleCap')?.value || 10) / 100,
       industry_cap: Number(byId('wbIndustryCap')?.value || 30) / 100,
       lot: Number(byId('wbLot')?.value || 100),
       cash_shortage_policy: byId('wbCashPolicy')?.value || 'skip',
+      portfolio_mode: byId('wbPortfolioMode')?.value || 'equal_10',
       risk_budget: {
+        ...loadedRiskBudget,
         enabled: !!byId('wbRiskBudget')?.checked,
         base_portfolio_risk: Number(byId('wbBasePortfolioRisk')?.value || 6) / 100,
         atr_stop_k: Number(byId('wbAtrStopK')?.value || 2.0),
@@ -301,6 +471,7 @@ function buildConfigDraft() {
         dd_stop_protect_days: Number(byId('wbDdStopProtect')?.value || 30),
       },
       market_filter: {
+        ...loadedMarketFilter,
         enabled: !!byId('wbMarketFilter')?.checked,
         slope_ma_period: Number(byId('wbMfSlopeMaPeriod')?.value || 50),
         slope_window: Number(byId('wbMfSlopeWindow')?.value || 10),
@@ -315,7 +486,32 @@ function buildConfigDraft() {
         slippage: 'fixed_assumption',
         matching: 'next_open',
       },
+      ...(includeBreadth ? { breadth: {
+        ...loadedBreadth,
+        enabled: !!byId('wbBreadthEnabled')?.checked,
+        mode: byId('wbBreadthMode')?.value || 'dynamic_maxpos',
+        score_type: byId('wbBreadthScoreType')?.value || 'B',
+        mapping_mode: byId('wbBreadthMappingMode')?.value || 'smooth',
+        min_positions: Number(byId('wbBreadthMinPositions')?.value || 3),
+        max_positions: Number(byId('wbBreadthMaxPositions')?.value || 15),
+        step_high: Number(byId('wbBreadthStepHigh')?.value || 0.6),
+        step_mid: Number(byId('wbBreadthStepMid')?.value || 0.45),
+        smooth_lo: Number(byId('wbBreadthSmoothLo')?.value || 0.4),
+        smooth_range: Number(byId('wbBreadthSmoothRange')?.value || 0.2),
+        ema_fast: Number(byId('wbBreadthEmaFast')?.value || 8),
+        ema_slow: Number(byId('wbBreadthEmaSlow')?.value || 25),
+        gate_threshold: Number(byId('wbBreadthGateThreshold')?.value || 0.45),
+        gate_quantile_window: Number(byId('wbBreadthGateWindow')?.value || 252),
+        gate_quantile_pct: Number(byId('wbBreadthGatePct')?.value || 0.2),
+        gate_persist_days: Number(byId('wbBreadthGatePersist')?.value || 3),
+        size_scale_floor: Number(byId('wbBreadthScaleFloor')?.value || 0.3),
+      } } : {}),
     },
+    ...(includeSizing ? { sizing: {
+      ...loadedSizing,
+      weight_mode: weightMode,
+      min_positions: minPositions,
+    } } : {}),
     exit_priority: Array.from(byId('wbExitPriorityList')?.querySelectorAll('li') || []).map(
       (li) => li.textContent.replace(/^\d+\s*/, '').trim()
     ),
@@ -323,7 +519,9 @@ function buildConfigDraft() {
   state.config_draft = draft;
   state.strategy_pack = draft.strategy_pack;
   state.universe_mode = draft.universe_mode;
+  if (byId('wbStrategyPack')) byId('wbStrategyPack').value = draft.strategy_pack;
   refreshConfigPanels();
+  syncConfigSourceUI();
   renderSummaryBar();
   return draft;
 }
@@ -348,6 +546,7 @@ function setMode(mode) {
   document.querySelectorAll('#wbMode button').forEach((b) => b.classList.toggle('active', b.getAttribute('data-mode') === mode));
   addLog(`切换模式: ${mode}`);
   buildConfigDraft();
+  syncPresetHint();
 }
 
 function estimatedTier() {
@@ -371,27 +570,37 @@ function renderUniverseStats(stats) {
     return;
   }
   const funnel = (stats.filter_breakdown || []).map((x) => `${x.name}:${x.before}→${x.after}`).join(' | ');
-  el.innerHTML = `全市场 ${stats.total_symbols} → 可交易 ${stats.tradable_symbols} → 流动性过滤 ${stats.after_filters_symbols} → 最终 ${stats.universe_size}<br>
+  const scope = stats.scope_label ? `${esc(stats.scope_label)} | ` : '';
+  el.innerHTML = `${scope}全市场 ${stats.total_symbols} → 可交易 ${stats.tradable_symbols} → 流动性过滤 ${stats.after_filters_symbols} → 最终 ${stats.universe_size}<br>
     交易日=${stats.trading_days} | 缺失率=${pct(stats.missing_rate)} | 数据快照=${esc(stats.data_snapshot_id || '无')}<br>${esc(funnel)}`;
 }
 
 function currentSymbolsForValidate() {
   const mode = byId('wbUniverseMode')?.value || 'ALL_A';
   const custom = (byId('wbSymbols')?.value || '').split(',').map((s) => s.trim()).filter(Boolean);
-  if (mode === 'CUSTOM' && custom.length) return custom;
-  // 非 CUSTOM 模式下 resolver 会动态解析，这里用少量样本做验证
-  return custom.length ? custom : ['600000.SH', '000001.SZ', '600519.SH'];
+  if (mode === 'CUSTOM') return custom;
+  return [];
 }
 
 async function doValidate() {
   buildConfigDraft();
   const q = new URLSearchParams();
   const syms = currentSymbolsForValidate();
-  q.set('symbols', syms.join(','));
+  if (syms.length) q.set('symbols', syms.join(','));
   q.set('start', byId('wbStartDate')?.value || '2021-01-01');
   q.set('end', byId('wbEndDate')?.value || '2026-02-01');
   q.set('benchmark', byId('wbBenchmark')?.value || '000300.SH');
+  q.set('universe_mode', byId('wbUniverseMode')?.value || 'ALL_A');
+  q.set('industries', getSelectedIndustries().join(','));
+  q.set('universe_limit', String(Number(byId('wbUniverseLimit')?.value || 0) || 0));
   q.set('strict_suspended', String(!!byId('wbExcludeSuspended')?.checked));
+  q.set('exclude_st', String(!!byId('wbExcludeSt')?.checked));
+  q.set('exclude_suspended', String(!!byId('wbExcludeSuspended')?.checked));
+  q.set('min_list_days', String(Number(byId('wbMinListDays')?.value || 120)));
+  q.set('min_avg_turnover_20d', String(Number(byId('wbMinTurnover')?.value || 1e8)));
+  q.set('price_min', String(Number(byId('wbPriceMin')?.value || 0)));
+  q.set('price_max', String(Number(byId('wbPriceMax')?.value || 99999)));
+  q.set('limit_rule', byId('wbLimitRule')?.value || 'ignore');
   q.set('audit_dump', 'true');
   const url = `/api/backtest_v2/validate_data?${q.toString()}`;
   byId('wbRunStatus').textContent = '数据验收中...';
@@ -459,37 +668,34 @@ async function pollJob(jobId) {
     if (typeof _cleanupCancel === 'function') _cleanupCancel();
   }
 }
-function runPayloadFromDraft(preset) {
-  const d = buildConfigDraft();
-  const mode = d.universe_mode || 'CUSTOM';
-  const payload = {
-    preset,
-    start_date: d.universe.start,
-    end_date: d.universe.end,
-    benchmark: d.universe.benchmark,
-    compare_symbol: byId('wbBenchmark')?.value || '000001.SH',
-    universe_limit: d.universe.limit,
-    max_positions: d.position_risk.max_positions,
-    lot_size: d.position_risk.lot,
-    config_id: state.config_id,
-    workbench_mode: state.mode,
-    workbench_config: d,
-    fast_mode: true,
-    universe_mode: mode,
-    price_adj: d.universe.price_adj || 'hfq',
-  };
-  // CUSTOM 模式传 symbols，INDUSTRY 模式传 industries
-  if (mode === 'CUSTOM') {
-    payload.symbols = d.universe.symbols;
-  } else if (mode === 'INDUSTRY') {
-    payload.industries = d.industries || [];
+function resolveRuntimeConfigHandoff(preset) {
+  const requestedPreset = selectedExperimentPreset(preset);
+  if (isLockedCandidatePreset(requestedPreset)) {
+    return {
+      preset: requestedPreset,
+      fast_mode: true,
+      workbench_mode: state.mode,
+    };
   }
+  const d = buildConfigDraft();
+  const payload = {
+      preset: requestedPreset,
+      config_id: effectiveConfigIdForExecution(),
+      runtime_config_json: d,
+      workbench_mode: state.mode,
+      fast_mode: true,
+  };
   return payload;
 }
 
+function runPayloadFromDraft(preset) {
+  return resolveRuntimeConfigHandoff(preset);
+}
+
 async function runExperiment(presetOverride = null) {
-  const payload = runPayloadFromDraft(presetOverride || 'single');
-  addLog('POST /api/backtest_v2/experiment/run_async (single-run)');
+  const requestedPreset = selectedExperimentPreset(presetOverride || 'single');
+  const payload = runPayloadFromDraft(requestedPreset);
+  addLog(`POST /api/backtest_v2/experiment/run_async (${requestedPreset})`);
   const q = await apiRequestJson('experiment_run_async', '/api/backtest_v2/experiment/run_async', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   });
@@ -497,6 +703,9 @@ async function runExperiment(presetOverride = null) {
   state.active_exp = result;
   state.active_result = result;
   await loadActiveArtifacts();
+  if (isLockedCandidatePreset(requestedPreset) && !state.active_artifacts?.run_meta?.candidate) {
+    throw new Error(`candidate preset mismatch: ${result?.exp_id || '-'} did not return locked candidate artifacts`);
+  }
   renderExperimentResult(result);
   renderRightInspector();
   renderArtifacts(result);
@@ -506,40 +715,130 @@ function renderExperimentResult(result) {
   byId('wbDims').textContent = `exp_id=${result?.exp_id || '-'} | status=${result?.status || '-'}`;
 }
 
-function renderSummaryBar() {
-  const cfg = state.config_draft || {};
-  const u = cfg.universe || {};
-  const sg = cfg.signal_generation || {};
-  const stratName = String(sg.strategy || cfg.strategy_pack || 'SMA_CROSS').toUpperCase();
+function resolveSummaryConfig() {
+  const artCfg = (state.active_artifacts || {}).config;
+  if (artCfg && typeof artCfg === 'object') {
+    const preferredWorkbenchCfg = artCfg?.overrides?.original_workbench_config
+      || artCfg?.overrides?.workbench_config
+      || artCfg?.workbench_config;
+    if (preferredWorkbenchCfg && typeof preferredWorkbenchCfg === 'object') {
+      return preferredWorkbenchCfg;
+    }
+  }
+  const runtimeCfg = artCfg && typeof artCfg === 'object' && artCfg.base_config && typeof artCfg.base_config === 'object'
+    ? artCfg.base_config
+    : artCfg;
+  if (runtimeCfg && typeof runtimeCfg === 'object' && (runtimeCfg.strategy || runtimeCfg.universe)) return runtimeCfg;
+  return state.config_draft || {};
+}
+
+function runtimeStrategySummary(cfg, art) {
+  const strategy = cfg?.strategy || {};
+  const params = strategy.params || {};
+  const strategyName = String(strategy.name || '').toUpperCase();
+  const maxPositions = art?.run_meta?.counters?.max_positions ?? cfg?.position_risk?.max_positions ?? '-';
+  const br = cfg?.benchmark_regime || {};
+  const brTag = br.enabled ? ` | BR=${br.fast_period ?? 20}/${br.slow_period ?? 120}` : '';
+  if (strategyName === 'BREAKOUT_TREND') {
+    return `BREAKOUT_TREND | 突破=${params.breakout_window ?? 55} | ATR止损=${params.atr_stop_k ?? '-'} | ATR追踪=${params.atr_trail_k ?? '-'} | regime_ma=${params.regime_ma ?? '-'}${brTag} | 最大持仓=${maxPositions}`;
+  }
+  if (strategyName === 'SMA_CROSS' || strategyName === 'EMA_CROSS') {
+    return `${strategyName} | 快线=${strategy.fast ?? '-'} 慢线=${strategy.slow ?? '-'}${brTag} | 最大持仓=${maxPositions}`;
+  }
+  return `${strategyName || 'STRATEGY'} | 最大持仓=${maxPositions}`;
+}
+
+function compactResultsDir(path) {
+  const text = String(path || '').trim();
+  if (!text) return '-';
+  const parts = text.replaceAll('\\', '/').split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : text;
+}
+
+function runtimeStrategyOverview(cfg, art) {
+  const strategy = cfg?.strategy || {};
+  const params = strategy.params || {};
+  const strategyName = String(strategy.name || '').toUpperCase();
+  const maxPositions = art?.run_meta?.counters?.max_positions ?? cfg?.position_risk?.max_positions ?? '-';
+  const portfolioMode = cfg?.position_risk?.portfolio_mode || cfg?.risk_budget?.portfolio_mode || 'equal_10';
+  const br = cfg?.benchmark_regime || {};
+  const brText = br.enabled ? `BR ${br.fast_period ?? 20}/${br.slow_period ?? 120}/${br.slope_window ?? 5}` : 'BR 关闭';
+  if (strategyName === 'BREAKOUT_TREND') {
+    return {
+      name: 'BREAKOUT_TREND',
+      core: `突破 ${params.breakout_window ?? 55} | ATR ${params.atr_stop_k ?? '-'} / ${params.atr_trail_k ?? '-'}`,
+      portfolioMode,
+      extra: `regime_ma=${params.regime_ma ?? '-'} | ${brText} | 最大持仓=${maxPositions}`,
+    };
+  }
+  if (strategyName === 'SMA_CROSS' || strategyName === 'EMA_CROSS') {
+    return {
+      name: strategyName,
+      core: `快线 ${strategy.fast ?? '-'} | 慢线 ${strategy.slow ?? '-'}`,
+      portfolioMode,
+      extra: `${brText} | 最大持仓=${maxPositions}`,
+    };
+  }
+  const sg = cfg?.signal_generation || {};
   const trend = sg.trend || sg.sma || sg.ema || {};
+  const stratName = String(sg.strategy || cfg.strategy_pack || 'SMA_CROSS').toUpperCase();
+  if (sg.regime_detection?.enabled) {
+    const mr = sg.mr || {};
+    return {
+      name: 'REGIME',
+      core: `趋势 ${String(trend.strategy || 'SMA').toUpperCase()} ${trend.fast_ma ?? 20}/${trend.slow_ma ?? 60}`,
+      portfolioMode: cfg?.position_risk?.portfolio_mode ?? 'equal_10',
+      extra: `MR RSI(${mr.rsi_period ?? 6}) ${mr.rsi_buy_threshold ?? 20}/${mr.rsi_sell_threshold ?? 80} | regime_ma=${sg.regime_detection?.regime_ma ?? 60}`,
+    };
+  }
+  const breakout = sg.breakout || {};
+  return {
+    name: stratName || 'STRATEGY',
+    core: stratName === 'BREAKOUT_TREND'
+      ? `突破 ${breakout.breakout_window ?? 55} | confirm=${breakout.entry_confirm_mode ?? 'none'}`
+      : `快线 ${trend.fast_ma ?? '-'} | 慢线 ${trend.slow_ma ?? '-'}`,
+    portfolioMode: cfg?.position_risk?.portfolio_mode ?? 'equal_10',
+    extra: `最大持仓=${cfg?.position_risk?.max_positions ?? '-'} | 组合=${cfg?.position_risk?.portfolio_mode ?? 'equal_10'}`,
+  };
+}
+
+function renderSummaryBar() {
   const row = state.active_result || {};
   const art = state.active_artifacts || {};
+  const cfg = resolveSummaryConfig();
   const p = art.perf || {};
-  const rmUni = (art.run_meta || {}).universe;
-  const symbols = (rmUni && rmUni.raw_count != null) ? rmUni.raw_count : (Array.isArray(u.symbols) ? u.symbols.length : 0);
+  const u = cfg?.universe || {};
+  const rm = art.run_meta || {};
+  const rmData = rm.data || {};
+  const rmUni = rm.universe || {};
+  const universeMode = rmData.universe_mode || rmUni.universe_mode || cfg?.universe_mode || '-';
+  const start = rmData.start || u.start || '-';
+  const end = rmData.end || u.end || '-';
+  const benchmark = rmData.benchmark || u.benchmark || '-';
+  const rawCount = rmUni.raw_count;
+  const tradableCount = rmUni.tradable_symbols ?? rmUni.after_filters_symbols;
+  const symbolsText = Number.isFinite(Number(rawCount))
+    ? (Number.isFinite(Number(tradableCount)) ? `${fmtInt(rawCount)} → ${fmtInt(tradableCount)}` : fmtInt(rawCount))
+    : (Array.isArray(u.symbols) ? fmtInt(u.symbols.length) : '-');
+  const strategyInfo = runtimeStrategyOverview(cfg, art);
+  const configSource = rm?.candidate?.candidate_name
+    || rm?.report_consistency?.config_source
+    || state.loaded_config_meta?.display_name
+    || state.config_source_mode
+    || '草稿';
 
-  setTextById(
-    'wbSummaryUniverse',
-    `区间 ${u.start || '-'} ~ ${u.end || '-'} | 基准 ${u.benchmark || '-'} | 标的 ${symbols} 个`
-  );
-  let stratSummary;
-  const regimeOn = sg.regime_detection?.enabled;
-  if (regimeOn) {
-    const mr = sg.mr || {};
-    const trendName = (trend.strategy || 'SMA').toUpperCase();
-    const rfOn = sg.regime_detection?.regime_filter?.enabled;
-    const rfTag = rfOn ? ` | RF=ON(thr=${sg.regime_detection.regime_filter.regime_threshold ?? 0.3})` : '';
-    stratSummary = `REGIME | 趋势:${trendName} ${trend.fast_ma ?? 20}/${trend.slow_ma ?? 60} | MR:RSI(${mr.rsi_period ?? 6}) ${mr.rsi_buy_threshold ?? 20}/${mr.rsi_sell_threshold ?? 80} | regime_ma=${sg.regime_detection?.regime_ma ?? 60}${rfTag} | 最大持仓=${cfg?.position_risk?.max_positions ?? '-'}`;
-  } else {
-    const trendName = (trend.strategy || stratName).toUpperCase();
-    stratSummary = `${trendName} | 快线=${trend.fast_ma ?? '-'} 慢线=${trend.slow_ma ?? '-'} | 最大持仓=${cfg?.position_risk?.max_positions ?? '-'}`;
-  }
-  setTextById('wbSummaryStrategy', stratSummary);
-  const flow = `接口状态 验证=${_apiTag('validate_data')} 运行=${_apiTag('experiment_run_async')} 轮询=${_apiTag('job_poll')} 产物=${_apiTag('artifact_read_nav')} 基准=${_apiTag('series_benchmark')} 执行=${_apiTag('execution_preview')}`;
-  const stat = row.exp_id
-    ? `实验=${row.exp_id} | 状态=${row.status || '-'} | 年化=${pct(p.cagr ?? row.cagr)} | 回撤=${pct(p.max_drawdown ?? row.max_drawdown)} | 夏普=${num(p.sharpe ?? row.sharpe, 2)} | ${flow}`
-    : `等待运行结果... | ${flow}`;
-  setTextById('wbSummaryTrade', stat);
+  setTextById('wbOverviewExpId', row.exp_id || '-');
+  setTextById('wbOverviewStatus', row.exp_id ? (row.status || '-') : '等待运行');
+  setTextById('wbOverviewConfigSource', String(configSource || '-'));
+  setTextById('wbOverviewResultsDir', compactResultsDir(row.results_dir || state.active_exp?.results_dir || ''));
+  setTextById('wbSummaryUniverse', `${start} ~ ${end}`);
+  setTextById('wbOverviewBenchmark', benchmark);
+  setTextById('wbOverviewUniverseMode', universeMode);
+  setTextById('wbOverviewUniverseCount', symbolsText);
+  setTextById('wbOverviewStrategyName', strategyInfo.name);
+  setTextById('wbOverviewStrategyCore', strategyInfo.core);
+  setTextById('wbOverviewPortfolioMode', strategyInfo.portfolioMode);
+  setTextById('wbSummaryStrategy', strategyInfo.extra);
 }
 
 function applyConfigToUI(cfg) {
@@ -562,6 +861,9 @@ function applyConfigToUI(cfg) {
   _chk('wbExcludeSuspended', f.exclude_suspended);
   _set('wbMinListDays', f.min_list_days);
   _set('wbMinTurnover', f.min_avg_turnover_20d);
+  _set('wbPriceMin', f.price_min ?? cfg?.universe_filter?.min_price);
+  _set('wbPriceMax', f.price_max);
+  _set('wbLimitRule', f.limit_rule);
 
   // 价格口径
   const loadedAdj = u.price_adj || 'hfq';
@@ -572,17 +874,16 @@ function applyConfigToUI(cfg) {
 
   // --- 信号生成: 新结构 (regime_detection + trend + mr) ---
   const sgCfg = cfg?.signal_generation || {};
-  const strategyName = String(sgCfg.strategy || cfg?.strategy_pack || 'SMA_CROSS').toUpperCase();
-
-  // 兼容旧 adaptive_regime 格式 → 转换为新结构
-  const oldAr = sgCfg.adaptive_regime || {};
-  const hasOldAr = strategyName === 'ADAPTIVE_REGIME' && (oldAr.regime_ma || oldAr.rsi_period);
+  const rawStrategyName = String(sgCfg.strategy || cfg?.strategy_pack || 'SMA_CROSS').toUpperCase();
+  const unsupportedAdaptiveRegime = rawStrategyName === 'ADAPTIVE_REGIME';
+  const strategyName = unsupportedAdaptiveRegime ? 'REGIME_ROUTER' : rawStrategyName;
+  _set('wbStrategyPack', strategyName);
 
   // Regime detection
   const rd = sgCfg.regime_detection || {};
-  const regimeOn = hasOldAr ? true : !!rd.enabled;
+  const regimeOn = strategyName === 'REGIME_ROUTER';
   _chk('wbRegimeEnabled', regimeOn);
-  _set('wbRegimeMa', hasOldAr ? (oldAr.regime_ma ?? 60) : (rd.regime_ma ?? 60));
+  _set('wbRegimeMa', rd.regime_ma ?? 60);
   const regimeParams = byId('wbRegimeParams'); if (regimeParams) regimeParams.style.display = regimeOn ? '' : 'none';
   const rfBlock = byId('wbRegimeFilterBlock'); if (rfBlock) rfBlock.style.display = regimeOn ? '' : 'none';
   const rfCfg = rd.regime_filter || {};
@@ -594,20 +895,29 @@ function applyConfigToUI(cfg) {
 
   // Trend strategy
   const trend = sgCfg.trend || {};
-  const trendName = hasOldAr ? 'EMA_CROSS' : (trend.strategy || strategyName || 'EMA_CROSS');
+  const trendName = trend.strategy || strategyName || 'EMA_CROSS';
   _set('wbTrendStrategy', trendName);
-  _set('wbFastMa', hasOldAr ? (oldAr.fast_ma ?? 20) : (trend.fast_ma ?? sgCfg.sma?.fast_ma ?? 20));
-  _set('wbSlowMa', hasOldAr ? (oldAr.slow_ma ?? 60) : (trend.slow_ma ?? sgCfg.sma?.slow_ma ?? 60));
+  _set('wbFastMa', trend.fast_ma ?? sgCfg.sma?.fast_ma ?? 20);
+  _set('wbSlowMa', trend.slow_ma ?? sgCfg.sma?.slow_ma ?? 60);
   _set('wbEntryBuffer', trend.entry_buffer_pct ?? sgCfg.sma?.entry_buffer_pct ?? 1);
+  const breakout = sgCfg.breakout || {};
+  _set('wbBreakoutWindow', breakout.breakout_window ?? 55);
+  _chk('wbDualBreakout', breakout.enable_dual_breakout);
+  _set('wbBreakoutWindowShort', breakout.breakout_window_short ?? 20);
+  _set('wbBreakoutWindowLong', breakout.breakout_window_long ?? 55);
+  _set('wbBreakoutBuffer', breakout.breakout_entry_buffer_pct ?? 0);
+  _set('wbEntryConfirmMode', breakout.entry_confirm_mode ?? 'none');
+  _set('wbEntryDelayMode', breakout.entry_delay_mode ?? 'none');
+  _set('wbMomentumTopPct', sgCfg.ranking?.momentum_top_pct ?? 0);
 
   // MR strategy
   const mr = sgCfg.mr || {};
   _set('wbMrStrategy', mr.strategy || 'RSI_REVERSAL');
-  _set('wbMrRsiPeriod', hasOldAr ? (oldAr.rsi_period ?? 6) : (mr.rsi_period ?? 6));
-  _set('wbMrRsiBuy', hasOldAr ? (oldAr.rsi_buy_threshold ?? 20) : (mr.rsi_buy_threshold ?? 20));
-  _set('wbMrRsiSell', hasOldAr ? (oldAr.rsi_sell_threshold ?? 80) : (mr.rsi_sell_threshold ?? 80));
-  _set('wbMrMaxHold', hasOldAr ? (oldAr.mr_max_hold_days ?? 5) : (mr.mr_max_hold_days ?? 5));
-  const mrStopRaw = hasOldAr ? oldAr.mr_stop_loss_pct : mr.mr_stop_loss_pct;
+  _set('wbMrRsiPeriod', mr.rsi_period ?? 6);
+  _set('wbMrRsiBuy', mr.rsi_buy_threshold ?? 20);
+  _set('wbMrRsiSell', mr.rsi_sell_threshold ?? 80);
+  _set('wbMrMaxHold', mr.mr_max_hold_days ?? 5);
+  const mrStopRaw = mr.mr_stop_loss_pct;
   _set('wbMrStopLoss', mrStopRaw != null ? Number(mrStopRaw) * 100 : 3);
 
   // MR panel visibility — always visible, dimmed when regime off
@@ -643,6 +953,8 @@ function applyConfigToUI(cfg) {
   const fs = ex.fixed_stop || {};
   _chk('wbExitFixedStop', fs.enabled);
   _set('wbFixedStopPct', fs.pct != null ? Number(fs.pct) * 100 : undefined);
+  _chk('wbExitMa20', ex.ma20_exit?.enabled);
+  _chk('wbExitLow10', ex.low10_exit?.enabled);
 
   const pr = cfg?.position_risk || {};
   _set('wbMaxPositions', pr.max_positions);
@@ -650,6 +962,7 @@ function applyConfigToUI(cfg) {
   _set('wbIndustryCap', pr.industry_cap != null ? Number(pr.industry_cap) * 100 : undefined);
   _set('wbLot', pr.lot);
   _set('wbCashPolicy', pr.cash_shortage_policy);
+  _set('wbPortfolioMode', pr.portfolio_mode ?? 'equal_10');
   // 风险预算
   const rb = pr.risk_budget || {};
   _chk('wbRiskBudget', rb.enabled);
@@ -671,6 +984,45 @@ function applyConfigToUI(cfg) {
   _set('wbMfLightMult', mf.light_multiplier);
   _set('wbMfEmaFast', mf.ema_light_fast);
   _set('wbMfEmaSlow', mf.ema_light_slow);
+  // breadth
+  const breadth = pr.breadth || {};
+  _chk('wbBreadthEnabled', breadth.enabled);
+  _set('wbBreadthMode', breadth.mode ?? 'dynamic_maxpos');
+  _set('wbBreadthScoreType', breadth.score_type ?? 'B');
+  _set('wbBreadthMappingMode', breadth.mapping_mode ?? 'smooth');
+  _set('wbBreadthMinPositions', breadth.min_positions ?? 3);
+  _set('wbBreadthMaxPositions', breadth.max_positions ?? 15);
+  _set('wbBreadthStepHigh', breadth.step_high ?? 0.6);
+  _set('wbBreadthStepMid', breadth.step_mid ?? 0.45);
+  _set('wbBreadthSmoothLo', breadth.smooth_lo ?? 0.4);
+  _set('wbBreadthSmoothRange', breadth.smooth_range ?? 0.2);
+  _set('wbBreadthEmaFast', breadth.ema_fast ?? 8);
+  _set('wbBreadthEmaSlow', breadth.ema_slow ?? 25);
+  _set('wbBreadthGateThreshold', breadth.gate_threshold ?? 0.45);
+  _set('wbBreadthGateWindow', breadth.gate_quantile_window ?? 252);
+  _set('wbBreadthGatePct', breadth.gate_quantile_pct ?? 0.2);
+  _set('wbBreadthGatePersist', breadth.gate_persist_days ?? 3);
+  _set('wbBreadthScaleFloor', breadth.size_scale_floor ?? 0.3);
+  // sizing
+  const sizing = cfg?.sizing || {};
+  _set('wbWeightMode', sizing.weight_mode ?? 'equal');
+  _set('wbMinPositions', sizing.min_positions ?? 10);
+  // benchmark regime
+  const br = cfg?.benchmark_regime || {};
+  _chk('wbBenchmarkRegimeEnabled', br.enabled);
+  _set('wbBenchmarkRegimeFast', br.fast_period ?? 20);
+  _set('wbBenchmarkRegimeSlow', br.slow_period ?? 120);
+  _set('wbBenchmarkRegimeSlope', br.slope_window ?? 5);
+  // stock trend / sector gate
+  const stockTrend = cfg?.stock_trend_filter || {};
+  _chk('wbStockTrendEnabled', stockTrend.enabled);
+  _set('wbStockTrendShortMa', stockTrend.short_ma ?? 20);
+  _set('wbStockTrendLongMa', stockTrend.long_ma ?? 60);
+  const sectorGate = cfg?.sector_gate || {};
+  _chk('wbSectorGateEnabled', sectorGate.enabled);
+  _set('wbSectorRankWindow', sectorGate.rank_window ?? 60);
+  _set('wbSectorTopPct', sectorGate.top_pct ?? 0.3);
+  _set('wbScoreThreshold', cfg?.signal_composition?.score_threshold ?? 0.6);
 
   // Exit priority
   const ep = cfg?.exit_priority;
@@ -687,34 +1039,156 @@ function applyConfigToUI(cfg) {
   buildConfigDraft();
   syncExitLinkage();
   updateAtrNote();
+  return { unsupportedStrategy: unsupportedAdaptiveRegime ? rawStrategyName : null };
 }
 
 async function loadConfig(configId) {
   const j = await apiRequestJson('configs_get', `/api/backtest_v2/configs/${encodeURIComponent(configId)}`);
-  state.config_id = j.config_id;
-  byId('wbConfigId').textContent = j.config_id;
-  applyConfigToUI(j.config_json || {});
+  state.loaded_config_json = cloneJson(j.config_json || {});
+  const applied = applyConfigToUI(j.config_json || {});
+  if (applied?.unsupportedStrategy) {
+    clearLoadedConfig(`配置 ${j.config_id} 使用已移除策略 ${applied.unsupportedStrategy}；请改用 REGIME_ROUTER 重新配置`);
+    byId('wbRunStatus').textContent = `配置 ${j.config_id} 使用已移除策略 ${applied.unsupportedStrategy}`;
+    return;
+  }
+  setSelectedLockedCandidatePreset('');
+  rememberLoadedConfig(j, stableSerializeConfig(state.config_draft || {}), j.config_json || {});
   addLog(`已加载配置: ${j.config_id}`);
 }
 
 async function loadConfigList() {
-  const j = await apiRequestJson('configs_list', '/api/backtest_v2/configs?latest=20');
+  const j = await apiRequestJson('configs_list', '/api/backtest_v2/configs?latest=50');
   const items = Array.isArray(j.items) ? j.items : [];
   const sel = byId('wbConfigList');
-  if (!sel) return;
+  if (!sel) return items;
   sel.innerHTML = '<option value="">选择配置...</option>' + items.map((x) => {
-    const tags = Array.isArray(x.tags) ? x.tags.map((t) => String(t)) : [];
-    const prefix = tags.includes('flow_script') ? '[通流脚本] ' : '';
-    const name = x.name ? ` | ${x.name}` : '';
-    return `<option value="${esc(x.config_id)}">${esc(prefix + x.config_id)}${esc(name)} | ${esc(x.saved_at || '')}</option>`;
+    const label = `${configMetaLabel(x)} ${configDisplayName(x) || x.config_id}`;
+    return `<option value="${esc(x.config_id)}">${esc(label)} | ${esc(x.saved_at || '')}</option>`;
   }).join('');
+  return items;
+}
+
+function configCenterBadgeText(item) {
+  const sourceMap = { baseline: '基线', search: '搜索', template: '内置', derived: '保存' };
+  const ownerMap = { manual: '手工', claude: 'Codex', script: '脚本', builtin: '内置' };
+  const parts = [];
+  const source = sourceMap[String(item?.source_type || '').trim()] || String(item?.source_type || '').trim() || '保存';
+  const owner = ownerMap[String(item?.owner || '').trim()] || String(item?.owner || '').trim() || '手工';
+  parts.push(source, owner);
+  if (item?.locked) parts.push('锁定');
+  return parts.join(' / ');
+}
+
+function buildConfigCenterGroups(items) {
+  const builtin = [];
+  const saved = [];
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const tags = new Set((Array.isArray(item?.tags) ? item.tags : []).map((tag) => String(tag || '').trim().toLowerCase()));
+    if (String(item?.owner || '').trim().toLowerCase() === 'builtin' || tags.has('builtin') || String(item?.source_type || '').trim().toLowerCase() === 'template') {
+      builtin.push(item);
+      return;
+    }
+    saved.push(item);
+  });
+  return {
+    draft: [
+      {
+        key: 'draft',
+        title: '当前草稿',
+        desc: state.loaded_config_meta?.config_id ? '脱离已加载配置 provenance，后续运行只认当前页面草稿' : '直接使用当前页面草稿作为运行真相',
+        active: !String(state.selected_locked_candidate_preset || '').trim() && (!state.loaded_config_meta || currentConfigSourceMode() === 'loaded-dirty'),
+        onClick: () => {
+          setSelectedLockedCandidatePreset('');
+          clearLoadedConfig('已切换到当前草稿');
+        },
+      },
+    ],
+    candidate: Object.keys(LOCKED_CANDIDATE_PRESETS).map((preset) => ({
+      key: `candidate:${preset}`,
+      title: preset === 'v2-breakout-br35-atr10-candidate' ? '候选 BR35 + ATR1.0' : '候选 ATR 1.0',
+      desc: lockedCandidatePresetMeta(preset)?.hint || '锁定候选入口',
+      active: String(state.selected_locked_candidate_preset || '').trim() === preset,
+      onClick: () => {
+        setSelectedLockedCandidatePreset(preset);
+        addLog(`已选择锁定候选: ${preset}`);
+      },
+    })),
+    builtin: builtin.map((item) => ({
+      key: `config:${item.config_id}`,
+      title: configDisplayName(item) || item.config_id,
+      desc: `${configCenterBadgeText(item)} | ${item.saved_at || ''}`,
+      active: !String(state.selected_locked_candidate_preset || '').trim() && currentConfigSourceMode() === 'loaded-clean' && String(state.loaded_config_meta?.config_id || '') === String(item.config_id || ''),
+      onClick: async () => {
+        await loadConfig(item.config_id);
+      },
+    })),
+    saved: saved.map((item) => ({
+      key: `config:${item.config_id}`,
+      title: configDisplayName(item) || item.config_id,
+      desc: `${configCenterBadgeText(item)} | ${item.saved_at || ''}`,
+      active: !String(state.selected_locked_candidate_preset || '').trim() && currentConfigSourceMode() === 'loaded-clean' && String(state.loaded_config_meta?.config_id || '') === String(item.config_id || ''),
+      onClick: async () => {
+        await loadConfig(item.config_id);
+      },
+    })),
+  };
+}
+
+async function openConfigCenterDropdown(anchorEl = null) {
+  const existing = document.getElementById('wbConfigCenterDropdown');
+  if (existing) {
+    existing.remove();
+    return;
+  }
+  const items = await loadConfigList();
+  const groups = buildConfigCenterGroups(items);
+  const dd = document.createElement('div');
+  dd.id = 'wbConfigCenterDropdown';
+  dd.className = 'wb-load-dropdown wb-config-center-dropdown';
+  const sections = [
+    ['当前草稿', groups.draft],
+    ['锁定 Candidate', groups.candidate],
+    ['内置模板', groups.builtin],
+    ['已保存配置', groups.saved],
+  ];
+  sections.forEach(([label, rows]) => {
+    if (!Array.isArray(rows) || !rows.length) return;
+    const head = document.createElement('div');
+    head.className = 'wb-config-center-section';
+    head.textContent = label;
+    dd.appendChild(head);
+    rows.forEach((row) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = `wb-load-item wb-config-center-item${row.active ? ' active' : ''}`;
+      item.innerHTML = `<span class="wb-config-center-title">${esc(row.title)}</span><span class="wb-config-center-desc">${esc(row.desc)}</span>`;
+      item.addEventListener('click', async () => {
+        dd.remove();
+        try {
+          await row.onClick();
+        } catch (e) {
+          addLog(`配置中心操作失败: ${e?.message || e}`);
+        }
+      });
+      dd.appendChild(item);
+    });
+  });
+  (anchorEl || byId('wbConfigCenterBtn') || byId('wbQuickLoad') || byId('wbRunBtn'))?.parentElement?.appendChild(dd);
+  const dismiss = (e) => {
+    const btn = anchorEl || byId('wbConfigCenterBtn') || byId('wbQuickLoad');
+    if (!dd.contains(e.target) && e.target !== btn) {
+      dd.remove();
+      document.removeEventListener('click', dismiss);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', dismiss), 0);
 }
 
 async function previewExecution() {
   buildConfigDraft();
   const body = {
-    config_id: state.config_id,
-    config_json: state.config_draft,
+    config_id: effectiveConfigIdForExecution(),
+    runtime_config_json: state.config_draft,
     exp_id: state.active_exp?.exp_id || null,
     results_dir: state.active_exp?.results_dir || null,
     as_of_date: byId('wbExecDate')?.value || null,
@@ -758,6 +1232,7 @@ async function pasteConfigJson() {
     const text = await navigator.clipboard.readText();
     const obj = JSON.parse(text);
     applyConfigToUI(obj || {});
+    clearLoadedConfig();
     addLog('已从剪贴板粘贴配置JSON');
   } catch (e) {
     addLog(`粘贴JSON失败: ${e.message || e}`);
@@ -765,9 +1240,10 @@ async function pasteConfigJson() {
 }
 
 function switchInspectorTab(tab) {
-  if (tab === 'perf' || tab === 'runner') return switchDockTab('explain');
-  if (tab === 'explain') return switchDockTab('explain');
+  if (tab === 'perf' || tab === 'runner') return switchDockTab('buy_funnel');
+  if (tab === 'explain') return switchDockTab('buy_funnel');
   if (tab === 'exec' || tab === 'execution') return switchDockTab('execution');
+  if (tab === 'sell' || tab === 'sell_funnel') return switchDockTab('sell_funnel');
   if (tab === 'logs') return switchDockTab('logs');
 }
 

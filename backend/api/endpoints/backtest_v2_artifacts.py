@@ -400,6 +400,151 @@ def _build_score_diagnostics(results_dir: Path, candidate_df: pd.DataFrame) -> P
     return out
 
 
+def _sum_int_column(df: pd.DataFrame, column: str) -> int | None:
+    if df.empty or column not in df.columns:
+        return None
+    values = pd.to_numeric(df[column], errors="coerce").fillna(0)
+    return int(values.sum())
+
+
+def _build_buy_stage_funnel(
+    result: dict[str, Any],
+    results_dir: Path,
+    buy_orders_count: int,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    daily_path = results_dir / ARTIFACT_FILENAMES["daily"]
+    daily_df = _safe_read_csv(daily_path)
+    universe_meta = dict(result.get("universe_meta") or {})
+    diag_raw = {
+        str(k): int(v or 0)
+        for k, v in dict(result.get("candidate_diag_reason_counts") or {}).items()
+        if str(k).strip()
+    }
+    diag = {
+        k: v for k, v in diag_raw.items()
+        if k.startswith("BLOCK_") or k.startswith("SKIP_") or k.startswith("ENTRY_")
+    }
+
+    raw_universe = _safe_int(universe_meta.get("raw_count"))
+    tradable_universe = _safe_int(
+        universe_meta.get("tradable_symbols")
+        or universe_meta.get("after_filters_symbols")
+    )
+    trading_days = int(len(daily_df)) if not daily_df.empty else None
+    tradable_symbol_days = None
+    if tradable_universe is not None and trading_days is not None:
+        tradable_symbol_days = int(tradable_universe) * int(trading_days)
+    raw_buy_signal = _sum_int_column(daily_df, "raw_buy_signal_count")
+    buy_candidates = _sum_int_column(daily_df, "buy_candidate_count")
+    after_held = _sum_int_column(daily_df, "after_held_filter_count")
+    after_slot = _sum_int_column(daily_df, "after_slot_filter_count")
+    after_cash = _sum_int_column(daily_df, "after_cash_lot_count")
+    after_slot_measured = after_slot is not None and (after_slot > 0 or buy_orders_count == 0)
+    after_cash_measured = after_cash is not None and (after_cash > 0 or buy_orders_count == 0)
+
+    def stage_row(
+        stage_key: str,
+        stage_label: str,
+        input_count: int | None,
+        output_count: int | None,
+        note: str,
+        *,
+        available: bool = True,
+    ) -> dict[str, Any]:
+        filtered_count = None
+        if input_count is not None and output_count is not None:
+            filtered_count = max(int(input_count) - int(output_count), 0)
+        return {
+            "stage_key": stage_key,
+            "stage_label": stage_label,
+            "input_count": input_count,
+            "output_count": output_count,
+            "filtered_count": filtered_count,
+            "available": bool(available),
+            "note": note,
+        }
+
+    rows: list[dict[str, Any]] = []
+    rows.append(stage_row(
+        "s1",
+        "S1 股票池",
+        raw_universe,
+        tradable_universe,
+        "指数成分载入与基础可交易过滤后的标的数",
+        available=raw_universe is not None and tradable_universe is not None,
+    ))
+    rows.append(stage_row(
+        "s2",
+        "S2 大盘环境",
+        None,
+        None,
+        "当前产物未按候选维度单独计数；大盘环境已并入信号生成或交易模式",
+        available=False,
+    ))
+    rows.append(stage_row(
+        "s3",
+        "S3 行业趋势",
+        None,
+        None,
+        "当前策略未启用或未单独输出行业级买入过滤计数",
+        available=False,
+    ))
+    rows.append(stage_row(
+        "s4",
+        "S4 个股趋势",
+        tradable_symbol_days,
+        raw_buy_signal,
+        "从全回测期可交易标的日频事件收缩到原始买入信号",
+        available=tradable_symbol_days is not None and raw_buy_signal is not None,
+    ))
+    rows.append(stage_row(
+        "s5",
+        "S5 个股排序",
+        raw_buy_signal,
+        buy_candidates,
+        "候选排序与可交易预筛后的保留数量",
+        available=raw_buy_signal is not None and buy_candidates is not None,
+    ))
+    rows.append(stage_row(
+        "s6",
+        "S6 入场信号",
+        buy_candidates,
+        after_held,
+        "去除已持仓/重复信号后的可入场候选",
+        available=buy_candidates is not None and after_held is not None,
+    ))
+    rows.append(stage_row(
+        "s7",
+        "S7 组合构建",
+        after_held,
+        after_slot if after_slot_measured else buy_orders_count,
+        "仓位槽位与组合容量约束后的候选数量"
+        if after_slot_measured
+        else "当前引擎未稳定输出 slot stage，直接落到实际 BUY orders",
+        available=after_held is not None,
+    ))
+    rows.append(stage_row(
+        "s8",
+        "S8 风险控制",
+        after_slot if after_slot_measured else None,
+        after_cash if after_cash_measured else None,
+        "现金、整手与下单金额约束后的候选数量"
+        if (after_slot_measured and after_cash_measured)
+        else "当前引擎未单独输出 cash/lot stage 计数",
+        available=after_slot_measured and after_cash_measured,
+    ))
+    rows.append(stage_row(
+        "s9",
+        "S9 退出",
+        None,
+        None,
+        "买入漏斗不适用；退出统计请查看卖出漏斗",
+        available=False,
+    ))
+
+    return rows, diag
+
+
 def _build_counters(
     result: dict[str, Any],
     results_dir: Path,
@@ -453,6 +598,17 @@ def _build_counters(
                 )
         except Exception:
             pass
+    buy_orders_count = 0
+    sell_orders_count = 0
+    if trades_path.exists():
+        try:
+            tdf_orders = pd.read_csv(trades_path)
+            if not tdf_orders.empty and "side" in tdf_orders.columns:
+                side = tdf_orders["side"].astype(str).str.upper()
+                buy_orders_count = int(side.eq("BUY").sum())
+                sell_orders_count = int(side.eq("SELL").sum())
+        except Exception:
+            pass
     counters["atr_stop_exit_count"] = atr_stop
     counters["atr_trail_exit_count"] = atr_trail
     counters["atr_trail_update_count"] = int(result.get("atr_trail_update_count", 0) or 0) or atr_trail_update
@@ -495,6 +651,11 @@ def _build_counters(
     avg_pos = counters["avg_positions"]
     max_pos = counters["max_positions"]
     counters["slots_left"] = round(float(max_pos) - float(avg_pos), 1)
+    counters["buy_orders_count"] = int(buy_orders_count)
+    counters["sell_orders_count"] = int(sell_orders_count)
+    buy_stage_funnel, buy_block_reason_counts = _build_buy_stage_funnel(result, results_dir, buy_orders_count)
+    counters["buy_stage_funnel"] = buy_stage_funnel
+    counters["buy_block_reason_counts"] = buy_block_reason_counts
 
     return sanitize_json(counters)
 
@@ -782,6 +943,32 @@ def ensure_standard_artifacts(
         (overrides.get("benchmark"), "overrides.benchmark"),
         (base_uni.get("benchmark"), "base_config.universe.benchmark"),
     ])
+    resolved_config_mode = str(
+        overrides.get("resolved_config_mode") or result.get("resolved_config_mode") or "none"
+    )
+    resolved_config_id = overrides.get("resolved_config_id")
+    if resolved_config_id in (None, ""):
+        resolved_config_id = result.get("resolved_config_id")
+    resolved_config_hash = str(
+        overrides.get("resolved_config_hash") or result.get("resolved_config_hash") or ""
+    ).strip()
+    resolved_config_meta_raw = overrides.get("resolved_config_meta")
+    if not isinstance(resolved_config_meta_raw, dict):
+        resolved_config_meta_raw = result.get("resolved_config_meta")
+    resolved_config_meta = (
+        sanitize_json(dict(resolved_config_meta_raw)) if isinstance(resolved_config_meta_raw, dict) else None
+    )
+    resolved_universe_mode = str(
+        (resolved_config_meta or {}).get("universe_mode")
+        or runtime_uni.get("universe_mode")
+        or wb_uni.get("universe_mode")
+        or overrides.get("universe_mode")
+        or (result.get("universe_meta") or {}).get("universe_mode")
+        or ""
+    ).strip()
+    if resolved_config_meta is not None and resolved_universe_mode and not resolved_config_meta.get("universe_mode"):
+        resolved_config_meta = dict(resolved_config_meta)
+        resolved_config_meta["universe_mode"] = resolved_universe_mode
 
     run_meta_obj = {
         "exp_id": str(result.get("exp_id") or ""),
@@ -818,6 +1005,12 @@ def ensure_standard_artifacts(
             },
             "config_source": str(overrides.get("config_source") or "unknown"),
             "config_conflict_policy": str(overrides.get("config_conflict_policy") or ""),
+            "resolved_config_mode": resolved_config_mode,
+            "resolved_config_id": str(resolved_config_id or "") or None,
+            "resolved_config_hash": resolved_config_hash or None,
+            "resolved_config_source_type": str((resolved_config_meta or {}).get("source_type") or ""),
+            "resolved_config_owner": str((resolved_config_meta or {}).get("owner") or ""),
+            "resolved_config_meta": resolved_config_meta,
         },
     }
     # 注入 universe resolver 元数据（来自 experiment_runner）

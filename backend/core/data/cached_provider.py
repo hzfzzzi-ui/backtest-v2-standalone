@@ -1,16 +1,22 @@
-"""进程级 Parquet 缓存层 — 透明加速 OHLCV 数据加载。
+"""Process-local OHLCV parquet cache with DB-signature invalidation.
 
-首次调用 load_ohlcv_daily() 时从 PostgreSQL 全表 dump 到 /tmp/ohlcv_cache.parquet；
-后续调用直接从 Parquet 读取，使用 predicate pushdown 按日期过滤。
-缓存生命周期 = 容器生命周期（/tmp 非持久化，容器重启自动清空）。
+The first `load_ohlcv_daily()` call dumps the full PostgreSQL OHLCV table to
+`/tmp/ohlcv_cache.parquet`. Subsequent reads use parquet predicate pushdown on
+date and in-memory symbol filtering.
+
+To avoid stale-cache failures after DB repair work, the cache now tracks a
+lightweight DB signature and invalidates itself when the signature changes.
 """
+
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import psycopg
@@ -25,31 +31,70 @@ logger = logging.getLogger(__name__)
 
 _CACHE_PATH = Path("/tmp/ohlcv_cache.parquet")
 _CACHE_TMP = Path("/tmp/ohlcv_cache.parquet.tmp")
+_META_PATH = Path("/tmp/ohlcv_cache.meta.json")
+_CACHE_VERSION = 2
 
-# 全表 dump: 每次从 DB 取 50 万行，避免一次性 OOM
 _CHUNK_SIZE = 500_000
-# 全表 dump 超时 10 分钟
 _WARMUP_TIMEOUT_MS = 600_000
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def clear_ohlcv_cache_files() -> list[str]:
+    removed: list[str] = []
+    for path in (_CACHE_PATH, _CACHE_TMP, _META_PATH):
+        try:
+            if path.exists():
+                path.unlink()
+                removed.append(str(path))
+        except FileNotFoundError:
+            continue
+    return removed
+
+
+def get_ohlcv_cache_paths() -> dict[str, str]:
+    return {
+        "cache_path": str(_CACHE_PATH),
+        "cache_tmp_path": str(_CACHE_TMP),
+        "meta_path": str(_META_PATH),
+    }
 
 
 class CachedDataProvider(DataProvider):
-    """包装 PostgresDataProvider，对 load_ohlcv_daily 添加 Parquet 缓存。"""
+    """Wrap PostgresDataProvider with parquet-backed OHLCV caching."""
 
     def __init__(self, inner: PostgresDataProvider) -> None:
         self._inner = inner
-        self._warm: bool = _CACHE_PATH.exists()
+        self._cache_disabled = str(os.environ.get("OHLCV_CACHE_DISABLE", "")).strip().lower() in _TRUE_VALUES
+        self._force_refresh = str(os.environ.get("OHLCV_CACHE_FORCE_REFRESH", "")).strip().lower() in _TRUE_VALUES
+        self._db_signature: dict[str, Any] | None = None
+        self._warm = False
 
-    # ── OHLCV: 缓存核心 ──────────────────────────────────────
+        if self._cache_disabled:
+            logger.info("OHLCV cache disabled by OHLCV_CACHE_DISABLE")
+            return
+
+        if self._force_refresh:
+            removed = clear_ohlcv_cache_files()
+            logger.info("OHLCV cache force refresh requested; removed=%s", removed)
+
+        self._db_signature = self._current_db_signature()
+        self._warm = self._is_cache_valid()
 
     def load_ohlcv_daily(
-        self, symbols: list[str], start: date, end: date, source: str,
+        self,
+        symbols: list[str],
+        start: date,
+        end: date,
+        source: str,
     ) -> pd.DataFrame:
         t0 = time.perf_counter()
+
+        if self._cache_disabled:
+            return self._inner.load_ohlcv_daily(symbols, start, end, source)
 
         if not self._warm:
             self._warmup_full_table()
 
-        # 从 Parquet 读取，predicate pushdown 按日期过滤
         df = pd.read_parquet(
             _CACHE_PATH,
             filters=[
@@ -58,7 +103,6 @@ class CachedDataProvider(DataProvider):
             ],
         )
 
-        # 内存过滤 symbols
         if symbols:
             norm = {normalize_stock_symbol(s) for s in symbols}
             df = df[df["symbol"].isin(norm)]
@@ -71,8 +115,6 @@ class CachedDataProvider(DataProvider):
         )
         return df.reset_index(drop=True)
 
-    # ── 其他方法: 直接委托给内部 provider ──────────────────
-
     def load_trading_calendar_cn(self, start: date, end: date) -> pd.DatetimeIndex:
         return self._inner.load_trading_calendar_cn(start, end)
 
@@ -82,14 +124,10 @@ class CachedDataProvider(DataProvider):
     def load_instrument_rules(self, symbols: list[str]) -> pd.DataFrame:
         return self._inner.load_instrument_rules(symbols)
 
-    def load_benchmark_daily(
-        self, benchmark_symbol: str, start: date, end: date,
-    ) -> pd.DataFrame:
+    def load_benchmark_daily(self, benchmark_symbol: str, start: date, end: date) -> pd.DataFrame:
         return self._inner.load_benchmark_daily(benchmark_symbol, start, end)
 
-    def load_st_history(
-        self, symbols: list[str], start: date, end: date,
-    ) -> pd.DataFrame:
+    def load_st_history(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
         return self._inner.load_st_history(symbols, start, end)
 
     def load_sector_indices(self, start: date, end: date) -> pd.DataFrame:
@@ -98,6 +136,9 @@ class CachedDataProvider(DataProvider):
     def load_industry_mapping(self, symbols: list[str]) -> dict[str, str]:
         return self._inner.load_industry_mapping(symbols)
 
+    def load_industry_history(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
+        return self._inner.load_industry_history(symbols, start, end)
+
     def load_security_master(self, symbols: list[str]) -> pd.DataFrame:
         return self._inner.load_security_master(symbols)
 
@@ -105,27 +146,29 @@ class CachedDataProvider(DataProvider):
     def query_audit(self) -> list[dict]:
         return self._inner.query_audit
 
-    # ── 内部: 全表 dump ──────────────────────────────────────
-
     def _warmup_full_table(self) -> None:
-        """从 PostgreSQL 流式 dump 全表到 Parquet 文件。
-
-        使用 server-side cursor 分块读取 + pyarrow ParquetWriter 增量写入，
-        避免一次性将 13.6M 行加载到内存导致 OOM。
-        """
-        logger.info("OHLCV cache MISS — 正在从数据库流式 dump 全表到 Parquet...")
+        logger.info("OHLCV cache MISS: rebuilding parquet cache from PostgreSQL")
         t0 = time.perf_counter()
 
-        # 构建全表查询（复用内部 provider 的 schema 发现逻辑）
         src = self._inner._source
         table = safe_ident(src.stocks_table)
         mapping = self._inner._schema[src.stocks_table]
         existing = self._inner._get_table_columns(src.stocks_table)
 
         ordered_keys = [
-            "date", "symbol", "open", "high", "low", "close",
-            "volume", "amount", "limit_up", "limit_down",
-            "is_suspended", "is_st", "adj_factor",
+            "date",
+            "symbol",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "amount",
+            "limit_up",
+            "limit_down",
+            "is_suspended",
+            "is_st",
+            "adj_factor",
         ]
         cols = self._inner._filter_existing_cols(mapping, ordered_keys, existing)
         if "is_st" not in cols and "is_st" in existing:
@@ -133,20 +176,21 @@ class CachedDataProvider(DataProvider):
         cols_sql = ", ".join(safe_ident(c) for c in cols)
         date_col = safe_ident(mapping["date"])
         sym_col = safe_ident(mapping["symbol"])
-
         query = f"SELECT {cols_sql} FROM {table} ORDER BY {date_col}, {sym_col}"
 
-        # 使用 server-side cursor 流式读取，分块写入 Parquet
         db = self._inner._db
         writer: pq.ParquetWriter | None = None
         total_rows = 0
 
         try:
             with psycopg.connect(
-                host=db.host, port=db.port, dbname=db.dbname,
-                user=db.user, password=db.password, autocommit=False,
+                host=db.host,
+                port=db.port,
+                dbname=db.dbname,
+                user=db.user,
+                password=db.password,
+                autocommit=False,
             ) as conn:
-                # SET LOCAL 必须在普通 cursor 上执行（named cursor 会包装为 DECLARE）
                 conn.execute(f"SET LOCAL statement_timeout = '{_WARMUP_TIMEOUT_MS}ms'")
                 conn.execute("SET TRANSACTION READ ONLY")
                 with conn.cursor(name="ohlcv_cache_warmup") as cur:
@@ -165,31 +209,128 @@ class CachedDataProvider(DataProvider):
                         arrow_table = pa.Table.from_pandas(chunk_out, preserve_index=False)
                         if writer is None:
                             writer = pq.ParquetWriter(
-                                str(_CACHE_TMP), arrow_table.schema, compression="snappy",
+                                str(_CACHE_TMP),
+                                arrow_table.schema,
+                                compression="snappy",
                             )
                         writer.write_table(arrow_table)
                         total_rows += len(chunk_out)
                         logger.info("  cache warmup: %s rows written...", f"{total_rows:,}")
 
-            if writer is not None:
-                writer.close()
-                os.replace(str(_CACHE_TMP), str(_CACHE_PATH))
-            else:
-                logger.warning("OHLCV cache: 数据库返回 0 行，跳过缓存创建")
+            if writer is None:
+                logger.warning("OHLCV cache rebuild returned zero rows; cache skipped")
                 self._warm = True
                 return
 
+            writer.close()
+            os.replace(str(_CACHE_TMP), str(_CACHE_PATH))
+            self._write_cache_meta()
         except Exception:
             _CACHE_TMP.unlink(missing_ok=True)
-            logger.warning("OHLCV cache 写入失败，fallback 到无缓存模式", exc_info=True)
+            logger.warning("OHLCV cache rebuild failed", exc_info=True)
             raise
 
         elapsed = time.perf_counter() - t0
         size_mb = _CACHE_PATH.stat().st_size / 1024 / 1024
         self._warm = True
         logger.info(
-            "OHLCV cache 已创建: %s rows, %.0f MB, %.1fs",
+            "OHLCV cache rebuilt: %s rows, %.0f MB, %.1fs",
             f"{total_rows:,}",
             size_mb,
             elapsed,
         )
+
+    def _load_cache_meta(self) -> dict[str, Any] | None:
+        if not _META_PATH.exists():
+            return None
+        try:
+            return json.loads(_META_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("OHLCV cache meta unreadable; clearing local cache files", exc_info=True)
+            clear_ohlcv_cache_files()
+            return None
+
+    def _write_cache_meta(self) -> None:
+        payload = {
+            "cache_version": _CACHE_VERSION,
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "db_signature": self._db_signature or self._current_db_signature(),
+            **get_ohlcv_cache_paths(),
+        }
+        _META_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _is_cache_valid(self) -> bool:
+        if not _CACHE_PATH.exists():
+            return False
+        meta = self._load_cache_meta()
+        if not meta:
+            logger.info("OHLCV cache exists but meta is missing; cache will be rebuilt")
+            clear_ohlcv_cache_files()
+            return False
+        if int(meta.get("cache_version") or 0) != _CACHE_VERSION:
+            logger.info("OHLCV cache version mismatch; cache will be rebuilt")
+            clear_ohlcv_cache_files()
+            return False
+        cached_signature = dict(meta.get("db_signature") or {})
+        current_signature = dict(self._db_signature or self._current_db_signature())
+        if cached_signature != current_signature:
+            logger.info(
+                "OHLCV cache signature mismatch; rebuilding cache. cached=%s current=%s",
+                cached_signature,
+                current_signature,
+            )
+            clear_ohlcv_cache_files()
+            self._db_signature = current_signature
+            return False
+        return True
+
+    def _current_db_signature(self) -> dict[str, Any]:
+        src = self._inner._source
+        table = safe_ident(src.stocks_table)
+        mapping = self._inner._schema[src.stocks_table]
+        existing = self._inner._get_table_columns(src.stocks_table)
+
+        date_col = safe_ident(mapping["date"])
+        created_col = "created_at" if "created_at" in existing else None
+        suspended_col = "is_suspended" if "is_suspended" in existing else None
+
+        select_cols = [
+            "count(*)::bigint as row_count",
+            f"max({date_col}) as max_trade_date",
+            f"max({safe_ident(created_col)}) as max_created_at" if created_col else "null::timestamptz as max_created_at",
+            (
+                f"count(*) filter (where coalesce({safe_ident(suspended_col)}, false))::bigint as suspended_rows"
+                if suspended_col else
+                "0::bigint as suspended_rows"
+            ),
+        ]
+        query = f"SELECT {', '.join(select_cols)} FROM {table}"
+        db = self._inner._db
+        with psycopg.connect(
+            host=db.host,
+            port=db.port,
+            dbname=db.dbname,
+            user=db.user,
+            password=db.password,
+            autocommit=False,
+        ) as conn:
+            conn.execute("SET TRANSACTION READ ONLY")
+            conn.execute(f"SET LOCAL statement_timeout = '{_WARMUP_TIMEOUT_MS}ms'")
+            with conn.cursor() as cur:
+                cur.execute(query)
+                row = cur.fetchone()
+
+        if not row:
+            return {
+                "row_count": 0,
+                "max_trade_date": None,
+                "max_created_at": None,
+                "suspended_rows": 0,
+            }
+
+        return {
+            "row_count": int(row[0] or 0),
+            "max_trade_date": row[1].isoformat() if row[1] is not None else None,
+            "max_created_at": row[2].isoformat() if row[2] is not None else None,
+            "suspended_rows": int(row[3] or 0),
+        }

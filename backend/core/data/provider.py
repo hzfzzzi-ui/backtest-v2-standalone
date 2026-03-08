@@ -49,6 +49,14 @@ class DataProvider(ABC):
         """
         return {}
 
+    def load_industry_history(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
+        """加载股票→行业历史映射（PIT-safe 区间记录）。
+
+        返回至少包含 ts_code/start_date/end_date/industry_l1 的 DataFrame。
+        默认返回空 DataFrame。
+        """
+        return pd.DataFrame(columns=["ts_code", "start_date", "end_date", "industry_l1"])
+
     def load_security_master(self, symbols: list[str]) -> pd.DataFrame:
         """Return security master rows with at least symbol/list_date/delist_date.
 

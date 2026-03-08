@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <title>Strategy Workbench v2</title>
-  <link rel="stylesheet" href="assets/css/workbench.css" />
+<link rel="stylesheet" href="assets/css/workbench.css?v=20260308_results_surface_reset4" />
 </head>
 <body>
   <div class="wb-app">
@@ -22,8 +22,18 @@
 
       <div class="wb-cmd-right">
         <button id="wbRunBtn" class="wb-btn-run">运行</button>
+        <button id="wbConfigCenterBtn" class="pill wb-cmd-btn">配置中心</button>
+        <span id="wbConfigCenterHint" class="wb-run-status">当前：草稿</span>
+        <select id="wbPresetSelect" class="formInput wb-input-sm wb-preset-select" title="运行入口" hidden>
+          <option value="">默认入口</option>
+          <option value="v2-breakout-br35-atr10-candidate">候选 BR35 + ATR1.0</option>
+          <option value="v2-breakout-atr-stop-k10-candidate">候选 ATR 1.0</option>
+        </select>
+        <span id="wbPresetHint" class="wb-run-status" hidden>默认：使用当前草稿 / 已加载配置</span>
         <button id="wbQuickSave" class="pill wb-cmd-btn">保存</button>
-        <button id="wbQuickLoad" class="pill wb-cmd-btn">加载</button>
+        <button id="wbQuickLoad" class="pill wb-cmd-btn" hidden>加载</button>
+        <span id="wbConfigSourceChip" class="wb-chip">草稿运行</span>
+        <span id="wbConfigSourceText" class="wb-run-status"></span>
 
         <span id="wbRunStatus" class="wb-run-status"></span>
         <button id="wbStatusBell" class="wb-bell wb-bell-ok" title="Status Center">
@@ -41,23 +51,52 @@
     <!-- ═══ Body: Rail + Drawer + Main ═══ -->
     <div class="wb-body" id="wbBody">
 
-      <!-- ═══ B-1. Icon Rail (48 px, 9-stage + JSON + History) ═══ -->
+      <!-- ═══ B-1. Stage Rail ═══ -->
       <aside class="wb-rail" id="wbRail">
-        <button class="wb-rail-btn wb-rail-stage active" data-panel="s1" title="S1 股票池"><span class="wb-rail-num">①</span>池</button>
-        <button class="wb-rail-btn wb-rail-stage" data-panel="s2" title="S2 大盘环境"><span class="wb-rail-num">②</span>盘</button>
-        <button class="wb-rail-btn wb-rail-stage" data-panel="s3" title="S3 行业趋势"><span class="wb-rail-num">③</span>业</button>
-        <button class="wb-rail-btn wb-rail-stage" data-panel="s4" title="S4 个股趋势"><span class="wb-rail-num">④</span>股</button>
-        <button class="wb-rail-btn wb-rail-stage" data-panel="s5" title="S5 个股排序"><span class="wb-rail-num">⑤</span>排</button>
-        <button class="wb-rail-btn wb-rail-stage" data-panel="s6" title="S6 入场信号"><span class="wb-rail-num">⑥</span>入</button>
-        <button class="wb-rail-btn wb-rail-stage" data-panel="s7" title="S7 组合构建"><span class="wb-rail-num">⑦</span>组</button>
-        <button class="wb-rail-btn wb-rail-stage" data-panel="s8" title="S8 风险控制"><span class="wb-rail-num">⑧</span>控</button>
-        <button class="wb-rail-btn wb-rail-stage" data-panel="s9" title="S9 退出"><span class="wb-rail-num">⑨</span>退</button>
-        <div class="wb-rail-sep"></div>
-        <button class="wb-rail-btn" data-panel="json" title="JSON">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        <button class="wb-rail-btn wb-rail-stage active" data-panel="s1" title="S1 股票池">
+          <span class="wb-rail-num">①</span>
+          <span class="wb-rail-label">股票池</span>
         </button>
-        <button class="wb-rail-btn" data-panel="history" title="实验历史">
+        <button class="wb-rail-btn wb-rail-stage" data-panel="s2" title="S2 大盘环境">
+          <span class="wb-rail-num">②</span>
+          <span class="wb-rail-label">大盘环境</span>
+        </button>
+        <button class="wb-rail-btn wb-rail-stage" data-panel="s3" title="S3 行业趋势">
+          <span class="wb-rail-num">③</span>
+          <span class="wb-rail-label">行业趋势</span>
+        </button>
+        <button class="wb-rail-btn wb-rail-stage" data-panel="s4" title="S4 个股趋势">
+          <span class="wb-rail-num">④</span>
+          <span class="wb-rail-label">个股趋势</span>
+        </button>
+        <button class="wb-rail-btn wb-rail-stage" data-panel="s5" title="S5 个股排序">
+          <span class="wb-rail-num">⑤</span>
+          <span class="wb-rail-label">个股排序</span>
+        </button>
+        <button class="wb-rail-btn wb-rail-stage" data-panel="s6" title="S6 入场信号">
+          <span class="wb-rail-num">⑥</span>
+          <span class="wb-rail-label">入场信号</span>
+        </button>
+        <button class="wb-rail-btn wb-rail-stage" data-panel="s7" title="S7 组合构建">
+          <span class="wb-rail-num">⑦</span>
+          <span class="wb-rail-label">组合构建</span>
+        </button>
+        <button class="wb-rail-btn wb-rail-stage" data-panel="s8" title="S8 风险控制">
+          <span class="wb-rail-num">⑧</span>
+          <span class="wb-rail-label">风险控制</span>
+        </button>
+        <button class="wb-rail-btn wb-rail-stage" data-panel="s9" title="S9 退出">
+          <span class="wb-rail-num">⑨</span>
+          <span class="wb-rail-label">退出</span>
+        </button>
+        <div class="wb-rail-sep"></div>
+        <button class="wb-rail-btn wb-rail-tool" data-panel="json" title="JSON 配置">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          <span class="wb-rail-label">JSON</span>
+        </button>
+        <button class="wb-rail-btn wb-rail-tool" data-panel="history" title="实验历史">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span class="wb-rail-label">历史</span>
         </button>
       </aside>
 
@@ -78,6 +117,9 @@
         <!-- Hidden: config tracking elements for JS -->
         <span id="wbConfigId" class="wb-code" hidden>-</span>
         <select id="wbConfigList" class="formInput wb-input-sm" hidden></select>
+        <div class="wb-inline wb-gap-bottom">
+          <span id="wbSchemaBadge" class="wb-chip wb-ok">Schema OK</span>
+        </div>
 
         <!-- ── Universe module ── -->
         <section class="wb-module active" data-module="s1">
@@ -190,6 +232,7 @@
               <button data-val="close">当日收盘</button>
             </div>
             <select id="wbMatchPrice" hidden><option value="next_open" selected>次日开盘</option><option value="close">当日收盘</option></select>
+            <div class="wb-mini wb-gap-top"><span class="wb-badge-unimpl">未实现</span> 主实验执行层当前固定使用 `next_open`。</div>
           </div>
 
           <!-- 12. 涨跌停成交 -->
@@ -200,6 +243,7 @@
               <button data-val="allow">允许</button>
             </div>
             <select id="wbLimitTrade" hidden><option value="forbid" selected>禁止</option><option value="allow">允许</option></select>
+            <div class="wb-mini wb-gap-top"><span class="wb-badge-unimpl">未实现</span> 当前只消费下方 `涨跌停规则`，不消费该成交假设控件。</div>
           </div>
 
           <!-- 13. 涨跌停可成交规则 -->
@@ -221,6 +265,7 @@
               <button data-val="fixed">固定成分</button>
             </div>
             <select id="wbConstituent" hidden><option value="dynamic" selected>动态成分</option><option value="fixed">固定成分</option></select>
+            <div class="wb-mini wb-gap-top"><span class="wb-badge-unimpl">未实现</span> 实际口径由 `universe_mode` 决定，当前没有独立的 fixed/dynamic toggle。</div>
           </div>
 
           <!-- 15. 行业体系 & PIT -->
@@ -233,6 +278,7 @@
               </select>
               <span class="wb-chip wb-ok">PIT: ON</span>
             </div>
+            <div class="wb-mini wb-gap-top"><span class="wb-badge-unimpl">未实现</span> 当前固定使用 `pit_industry_history.industry_l1`，未开放行业体系切换。</div>
           </div>
 
           <!-- Benchmark (保留) -->
@@ -248,6 +294,7 @@
               <div><label class="wb-sub-label">min</label><input id="wbPriceMin" type="number" class="formInput" value="0" /></div>
               <div><label class="wb-sub-label">max</label><input id="wbPriceMax" type="number" class="formInput" value="99999" /></div>
             </div>
+            <div class="wb-mini wb-gap-top"><span class="wb-badge-unimpl">未实现</span> 主实验 runtime 当前只消费 `min_price`，`max` 仍仅保留在 draft / report 口径中。</div>
           </div>
 
           <!-- Hidden compat -->
@@ -295,31 +342,38 @@
         <!-- ── S2: 大盘环境 ── -->
         <section class="wb-module" data-module="s2">
           <details class="wb-acc" open>
-            <summary>Signal Generation</summary>
+            <summary>大盘环境 / Regime Router</summary>
             <div class="wb-acc-body">
-              <div class="wb-inline" style="margin-bottom:8px">
-                <label><input type="checkbox" id="wbEnableSignal" checked /> 启用</label>
-                <select id="wbStrategyFamily" class="formInput wb-input-sm">
-                  <option value="SMA_CROSS" selected>均线交叉 SMA</option>
-                  <option value="BREAKOUT">突破 Breakout</option>
-                  <option value="MEAN_REVERSION">均值回归 MR</option>
-                </select>
+              <div class="wb-inline wb-gap-bottom">
+                <label><input type="checkbox" id="wbEnableSignal" checked /> 启用信号生成</label>
+                <label><input type="checkbox" id="wbRegimeEnabled" checked /> 启用 Regime Router</label>
+                <span class="wb-mini">启用后主策略切换为 `REGIME_ROUTER`，趋势臂只支持 SMA / EMA。</span>
               </div>
-              <div id="wbSigParamsSMA" class="wb-grid3">
-                <div><label class="formLabel">fast_ma</label><input id="wbFastMa" type="number" class="formInput" value="5" /></div>
-                <div><label class="formLabel">slow_ma</label><input id="wbSlowMa" type="number" class="formInput" value="20" /></div>
-                <div><label class="formLabel">buffer%</label><input id="wbEntryBuffer" type="number" class="formInput" value="1" /></div>
+              <div id="wbRegimeParams" class="wb-grid3">
+                <div><label class="formLabel">regime_ma</label><input id="wbRegimeMa" type="number" class="formInput" value="60" /></div>
+                <div><label class="formLabel">趋势臂限制</label><input class="formInput" value="EMA_CROSS / SMA_CROSS" disabled /></div>
+                <div><label class="formLabel">Stage 标签</label><input id="wbStrategyPack" class="formInput" value="REGIME_ROUTER" disabled /></div>
               </div>
-              <div id="wbSigParamsBREAKOUT" class="wb-grid3" hidden>
-                <div><label class="formLabel">lookback</label><input id="wbBreakoutLookback" type="number" class="formInput" value="20" /></div>
-                <div><label class="formLabel">buffer%</label><input id="wbBreakoutBuffer" type="number" class="formInput" value="1" /></div>
+              <div id="wbRegimeFilterBlock" class="wb-gap-top">
+                <div class="wb-inline wb-gap-bottom">
+                  <label><input type="checkbox" id="wbRegimeFilterEnabled" /> Regime Filter</label>
+                  <span class="wb-mini">研究级阈值过滤，当前编译链支持并写入 runtime config。</span>
+                </div>
+                <div id="wbRegimeFilterParams" class="wb-grid2" style="display:none">
+                  <div><label class="formLabel">threshold</label><input id="wbRfThreshold" type="number" step="0.05" class="formInput" value="0.3" /></div>
+                  <div><label class="formLabel">alpha</label><input id="wbRfAlpha" type="number" step="0.1" class="formInput" value="2.0" /></div>
+                </div>
               </div>
-              <div id="wbSigParamsMR" class="wb-grid3" hidden>
-                <div><label class="formLabel">lookback</label><input id="wbMrLookback" type="number" class="formInput" value="20" /></div>
-                <div><label class="formLabel">z_entry</label><input id="wbMrZEntry" type="number" class="formInput" value="2" /></div>
-                <div><label class="formLabel">z_exit</label><input id="wbMrZExit" type="number" class="formInput" value="0.5" /></div>
+              <hr class="wb-acc-separator" />
+              <div class="wb-inline wb-gap-bottom">
+                <label><input type="checkbox" id="wbBenchmarkRegimeEnabled" checked /> Benchmark Regime 过滤</label>
+                <span class="wb-mini">对应后端 `benchmark_regime`，与 Stage 2 `regime_detection` 分离展示。</span>
               </div>
-              <div class="wb-mini wb-gap-top">输出: <span id="wbSigOutput">raw_signal_count —</span></div>
+              <div class="wb-grid3">
+                <div><label class="formLabel">fast_period</label><input id="wbBenchmarkRegimeFast" type="number" class="formInput" value="20" /></div>
+                <div><label class="formLabel">slow_period</label><input id="wbBenchmarkRegimeSlow" type="number" class="formInput" value="120" /></div>
+                <div><label class="formLabel">slope_window</label><input id="wbBenchmarkRegimeSlope" type="number" class="formInput" value="5" /></div>
+              </div>
             </div>
           </details>
         </section>
@@ -327,15 +381,35 @@
         <!-- ── S3: 行业趋势 ── -->
         <section class="wb-module" data-module="s3">
           <details class="wb-acc" open>
-            <summary>Composition Pipeline</summary>
+            <summary>行业趋势 / 组合面</summary>
             <div class="wb-acc-body">
-              <div class="wb-inline" style="margin-bottom:8px">
+              <div class="wb-inline wb-gap-bottom">
+                <label><input type="checkbox" id="wbSectorGateEnabled" /> 行业趋势门控</label>
+                <span class="wb-mini">对应 `sector_gate`，仅主实验编译链消费。</span>
+              </div>
+              <div class="wb-grid2">
+                <div><label class="formLabel">rank_window</label><input id="wbSectorRankWindow" type="number" class="formInput" value="60" /></div>
+                <div><label class="formLabel">top_pct</label><input id="wbSectorTopPct" type="number" step="0.05" class="formInput" value="0.30" /></div>
+              </div>
+              <hr class="wb-acc-separator" />
+              <div class="wb-inline wb-gap-bottom">
                 <label><input type="checkbox" id="wbEnableComposition" checked /> 启用</label>
                 <select id="wbComposeMode" class="formInput wb-input-sm"><option value="WEIGHTED_SCORE">Weighted Score</option><option value="AND">AND</option><option value="OR">OR</option></select>
                 <div style="margin-left:auto"><label class="formLabel" style="display:inline">score_threshold</label> <input id="wbScoreThreshold" type="number" class="formInput wb-input-sm" value="0.6" style="width:60px" /></div>
+                <span class="wb-badge-unimpl">未实现</span>
               </div>
-              <div id="wbPipelineFlow" class="wb-pipeline"></div>
-              <div class="wb-mini wb-gap-top">输出: <span id="wbCompOutput">—</span></div>
+              <div id="wbSignalCompositionNotice" class="wb-hint-warn">
+                `signal_composition.modules` 仍会进入草稿与 diff，但当前主实验编译链不消费它，只作为研究 / 对照界面保留。
+              </div>
+              <div id="wbPipelineFlow" class="wb-pipeline wb-gap-top">
+                <table class="wb-table wb-table-compact">
+                  <thead>
+                    <tr><th>模块</th><th>启用</th><th>角色</th><th>权重</th><th>优先级</th></tr>
+                  </thead>
+                  <tbody id="wbComposeRows"></tbody>
+                </table>
+              </div>
+              <div class="wb-mini wb-gap-top">输出: <span id="wbCompOutput">研究对照面板，不参与主链编译</span></div>
             </div>
           </details>
         </section>
@@ -343,10 +417,18 @@
         <!-- ── S4: 个股趋势 ── -->
         <section class="wb-module" data-module="s4">
           <details class="wb-acc" open>
-            <summary>Live Preview</summary>
+            <summary>个股趋势过滤</summary>
             <div class="wb-acc-body">
-              <div id="wbLivePreview" class="wb-live-preview">
-                <div class="wb-mini" style="opacity:.5">运行后显示实时预览</div>
+              <div class="wb-inline wb-gap-bottom">
+                <label><input type="checkbox" id="wbStockTrendEnabled" /> 启用个股趋势过滤</label>
+                <span class="wb-mini">对应后端 `stock_trend_filter` / breakout `enable_v2_trend_filter`。</span>
+              </div>
+              <div class="wb-grid2">
+                <div><label class="formLabel">short_ma</label><input id="wbStockTrendShortMa" type="number" class="formInput" value="20" /></div>
+                <div><label class="formLabel">long_ma</label><input id="wbStockTrendLongMa" type="number" class="formInput" value="60" /></div>
+              </div>
+              <div id="wbLivePreview" class="wb-live-preview wb-gap-top">
+                <div class="wb-mini" style="opacity:.7">运行后在 Explain / 图表区观察过滤后的实际影响。</div>
               </div>
             </div>
           </details>
@@ -357,7 +439,13 @@
           <details class="wb-acc" open>
             <summary>个股排序</summary>
             <div class="wb-acc-body">
-              <div class="wb-mini">该阶段已独立，可单独进入。当前排序参数沿用 S3 组合配置。</div>
+              <div class="wb-grid2">
+                <div><label class="formLabel">momentum_top_pct</label><input id="wbMomentumTopPct" type="number" step="0.05" class="formInput" value="0" /></div>
+                <div><label class="formLabel">说明</label><input class="formInput" value="0 = 不启用排序截断" disabled /></div>
+              </div>
+              <div class="wb-mini wb-gap-top">
+                `strength rank / multifactor rank` 当前仍主要由脚本与 execution preview 使用，不纳入 9-stage 主面板。
+              </div>
             </div>
           </details>
         </section>
@@ -367,7 +455,61 @@
           <details class="wb-acc" open>
             <summary>入场信号</summary>
             <div class="wb-acc-body">
-              <div class="wb-mini">该阶段已独立，可单独进入。当前入场参数沿用 S2 信号配置。</div>
+              <div class="wb-inline wb-gap-bottom">
+                <label class="wb-field-label" style="margin:0">主策略</label>
+                <select id="wbTrendStrategy" class="formInput wb-input-sm">
+                  <option value="EMA_CROSS">EMA_CROSS</option>
+                  <option value="SMA_CROSS">SMA_CROSS</option>
+                  <option value="BREAKOUT_TREND">BREAKOUT_TREND</option>
+                  <option value="RSI_REVERSAL">RSI_REVERSAL (未实现)</option>
+                </select>
+                <span class="wb-mini">`RSI_REVERSAL` 目前仅作为 regime-router 的 MR 臂实现，不支持主策略直跑。</span>
+              </div>
+              <div class="wb-grid3">
+                <div><label class="formLabel">fast_ma</label><input id="wbFastMa" type="number" class="formInput" value="20" /></div>
+                <div><label class="formLabel">slow_ma</label><input id="wbSlowMa" type="number" class="formInput" value="60" /></div>
+                <div><label class="formLabel">entry_buffer_pct</label><input id="wbEntryBuffer" type="number" step="0.1" class="formInput" value="1" /></div>
+              </div>
+              <hr class="wb-acc-separator" />
+              <div class="wb-field">
+                <label class="wb-field-label">Breakout 扩展参数</label>
+                <div class="wb-grid3">
+                  <div><label class="formLabel">breakout_window</label><input id="wbBreakoutWindow" type="number" class="formInput" value="55" /></div>
+                  <div><label class="formLabel">short_window</label><input id="wbBreakoutWindowShort" type="number" class="formInput" value="20" /></div>
+                  <div><label class="formLabel">long_window</label><input id="wbBreakoutWindowLong" type="number" class="formInput" value="55" /></div>
+                  <div><label class="formLabel">breakout_buffer_pct</label><input id="wbBreakoutBuffer" type="number" step="0.1" class="formInput" value="0" /></div>
+                  <div><label class="formLabel">entry_confirm_mode</label><select id="wbEntryConfirmMode" class="formInput"><option value="none">none</option><option value="close_confirm">close_confirm</option></select></div>
+                  <div><label class="formLabel">entry_delay_mode</label><select id="wbEntryDelayMode" class="formInput"><option value="none">none</option><option value="next_open">next_open</option></select></div>
+                </div>
+                <label class="wb-toggle wb-gap-top"><input id="wbDualBreakout" type="checkbox" /> enable_dual_breakout</label>
+              </div>
+              <hr class="wb-acc-separator" />
+              <div id="wbMrPanel">
+                <div class="wb-inline wb-gap-bottom">
+                  <label class="wb-field-label" style="margin:0">MR 臂</label>
+                  <select id="wbMrStrategy" class="formInput wb-input-sm">
+                    <option value="RSI_REVERSAL">RSI_REVERSAL</option>
+                  </select>
+                  <span class="wb-mini">仅在 `REGIME_ROUTER` 启用时进入主实验编译链。</span>
+                </div>
+                <div class="wb-grid3">
+                  <div><label class="formLabel">rsi_period</label><input id="wbMrRsiPeriod" type="number" class="formInput" value="6" /></div>
+                  <div><label class="formLabel">rsi_buy</label><input id="wbMrRsiBuy" type="number" class="formInput" value="20" /></div>
+                  <div><label class="formLabel">rsi_sell</label><input id="wbMrRsiSell" type="number" class="formInput" value="80" /></div>
+                  <div><label class="formLabel">mr_max_hold_days</label><input id="wbMrMaxHold" type="number" class="formInput" value="5" /></div>
+                  <div><label class="formLabel">mr_stop_loss_pct</label><input id="wbMrStopLoss" type="number" step="0.1" class="formInput" value="3" /></div>
+                </div>
+              </div>
+              <hr class="wb-acc-separator" />
+              <div class="wb-field">
+                <label class="wb-field-label">入场过滤</label>
+                <div class="wb-inline">
+                  <label><input id="wbEntryAboveSlowMa" type="checkbox" /> 仅允许站上慢线</label>
+                  <label><input id="wbEntrySlowMaSlope" type="checkbox" /> 慢线斜率过滤</label>
+                  <div><label class="formLabel">entry_slope_lookback</label><input id="wbEntrySlopeLookback" type="number" class="formInput wb-input-sm" value="5" disabled /></div>
+                </div>
+              </div>
+              <div class="wb-mini">输出: <span id="wbSigOutput">由 runtime config 决定，Summary / Report 会读取编译后的真实策略参数</span></div>
             </div>
           </details>
         </section>
@@ -384,6 +526,9 @@
                 <div><label class="formLabel">行业上限%</label><input id="wbIndustryCap" type="number" class="formInput" value="30" /></div>
                 <div><label class="formLabel">lot</label><input id="wbLot" type="number" class="formInput" value="100" /></div>
                 <div><label class="formLabel">现金不足策略</label><select id="wbCashPolicy" class="formInput"><option value="skip">跳过</option><option value="scale_down">缩量</option></select></div>
+                <div><label class="formLabel">portfolio_mode</label><select id="wbPortfolioMode" class="formInput"><option value="equal_10">equal_10</option><option value="profit_release">profit_release</option></select></div>
+                <div><label class="formLabel">weight_mode</label><select id="wbWeightMode" class="formInput"><option value="equal">equal</option><option value="atr">atr</option><option value="risk_budget">risk_budget</option></select></div>
+                <div><label class="formLabel">min_positions</label><input id="wbMinPositions" type="number" class="formInput" value="10" /></div>
               </div>
               <div id="wbConstraintStats" class="wb-stat-row">
                 <div class="wb-stat-item"><span class="wb-stat-label">平均持仓</span><span class="wb-stat-value" data-key="avg_positions">—</span></div>
@@ -404,13 +549,76 @@
         <!-- ── S8: 风险控制 ── -->
         <section class="wb-module" data-module="s8">
           <details class="wb-acc" open>
-            <summary>Risk Gate <span class="wb-badge-soon">即将支持</span></summary>
+            <summary>风险控制</summary>
             <div class="wb-acc-body">
+              <div class="wb-inline wb-gap-bottom">
+                <label><input type="checkbox" id="wbRiskBudget" checked /> Risk Budget</label>
+                <span class="wb-mini">对应后端 `risk_budget`。</span>
+              </div>
+              <div class="wb-grid3">
+                <div><label class="formLabel">base_portfolio_risk%</label><input id="wbBasePortfolioRisk" type="number" step="0.5" class="formInput" value="6" /></div>
+                <div><label class="formLabel">atr_stop_k</label><input id="wbAtrStopK" type="number" step="0.1" class="formInput" value="2.0" /></div>
+                <div><label class="formLabel">min_active_ratio%</label><input id="wbMinActiveRatio" type="number" step="1" class="formInput" value="60" /></div>
+                <div><label class="formLabel">dd_scale_10</label><input id="wbDdScale10" type="number" step="0.1" class="formInput" value="0.8" /></div>
+                <div><label class="formLabel">dd_scale_15</label><input id="wbDdScale15" type="number" step="0.1" class="formInput" value="0.6" /></div>
+                <div><label class="formLabel">dd_fixed_20%</label><input id="wbDdFixed20" type="number" step="0.5" class="formInput" value="3" /></div>
+                <div><label class="formLabel">dd_stop_pct%</label><input id="wbDdStopPct" type="number" step="1" class="formInput" value="35" /></div>
+                <div><label class="formLabel">dd_stop_cooldown</label><input id="wbDdStopCooldown" type="number" class="formInput" value="60" /></div>
+                <div><label class="formLabel">dd_stop_protect</label><input id="wbDdStopProtect" type="number" class="formInput" value="30" /></div>
+              </div>
+              <hr class="wb-acc-separator" />
+              <div class="wb-inline wb-gap-bottom">
+                <label><input type="checkbox" id="wbMarketFilter" /> Market Filter</label>
+                <span class="wb-mini">对应后端 `market_filter`。</span>
+              </div>
+              <div class="wb-grid3">
+                <div><label class="formLabel">slope_ma_period</label><input id="wbMfSlopeMaPeriod" type="number" class="formInput" value="50" /></div>
+                <div><label class="formLabel">slope_window</label><input id="wbMfSlopeWindow" type="number" class="formInput" value="10" /></div>
+                <div><label class="formLabel">bull_multiplier</label><input id="wbMfBullMult" type="number" step="0.1" class="formInput" value="1.5" /></div>
+                <div><label class="formLabel">light_multiplier</label><input id="wbMfLightMult" type="number" step="0.1" class="formInput" value="0.6" /></div>
+                <div><label class="formLabel">ema_light_fast</label><input id="wbMfEmaFast" type="number" class="formInput" value="5" /></div>
+                <div><label class="formLabel">ema_light_slow</label><input id="wbMfEmaSlow" type="number" class="formInput" value="20" /></div>
+              </div>
+              <div id="wbMarketStateStats" class="wb-stat-row" style="display:none">
+                <div class="wb-stat-item"><span class="wb-stat-label">bull_days</span><span class="wb-stat-value" data-key="market_state_bull_days">—</span></div>
+                <div class="wb-stat-item"><span class="wb-stat-label">bear_days</span><span class="wb-stat-value" data-key="market_state_bear_days">—</span></div>
+                <div class="wb-stat-item"><span class="wb-stat-label">trans_down</span><span class="wb-stat-value" data-key="market_state_trans_down_days">—</span></div>
+                <div class="wb-stat-item"><span class="wb-stat-label">trans_up</span><span class="wb-stat-value" data-key="market_state_trans_up_days">—</span></div>
+                <div class="wb-stat-item"><span class="wb-stat-label">trade_main</span><span class="wb-stat-value" data-key="trade_mode_main_days">—</span></div>
+                <div class="wb-stat-item"><span class="wb-stat-label">trade_light</span><span class="wb-stat-value" data-key="trade_mode_light_days">—</span></div>
+              </div>
+              <hr class="wb-acc-separator" />
+              <div class="wb-inline wb-gap-bottom">
+                <label><input type="checkbox" id="wbBreadthEnabled" /> Breadth 动态仓位</label>
+                <span class="wb-mini">核心字段进入 9-stage；高级调参仍按 research-only 处理。</span>
+              </div>
+              <div class="wb-grid3">
+                <div><label class="formLabel">mode</label><select id="wbBreadthMode" class="formInput"><option value="dynamic_maxpos">dynamic_maxpos</option><option value="gate_only">gate_only</option></select></div>
+                <div><label class="formLabel">score_type</label><select id="wbBreadthScoreType" class="formInput"><option value="B">B</option><option value="EMA">EMA</option></select></div>
+                <div><label class="formLabel">mapping_mode</label><select id="wbBreadthMappingMode" class="formInput"><option value="smooth">smooth</option><option value="step">step</option></select></div>
+                <div><label class="formLabel">min_positions</label><input id="wbBreadthMinPositions" type="number" class="formInput" value="3" /></div>
+                <div><label class="formLabel">max_positions</label><input id="wbBreadthMaxPositions" type="number" class="formInput" value="15" /></div>
+                <div><label class="formLabel">gate_threshold</label><input id="wbBreadthGateThreshold" type="number" step="0.05" class="formInput" value="0.45" /></div>
+                <div><label class="formLabel">ema_fast</label><input id="wbBreadthEmaFast" type="number" class="formInput" value="8" /></div>
+                <div><label class="formLabel">ema_slow</label><input id="wbBreadthEmaSlow" type="number" class="formInput" value="25" /></div>
+                <div><label class="formLabel">size_scale_floor</label><input id="wbBreadthScaleFloor" type="number" step="0.05" class="formInput" value="0.30" /></div>
+                <div><label class="formLabel">step_high</label><input id="wbBreadthStepHigh" type="number" step="0.05" class="formInput" value="0.60" /></div>
+                <div><label class="formLabel">step_mid</label><input id="wbBreadthStepMid" type="number" step="0.05" class="formInput" value="0.45" /></div>
+                <div><label class="formLabel">smooth_lo</label><input id="wbBreadthSmoothLo" type="number" step="0.05" class="formInput" value="0.40" /></div>
+                <div><label class="formLabel">smooth_range</label><input id="wbBreadthSmoothRange" type="number" step="0.05" class="formInput" value="0.20" /></div>
+                <div><label class="formLabel">gate_window</label><input id="wbBreadthGateWindow" type="number" class="formInput" value="252" /></div>
+                <div><label class="formLabel">gate_pct</label><input id="wbBreadthGatePct" type="number" step="0.05" class="formInput" value="0.20" /></div>
+                <div><label class="formLabel">gate_persist</label><input id="wbBreadthGatePersist" type="number" class="formInput" value="3" /></div>
+              </div>
+              <hr class="wb-acc-separator" />
+              <div class="wb-inline wb-gap-bottom">
+                <label><input type="checkbox" id="wbRiskGateEnabled" disabled /> Risk Gate</label>
+                <span class="wb-badge-unimpl">未实现</span>
+              </div>
               <div class="wb-grid2">
-                <label><input type="checkbox" id="wbRiskGateEnabled" /> 启用</label><div></div>
-                <div><label class="formLabel">回撤阈值 <span class="muted">(%)</span></label><input id="wbRiskGateThreshold" type="number" class="formInput" value="-10" /></div>
-                <div><label class="formLabel">动作</label><select id="wbRiskGateAction" class="formInput"><option value="reduce">降档</option><option value="stop">停手</option></select></div>
-                <div><label class="formLabel">冷却天数</label><input id="wbRiskGateCooldown" type="number" class="formInput" value="5" /></div>
+                <div><label class="formLabel">回撤阈值 <span class="muted">(%)</span></label><input id="wbRiskGateThreshold" type="number" class="formInput" value="-10" disabled /></div>
+                <div><label class="formLabel">动作</label><select id="wbRiskGateAction" class="formInput" disabled><option value="reduce">降档</option><option value="stop">停手</option></select></div>
+                <div><label class="formLabel">冷却天数</label><input id="wbRiskGateCooldown" type="number" class="formInput" value="5" disabled /></div>
                 <div class="wb-stat-item"><span class="wb-stat-label">触发次数</span><span class="wb-stat-value" id="wbRiskGateTriggerCount">—</span></div>
               </div>
             </div>
@@ -431,6 +639,16 @@
                 <div><label class="formLabel">trail_k <span class="muted">(×ATR)</span></label><input id="wbTrailK" type="number" class="formInput" value="2.0" /></div>
                 <label><input id="wbExitTime" type="checkbox" /> 时间退出</label>
                 <div><label class="formLabel">N days <span class="muted">(天)</span></label><input id="wbExitDays" type="number" class="formInput" value="20" /></div>
+                <label><input id="wbExitTakeProfit" type="checkbox" /> 止盈</label>
+                <div><label class="formLabel">take_profit_mode</label><select id="wbTakeProfitMode" class="formInput"><option value="pct">pct</option><option value="atr">atr</option></select></div>
+                <div><label class="formLabel">take_profit_pct%</label><input id="wbTakeProfitPct" type="number" class="formInput" value="10" /></div>
+                <div><label class="formLabel">take_profit_atr_k</label><input id="wbTakeProfitAtrK" type="number" class="formInput" value="3.0" /></div>
+                <label><input id="wbExitFixedStop" type="checkbox" /> 固定止损</label>
+                <div><label class="formLabel">fixed_stop_pct%</label><input id="wbFixedStopPct" type="number" class="formInput" value="5" /></div>
+                <label><input id="wbExitMa20" type="checkbox" /> MA20_EXIT</label>
+                <label><input id="wbExitLow10" type="checkbox" checked /> LOW10_EXIT</label>
+                <div><label class="formLabel">min_hold_days</label><input id="wbMinHoldDays" type="number" class="formInput" value="5" /></div>
+                <div><label class="formLabel">cooldown_days</label><input id="wbCooldownDays" type="number" class="formInput" value="5" /></div>
               </div>
               <div id="wbAtrNote" class="wb-atr-note">
                 ATR 窗口: 14日 · 价格口径: 前复权 · 触发价: 次日开盘
@@ -460,11 +678,23 @@
         <section class="wb-module" data-module="json">
           <details class="wb-acc" open>
             <summary>Config JSON</summary>
-            <div class="wb-acc-body"><pre id="wbConfigJsonPreview" class="wb-pre"></pre></div>
+            <div class="wb-acc-body">
+              <div class="wb-inline wb-gap-bottom">
+                <button id="wbCopyCfgJson" class="pill">复制 JSON</button>
+                <button id="wbPasteCfgJson" class="pill">粘贴 JSON</button>
+                <button id="wbApplyGroup" class="pill">套用当前结果</button>
+              </div>
+              <pre id="wbConfigJsonPreview" class="wb-pre"></pre>
+            </div>
           </details>
           <details class="wb-acc" open>
             <summary>Validation & Diff</summary>
-            <div class="wb-acc-body"><pre id="wbConfigDiff" class="wb-pre"></pre></div>
+            <div class="wb-acc-body">
+              <div class="wb-inline wb-gap-bottom">
+                <button id="wbDiffCfg" class="pill">刷新 Diff</button>
+              </div>
+              <pre id="wbConfigDiff" class="wb-pre"></pre>
+            </div>
           </details>
         </section>
 
@@ -488,32 +718,100 @@
 
         <!-- scrollable content area -->
         <div class="wb-main-content">
-          <!-- Summary dashboard -->
-          <div id="wbSummaryBar" class="wb-summary-bar">
-            <div class="wb-summary-col">
-              <div class="wb-summary-header">Universe摘要</div>
-              <div id="wbSummaryUniverse" class="wb-summary-body">等待数据...</div>
-            </div>
-            <div class="wb-summary-col">
-              <div class="wb-summary-header">策略摘要</div>
-              <div id="wbSummaryStrategy" class="wb-summary-body">等待配置...</div>
-            </div>
-            <div class="wb-summary-col">
-              <div class="wb-summary-header">交易摘要</div>
-              <div id="wbSummaryTrade" class="wb-summary-body">等待运行...</div>
-            </div>
-          </div>
+          <section id="wbSummaryBar" class="wb-result-overview">
+            <article class="wb-overview-card">
+              <div class="wb-overview-title">运行概览</div>
+              <dl class="wb-overview-grid">
+                <div><dt>实验ID</dt><dd id="wbOverviewExpId">-</dd></div>
+                <div><dt>状态</dt><dd id="wbOverviewStatus">等待运行</dd></div>
+                <div><dt>配置来源</dt><dd id="wbOverviewConfigSource">草稿</dd></div>
+                <div><dt>结果目录</dt><dd id="wbOverviewResultsDir">-</dd></div>
+              </dl>
+            </article>
+            <article class="wb-overview-card">
+              <div class="wb-overview-title">股票池口径</div>
+              <dl class="wb-overview-grid">
+                <div><dt>区间</dt><dd id="wbSummaryUniverse">等待数据...</dd></div>
+                <div><dt>基准</dt><dd id="wbOverviewBenchmark">-</dd></div>
+                <div><dt>股票池</dt><dd id="wbOverviewUniverseMode">-</dd></div>
+                <div><dt>标的数</dt><dd id="wbOverviewUniverseCount">-</dd></div>
+              </dl>
+            </article>
+            <article class="wb-overview-card">
+              <div class="wb-overview-title">策略口径</div>
+              <dl class="wb-overview-grid">
+                <div><dt>策略</dt><dd id="wbOverviewStrategyName">等待配置...</dd></div>
+                <div><dt>主参数</dt><dd id="wbOverviewStrategyCore">-</dd></div>
+                <div><dt>组合模式</dt><dd id="wbOverviewPortfolioMode">-</dd></div>
+                <div><dt>补充信息</dt><dd id="wbSummaryStrategy">-</dd></div>
+              </dl>
+            </article>
+          </section>
 
-          <!-- KPI row -->
-          <section class="wb-kpi-row" id="wbPerfKpis"></section>
+          <section class="wb-kpi-grid" id="wbPerfKpis">
+            <article class="wb-kpi-card wb-kpi-pair">
+              <div class="wb-kpi-pair-grid">
+                <div><span class="wb-kpi-sub">期初资金</span><strong id="wbKpiInitialCapital">-</strong></div>
+                <div><span class="wb-kpi-sub">期末资金</span><strong id="wbKpiFinalCapital">-</strong></div>
+              </div>
+            </article>
+            <article class="wb-kpi-card wb-kpi-pair">
+              <div class="wb-kpi-pair-grid">
+                <div><span class="wb-kpi-sub">年化收益</span><strong id="wbKpiCagr">-</strong></div>
+                <div><span class="wb-kpi-sub">总收益</span><strong id="wbKpiTotalReturn">-</strong></div>
+              </div>
+            </article>
+            <article class="wb-kpi-card">
+              <div class="wb-kpi-single">
+                <span class="wb-kpi-sub">最大回撤</span>
+                <strong id="wbKpiMaxDrawdown" class="wb-kpi-value">-</strong>
+              </div>
+            </article>
+            <article class="wb-kpi-card wb-kpi-pair">
+              <div class="wb-kpi-pair-grid">
+                <div><span class="wb-kpi-sub">夏普比率</span><strong id="wbKpiSharpe">-</strong></div>
+                <div><span class="wb-kpi-sub">卡玛比率</span><strong id="wbKpiCalmar">-</strong></div>
+              </div>
+            </article>
+            <article class="wb-kpi-card">
+              <div class="wb-kpi-single">
+                <span class="wb-kpi-sub">交易次数</span>
+                <strong id="wbKpiTrades" class="wb-kpi-value">-</strong>
+              </div>
+            </article>
+            <article class="wb-kpi-card">
+              <div class="wb-kpi-single">
+                <span class="wb-kpi-sub">换手率</span>
+                <strong id="wbKpiTurnover" class="wb-kpi-value">-</strong>
+              </div>
+            </article>
+            <article class="wb-kpi-card">
+              <div class="wb-kpi-single">
+                <span class="wb-kpi-sub">TOP10 集中度</span>
+                <strong id="wbKpiTop10Concentration" class="wb-kpi-value">-</strong>
+              </div>
+            </article>
+            <article class="wb-kpi-card">
+              <div class="wb-kpi-single">
+                <span class="wb-kpi-sub">评级</span>
+                <strong id="wbKpiTier" class="wb-kpi-value">-</strong>
+              </div>
+            </article>
+          </section>
 
           <!-- Chart canvas -->
           <section class="wb-canvas">
             <div class="wb-canvas-head">
               <div class="wb-canvas-info">
                 <span id="wbDims" class="wb-mini"></span>
+                <span class="wb-canvas-sep">|</span>
+                <span id="wbGroupLoadStatus" class="wb-mini">产物待加载</span>
               </div>
               <div class="wb-inline">
+                <select id="wbChartMode" class="formInput wb-input-sm">
+                  <option value="portfolio" selected>组合</option>
+                  <option value="symbol">个股</option>
+                </select>
                 <label class="wb-check-label"><input id="wbChartBenchToggle" type="checkbox" checked /> 对比基准</label>
                 <select id="wbChartRange" class="formInput wb-input-sm">
                   <option value="D" selected>日K</option><option value="W">周K</option><option value="M">月K</option><option value="Y">年K</option>
@@ -529,58 +827,83 @@
                 <span>运行实验后显示净值曲线</span>
               </div>
             </div>
-            <div id="wbDdChart" class="wb-chart wb-chart-sub">
-              <div class="wb-empty">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                <span>回撤曲线</span>
+            <div class="wb-canvas-footer">
+              <div id="wbPerfSeries" class="wb-mini">运行实验后显示序列说明</div>
+            </div>
+          </section>
+
+          <section class="wb-symbol-panel">
+            <div class="wb-symbol-head">
+              <div>
+                <div class="wb-symbol-title">个股筛选净值</div>
+                <div id="wbSymbolPerfHint" class="wb-mini">运行实验后显示个股绩效与近似估值提示，可在列表内用滚轮上下浏览。</div>
+              </div>
+              <div class="wb-inline">
+                <input id="wbSymbolFilter" type="text" class="formInput wb-input-sm" placeholder="筛选标的" />
+                <select id="wbSymbolSort" class="formInput wb-input-sm">
+                  <option value="return_desc" selected>收益优先</option>
+                  <option value="drawdown_asc">回撤更小</option>
+                  <option value="trades_desc">交易更多</option>
+                </select>
               </div>
             </div>
+            <div class="wb-table-wrap wb-gap-top wb-symbol-table-wrap">
+              <table class="wb-table">
+                <thead>
+                  <tr>
+                    <th>标的</th>
+                    <th class="num">收益</th>
+                    <th class="num">回撤</th>
+                    <th class="num">交易数</th>
+                  </tr>
+                </thead>
+                <tbody id="wbSymbolPerfBody">
+                  <tr><td colspan="4" class="wb-symbol-empty">运行后显示个股绩效</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
 
+          <section class="wb-results-sections">
+            <details id="wbAccBuyFunnel" class="wb-result-acc">
+              <summary>
+                <span>买入漏斗</span>
+                <span id="wbAccBuyFunnelMeta" class="wb-mini">等待结果</span>
+              </summary>
+              <div class="wb-result-acc-body">
+                <div id="wbBuyFunnel" class="wb-mini">运行实验后显示买入漏斗</div>
+              </div>
+            </details>
+            <details id="wbAccSellFunnel" class="wb-result-acc">
+              <summary>
+                <span>卖出漏斗</span>
+                <span id="wbAccSellFunnelMeta" class="wb-mini">等待结果</span>
+              </summary>
+              <div class="wb-result-acc-body">
+                <div id="wbSellFunnel" class="wb-mini">运行实验后显示卖出原因频次</div>
+              </div>
+            </details>
+            <details id="wbAccTrades" class="wb-result-acc">
+              <summary>
+                <span>详细交易明细</span>
+                <span id="wbAccTradesMeta" class="wb-mini">等待结果</span>
+              </summary>
+              <div class="wb-result-acc-body">
+                <div id="wbTradesList" class="wb-mini">运行实验后显示交易明细</div>
+              </div>
+            </details>
+            <details id="wbAccLogs" class="wb-result-acc">
+              <summary>
+                <span>日志</span>
+                <span id="wbAccLogsMeta" class="wb-mini">状态输出</span>
+              </summary>
+              <div class="wb-result-acc-body">
+                <div id="wbArtifacts" class="wb-mini"></div>
+                <div id="wbLogs" class="wb-log wb-gap-top"></div>
+              </div>
+            </details>
           </section>
         </div>
-
-        <!-- ═══ D. Bottom Dock (IDE console) ═══ -->
-        <section id="wbDock" class="wb-dock">
-          <div id="wbDockResize" class="wb-dock-resize"><span></span></div>
-          <div class="wb-dock-head">
-            <div class="wb-dock-tabs">
-              <button class="active" data-dock="explain">Explain</button>
-              <button data-dock="execution">Execution</button>
-              <button data-dock="logs">Logs</button>
-            </div>
-          </div>
-          <div class="wb-dock-body">
-            <!-- Explain -->
-            <div id="wbDockExplain" class="wb-dock-panel active">
-              <div id="wbExplainPanel" class="wb-explain-scroll">
-                <div id="wbFunnel" class="wb-mini"></div>
-                <div id="wbTriggers" class="wb-mini wb-gap-top"></div>
-                <div id="wbReasons" class="wb-mini wb-gap-top"></div>
-                <div id="wbBaselineDiff" class="wb-mini wb-gap-top"></div>
-              </div>
-            </div>
-            <!-- Execution -->
-            <div id="wbDockExecution" class="wb-dock-panel">
-              <div id="wbExecPanel">
-                <div class="wb-inline">
-                  <input id="wbExecDate" type="date" class="formInput wb-input-sm" />
-                  <button id="wbPreviewExec" class="pill">生成今日执行清单</button>
-                  <button id="wbCopyExec" class="pill">复制JSON</button>
-                </div>
-                <div id="wbExecDateNote" class="wb-mini wb-gap-top"></div>
-                <div id="wbExecCandidates" class="wb-mini wb-gap-top"></div>
-                <div id="wbExecTargets" class="wb-mini wb-gap-top"></div>
-                <hr class="wb-acc-separator" style="margin:8px 0" />
-                <div id="wbTradesList" class="wb-mini wb-gap-top" style="max-height:400px;overflow:auto"></div>
-              </div>
-            </div>
-            <!-- Logs -->
-            <div id="wbDockLogs" class="wb-dock-panel">
-              <div id="wbArtifacts" class="wb-mini"></div>
-              <div id="wbLogs" class="wb-log wb-gap-top"></div>
-            </div>
-          </div>
-        </section>
       </main>
     </div>
 
@@ -600,11 +923,11 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="assets/js/backtest_v2.js?v=20260307_9stage_fix"></script>
+<script src="assets/js/backtest_v2.js?v=20260308_results_surface_reset4"></script>
   <script src="assets/js/api-client.js?v=20260307_9stage_fix"></script>
-  <script src="assets/js/ui-controls.js?v=20260307_9stage_fix"></script>
+<script src="assets/js/ui-controls.js?v=20260308_results_surface_reset4"></script>
   <script src="assets/js/charts.js?v=20260307_9stage_fix"></script>
-  <script src="assets/js/artifacts.js?v=20260307_9stage_fix"></script>
+<script src="assets/js/artifacts.js?v=20260308_results_surface_reset3"></script>
   <script src="assets/js/compare.js?v=20260307_9stage_fix"></script>
   <script src="assets/js/report.js?v=20260307_9stage_fix"></script>
   <script>init();</script>

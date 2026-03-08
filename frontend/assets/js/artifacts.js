@@ -1,6 +1,6 @@
 /* ── artifacts.js ── Artifact loading, normalization, and rendering ── */
 /* Globals used: state, byId, esc, num, pct, fmtInt, fmtMoney, setTextById, setHtmlById,
-   LEGACY_ARTIFACT_FALLBACKS, COUNTER_LEGACY_ALIASES, reasonZh,
+   reasonZh,
    apiRequestJson, setStatusItems, addLog,
    renderLoadingSkeleton, renderNavChartLW, renderDdChartLW,
    aggregateOhlc, aggregateNav, aggregateDrawdown,
@@ -41,22 +41,7 @@ async function readArtifactWithStatus(resultsDir, relPath, keyName) {
 function normalizeRunMetaCounters(metaObj) {
   const meta = metaObj && typeof metaObj === 'object' ? { ...metaObj } : {};
   const counters = meta.counters && typeof meta.counters === 'object' ? { ...meta.counters } : {};
-  let legacyHits = 0;
-  Object.entries(COUNTER_LEGACY_ALIASES).forEach(([canonical, aliases]) => {
-    if (counters[canonical] != null) return;
-    for (const alias of aliases) {
-      if (counters[alias] != null) {
-        counters[canonical] = counters[alias];
-        legacyHits += 1;
-        break;
-      }
-    }
-  });
   meta.counters = counters;
-  meta.legacy_hits = {
-    ...(meta.legacy_hits || {}),
-    counters_field_alias: Number(meta?.legacy_hits?.counters_field_alias || 0) + legacyHits,
-  };
   return meta;
 }
 
@@ -145,7 +130,13 @@ function normalizeSymbolPerformanceRows(rows) {
 function getFilteredSortedSymbolRows() {
   const rows = (state.active_artifacts || {}).symbolPerformanceRows || [];
   const keyword = String(state.symbol_filter || '').trim().toLowerCase();
-  const filtered = keyword ? rows.filter((r) => r.symbol.includes(keyword)) : rows.slice();
+  const filtered = keyword
+    ? rows.filter((r) => {
+      const symbol = String(r.symbol || '').toLowerCase();
+      const name = String(stockZh(r.symbol) || '').toLowerCase();
+      return symbol.includes(keyword) || name.includes(keyword);
+    })
+    : rows.slice();
   const sorter = String(state.symbol_sort || 'return_desc');
   if (sorter === 'drawdown_asc') {
     filtered.sort((a, b) => Number(a.max_drawdown || 0) - Number(b.max_drawdown || 0));
@@ -246,7 +237,7 @@ async function loadActiveArtifacts() {
     readArtifactWithStatus(resultsDir, gf.perf, 'perf'),
     readArtifactWithStatus(resultsDir, gf.nav, 'nav'),
     readArtifactWithStatus(resultsDir, gf.funnel, 'funnel'),
-    readArtifactWithFallback(resultsDir, gf.reason_codes || 'reason_codes.csv', 'reason_codes', LEGACY_ARTIFACT_FALLBACKS.reason_codes),
+    readArtifactWithStatus(resultsDir, gf.reason_codes || 'reason_codes.csv', 'reason_codes'),
     readArtifactWithStatus(resultsDir, gf.run_meta, 'run_meta'),
     readArtifactWithStatus(resultsDir, gf.config, 'config'),
     gf.trades ? readArtifactWithStatus(resultsDir, gf.trades, 'trades') : Promise.resolve({ ok: false, key: 'trades', missing: true }),
@@ -305,6 +296,7 @@ async function loadActiveArtifacts() {
     missing,
     errors,
   };
+  if (typeof syncConfigSourceUI === 'function') syncConfigSourceUI();
   state.symbol_series_cache = {};
   state.symbol_series_loading = false;
   const hasSelected = state.selected_symbol && symbolPerfRows.some((x) => x.symbol === state.selected_symbol);
@@ -340,11 +332,20 @@ async function loadActiveArtifacts() {
 
 function reasonByPrefix(rows) {
   const out = { blocked: [], skipped: [], exit: [], other: [] };
+  const exitSingles = new Set([
+    'TAKE_PROFIT',
+    'FIXED_STOP_LOSS',
+    'STOP_LOSS',
+    'SIGNAL_REVERSE',
+    'TREND_REVERSE',
+    'RISK_OFF_EXIT',
+  ]);
+  const codeOf = (row) => String(row?.code || row?.reason_code || '').toUpperCase();
   (rows || []).forEach((r) => {
-    const code = String(r.code || '').toUpperCase();
-    if (code.startsWith('BLOCKED_')) out.blocked.push(r);
-    else if (code.startsWith('SKIPPED_')) out.skipped.push(r);
-    else if (code.includes('EXIT') || code.includes('ATR_')) out.exit.push(r);
+    const code = codeOf(r);
+    if (code.startsWith('BLOCKED_') || code.startsWith('BLOCK_')) out.blocked.push(r);
+    else if (code.startsWith('SKIPPED_') || code.startsWith('SKIP_')) out.skipped.push(r);
+    else if (code.includes('EXIT') || code.includes('ATR_') || exitSingles.has(code)) out.exit.push(r);
     else out.other.push(r);
   });
   Object.values(out).forEach((arr) => arr.sort((a, b) => Number(b.count || 0) - Number(a.count || 0)));
@@ -369,8 +370,12 @@ function renderSymbolPerformancePanel() {
   }
   body.innerHTML = rows.map((r) => {
     const active = String(state.selected_symbol || '') === String(r.symbol);
+    const displayName = stockZh(r.symbol);
+    const symbolCell = displayName !== r.symbol
+      ? `${esc(displayName)}<span class="wb-mini" style="margin-left:6px">${esc(r.symbol)}</span>`
+      : esc(r.symbol);
     return `<tr class="wb-symbol-row${active ? ' active' : ''}" data-symbol="${esc(r.symbol)}">
-      <td>${esc(r.symbol)}</td>
+      <td>${symbolCell}</td>
       <td class="num">${pct(r.return_pct)}</td>
       <td class="num">${pct(r.max_drawdown)}</td>
       <td class="num">${fmtInt(r.trades)}</td>
@@ -386,6 +391,73 @@ function renderSymbolPerformancePanel() {
       renderPerfPanel();
     });
   });
+}
+
+function firstValidValue(...values) {
+  for (const value of values) {
+    if (value == null) continue;
+    if (typeof value === 'string' && !String(value).trim()) continue;
+    if (typeof value === 'number' && Number.isNaN(value)) continue;
+    return value;
+  }
+  return null;
+}
+
+function setKpiValue(id, text) {
+  setTextById(id, text == null || text === '' ? '-' : String(text));
+}
+
+function renderBuyFunnelRows(rows, counters) {
+  if (!Array.isArray(rows) || !rows.length) {
+    return '<div class="wb-mini">当前结果未提供买入 stage counters，无法安全生成逐 stage 买入漏斗。</div>';
+  }
+  const maxValue = Math.max(1, ...rows.map((row) => Number(row.input_count ?? row.output_count ?? row.filtered_count ?? 0) || 0));
+  const body = rows.map((row) => {
+    const available = row.available !== false;
+    const inputCount = Number(row.input_count);
+    const outputCount = Number(row.output_count);
+    const filteredCount = Number(row.filtered_count);
+    const inputText = Number.isFinite(inputCount) ? fmtInt(inputCount) : '-';
+    const outputText = Number.isFinite(outputCount) ? fmtInt(outputCount) : '-';
+    const filteredText = Number.isFinite(filteredCount) ? fmtInt(filteredCount) : '-';
+    const width = Number.isFinite(outputCount) ? Math.max(6, (outputCount / maxValue) * 100) : 0;
+    return `<div class="wb-funnel-row${available ? '' : ' wb-funnel-unavailable'}">
+      <div class="wb-funnel-row-head">
+        <div class="wb-funnel-row-title">${esc(row.stage_label || row.title || row.stage_key || '阶段')}</div>
+        <div class="wb-funnel-row-note">${esc(row.note || (available ? '已接入后端计数' : '当前策略未启用或未单独计数'))}</div>
+      </div>
+      <div class="wb-bar"><span style="width:${width}%"></span></div>
+      <div class="wb-funnel-row-meta">
+        <div><span>输入</span><strong>${inputText}</strong></div>
+        <div><span>保留</span><strong>${outputText}</strong></div>
+        <div><span>过滤</span><strong>${filteredText}</strong></div>
+      </div>
+    </div>`;
+  }).join('');
+  const reasonCounts = counters?.buy_block_reason_counts || {};
+  const topReasons = Object.entries(reasonCounts)
+    .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+    .slice(0, 8)
+    .map(([code, count]) => `${reasonZh(code)} ${fmtInt(count)}`)
+    .join(' | ');
+  const footer = topReasons ? `<div class="wb-mini wb-gap-top">主要过滤原因：${esc(topReasons)}</div>` : '';
+  return `<div class="wb-funnel-stack">${body}</div>${footer}`;
+}
+
+function renderSellFunnelRows(reasonRows) {
+  const rows = Array.isArray(reasonRows) ? reasonRows : [];
+  if (!rows.length) {
+    return '<div class="wb-mini">当前结果没有可展示的卖出原因频次。</div>';
+  }
+  const maxCount = Math.max(1, ...rows.map((row) => Number(row.count || 0)));
+  return `<div class="wb-sell-funnel-list">${rows.map((row) => {
+    const count = Number(row.count || 0);
+    return `<div class="wb-sell-funnel-item">
+      <div class="wb-sell-funnel-label">${esc(reasonZh(row.code))}</div>
+      <div class="wb-bar"><span style="width:${Math.max(6, (count / maxCount) * 100)}%"></span></div>
+      <div class="wb-sell-funnel-count">${fmtInt(count)}</div>
+    </div>`;
+  }).join('')}</div>`;
 }
 
 async function ensureSelectedSymbolSeries(navSeries) {
@@ -465,6 +537,7 @@ function renderPerfPanel() {
     : `${isSymbolMode ? '个股序列缺失' : '净值缺失'}(${art.errors?.find((x) => String(x).startsWith('nav:')) || '未提供'})`;
   const bmInfo = art.benchmarkError ? `基准异常=${art.benchmarkError}` : `基准来源=${art.benchmarkSource || '无'}`;
   setHtmlById('wbPerfSeries', `${navInfo} | 回撤=${ddSeries.length}点 | ${bmInfo} ${state.chart_show_benchmark ? '' : '| 基准=关'}`);
+  renderTradesList();
 }
 
 function renderFunnelBars(funnel) {
@@ -593,13 +666,24 @@ function stockZh(symbol) {
   return name ? `${name}` : String(symbol ?? '');
 }
 
-function renderTradesList() {
+function visibleTradesRows() {
   const rows = (state.active_artifacts || {}).tradesRows || [];
-  const el = byId('wbTradesList');
-  if (!el) return;
+  const symbolMode = state.chart_mode === 'symbol' && state.selected_symbol;
+  if (!symbolMode) return rows;
+  const symbol = String(state.selected_symbol || '').toLowerCase();
+  return rows.filter((r) => String(r.symbol || '').toLowerCase() === symbol);
+}
+
+function tradesTableHtml(rows, totalRows) {
+  const symbolMode = state.chart_mode === 'symbol' && state.selected_symbol;
+  const title = symbolMode
+    ? `交易明细 (${fmtInt(rows.length)} 条 / ${esc(String(state.selected_symbol || '').toUpperCase())})`
+    : `交易明细 (${fmtInt(rows.length)} 条)`;
   if (!rows.length) {
-    el.innerHTML = '<div class="wb-mini">运行后显示交易明细</div>';
-    return;
+    const emptyText = totalRows
+      ? '当前个股视图下没有交易明细'
+      : '运行后显示交易明细';
+    return `<div class="wb-mini">${emptyText}</div>`;
   }
   const labels = ['日期', '标的', '方向', '成交价', '数量', '金额', '佣金', '印花税', '净额', '原因'];
   const aligns = ['', '', '', 'num', 'num', 'num', 'num', 'num', 'num', ''];
@@ -618,5 +702,176 @@ function renderTradesList() {
     const netAmt = r.net_amount != null ? fmtMoney(r.net_amount) : fmtMoney(r.value);
     return `<tr><td>${esc(String(r.date ?? ''))}</td><td>${symbolCell}</td><td>${sideBadge}</td><td class="num">${fp}</td><td class="num">${fmtInt(r.qty)}</td><td class="num">${fmtMoney(r.value)}</td><td class="num">${comm}</td><td class="num">${stax}</td><td class="num">${netAmt}</td><td>${esc(reasonZh(r.reason_code))}</td></tr>`;
   }).join('');
-  el.innerHTML = `<div class="wb-mini" style="margin-bottom:4px">交易明细 (${fmtInt(rows.length)} 条)</div><table class="wb-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
+  return `<div class="wb-mini" style="margin-bottom:4px">${title}</div><table class="wb-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
 }
+
+function renderTradesList() {
+  const allRows = (state.active_artifacts || {}).tradesRows || [];
+  const rows = visibleTradesRows();
+  const html = tradesTableHtml(rows, allRows.length);
+  const el = byId('wbTradesList');
+  if (el) el.innerHTML = html;
+}
+
+function _reasonCodeOf(row) {
+  return String(row?.code || row?.reason_code || '').toUpperCase();
+}
+
+renderBuyFunnelRows = function renderBuyFunnelRowsV2(rows, counters) {
+  if (!Array.isArray(rows) || !rows.length) {
+    return '<div class="wb-mini">当前结果尚未提供买入 stage counters，无法安全生成买入漏斗。</div>';
+  }
+  const maxValue = Math.max(1, ...rows.map((row) => Number(row.input_count ?? row.output_count ?? row.filtered_count ?? 0) || 0));
+  const body = rows.map((row) => {
+    const available = row.available !== false;
+    const inputCount = Number(row.input_count);
+    const outputCount = Number(row.output_count);
+    const filteredCount = Number(row.filtered_count);
+    const inputText = Number.isFinite(inputCount) ? fmtInt(inputCount) : '-';
+    const outputText = Number.isFinite(outputCount) ? fmtInt(outputCount) : '-';
+    const filteredText = Number.isFinite(filteredCount) ? fmtInt(filteredCount) : '-';
+    const width = Number.isFinite(outputCount) ? Math.max(6, (outputCount / maxValue) * 100) : 0;
+    return `<div class="wb-funnel-row${available ? '' : ' wb-funnel-unavailable'}">
+      <div class="wb-funnel-row-head">
+        <div class="wb-funnel-row-title">${esc(row.stage_label || row.title || row.stage_key || '阶段')}</div>
+        <div class="wb-funnel-row-note">${esc(row.note || (available ? '已接入后端真实计数' : '当前策略未启用或未单独计数'))}</div>
+      </div>
+      <div class="wb-bar"><span style="width:${width}%"></span></div>
+      <div class="wb-funnel-row-meta">
+        <div><span>输入</span><strong>${inputText}</strong></div>
+        <div><span>保留</span><strong>${outputText}</strong></div>
+        <div><span>过滤</span><strong>${filteredText}</strong></div>
+      </div>
+    </div>`;
+  }).join('');
+  const reasonCounts = counters?.buy_block_reason_counts || {};
+  const topReasons = Object.entries(reasonCounts)
+    .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+    .slice(0, 8)
+    .map(([code, count]) => `${reasonZh(code)} ${fmtInt(count)}`)
+    .join(' | ');
+  const footer = topReasons ? `<div class="wb-mini wb-gap-top">主要过滤原因：${esc(topReasons)}</div>` : '';
+  return `<div class="wb-funnel-stack">${body}</div>${footer}`;
+};
+
+renderSellFunnelRows = function renderSellFunnelRowsV2(reasonRows) {
+  const rows = Array.isArray(reasonRows) ? reasonRows : [];
+  if (!rows.length) {
+    return '<div class="wb-mini">当前结果没有可展示的卖出原因频次。</div>';
+  }
+  const maxCount = Math.max(1, ...rows.map((row) => Number(row.count || 0)));
+  return `<div class="wb-sell-funnel-list">${rows.map((row) => {
+    const count = Number(row.count || 0);
+    const code = _reasonCodeOf(row);
+    return `<div class="wb-sell-funnel-item">
+      <div class="wb-sell-funnel-label">${esc(reasonZh(code))}</div>
+      <div class="wb-bar"><span style="width:${Math.max(6, (count / maxCount) * 100)}%"></span></div>
+      <div class="wb-sell-funnel-count">${fmtInt(count)}</div>
+    </div>`;
+  }).join('')}</div>`;
+};
+
+renderPerfPanel = function renderPerfPanelV2() {
+  const row = state.active_result || {};
+  const art = state.active_artifacts || {};
+  const p = art.perf || {};
+  const cagr = firstValidValue(p.cagr, row.cagr);
+  const totalReturn = firstValidValue(p.total_return, row.total_return);
+  const maxDrawdown = firstValidValue(p.max_drawdown, row.max_drawdown);
+  const sharpe = firstValidValue(p.sharpe, row.sharpe);
+  const calmar = firstValidValue(p.calmar, row.calmar);
+  const trades = firstValidValue(p.trades, row.trades);
+  const turnover = firstValidValue(p.turnover, row.turnover);
+  const top10 = firstValidValue(p.top10_profit_concentration, row.top10_profit_concentration);
+  const tier = firstValidValue(p.tier, row.tier, art.run_meta?.tier);
+  renderSymbolPerformancePanel();
+
+  const navBase = Array.isArray(art.navSeries) ? art.navSeries : [];
+  const navStart = Number(navBase[0]?.value);
+  const navEnd = Number(navBase[navBase.length - 1]?.value);
+  setKpiValue('wbKpiInitialCapital', Number.isFinite(navStart) ? fmtMoney(navStart) : '-');
+  setKpiValue('wbKpiFinalCapital', Number.isFinite(navEnd) ? fmtMoney(navEnd) : '-');
+  setKpiValue('wbKpiCagr', cagr == null ? '-' : pct(cagr));
+  setKpiValue('wbKpiTotalReturn', totalReturn == null ? '-' : pct(totalReturn));
+  setKpiValue('wbKpiMaxDrawdown', maxDrawdown == null ? '-' : pct(maxDrawdown));
+  setKpiValue('wbKpiSharpe', sharpe == null ? '-' : num(sharpe, 2));
+  setKpiValue('wbKpiCalmar', calmar == null ? '-' : num(calmar, 2));
+  setKpiValue('wbKpiTrades', trades == null ? '-' : fmtInt(trades));
+  setKpiValue('wbKpiTurnover', turnover == null ? '-' : pct(turnover));
+  setKpiValue('wbKpiTop10Concentration', top10 == null ? '-' : pct(top10));
+  setKpiValue('wbKpiTier', tier == null ? '-' : tier);
+
+  const missingMsg = art?.missing?.length ? `缺失 ${art.missing.length} 个产物，详情见状态中心` : '产物已加载';
+  setTextById('wbGroupLoadStatus', missingMsg);
+
+  const period = state.chart_range;
+  const isSymbolMode = state.chart_mode === 'symbol' && !!state.selected_symbol;
+  const symbolCache = isSymbolMode ? state.symbol_series_cache[state.selected_symbol] : null;
+  if (isSymbolMode && !symbolCache) ensureSelectedSymbolSeries(art.navSeries || []);
+  const rawMainSeries = (isSymbolMode && symbolCache)
+    ? (symbolCache.points || []).map((x) => ({ date: x.date, value: x.nav }))
+    : (art.navSeries || []);
+
+  const benchOhlc = aggregateOhlc(art.benchmarkOhlc || [], period);
+  const navSeries = aggregateNav(rawMainSeries, period);
+  const tradeMarkers = isSymbolMode ? symbolTradeMarkers(state.selected_symbol, art.tradesRows || []) : [];
+  const marketStates = !isSymbolMode ? (art.marketStates || []) : [];
+  const suspensionRanges = (isSymbolMode && symbolCache) ? (symbolCache.suspensionRanges || []) : [];
+
+  renderNavChartLW(
+    'wbNavChart',
+    state.chart_show_benchmark ? benchOhlc : [],
+    navSeries,
+    state.chart_show_benchmark,
+    { mode: isSymbolMode ? 'symbol' : 'portfolio', markers: tradeMarkers, marketStates, suspensionRanges },
+  );
+
+  const navInfo = navSeries.length
+    ? `${isSymbolMode ? `个股 ${state.selected_symbol}` : '净值'}=${navSeries.length}点`
+    : `${isSymbolMode ? '个股序列缺失' : '净值缺失'}(${art.errors?.find((x) => String(x).startsWith('nav:')) || '未提供'})`;
+  const bmInfo = art.benchmarkError ? `基准异常=${art.benchmarkError}` : `基准来源=${art.benchmarkSource || '未知'}`;
+  setHtmlById('wbPerfSeries', `${navInfo} | ${bmInfo}${state.chart_show_benchmark ? '' : ' | 基准=关闭'}`);
+  renderTradesList();
+};
+
+renderExplainPanel = function renderExplainPanelV2() {
+  const row = state.active_result || {};
+  const art = state.active_artifacts || {};
+  if (!row.exp_id && !Object.keys(art || {}).length) {
+    setHtmlById('wbBuyFunnel', '<div class="wb-mini">运行后显示买入漏斗。</div>');
+    setHtmlById('wbSellFunnel', '<div class="wb-mini">运行后显示卖出漏斗。</div>');
+    setTextById('wbAccBuyFunnelMeta', '等待结果');
+    setTextById('wbAccSellFunnelMeta', '等待结果');
+    setTextById('wbAccLogsMeta', '状态输出');
+    return;
+  }
+  const counters = art?.run_meta?.counters || row || {};
+  const buyStageRows = Array.isArray(counters.buy_stage_funnel) ? counters.buy_stage_funnel : [];
+  const reasonBuckets = reasonByPrefix(art.reasonRows || []);
+  const exitRows = reasonBuckets.exit || [];
+  const exitCount = exitRows.reduce((sum, item) => sum + Number(item.count || 0), 0);
+  const buyOrders = Number(counters.buy_orders_count ?? 0);
+
+  setHtmlById('wbBuyFunnel', renderBuyFunnelRows(buyStageRows, counters));
+  setHtmlById('wbSellFunnel', renderSellFunnelRows(exitRows));
+  setTextById('wbAccBuyFunnelMeta', buyStageRows.length ? `最终买入 ${fmtInt(buyOrders)} 笔` : '等待后端 stage counters');
+  setTextById('wbAccSellFunnelMeta', exitRows.length ? `卖出原因 ${fmtInt(exitCount)} 次` : '无退出数据');
+  setTextById('wbAccLogsMeta', row.exp_id ? `${row.exp_id} | ${row.status || '-'}` : '状态输出');
+};
+
+renderTradesList = function renderTradesListV2() {
+  const allRows = (state.active_artifacts || {}).tradesRows || [];
+  const rows = visibleTradesRows();
+  const html = tradesTableHtml(rows, allRows.length);
+  const el = byId('wbTradesList');
+  if (el) el.innerHTML = html;
+  const symbolMode = state.chart_mode === 'symbol' && state.selected_symbol;
+  const meta = symbolMode
+    ? `${String(state.selected_symbol || '').toUpperCase()} | ${fmtInt(rows.length)} 条`
+    : `全部交易 ${fmtInt(rows.length)} 条`;
+  setTextById('wbAccTradesMeta', meta);
+};
+
+renderExecutionPanel = function renderExecutionPanelV2() {
+  if (!byId('wbExecDateNote') && !byId('wbExecCandidates') && !byId('wbExecTargets')) return;
+};

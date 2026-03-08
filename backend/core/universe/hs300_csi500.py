@@ -9,6 +9,7 @@ import pandas as pd
 
 from backend.core.config.models import DBConfig, DBRuntimeConfig
 from backend.core.data.mapping import normalize_stock_symbol
+from backend.core.universe.lineage import ALL_A_SYMBOLS_SOURCE
 
 try:
     import psycopg
@@ -49,7 +50,7 @@ def load_constituents_from_db(
             status="ERROR:PSYCOPG_MISSING",
             message="psycopg not available",
             meta={
-                "symbols_source": "db_index_constituents",
+                "symbols_source": ALL_A_SYMBOLS_SOURCE,
                 "constituents_load_status": "ERROR:PSYCOPG_MISSING",
                 "universe_limit": universe_limit,
                 "raw_count": 0,
@@ -91,7 +92,7 @@ def load_constituents_from_db(
     except Exception as exc:
         err = f"{type(exc).__name__}:{str(exc).replace(chr(10), ' ').replace(chr(13), ' ')}"
         meta = {
-            "symbols_source": "db_index_constituents",
+            "symbols_source": ALL_A_SYMBOLS_SOURCE,
             "constituents_load_status": f"ERROR:{err[:120]}",
             "universe_limit": universe_limit,
             "raw_count": 0,
@@ -113,7 +114,7 @@ def load_constituents_from_db(
         symbols = symbols[: int(universe_limit)]
 
     meta = {
-        "symbols_source": "db_index_constituents",
+        "symbols_source": ALL_A_SYMBOLS_SOURCE,
         "constituents_load_status": "OK" if raw_count > 0 else "EMPTY",
         "universe_limit": universe_limit,
         "raw_count": raw_count,

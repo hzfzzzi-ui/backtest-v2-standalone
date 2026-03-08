@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Literal
+
 from backend.core.config.models import StrategyConfig
 from .base import Strategy
 from .ma_atr_stop import MAAtrStopStrategy
@@ -13,16 +16,190 @@ from .volume_breakout import VolumeBreakoutStrategy
 from .momentum_roc import MomentumROCStrategy
 from .relative_strength import RelativeStrengthStrategy
 from .bollinger_breakout import BollingerBreakoutStrategy
-from .adaptive_regime import AdaptiveRegimeStrategy
 from .rsi_reversal import RSIReversalStrategy
 from .regime_router import RegimeDetector, RegimeRouter
 from .breakout_trend import BreakoutTrendStrategy
 from .composite_strategy import CompositeStrategy
 
 
+StrategySupportClass = Literal["product-supported", "research-only", "deprecated"]
+
+
+@dataclass(frozen=True, slots=True)
+class StrategySurface:
+    name: str
+    classification: StrategySupportClass
+    ui_reachable: bool
+    api_compile_supported: bool
+    runtime_execution_supported: bool
+    script_only_reachable: bool
+    notes: str = ""
+
+
+STRATEGY_SUPPORT_MATRIX: dict[str, StrategySurface] = {
+    "bollinger_breakout": StrategySurface(
+        name="bollinger_breakout",
+        classification="research-only",
+        ui_reachable=False,
+        api_compile_supported=False,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Registry-only research strategy; not part of the main V2 workbench contract.",
+    ),
+    "breakout_trend": StrategySurface(
+        name="breakout_trend",
+        classification="product-supported",
+        ui_reachable=True,
+        api_compile_supported=True,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Only provider-protocol strategy integrated into the production runtime.",
+    ),
+    "composite": StrategySurface(
+        name="composite",
+        classification="research-only",
+        ui_reachable=False,
+        api_compile_supported=False,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Kept for research parity and script-driven experiments only.",
+    ),
+    "ema_cross": StrategySurface(
+        name="ema_cross",
+        classification="product-supported",
+        ui_reachable=True,
+        api_compile_supported=True,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Mainline 9-stage product strategy.",
+    ),
+    "ma_atr_stop": StrategySurface(
+        name="ma_atr_stop",
+        classification="research-only",
+        ui_reachable=False,
+        api_compile_supported=False,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Legacy script strategy; not exposed in the main workbench.",
+    ),
+    "ma_trend_filter": StrategySurface(
+        name="ma_trend_filter",
+        classification="research-only",
+        ui_reachable=False,
+        api_compile_supported=False,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Research-only trend-filter variant.",
+    ),
+    "momentum_roc": StrategySurface(
+        name="momentum_roc",
+        classification="research-only",
+        ui_reachable=False,
+        api_compile_supported=False,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Research-only ranking strategy.",
+    ),
+    "multifactor_signal": StrategySurface(
+        name="multifactor_signal",
+        classification="research-only",
+        ui_reachable=False,
+        api_compile_supported=False,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Script and parity-harness surface; not a product feature.",
+    ),
+    "regime_router": StrategySurface(
+        name="regime_router",
+        classification="product-supported",
+        ui_reachable=True,
+        api_compile_supported=True,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Mainline product regime strategy compiled from the 9-stage workbench.",
+    ),
+    "relative_strength": StrategySurface(
+        name="relative_strength",
+        classification="research-only",
+        ui_reachable=False,
+        api_compile_supported=False,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Research-only rotational strategy.",
+    ),
+    "rsi_reversal": StrategySurface(
+        name="rsi_reversal",
+        classification="research-only",
+        ui_reachable=True,
+        api_compile_supported=False,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Supported as regime_router MR arm, but not as a product-supported primary strategy.",
+    ),
+    "sma_cross": StrategySurface(
+        name="sma_cross",
+        classification="product-supported",
+        ui_reachable=True,
+        api_compile_supported=True,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Mainline 9-stage product strategy.",
+    ),
+    "sma_cross_regime": StrategySurface(
+        name="sma_cross_regime",
+        classification="research-only",
+        ui_reachable=False,
+        api_compile_supported=False,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Older regime variant retained for research and parity checks.",
+    ),
+    "sma_cross_regime_atr": StrategySurface(
+        name="sma_cross_regime_atr",
+        classification="research-only",
+        ui_reachable=False,
+        api_compile_supported=False,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Research-only parity strategy used by provider comparison tools.",
+    ),
+    "volume_breakout": StrategySurface(
+        name="volume_breakout",
+        classification="research-only",
+        ui_reachable=False,
+        api_compile_supported=False,
+        runtime_execution_supported=True,
+        script_only_reachable=True,
+        notes="Registry-only research strategy.",
+    ),
+}
+
+
+def get_strategy_surface(name: str) -> StrategySurface:
+    key = str(name or "").strip().lower()
+    if key not in STRATEGY_SUPPORT_MATRIX:
+        raise ValueError(f"unknown strategy surface: {name}")
+    return STRATEGY_SUPPORT_MATRIX[key]
+
+
+def list_strategy_surfaces(
+    classification: StrategySupportClass | None = None,
+) -> list[StrategySurface]:
+    items = sorted(STRATEGY_SUPPORT_MATRIX.values(), key=lambda item: item.name)
+    if classification is None:
+        return items
+    return [item for item in items if item.classification == classification]
+
+
+def product_supported_strategy_names() -> tuple[str, ...]:
+    return tuple(item.name for item in list_strategy_surfaces("product-supported"))
+
+
 def build_strategy(cfg: StrategyConfig) -> Strategy:
     name = cfg.name.lower()
     params = dict(cfg.params or {})
+    if name == "adaptive_regime":
+        raise ValueError("strategy 'adaptive_regime' has been removed; use 'regime_router'")
     if name == "sma_cross":
         _default_exempt = ["ATR_STOP_LOSS", "FIXED_STOP_LOSS", "ATR_TRAIL_EXIT", "RISK_OFF_EXIT", "TREND_BREAK_EXIT"]
         return SMACrossStrategy(
@@ -250,6 +427,25 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
             enable_sector_gate=bool(params.get("enable_sector_gate", False)),
             sector_rank_window=int(params.get("sector_rank_window", 60)),
             sector_top_pct=float(params.get("sector_top_pct", 0.30)),
+            enable_pullback_candidates=bool(params.get("enable_pullback_candidates", False)),
+            pullback_variant_mode=str(params.get("pullback_variant_mode", "pb_reclaim_ma20")),
+            pullback_touch_lookback=int(params.get("pullback_touch_lookback", 12)),
+            pullback_reclaim_window=int(params.get("pullback_reclaim_window", 3)),
+            pullback_ma20_touch_band_pct=float(params.get("pullback_ma20_touch_band_pct", 0.01)),
+            pullback_low_lookback=int(params.get("pullback_low_lookback", 10)),
+            pullback_low_band_pct=float(params.get("pullback_low_band_pct", 0.02)),
+            pullback_box_window=int(params.get("pullback_box_window", 5)),
+            pullback_box_range_pct_max=float(params.get("pullback_box_range_pct_max", 0.08)),
+            enable_residual_ranking=bool(params.get("enable_residual_ranking", False)),
+            residual_window=int(params.get("residual_window", 60)),
+            source_aware_residual_mode=str(params.get("source_aware_residual_mode", "off")),
+            enable_sector_quality_ranking=bool(params.get("enable_sector_quality_ranking", False)),
+            sector_strength_window_short=int(params.get("sector_strength_window_short", 20)),
+            sector_strength_window_long=int(params.get("sector_strength_window_long", 60)),
+            volume_quality_window=int(params.get("volume_quality_window", 20)),
+            residual_weight=float(params.get("residual_weight", 0.5)),
+            sector_weight=float(params.get("sector_weight", 0.3)),
+            quality_weight=float(params.get("quality_weight", 0.2)),
         )
     if name == "regime_router":
         trend_name = str(params.get("trend_strategy", "sma_cross")).lower()
@@ -277,30 +473,6 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
         if isinstance(rf_cfg, dict):
             router.regime_filter_cfg = rf_cfg  # type: ignore[attr-defined]
         return router
-    if name == "adaptive_regime":
-        # 向后兼容: 构造 RegimeRouter(SMA + RSI)
-        order_size = int(params.get("order_size", cfg.order_size))
-        trend_strategy = SMACrossStrategy(
-            fast=int(params.get("fast", cfg.fast)),
-            slow=int(params.get("slow", cfg.slow)),
-            order_size=order_size,
-        )
-        mr_strategy = RSIReversalStrategy(
-            rsi_period=int(params.get("rsi_period", 6)),
-            rsi_buy_threshold=float(params.get("rsi_buy_threshold", 20.0)),
-            rsi_sell_threshold=float(params.get("rsi_sell_threshold", 80.0)),
-            mr_max_hold_days=int(params.get("mr_max_hold_days", 5)),
-            mr_stop_loss_pct=float(params.get("mr_stop_loss_pct", 0.03)),
-            order_size=order_size,
-        )
-        detector = RegimeDetector(
-            regime_ma=int(params.get("regime_ma", 60)),
-        )
-        return RegimeRouter(
-            detector=detector,
-            trend_strategy=trend_strategy,
-            mr_strategy=mr_strategy,
-        )
     if name == "composite":
         # 组合策略
         sub_strategies = []

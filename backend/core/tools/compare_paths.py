@@ -1,6 +1,9 @@
-"""Compare RegimeRouterSignalProvider vs GenericSignalProvider paths.
+"""Research-only parity harness for provider experiments.
 
-Temporary script for zero-diff validation.
+Compares RegimeRouterSignalProvider and GenericSignalProvider paths during
+matrix-search or engine cleanup work. This script is not part of the product
+runtime contract.
+
 Usage: python -m backend.core.tools.compare_paths <config_name>
 """
 from __future__ import annotations

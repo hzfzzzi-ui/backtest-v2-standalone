@@ -46,6 +46,12 @@ async function generateReport() {
   const wbUni = originalWb.universe || {};
   const metaData = meta.data || {};
   const metaUni = meta.universe || {};
+  const reportConsistency = meta.report_consistency || {};
+  const resolvedConfigMeta = reportConsistency.resolved_config_meta || {};
+  const resolvedConfigMode = reportConsistency.resolved_config_mode || '-';
+  const resolvedConfigId = reportConsistency.resolved_config_id || '-';
+  const resolvedConfigHash = reportConsistency.resolved_config_hash || '-';
+  const resolvedUniverseMode = resolvedConfigMeta.universe_mode || metaData.universe_mode || metaUni.universe_mode || '-';
 
   const pickFirst = (arr) => {
     const primary = arr[0]?.[1] || 'missing';
@@ -184,7 +190,11 @@ async function generateReport() {
     ['基准', `${benchmarkInfo.source}${benchmarkInfo.fallback ? ' (fallback)' : ''}`],
     ['标的数量', `${symbolCountInfo.source}${symbolCountInfo.fallback ? ' (fallback)' : ''}`],
     ['漏斗', funnelSource],
-    ['配置冲突策略', (meta.report_consistency || {}).config_conflict_policy || '-'],
+    ['配置冲突策略', reportConsistency.config_conflict_policy || '-'],
+    ['解析配置模式', resolvedConfigMode],
+    ['解析配置ID', resolvedConfigId],
+    ['解析配置Hash', resolvedConfigHash],
+    ['解析配置股票池', resolvedUniverseMode],
   ];
 
   const html = `<!DOCTYPE html>
@@ -220,7 +230,9 @@ async function generateReport() {
   <tr><td>回测区间</td><td>${e(startInfo.value || '-')} ~ ${e(endInfo.value || '-')}</td></tr>
   <tr><td>基准指数</td><td>${e(benchmarkInfo.value || '-')}</td></tr>
   <tr><td>对照指数</td><td>${e(metaData.compare_symbol || '-')}</td></tr>
+  <tr><td>股票池模式</td><td>${e(resolvedUniverseMode)}</td></tr>
   <tr><td>股票池数量</td><td>${iNum(symbolCountInfo.value || 0)}</td></tr>
+  <tr><td>解析配置</td><td>${e(`${resolvedConfigMode} | ${resolvedConfigId}`)}</td></tr>
 </table>
 <div class="kpi-grid">
   ${[

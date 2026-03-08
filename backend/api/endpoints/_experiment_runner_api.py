@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any, Callable
@@ -10,8 +11,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .backtest_v2_artifacts import stabilize_experiment_result
-from ._paths import _bt_root, _results_root, _configs_root
+from ._paths import _bt_root, _results_root
 from ._utils import sanitize_json, _sanitize_for_json
+from ._candidate_presets import (
+    build_locked_candidate_cfg,
+    is_locked_candidate_preset,
+    write_locked_candidate_artifacts,
+)
+from ._config_governance import resolve_runtime_config_source
 from ._job_store import (
     _JOBS,
     _JOBS_LOCK,
@@ -42,6 +49,7 @@ class BacktestV2ExperimentRequest(BaseModel):
     fast_mode: bool | None = None
     config_path: str | None = None
     config_id: str | None = None
+    runtime_config_json: dict[str, Any] | None = None
     workbench_mode: str | None = None
     workbench_config: dict[str, Any] | None = None
     universe_mode: str = "CUSTOM"
@@ -68,6 +76,107 @@ def _to_int_or_default(value: Any, default: int) -> int:
         return int(value)
     except Exception:
         return int(default)
+
+
+def _assert_locked_candidate_request_supported(body: BacktestV2ExperimentRequest) -> None:
+    forbidden: list[str] = []
+    if body.symbols:
+        forbidden.append("symbols")
+    if body.start_date:
+        forbidden.append("start_date")
+    if body.end_date:
+        forbidden.append("end_date")
+    if body.benchmark:
+        forbidden.append("benchmark")
+    if body.compare_symbol:
+        forbidden.append("compare_symbol")
+    if body.initial_capital is not None:
+        forbidden.append("initial_capital")
+    if body.max_positions is not None:
+        forbidden.append("max_positions")
+    if body.base_order_value is not None:
+        forbidden.append("base_order_value")
+    if body.univote_lot_mode is not None:
+        forbidden.append("univote_lot_mode")
+    if body.lot_size is not None:
+        forbidden.append("lot_size")
+    if body.universe_limit is not None:
+        forbidden.append("universe_limit")
+    if str(body.config_path or "").strip():
+        forbidden.append("config_path")
+    if str(body.config_id or "").strip():
+        forbidden.append("config_id")
+    if body.runtime_config_json is not None:
+        forbidden.append("runtime_config_json")
+    if body.workbench_config is not None:
+        forbidden.append("workbench_config")
+    if body.enable_strength_rank is not None:
+        forbidden.append("enable_strength_rank")
+    if body.strength_ma is not None:
+        forbidden.append("strength_ma")
+    if body.strength_top_k_mode is not None:
+        forbidden.append("strength_top_k_mode")
+    if body.enable_multifactor_rank is not None:
+        forbidden.append("enable_multifactor_rank")
+    if body.mf_topk is not None:
+        forbidden.append("mf_topk")
+    if body.momentum_top_pct is not None:
+        forbidden.append("momentum_top_pct")
+    if forbidden:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "locked baseline candidate does not accept config-mutating request fields: "
+                + ", ".join(forbidden)
+            ),
+        )
+
+
+def _build_locked_candidate_execution_context(
+    body: BacktestV2ExperimentRequest,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, dict[str, Any]]:
+    _assert_locked_candidate_request_supported(body)
+    candidate_name = str(body.preset or "").strip().lower()
+    try:
+        candidate_cfg, candidate_meta = build_locked_candidate_cfg(candidate_name)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=f"failed to build locked candidate config: {exc}")
+
+    runtime_overrides = dict(candidate_meta.get("locked_runtime_overrides") or {})
+    universe_mode = str(runtime_overrides.get("universe_mode") or "").strip()
+    if not universe_mode:
+        raise HTTPException(status_code=500, detail="locked candidate is missing baseline universe_mode")
+
+    price_adj = str(runtime_overrides.get("price_adj") or "hfq").strip() or "hfq"
+    resolved_config_hash = str(candidate_meta.get("candidate_config_hash") or "").strip()
+    resolved_config_meta = sanitize_json(
+        {
+            "candidate_name": str(candidate_meta.get("candidate_name") or ""),
+            "source_baseline_exp_id": str(candidate_meta.get("source_baseline_exp_id") or ""),
+            "main_change_path": str(candidate_meta.get("main_change_path") or ""),
+            "enabled_by_default": bool(candidate_meta.get("enabled_by_default", False)),
+        }
+    )
+    overrides: dict[str, Any] = {
+        "config_source": "locked_candidate",
+        "resolved_config_mode": "locked_candidate",
+        "config_conflict_policy": "locked_candidate",
+        "universe_mode": universe_mode,
+        "price_adj": price_adj,
+        "candidate_context": sanitize_json(candidate_meta),
+    }
+    if resolved_config_hash:
+        overrides["resolved_config_hash"] = resolved_config_hash
+    if resolved_config_meta:
+        overrides["resolved_config_meta"] = resolved_config_meta
+    if body.fast_mode is not None:
+        overrides["fast_mode"] = bool(body.fast_mode)
+    elif "fast_mode" in runtime_overrides:
+        overrides["fast_mode"] = bool(runtime_overrides.get("fast_mode"))
+    if body.workbench_mode:
+        overrides["workbench_mode"] = str(body.workbench_mode)
+
+    return candidate_cfg, sanitize_json(candidate_meta), overrides, resolved_config_hash, resolved_config_meta
 
 
 def _build_runtime_cfg_from_workbench(
@@ -119,10 +228,11 @@ def _build_runtime_cfg_from_workbench(
 
     sig = wb_cfg.get("signal_generation") if isinstance(wb_cfg.get("signal_generation"), dict) else {}
     strategy_pack = str(sig.get("strategy") or wb_cfg.get("strategy_pack") or "SMA_CROSS").strip().upper()
+    if strategy_pack == "ADAPTIVE_REGIME":
+        raise HTTPException(status_code=400, detail="strategy_pack ADAPTIVE_REGIME has been removed; use REGIME_ROUTER")
     strategy_name_map = {
         "SMA_CROSS": "sma_cross",
         "EMA_CROSS": "ema_cross",
-        "ADAPTIVE_REGIME": "adaptive_regime",
         "REGIME_ROUTER": "regime_router",
         "BREAKOUT_TREND": "breakout_trend",
     }
@@ -177,28 +287,7 @@ def _build_runtime_cfg_from_workbench(
             }
         # fall through to shared exit_rules compilation
 
-    # --- ADAPTIVE_REGIME 向后兼容: 转换为 regime_router ---
-    if strategy_name == "adaptive_regime":
-        ar_cfg = sig.get("adaptive_regime") if isinstance(sig.get("adaptive_regime"), dict) else {}
-        order_size = _to_int_or_default(cfg.get("strategy", {}).get("order_size"), 1000)
-        strategy = cfg.setdefault("strategy", {})
-        strategy["name"] = "adaptive_regime"
-        strategy["fast"] = _to_int_or_default(ar_cfg.get("fast_ma"), 5)
-        strategy["slow"] = _to_int_or_default(ar_cfg.get("slow_ma"), 20)
-        strategy["order_size"] = order_size
-        strategy["params"] = {
-            "fast": strategy["fast"],
-            "slow": strategy["slow"],
-            "order_size": order_size,
-            "regime_ma": _to_int_or_default(ar_cfg.get("regime_ma"), 60),
-            "rsi_period": _to_int_or_default(ar_cfg.get("rsi_period"), 6),
-            "rsi_buy_threshold": float(ar_cfg.get("rsi_buy_threshold", 20.0)),
-            "rsi_sell_threshold": float(ar_cfg.get("rsi_sell_threshold", 80.0)),
-            "mr_max_hold_days": _to_int_or_default(ar_cfg.get("mr_max_hold_days"), 5),
-            "mr_stop_loss_pct": float(ar_cfg.get("mr_stop_loss_pct", 0.03)),
-        }
-        # fall through to shared exit_rules compilation
-
+    # Strategy-specific runtime compilation.
     if strategy_name == "breakout_trend":
         bo_cfg = sig.get("breakout") if isinstance(sig.get("breakout"), dict) else {}
         pos_risk_cfg = wb_cfg.get("position_risk") if isinstance(wb_cfg.get("position_risk"), dict) else {}
@@ -220,7 +309,7 @@ def _build_runtime_cfg_from_workbench(
             "enable_v2_trend_filter": True,
         }
 
-    if strategy_name not in ("regime_router", "adaptive_regime", "breakout_trend"):
+    if strategy_name not in ("regime_router", "breakout_trend"):
         ma_key = "ema" if strategy_pack == "EMA_CROSS" else "sma"
         ma_cfg = sig.get(ma_key) if isinstance(sig.get(ma_key), dict) else {}
 
@@ -426,6 +515,110 @@ def _build_runtime_cfg_from_workbench(
     return cfg
 
 
+def _run_locked_candidate_preset_sync(
+    *,
+    body: BacktestV2ExperimentRequest,
+    bt_root: Path,
+    run_experiment: Callable[..., dict[str, Any]],
+    progress_hook: Callable[[int, str], None] | None = None,
+) -> dict[str, Any]:
+    base_cfg, candidate_meta, overrides, resolved_config_hash, resolved_config_meta = (
+        _build_locked_candidate_execution_context(body)
+    )
+    runtime_cfg_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as fh:
+            fh.write(json.dumps(base_cfg, ensure_ascii=False, indent=2))
+            runtime_cfg_path = Path(fh.name).resolve()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"failed to create locked candidate runtime config: {exc}")
+
+    env_backup = {
+        "PAMS_PG_HOST": os.environ.get("PAMS_PG_HOST"),
+        "PAMS_PG_PORT": os.environ.get("PAMS_PG_PORT"),
+        "PAMS_PG_DBNAME": os.environ.get("PAMS_PG_DBNAME"),
+        "PAMS_PG_USER": os.environ.get("PAMS_PG_USER"),
+        "PAMS_PG_PASSWORD": os.environ.get("PAMS_PG_PASSWORD"),
+    }
+    os.environ["PAMS_PG_HOST"] = os.environ.get("PGHOST", env_backup["PAMS_PG_HOST"] or "pams-postgres")
+    os.environ["PAMS_PG_PORT"] = os.environ.get("PGPORT", env_backup["PAMS_PG_PORT"] or "5432")
+    os.environ["PAMS_PG_DBNAME"] = os.environ.get("PGDATABASE", env_backup["PAMS_PG_DBNAME"] or "pams")
+    os.environ["PAMS_PG_USER"] = os.environ.get("PGUSER", env_backup["PAMS_PG_USER"] or "pams")
+    os.environ["PAMS_PG_PASSWORD"] = os.environ.get("PGPASSWORD", env_backup["PAMS_PG_PASSWORD"] or "")
+
+    try:
+        result = run_experiment(str(runtime_cfg_path), "single", overrides, progress_hook=progress_hook)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"experiment run failed: {exc}")
+    finally:
+        for k, v in env_backup.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        if runtime_cfg_path is not None:
+            try:
+                runtime_cfg_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    try:
+        _attach_run_profile_summary(result)
+    except Exception:
+        pass
+
+    try:
+        result = stabilize_experiment_result(
+            bt_root=bt_root,
+            result=result if isinstance(result, dict) else {},
+            base_cfg=base_cfg,
+            overrides=overrides,
+            run_profile_summary=result.get("run_profile_summary") if isinstance(result, dict) else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"artifact stabilization failed: {exc}")
+
+    result.setdefault("exp_id", "")
+    result.setdefault("results_dir", "")
+    result.setdefault("status", "OK")
+    result["requested_preset"] = str(body.preset or "").strip()
+    result["resolved_config_mode"] = "locked_candidate"
+    result["resolved_config_id"] = None
+    result["resolved_config_hash"] = resolved_config_hash or None
+    result["config_conflict_policy"] = "locked_candidate"
+    if resolved_config_meta:
+        result["resolved_config_meta"] = sanitize_json(dict(resolved_config_meta))
+
+    results_dir = Path(str(result.get("results_dir") or "")).resolve()
+    try:
+        candidate_artifacts = write_locked_candidate_artifacts(
+            candidate_name=str(body.preset or "").strip().lower(),
+            results_dir=results_dir,
+            result=result,
+            candidate_meta=candidate_meta,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=f"candidate artifact write failed: {exc}")
+
+    result["candidate"] = sanitize_json(
+        {
+            "name": str(candidate_meta.get("candidate_name") or ""),
+            "status": str(candidate_artifacts.get("status") or "blocked"),
+            "source_baseline_exp_id": str(candidate_meta.get("source_baseline_exp_id") or ""),
+            "main_change_path": str(candidate_meta.get("main_change_path") or ""),
+            "candidate_provenance_path": str(candidate_artifacts.get("candidate_provenance_path") or ""),
+            "candidate_summary_json_path": str(candidate_artifacts.get("candidate_summary_json_path") or ""),
+            "candidate_summary_path": str(candidate_artifacts.get("candidate_summary_path") or ""),
+            "blockers": list(candidate_artifacts.get("blockers") or []),
+        }
+    )
+    if str(candidate_artifacts.get("status") or "").strip().lower() != "ready":
+        blockers = ", ".join(str(item) for item in (candidate_artifacts.get("blockers") or []) if str(item).strip())
+        raise HTTPException(status_code=500, detail=f"candidate audit blocked: {blockers or 'unknown blockers'}")
+
+    return sanitize_json(result)
+
+
 def _run_backtest_v2_experiment_sync(
     body: BacktestV2ExperimentRequest,
     progress_hook: Callable[[int, str], None] | None = None,
@@ -438,6 +631,15 @@ def _run_backtest_v2_experiment_sync(
         from backend.core.tools.experiment_runner import run_experiment  # type: ignore
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"failed to import experiment tools: {exc}")
+
+    requested_preset = str(body.preset or "").strip()
+    if is_locked_candidate_preset(requested_preset):
+        return _run_locked_candidate_preset_sync(
+            body=body,
+            bt_root=bt_root,
+            run_experiment=run_experiment,
+            progress_hook=progress_hook,
+        )
 
     cfg_rel = body.config_path.strip() if (body.config_path or "").strip() else "configs/pams_cn_pg.json"
     cfg_path = (bt_root / cfg_rel).resolve()
@@ -453,34 +655,22 @@ def _run_backtest_v2_experiment_sync(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"invalid config json: {cfg_path} ({exc})")
 
-    # Resolve workbench config precedence:
-    # script config (config_id) > frontend draft (workbench_config)
-    script_wb_cfg: dict[str, Any] | None = None
-    cfg_id = str(body.config_id or "").strip()
-    if cfg_id:
-        cfg_file = (_configs_root() / f"{cfg_id}.json").resolve()
-        if cfg_file.exists():
-            try:
-                cfg_obj = json.loads(cfg_file.read_text(encoding="utf-8-sig"))
-                cfg_json = cfg_obj.get("config_json")
-                if isinstance(cfg_json, dict):
-                    script_wb_cfg = sanitize_json(dict(cfg_json))
-            except Exception:
-                script_wb_cfg = None
-
-    effective_wb_cfg: dict[str, Any] | None = None
-    config_source = "none"
-    if script_wb_cfg is not None:
-        effective_wb_cfg = script_wb_cfg
-        config_source = "config_id"
-    elif isinstance(body.workbench_config, dict):
-        effective_wb_cfg = sanitize_json(dict(body.workbench_config))
-        config_source = "workbench_config"
-
-    use_script_cfg = script_wb_cfg is not None
+    resolution = resolve_runtime_config_source(
+        config_id=body.config_id,
+        runtime_config=body.runtime_config_json,
+        draft_config=body.workbench_config,
+    )
+    effective_wb_cfg = resolution.get("effective_config_json") if isinstance(resolution.get("effective_config_json"), dict) else None
+    config_source = str(resolution.get("config_source") or "none")
+    resolved_config_mode = str(resolution.get("resolved_config_mode") or "none")
+    resolved_config_id = str(resolution.get("resolved_config_id") or body.config_id or "").strip()
+    resolved_config_hash = str(resolution.get("resolved_config_hash") or "").strip()
+    resolved_config_meta = resolution.get("resolved_config_meta") if isinstance(resolution.get("resolved_config_meta"), dict) else None
+    use_script_cfg = resolved_config_mode == "saved_config_run"
+    runtime_config_supplied = isinstance(body.runtime_config_json, dict)
 
     overrides: dict[str, Any] = {}
-    if not use_script_cfg:
+    if not use_script_cfg and not runtime_config_supplied:
         if body.symbols:
             overrides["symbols"] = list(body.symbols)
         if body.start_date:
@@ -503,9 +693,17 @@ def _run_backtest_v2_experiment_sync(
             overrides["universe_limit"] = int(body.universe_limit)
     if body.fast_mode is not None:
         overrides["fast_mode"] = bool(body.fast_mode)
-    if cfg_id:
-        overrides["config_id"] = cfg_id
+    if resolved_config_id:
+        overrides["config_id"] = resolved_config_id
     overrides["config_source"] = config_source
+    overrides["resolved_config_mode"] = resolved_config_mode
+    if resolved_config_hash:
+        overrides["resolved_config_hash"] = resolved_config_hash
+    if resolved_config_meta is not None:
+        overrides["resolved_config_meta"] = sanitize_json(dict(resolved_config_meta))
+    conflict_policy = str(resolution.get("config_conflict_policy") or "none")
+    if conflict_policy != "none":
+        overrides["config_conflict_policy"] = conflict_policy
     if body.workbench_mode:
         overrides["workbench_mode"] = str(body.workbench_mode)
     if isinstance(effective_wb_cfg, dict):
@@ -519,35 +717,33 @@ def _run_backtest_v2_experiment_sync(
             base_cfg,
             body,
             wb_cfg,
-            use_body_universe_fields=not use_script_cfg,
+            use_body_universe_fields=not (use_script_cfg or runtime_config_supplied),
         )
         overrides["original_workbench_config"] = wb_cfg
-    if use_script_cfg:
-        wb_uni = script_wb_cfg.get("universe") if isinstance(script_wb_cfg.get("universe"), dict) else {}
-        overrides["universe_mode"] = str(script_wb_cfg.get("universe_mode") or body.universe_mode or "CUSTOM")
-        overrides["industries"] = list(script_wb_cfg.get("industries") or [])
+    if use_script_cfg or runtime_config_supplied:
+        wb_uni = effective_wb_cfg.get("universe") if isinstance(effective_wb_cfg.get("universe"), dict) else {}
+        overrides["universe_mode"] = str(effective_wb_cfg.get("universe_mode") or body.universe_mode or "CUSTOM")
+        overrides["industries"] = list(effective_wb_cfg.get("industries") or [])
         overrides["price_adj"] = str(wb_uni.get("price_adj") or body.price_adj or "hfq")
-        if isinstance(body.workbench_config, dict):
-            overrides["config_conflict_policy"] = "config_id_overrides_workbench"
     else:
-        if body.universe_mode:
+        if body.universe_mode and not runtime_config_supplied:
             overrides["universe_mode"] = str(body.universe_mode)
-        if body.industries:
+        if body.industries and not runtime_config_supplied:
             overrides["industries"] = list(body.industries)
-        if body.price_adj:
+        if body.price_adj and not runtime_config_supplied:
             overrides["price_adj"] = str(body.price_adj)
-        # ????????
-        if body.enable_strength_rank is not None:
+        # 排名侧参数
+        if body.enable_strength_rank is not None and not runtime_config_supplied:
             overrides["enable_strength_rank"] = bool(body.enable_strength_rank)
-        if body.strength_ma is not None:
+        if body.strength_ma is not None and not runtime_config_supplied:
             overrides["strength_ma"] = int(body.strength_ma)
-        if body.strength_top_k_mode is not None:
+        if body.strength_top_k_mode is not None and not runtime_config_supplied:
             overrides["strength_top_k_mode"] = str(body.strength_top_k_mode)
-        if body.enable_multifactor_rank is not None:
+        if body.enable_multifactor_rank is not None and not runtime_config_supplied:
             overrides["enable_multifactor_rank"] = bool(body.enable_multifactor_rank)
-        if body.mf_topk is not None:
+        if body.mf_topk is not None and not runtime_config_supplied:
             overrides["mf_topk"] = int(body.mf_topk)
-        if body.momentum_top_pct is not None:
+        if body.momentum_top_pct is not None and not runtime_config_supplied:
             overrides["momentum_top_pct"] = float(body.momentum_top_pct)
 
     env_backup = {
@@ -595,8 +791,15 @@ def _run_backtest_v2_experiment_sync(
     result.setdefault("results_dir", "")
     result.setdefault("status", "OK")
     result["requested_preset"] = requested_preset
+    result["resolved_config_mode"] = resolved_config_mode
+    result["resolved_config_id"] = resolved_config_id or None
+    result["resolved_config_hash"] = resolved_config_hash or None
+    result["config_conflict_policy"] = conflict_policy
+    if resolved_config_meta is not None:
+        result["resolved_config_meta"] = sanitize_json(dict(resolved_config_meta))
+        result["resolved_config_source_type"] = str(resolved_config_meta.get("source_type") or "")
+        result["resolved_config_owner"] = str(resolved_config_meta.get("owner") or "")
     return sanitize_json(result)
-
 
 def _attach_run_profile_summary(result: dict[str, Any]) -> None:
     if not isinstance(result, dict):
@@ -691,7 +894,9 @@ def run_backtest_v2_experiment(body: BacktestV2ExperimentRequest):
 def run_backtest_v2_experiment_async(body: BacktestV2ExperimentRequest):
     preset_key = str(body.preset or "").strip().upper()
     eta = 480
-    if preset_key in {"G1-G4", "REGIME_BUFFER_2X2", "ATR_RISK_2X2", "ATR_PORTFOLIO_VALIDATE_V1", "PORTFOLIO_FILL_VALIDATE_V1", "TREND_FILTER_VALIDATE_V1", "TREND_TIER_VALIDATE_V1", "TREND_ACCEL_BRAKE_VALIDATE_V1", "TREND_BRAKE_CONFIRM_VALIDATE_V1", "STRENGTH_RANK_VALIDATE_V1", "FULL_RANGE_VALIDATE_V1", "CANDIDATE_DIAG_VALIDATE_V1", "SLOT_DEBUG_VALIDATE_V1", "MAX_POSITION_EXPAND_VALIDATE_V1", "STRONG_ONLY_VALIDATE_V1", "MULTIFACTOR_RANKING_VALIDATE_V1", "MULTIFACTOR_RANKING_WALKFORWARD_V1", "MF_RANK_REGIME_GATE_VALIDATE_V1", "MULTIFACTOR_BALANCED_V1", "MULTIFACTOR_FUSION_COMPARE_V1", "MULTIFACTOR_INCREMENTAL_V1", "MULTIFACTOR_INCREMENTAL_V1_6_1A", "EXPERIMENT_6_1A", "6.1A", "MULTIFACTOR_INCREMENTAL_V1_6_1B", "EXPERIMENT_6_1B", "6.1B", "MULTIFACTOR_INCREMENTAL_V1_6_1_LIMIT", "MULTIFACTOR_INCREMENTAL_V1_6_4", "EXPERIMENT_6_4", "6.4", "EXPERIMENT_6_1_LIMIT", "6.1L"}:
+    if is_locked_candidate_preset(body.preset):
+        eta = 240
+    elif preset_key in {"G1-G4", "REGIME_BUFFER_2X2", "ATR_RISK_2X2", "ATR_PORTFOLIO_VALIDATE_V1", "PORTFOLIO_FILL_VALIDATE_V1", "TREND_FILTER_VALIDATE_V1", "TREND_TIER_VALIDATE_V1", "TREND_ACCEL_BRAKE_VALIDATE_V1", "TREND_BRAKE_CONFIRM_VALIDATE_V1", "STRENGTH_RANK_VALIDATE_V1", "FULL_RANGE_VALIDATE_V1", "CANDIDATE_DIAG_VALIDATE_V1", "SLOT_DEBUG_VALIDATE_V1", "MAX_POSITION_EXPAND_VALIDATE_V1", "STRONG_ONLY_VALIDATE_V1", "MULTIFACTOR_RANKING_VALIDATE_V1", "MULTIFACTOR_RANKING_WALKFORWARD_V1", "MF_RANK_REGIME_GATE_VALIDATE_V1", "MULTIFACTOR_BALANCED_V1", "MULTIFACTOR_FUSION_COMPARE_V1", "MULTIFACTOR_INCREMENTAL_V1", "MULTIFACTOR_INCREMENTAL_V1_6_1A", "EXPERIMENT_6_1A", "6.1A", "MULTIFACTOR_INCREMENTAL_V1_6_1B", "EXPERIMENT_6_1B", "6.1B", "MULTIFACTOR_INCREMENTAL_V1_6_1_LIMIT", "MULTIFACTOR_INCREMENTAL_V1_6_4", "EXPERIMENT_6_4", "6.4", "EXPERIMENT_6_1_LIMIT", "6.1L"}:
         eta = 240
     elif preset_key in {"STRENGTH_RANK_VALIDATE_V2", "STRENGTH_RANK_VALIDATE_V2A", "STRENGTH_RANK_VALIDATE_V2B", "ENGINE_PERF_COMPARE_V1", "ENGINE_PERF_COMPARE_V2"}:
         eta = 180 if bool(body.fast_mode) else 360

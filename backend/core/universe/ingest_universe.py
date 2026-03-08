@@ -376,7 +376,8 @@ def ingest_index(conn, csv_dir: str | None = None) -> int:
         })
 
     with conn.cursor() as cur:
-        cur.execute("TRUNCATE TABLE public.pit_index_constituents")
+        # Preserve non-CSI800 constituent rows such as CSI1000.
+        cur.execute("DELETE FROM public.pit_index_constituents WHERE index_code = '000906.SH'")
         insert_sql = """
             INSERT INTO public.pit_index_constituents
                 (index_code, symbol, start_date, end_date, source, created_at)

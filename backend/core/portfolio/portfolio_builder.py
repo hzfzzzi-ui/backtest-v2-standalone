@@ -35,6 +35,49 @@ class PortfolioBacktestResult:
     metrics: dict[str, Any]
 
 
+def build_backtest_price_indices(
+    *,
+    history: pd.DataFrame,
+    trading_days: list[date],
+) -> tuple[dict[tuple[date, str], float], dict[tuple[date, str], float]]:
+    """Build execution open lookup plus valuation close lookup.
+
+    Execution keeps raw per-day opens. Valuation closes use same-symbol forward fill
+    over the trading calendar, but never extend past the last real bar.
+    """
+    hist = history.copy()
+    hist["date"] = pd.to_datetime(hist["date"]).dt.normalize()
+    hist["symbol"] = hist["symbol"].astype(str).str.lower()
+    hist = hist.sort_values(["date", "symbol"]).reset_index(drop=True)
+
+    open_idx: dict[tuple[date, str], float] = {}
+    for row in hist.itertuples(index=False):
+        d = pd.Timestamp(row.date).date()
+        s = str(row.symbol).lower()
+        open_idx[(d, s)] = float(row.open)
+
+    if hist.empty or not trading_days:
+        return open_idx, {}
+
+    cal = pd.DatetimeIndex(pd.to_datetime([pd.Timestamp(d).normalize() for d in trading_days]))
+    close_wide = (
+        hist.pivot_table(index="date", columns="symbol", values="close", aggfunc="last")
+        .sort_index()
+        .reindex(cal)
+        .ffill()
+    )
+    last_dates = hist.groupby("symbol", sort=False)["date"].max()
+    for sym, last_dt in last_dates.items():
+        close_wide.loc[close_wide.index > pd.Timestamp(last_dt), str(sym).lower()] = pd.NA
+
+    close_idx: dict[tuple[date, str], float] = {}
+    stacked = close_wide.stack()
+    stacked = stacked[stacked.notna()]
+    for (dt, sym), value in stacked.items():
+        close_idx[(pd.Timestamp(dt).date(), str(sym).lower())] = float(value)
+    return open_idx, close_idx
+
+
 def compute_nav_snapshot(
     *,
     cash: float,
@@ -122,6 +165,53 @@ def resolve_mf_gate_on_today(
     return False
 
 
+def _safe_float_or_none(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _build_candidate_audit_row(
+    *,
+    decision_date_s: str,
+    symbol: str,
+    strength: float | None,
+    strength_ma: int,
+    selected: bool,
+    selected_rank: int | None,
+    reject_reason: str,
+    meta: dict[str, Any] | None = None,
+    is_candidate: bool = True,
+    mf_score: float | None = None,
+    mf_rank: int | None = None,
+) -> dict[str, Any]:
+    _meta = dict(meta or {})
+    return {
+        "date": decision_date_s,
+        "symbol": str(symbol).lower(),
+        "is_candidate": bool(is_candidate),
+        "strength": None if strength is None else float(strength),
+        "strength_ma": int(strength_ma),
+        "selected": bool(selected),
+        "selected_flag": bool(selected),
+        "selected_rank": selected_rank,
+        "reject_reason": str(reject_reason),
+        "alpha_source": str(_meta.get("alpha_source", "") or ""),
+        "overlap_flag": bool(_meta.get("overlap_flag", False)),
+        "pullback_variant": str(_meta.get("pullback_variant", "") or ""),
+        "residual_strength_raw": _safe_float_or_none(_meta.get("residual_strength_raw")),
+        "residual_strength_score": _safe_float_or_none(_meta.get("residual_strength_score")),
+        "sector_strength_score": _safe_float_or_none(_meta.get("sector_strength_score")),
+        "volume_price_quality_score": _safe_float_or_none(_meta.get("volume_price_quality_score")),
+        "final_score": _safe_float_or_none(_meta.get("final_score")),
+        "mf_score": None if mf_score is None else float(mf_score),
+        "mf_rank": None if mf_rank is None else int(mf_rank),
+    }
+
+
 def build_rebalance_orders(
     *,
     positions: dict[str, int],
@@ -196,49 +286,46 @@ def build_rebalance_orders(
         sym = str(sig.symbol).lower()
         if sym in future_positions and int(future_positions.get(sym, 0)) > 0:
             if candidate_audit is not None:
-                candidate_audit.append(
-                    {
-                        "date": decision_date_s,
-                        "symbol": sym,
-                        "is_candidate": False,
-                        "strength": None,
-                        "strength_ma": int(strength_ma),
-                        "selected": False,
-                        "selected_rank": None,
-                        "reject_reason": "ALREADY_HELD",
-                    }
-                )
+                candidate_audit.append(_build_candidate_audit_row(
+                    decision_date_s=decision_date_s,
+                    symbol=sym,
+                    strength=None,
+                    strength_ma=int(strength_ma),
+                    selected=False,
+                    selected_rank=None,
+                    reject_reason="ALREADY_HELD",
+                    meta=(sig.meta if isinstance(sig.meta, dict) else None),
+                    is_candidate=False,
+                ))
             continue
         px = float(next_open.get(sym, 0.0) or 0.0)
         if px <= 0:
             if candidate_audit is not None:
-                candidate_audit.append(
-                    {
-                        "date": decision_date_s,
-                        "symbol": sym,
-                        "is_candidate": False,
-                        "strength": None,
-                        "strength_ma": int(strength_ma),
-                        "selected": False,
-                        "selected_rank": None,
-                        "reject_reason": "NOT_TRADABLE",
-                    }
-                )
+                candidate_audit.append(_build_candidate_audit_row(
+                    decision_date_s=decision_date_s,
+                    symbol=sym,
+                    strength=None,
+                    strength_ma=int(strength_ma),
+                    selected=False,
+                    selected_rank=None,
+                    reject_reason="NOT_TRADABLE",
+                    meta=(sig.meta if isinstance(sig.meta, dict) else None),
+                    is_candidate=False,
+                ))
             continue
         if float(min_trade_price) > 0 and px < float(min_trade_price):
             if candidate_audit is not None:
-                candidate_audit.append(
-                    {
-                        "date": decision_date_s,
-                        "symbol": sym,
-                        "is_candidate": False,
-                        "strength": None,
-                        "strength_ma": int(strength_ma),
-                        "selected": False,
-                        "selected_rank": None,
-                        "reject_reason": "SKIP_MIN_PRICE_AT_ORDER",
-                    }
-                )
+                candidate_audit.append(_build_candidate_audit_row(
+                    decision_date_s=decision_date_s,
+                    symbol=sym,
+                    strength=None,
+                    strength_ma=int(strength_ma),
+                    selected=False,
+                    selected_rank=None,
+                    reject_reason="SKIP_MIN_PRICE_AT_ORDER",
+                    meta=(sig.meta if isinstance(sig.meta, dict) else None),
+                    is_candidate=False,
+                ))
             continue
         meta = sig.meta if isinstance(sig.meta, dict) else {}
         close_v = float(meta.get("close", 0.0) or 0.0)
@@ -466,18 +553,21 @@ def build_rebalance_orders(
         pass
     if candidate_audit is not None:
         for item in ranked:
-            candidate_audit.append(
-                {
-                    "date": decision_date_s,
-                    "symbol": str(item["symbol"]),
-                    "is_candidate": True,
-                    "strength": None if item["strength"] is None else float(item["strength"]),
-                    "strength_ma": int(strength_ma),
-                    "selected": bool(item["selected"]),
-                    "selected_rank": item["selected_rank"],
-                    "reject_reason": str(item["reject_reason"]),
-                }
-            )
+            sig = item.get("signal")
+            meta = sig.meta if isinstance(sig, Signal) and isinstance(sig.meta, dict) else {}
+            candidate_audit.append(_build_candidate_audit_row(
+                decision_date_s=decision_date_s,
+                symbol=str(item["symbol"]),
+                strength=(None if item["strength"] is None else float(item["strength"])),
+                strength_ma=int(strength_ma),
+                selected=bool(item["selected"]),
+                selected_rank=item["selected_rank"],
+                reject_reason=str(item["reject_reason"]),
+                meta=meta,
+                is_candidate=True,
+                mf_score=_safe_float_or_none(item.get("mf_score")),
+                mf_rank=(int(item["mf_rank"]) if item.get("mf_rank") is not None else None),
+            ))
     if debug_plan is not None:
         debug_plan["buy_candidates_count"] = int(len(ranked))
         debug_plan["buy_slots"] = int(slots)
@@ -595,13 +685,10 @@ def run_portfolio_backtest(
         combined = hist
     combined_date_series = combined["date"]
 
-    open_idx: dict[tuple[date, str], float] = {}
-    close_idx: dict[tuple[date, str], float] = {}
-    for row in hist.itertuples(index=False):
-        d = pd.Timestamp(row.date).date()
-        s = str(row.symbol)
-        open_idx[(d, s)] = float(row.open)
-        close_idx[(d, s)] = float(row.close)
+    open_idx, close_idx = build_backtest_price_indices(
+        history=hist,
+        trading_days=trading_days,
+    )
 
     pending: dict[date, list[PortfolioOrder]] = {}
     positions: dict[str, int] = {}

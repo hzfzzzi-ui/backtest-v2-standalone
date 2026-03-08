@@ -1,4 +1,4 @@
-﻿/* Inlined from ui.js to avoid ES-module scope isolation */
+/* Inlined from ui.js to avoid ES-module scope isolation */
 function setActiveNav() {
   const path = (location.pathname || '/').split('/').pop() || 'index.html';
   document.querySelectorAll('[data-nav]')?.forEach(a => {
@@ -13,6 +13,12 @@ const state = {
   strategy_pack: 'EMA_CROSS',
   universe_mode: 'ALL_A',
   config_id: null,
+  loaded_config_meta: null,
+  loaded_config_json: null,
+  loaded_config_snapshot: '',
+  config_source_mode: 'draft-only',
+  config_dirty: false,
+  selected_locked_candidate_preset: '',
   config_draft: {},
   universe_stats: null,
   active_exp: null,
@@ -44,9 +50,11 @@ const COMPOSE_MODULES = ['Regime', 'Trend Quality', 'Strength Rank', 'MF Rank', 
 function byId(id) { return document.getElementById(id); }
 function getStrategySelector() { return byId('wbTrendStrategy') || byId('wbStrategyPack') || byId('wbStrategyFamily'); }
 function getStrategyPackValue() {
+  const selected = String((byId('wbTrendStrategy') || byId('wbStrategyPack') || byId('wbStrategyFamily'))?.value || 'EMA_CROSS').toUpperCase();
+  if (selected === 'BREAKOUT_TREND') return 'BREAKOUT_TREND';
   const regimeOn = !!byId('wbRegimeEnabled')?.checked;
   if (regimeOn) return 'REGIME_ROUTER';
-  return (byId('wbTrendStrategy') || byId('wbStrategyPack') || byId('wbStrategyFamily'))?.value || 'EMA_CROSS';
+  return selected || 'EMA_CROSS';
 }
 function setHtmlById(id, html) {
   const el = byId(id);
@@ -76,19 +84,178 @@ const REASON_MAP = {
 };
 function reasonZh(code) { return REASON_MAP[code] || String(code ?? ''); }
 
-const LEGACY_ARTIFACT_FALLBACKS = {
-  reason_codes: ['reason_code_counts.csv'],
-};
-
-const COUNTER_LEGACY_ALIASES = {
-  raw_signal: ['raw_signal_count'],
-  blocked: ['blocked_count'],
-  orders: ['orders_count'],
-  skipped: ['skipped_count'],
-  closed_trades: ['closed_trades_count'],
-};
-
 function todayISO() { return new Date().toISOString().slice(0, 10); }
+
+const CONFIG_SOURCE_LABELS = { baseline: '基线', search: '搜索', template: '模板', derived: '派生' };
+const CONFIG_OWNER_LABELS = { manual: '手工', claude: 'Claude', script: '脚本', builtin: '内建' };
+
+function stableSerializeConfig(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => stableSerializeConfig(item)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableSerializeConfig(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function cloneJson(value) {
+  if (!value || typeof value !== 'object') return null;
+  try { return JSON.parse(JSON.stringify(value)); } catch (_) { return null; }
+}
+
+function cloneConfigMeta(record) {
+  if (!record || typeof record !== 'object') return null;
+  const universeMode = record.universe_mode || record?.config_json?.universe_mode || null;
+  const rawDisplay = record.display_name || record.name || record.config_id || '';
+  const displayName = rawDisplay && universeMode ? `${rawDisplay} · 池=${universeMode}` : rawDisplay;
+  return {
+    config_id: record.config_id || null,
+    config_hash: record.config_hash || null,
+    display_name: displayName,
+    name: record.name || record.display_name || rawDisplay,
+    source_type: record.source_type || 'derived',
+    owner: record.owner || 'manual',
+    locked: !!record.locked,
+    baseline_of: record.baseline_of || null,
+    legacy_config_id: record.legacy_config_id || null,
+    universe_mode: universeMode,
+  };
+}
+
+function configMetaLabel(record) {
+  const meta = cloneConfigMeta(record) || {};
+  const source = CONFIG_SOURCE_LABELS[meta.source_type] || meta.source_type || '派生';
+  const owner = CONFIG_OWNER_LABELS[meta.owner] || meta.owner || '手工';
+  return `[${source}|${owner}]`;
+}
+
+function currentConfigSourceMode() {
+  const meta = state.loaded_config_meta;
+  if (!meta?.config_id) return 'draft-only';
+  const snapshot = state.loaded_config_snapshot || '';
+  const current = stableSerializeConfig(state.config_draft || {});
+  return snapshot && snapshot === current ? 'loaded-clean' : 'loaded-dirty';
+}
+
+function syncConfigSourceUI() {
+  const meta = state.loaded_config_meta;
+  const mode = currentConfigSourceMode();
+  state.config_source_mode = mode;
+  state.config_dirty = mode === 'loaded-dirty';
+  const idEl = byId('wbConfigId');
+  if (idEl) idEl.textContent = meta?.config_id || '-';
+  const chip = byId('wbConfigSourceChip');
+  const text = byId('wbConfigSourceText');
+  if (!chip || !text) return mode;
+  const runMeta = (state.active_artifacts || {}).run_meta || {};
+  const candidate = runMeta.candidate;
+  if (candidate && state.active_result?.exp_id) {
+    chip.className = 'wb-chip wb-ok';
+    chip.textContent = '候选预设';
+    text.textContent = `${candidate.candidate_name || 'locked_candidate'} | baseline=${candidate.source_baseline_exp_id || '-'}`;
+    return 'active-candidate';
+  }
+  const display = meta?.display_name || meta?.name || meta?.config_id || '当前草稿';
+  if (mode === 'draft-only') {
+    chip.className = 'wb-chip';
+    chip.textContent = '草稿运行';
+    text.textContent = '当前运行/预览基于页面草稿';
+    return mode;
+  }
+  if (mode === 'loaded-clean') {
+    chip.className = 'wb-chip wb-ok';
+    chip.textContent = `${configMetaLabel(meta)} 已加载`;
+    text.textContent = `运行/预览以 ${display} (${meta.config_id}) 为准`;
+    return mode;
+  }
+  chip.className = 'wb-chip wb-danger';
+  chip.textContent = '草稿已偏离';
+  text.textContent = `页面已偏离 ${meta.config_id}，运行/预览将基于当前草稿`;
+  return mode;
+}
+
+syncConfigSourceUI = function syncConfigSourceUIV2() {
+  const meta = state.loaded_config_meta;
+  const mode = currentConfigSourceMode();
+  state.config_source_mode = mode;
+  state.config_dirty = mode === 'loaded-dirty';
+  const idEl = byId('wbConfigId');
+  if (idEl) idEl.textContent = meta?.config_id || '-';
+  const chip = byId('wbConfigSourceChip');
+  const text = byId('wbConfigSourceText');
+  if (!chip || !text) return mode;
+
+  const selectedCandidatePreset = String(state.selected_locked_candidate_preset || '').trim();
+  if (selectedCandidatePreset) {
+    const candidateLabel = selectedCandidatePreset === 'v2-breakout-br35-atr10-candidate'
+      ? '候选 BR35 + ATR1.0'
+      : (selectedCandidatePreset === 'v2-breakout-atr-stop-k10-candidate' ? '候选 ATR 1.0' : selectedCandidatePreset);
+    chip.className = 'wb-chip wb-ok';
+    chip.textContent = '锁定候选';
+    text.textContent = `${candidateLabel} | 忽略当前草稿，按 locked candidate 运行`;
+    if (typeof syncPresetHint === 'function') syncPresetHint();
+    return 'selected-candidate';
+  }
+
+  const runMeta = (state.active_artifacts || {}).run_meta || {};
+  const candidate = runMeta.candidate;
+  if (candidate && state.active_result?.exp_id) {
+    chip.className = 'wb-chip wb-ok';
+    chip.textContent = '候选结果';
+    text.textContent = `${candidate.candidate_name || 'locked_candidate'} | baseline=${candidate.source_baseline_exp_id || '-'}`;
+    if (typeof syncPresetHint === 'function') syncPresetHint();
+    return 'active-candidate';
+  }
+
+  const display = meta?.display_name || meta?.name || meta?.config_id || '当前草稿';
+  if (mode === 'draft-only') {
+    chip.className = 'wb-chip';
+    chip.textContent = '草稿运行';
+    text.textContent = '当前运行 / 预览基于页面草稿';
+    if (typeof syncPresetHint === 'function') syncPresetHint();
+    return mode;
+  }
+  if (mode === 'loaded-clean') {
+    chip.className = 'wb-chip wb-ok';
+    chip.textContent = `${configMetaLabel(meta)} 已加载`;
+    text.textContent = `运行 / 预览以 ${display} (${meta.config_id}) 为准`;
+    if (typeof syncPresetHint === 'function') syncPresetHint();
+    return mode;
+  }
+  chip.className = 'wb-chip wb-danger';
+  chip.textContent = '草稿已偏离';
+  text.textContent = `页面已偏离 ${meta.config_id}，运行 / 预览将基于当前草稿`;
+  if (typeof syncPresetHint === 'function') syncPresetHint();
+  return mode;
+};
+
+function rememberLoadedConfig(record, snapshot = null, sourceConfig = null) {
+  state.loaded_config_meta = cloneConfigMeta(record);
+  state.loaded_config_json = cloneJson(sourceConfig || record?.config_json || null);
+  state.config_id = state.loaded_config_meta?.config_id || null;
+  state.loaded_config_snapshot = snapshot || stableSerializeConfig(state.config_draft || {});
+  syncConfigSourceUI();
+}
+
+function clearLoadedConfig(reason = '') {
+  state.loaded_config_meta = null;
+  state.loaded_config_json = null;
+  state.loaded_config_snapshot = '';
+  state.config_id = null;
+  if (reason) addLog(reason);
+  syncConfigSourceUI();
+}
+
+function effectiveConfigIdForExecution() {
+  return state.loaded_config_meta?.config_id || null;
+}
+
+function configDisplayName(record) {
+  const base = record?.display_name || record?.name || record?.config_id || '';
+  const universeMode = record?.universe_mode || record?.config_json?.universe_mode || '';
+  if (!base) return universeMode ? `池=${universeMode}` : '';
+  if (!universeMode || base.includes(`池=${universeMode}`)) return base;
+  return universeMode ? `${base} · 池=${universeMode}` : base;
+}
 
 function addLog(msg) {
   const el = byId('wbLogs');
@@ -131,12 +298,24 @@ function renderArtifacts(result) {
 
 async function saveConfig(kind = 'draft') {
   const cfg = buildConfigDraft();
-  const body = { config_json: cfg, name: 'workbench', tags: ['draft'] };
+  const body = {
+    config_json: cfg,
+    name: 'workbench',
+    display_name: 'workbench',
+    tags: ['draft'],
+    source_type: 'derived',
+    owner: 'manual',
+    locked: false,
+    baseline_of: null,
+  };
   if (kind === 'template') {
     body.name = `template_${Date.now()}`;
+    body.display_name = body.name;
     body.tags = ['template'];
+    body.source_type = 'template';
   } else if (kind === 'flow_script') {
     body.name = `flow_script_${Date.now()}`;
+    body.display_name = body.name;
     body.tags = ['flow_script'];
   }
   const j = await apiRequestJson('configs_save', '/api/backtest_v2/configs', {
@@ -144,8 +323,7 @@ async function saveConfig(kind = 'draft') {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  state.config_id = j.config_id;
-  byId('wbConfigId').textContent = j.config_id;
+  rememberLoadedConfig(j, stableSerializeConfig(cfg), cfg);
   addLog(`配置已保存(${kind}): ${j.config_id}`);
   await loadConfigList();
 }
@@ -223,6 +401,7 @@ function bindEvents() {
       setStatusItems([{ title: '运行失败', message: msg, detail: String(e) }]);
     }
   });
+  byId('wbPresetSelect')?.addEventListener('change', () => { syncPresetHint(); });
   byId('wbRunPreset')?.addEventListener('click', async () => {
     try { setStatusItems([]); await runExperiment(); } catch (e) {
       const msg = e.message || String(e);
@@ -236,6 +415,12 @@ function bindEvents() {
   byId('wbSaveTemplate')?.addEventListener('click', async () => { try { await saveConfig('template'); } catch (e) { addLog(`模板保存失败: ${e.message || e}`); } });
   byId('wbSaveFlowScript')?.addEventListener('click', async () => { try { await saveConfig('flow_script'); } catch (e) { addLog(`通流脚本保存失败: ${e.message || e}`); } });
   byId('wbQuickSave')?.addEventListener('click', async () => { try { await saveConfig('draft'); } catch (e) { addLog(`保存失败: ${e.message || e}`); } });
+  byId('wbConfigCenterBtn')?.addEventListener('click', async (evt) => {
+    evt.stopPropagation();
+    try {
+      await openConfigCenterDropdown(byId('wbConfigCenterBtn'));
+    } catch (e) { addLog(`配置中心加载失败: ${e.message || e}`); }
+  });
   byId('wbQuickLoad')?.addEventListener('click', async (evt) => {
     evt.stopPropagation();
     const existing = document.getElementById('wbLoadDropdown');
@@ -252,7 +437,7 @@ function bindEvents() {
         const isFlow = tags.includes('flow_script');
         const row = document.createElement('div');
         row.className = 'wb-load-item' + (isFlow ? ' wb-load-flow' : '');
-        row.textContent = (isFlow ? '[通流] ' : '') + (x.name || x.config_id);
+        row.textContent = `${configMetaLabel(x)} ${configDisplayName(x) || x.config_id}`;
         row.addEventListener('click', async () => {
           dd.remove();
           try { await loadConfig(x.config_id); } catch (e2) { addLog(`加载失败: ${e2.message || e2}`); }
@@ -287,11 +472,23 @@ function bindEvents() {
     if (!cfg) { addLog('当前结果缺少config.json'); return; }
     const draft = cfg?.overrides?.workbench_config || cfg?.workbench_config || cfg;
     applyConfigToUI(draft || {});
+    clearLoadedConfig();
     addLog(`已应用 exp_id=${state.active_result?.exp_id || '-'} 配置`);
   });
 
   document.querySelectorAll('.wb-main-tabs button[data-main-tab]').forEach((btn) => btn.addEventListener('click', () => switchMainTab(btn.getAttribute('data-main-tab') || 'overview')));
-  document.querySelectorAll('.wb-analysis-tabs button[data-dock]').forEach((btn) => btn.addEventListener('click', () => switchDockTab(btn.getAttribute('data-dock') || 'explain')));
+  document.querySelectorAll('.wb-analysis-tabs button[data-dock], .wb-dock-tabs button[data-dock]').forEach((btn) => {
+    btn.addEventListener('click', () => switchDockTab(btn.getAttribute('data-dock') || 'explain'));
+  });
+  document.querySelectorAll('.wb-result-acc').forEach((acc) => {
+    if (acc.dataset.boundToggle === '1') return;
+    acc.dataset.boundToggle = '1';
+    acc.addEventListener('toggle', () => {
+      if (acc.open) {
+        requestAnimationFrame(() => acc.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      }
+    });
+  });
   byId('wbPreviewExec')?.addEventListener('click', async () => { try { await previewExecution(); } catch (e) { addLog(`execution失败: ${e.message || e}`); } });
   byId('wbCopyExec')?.addEventListener('click', copyExecJson);
   byId('wbChartMode')?.addEventListener('change', (e) => {
@@ -388,20 +585,21 @@ function bindEvents() {
 function init() {
   setActiveNav();
   hydrateComposeRows(defaultComposeRows());
-  byId('wbExecDate').value = todayISO();
-  byId('wbChartBenchToggle').checked = true;
-  byId('wbChartRange').value = 'D';
+  if (byId('wbExecDate')) byId('wbExecDate').value = todayISO();
+  if (byId('wbChartBenchToggle')) byId('wbChartBenchToggle').checked = true;
+  if (byId('wbChartRange')) byId('wbChartRange').value = 'D';
   if (byId('wbChartMode')) byId('wbChartMode').value = 'portfolio';
   if (byId('wbSymbolSort')) byId('wbSymbolSort').value = 'return_desc';
   bindEvents();
   setDrawerPanel('s1');
   switchMainTab('overview');
-  switchDockTab('explain');
+  document.querySelectorAll('.wb-result-acc').forEach((acc) => { acc.open = false; });
   updateUniverseInputVisibility();
   renderRunHints();
   buildConfigDraft();
   syncExitLinkage();
   updateAtrNote();
+  syncPresetHint();
   setStatusItems([]);
   loadConfigList().catch((e) => { addLog(`加载配置列表失败: ${e?.message || e}`); });
   renderRightInspector();

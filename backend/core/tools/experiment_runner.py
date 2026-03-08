@@ -15,6 +15,7 @@ from backend.core.data.pg_provider import PostgresDataProvider
 from backend.core.data.price_adjust import apply_price_adjustment
 from backend.core.portfolio.portfolio_builder import run_portfolio_backtest
 from backend.core.strategies.registry import build_strategy
+from backend.core.universe.lineage import annotate_universe_meta, resolve_universe_timing
 from backend.core.universe.universe_resolver import resolve_universe_by_mode
 from backend.core.universe.hs300_csi500 import UniverseFilterConfig, apply_universe_filters, build_candidates_from_ohlcv
 
@@ -215,8 +216,11 @@ def run_experiment(
     if universe_mode == "CUSTOM" and not user_symbols:
         user_symbols = list(DEFAULT_EXPERIMENT_SYMBOLS)
 
-    dynamic_all_a_entry = bool(universe_mode == "ALL_A")
-    resolve_asof = cfg_obj.universe.end if dynamic_all_a_entry else cfg_obj.universe.start
+    resolve_asof, dynamic_all_a_entry = resolve_universe_timing(
+        universe_mode,
+        start=cfg_obj.universe.start,
+        end=cfg_obj.universe.end,
+    )
 
     _emit_progress(progress_hook, 10, f"解析 Universe ({universe_mode})")
     symbols, universe_meta = resolve_universe_by_mode(
@@ -228,8 +232,12 @@ def run_experiment(
         symbols=user_symbols,
         universe_limit=int(ov.get("universe_limit") or 0) or None,
     )
-    universe_meta["resolve_asof"] = str(resolve_asof)
-    universe_meta["dynamic_all_a_entry"] = bool(dynamic_all_a_entry)
+    universe_meta = annotate_universe_meta(
+        universe_meta,
+        mode=universe_mode,
+        start=cfg_obj.universe.start,
+        end=cfg_obj.universe.end,
+    )
     _emit_progress(progress_hook, 20, f"加载行情数据: {len(symbols)} 标的 ({universe_mode})")
     history = provider.load_ohlcv_daily(symbols, cfg_obj.universe.start, cfg_obj.universe.end, source="stocks")
 

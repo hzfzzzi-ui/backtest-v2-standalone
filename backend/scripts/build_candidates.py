@@ -126,7 +126,7 @@ def _select_groups(results_dir: Path, manifest: dict[str, Any]) -> tuple[list[di
         group_dir = (results_dir / gdir).resolve() if gdir else (results_dir / "groups" / gid).resolve()
         perf_path = (results_dir / str(gfiles.get("perf") or "")).resolve() if gfiles.get("perf") else (group_dir / "perf.json")
         run_meta_path = (results_dir / str(gfiles.get("run_meta") or "")).resolve() if gfiles.get("run_meta") else (group_dir / "run_meta.json")
-        reason_path = (results_dir / str(gfiles.get("reason_codes") or "")).resolve() if gfiles.get("reason_codes") else (group_dir / "reason_code_counts.csv")
+        reason_path = (results_dir / str(gfiles.get("reason_codes") or "")).resolve() if gfiles.get("reason_codes") else (group_dir / "reason_codes.csv")
 
         perf = _load_json(perf_path)
         run_meta = _load_json(run_meta_path)

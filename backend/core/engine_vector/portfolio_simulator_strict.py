@@ -21,11 +21,27 @@ from backend.core.engine_vector.signal_matrix import build_signal_matrices
 from backend.core.portfolio.portfolio_builder import (
     PortfolioBacktestResult,
     _compute_metrics,
+    build_backtest_price_indices,
     build_rebalance_orders,
     calc_buy_slots,
     compute_nav_snapshot,
     resolve_mf_gate_on_today,
 )
+from backend.core.strategies.breakout_trend import BreakoutTrendStrategy
+from backend.core.strategies.composite_strategy import CompositeStrategy
+from backend.core.strategies.ema_cross import EMACrossStrategy
+from backend.core.strategies.regime_router import RegimeRouter
+from backend.core.strategies.sma_cross import SMACrossStrategy
+
+
+def _resolve_runtime_route_id(strategy: Any) -> str:
+    if isinstance(strategy, BreakoutTrendStrategy):
+        return "provider_breakout_runtime"
+    if isinstance(strategy, CompositeStrategy):
+        return "generic_inline_runtime"
+    if isinstance(strategy, (SMACrossStrategy, EMACrossStrategy, RegimeRouter)):
+        return "strict_inline_runtime"
+    return "strict_inline_runtime"
 
 def _cross_rank_pct(values: dict[str, float | None]) -> dict[str, float]:
     valid = [(k, float(v)) for k, v in values.items() if v is not None and not np.isnan(float(v))]
@@ -116,16 +132,9 @@ def run_vector_portfolio_backtest_strict(
     benchmark_regime_cfg: Any = None,
     breadth_cfg: Any = None,
 ) -> PortfolioBacktestResult:
-    # VECTOR_FAST_STRICT optimized path is tailored for SMA-like strategies.
-    # For composite/multi-signal strategies, keep VECTOR engine mode but use
-    # generic per-day signal generation + strict execution semantics.
-    from backend.core.strategies.breakout_trend import BreakoutTrendStrategy
-    from backend.core.strategies.composite_strategy import CompositeStrategy
+    route_id = _resolve_runtime_route_id(strategy)
 
-    is_breakout = isinstance(strategy, BreakoutTrendStrategy)
-    is_composite = isinstance(strategy, CompositeStrategy)
-
-    if is_breakout:
+    if route_id == "provider_breakout_runtime":
         return _run_vector_portfolio_backtest_breakout(
             strategy=strategy,
             history=history,
@@ -156,7 +165,7 @@ def run_vector_portfolio_backtest_strict(
             benchmark_regime_cfg=benchmark_regime_cfg,
         )
 
-    if is_composite:
+    if route_id == "generic_inline_runtime":
         return _run_vector_portfolio_backtest_generic_signals(
             strategy=strategy,
             history=history,
@@ -338,13 +347,11 @@ def run_vector_portfolio_backtest_strict(
     _raw_hist = _raw.copy()
     _raw_hist["date"] = pd.to_datetime(_raw_hist["date"])
     _raw_hist["symbol"] = _raw_hist["symbol"].astype(str).str.lower()
-    open_idx: dict[tuple[date, str], float] = {}
-    close_idx: dict[tuple[date, str], float] = {}
-    for r in _raw_hist.itertuples(index=False):
-        d = pd.Timestamp(r.date).date()
-        s = str(r.symbol).lower()
-        open_idx[(d, s)] = float(r.open)
-        close_idx[(d, s)] = float(r.close)
+    day_list = list(trading_days)
+    open_idx, close_idx = build_backtest_price_indices(
+        history=_raw_hist,
+        trading_days=day_list,
+    )
     del _raw_hist
     sym_to_col = {s: i for i, s in enumerate(mx.symbols)}
 
@@ -1220,6 +1227,8 @@ def _run_vector_portfolio_backtest_breakout(
         st_history=st_history,
         strength_ma=strength_ma,
         base_order_value=float(initial_cash) / float(max(max_positions, 1)),
+        sector_data=sector_data,
+        industry_map=industry_map,
     )
 
     day_list = list(trading_days)
@@ -1320,13 +1329,11 @@ def _run_vector_portfolio_backtest_breakout(
     _raw_hist = _raw.copy()
     _raw_hist["date"] = pd.to_datetime(_raw_hist["date"])
     _raw_hist["symbol"] = _raw_hist["symbol"].astype(str).str.lower()
-    open_idx: dict[tuple[date, str], float] = {}
-    close_idx: dict[tuple[date, str], float] = {}
-    for r in _raw_hist.itertuples(index=False):
-        d = pd.Timestamp(r.date).date()
-        s = str(r.symbol).lower()
-        open_idx[(d, s)] = float(r.open)
-        close_idx[(d, s)] = float(r.close)
+    day_list = list(trading_days)
+    open_idx, close_idx = build_backtest_price_indices(
+        history=_raw_hist,
+        trading_days=day_list,
+    )
     del _raw_hist
 
     _cc = cost_cfg if cost_cfg is not None else CostConfig()
@@ -1643,7 +1650,7 @@ def _run_vector_portfolio_backtest_breakout(
         daily_rows[-1]["sells_executed_count"] = int(len(sell_sigs))
         daily_rows[-1]["positions_after_sell"] = int(positions_after_sell)
         daily_rows[-1]["buy_slots_calculated"] = int(buy_slots)
-        daily_rows[-1]["raw_buy_signal_count"] = int(ds.diagnostics.get("breakout_candidates", 0))
+        daily_rows[-1]["raw_buy_signal_count"] = int(ds.diagnostics.get("raw_buy_signal_count", ds.diagnostics.get("breakout_candidates", 0)))
 
         if orders:
             pending[next_day] = [
@@ -1778,13 +1785,11 @@ def _run_vector_portfolio_backtest_generic_signals(
     _raw_gs_hist = _raw_gs.copy()
     _raw_gs_hist["date"] = pd.to_datetime(_raw_gs_hist["date"])
     _raw_gs_hist["symbol"] = _raw_gs_hist["symbol"].astype(str).str.lower()
-    open_idx: dict[tuple[date, str], float] = {}
-    close_idx: dict[tuple[date, str], float] = {}
-    for r in _raw_gs_hist.itertuples(index=False):
-        d = pd.Timestamp(r.date).date()
-        s = str(r.symbol).lower()
-        open_idx[(d, s)] = float(r.open)
-        close_idx[(d, s)] = float(r.close)
+    day_list = list(trading_days)
+    open_idx, close_idx = build_backtest_price_indices(
+        history=_raw_gs_hist,
+        trading_days=day_list,
+    )
     del _raw_gs_hist
 
     pending: dict[date, list[dict[str, Any]]] = {}

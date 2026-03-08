@@ -25,13 +25,14 @@ from ._utils import (
     _hash_json,
     _sanitize_for_json,
 )
+from ._config_governance import resolve_runtime_config_source
 from ._paths import (
     _repo_root,
     _bt_root,
     _results_root,
-    _configs_root,
     _execution_root,
 )
+from backend.core.universe.lineage import annotate_universe_meta, resolve_universe_timing
 from . import _config_store
 from . import _experiment_runner_api
 from . import _experiment_history
@@ -64,6 +65,7 @@ def _inject_db_env(cfg_obj: Any) -> None:
 
 class BacktestV2ExecutionPreviewRequest(BaseModel):
     config_id: str | None = None
+    runtime_config_json: dict[str, Any] | None = None
     config_json: dict[str, Any] | None = None
     exp_id: str | None = None
     results_dir: str | None = None
@@ -79,15 +81,13 @@ class BacktestV2ArtifactReadRequest(BaseModel):
 # ── Helper functions (main-file-only) ──────────────────────────────────────
 
 
-def _resolve_reason_codes_path(group_dir: Path) -> tuple[Path, bool]:
-    path, legacy = resolve_artifact_path(group_dir, "reason_codes")
-    return path, legacy
+def _resolve_reason_codes_path(group_dir: Path) -> Path:
+    return resolve_artifact_path(group_dir, "reason_codes")
 
 
-def _normalized_run_meta_counters(run_meta: dict[str, Any]) -> tuple[dict[str, Any], int]:
+def _normalized_run_meta_counters(run_meta: dict[str, Any]) -> dict[str, Any]:
     counters = run_meta.get("counters") if isinstance(run_meta, dict) else {}
-    normalized, legacy_hits = protocol_normalize_counters(counters if isinstance(counters, dict) else {})
-    return normalized, legacy_hits
+    return protocol_normalize_counters(counters if isinstance(counters, dict) else {})
 
 
 def _pick_from_paths(obj: Any, paths: list[tuple[str, ...]], *, integer: bool = False) -> int | float | None:
@@ -154,11 +154,9 @@ def _extract_debug_atr_counters(group_dir: Path) -> dict[str, int]:
 
 
 def _extract_reason_code_counts(group_dir: Path) -> dict[str, int]:
-    path, legacy = _resolve_reason_codes_path(group_dir)
+    path = _resolve_reason_codes_path(group_dir)
     if not path.exists():
         return {}
-    if legacy:
-        logger.info("legacy artifact alias hit: reason_code_counts.csv -> reason_codes.csv (%s)", str(group_dir))
     try:
         df = pd.read_csv(path)
     except Exception:
@@ -179,16 +177,34 @@ def _extract_reason_code_counts(group_dir: Path) -> dict[str, int]:
     }
 
 
-def _build_universe_stats(validate_result: dict[str, Any], symbols: list[str]) -> dict[str, Any]:
+def _build_universe_stats(
+    validate_result: dict[str, Any],
+    symbols: list[str],
+    resolved_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     checks = validate_result.get("checks") if isinstance(validate_result.get("checks"), dict) else {}
     meta = validate_result.get("meta") if isinstance(validate_result.get("meta"), dict) else {}
     coverage = checks.get("coverage") if isinstance(checks.get("coverage"), dict) else {}
     by_symbol = coverage.get("by_symbol") if isinstance(coverage.get("by_symbol"), dict) else {}
+    resolved = resolved_meta if isinstance(resolved_meta, dict) else {}
 
-    total_symbols = int(len(symbols))
+    total_symbols = int(
+        _coerce_number(resolved.get("raw_count"), integer=True)
+        or _coerce_number(validate_result.get("resolved_symbols_count"), integer=True)
+        or len(symbols)
+    )
     coverage_nonzero = int(sum(1 for _, v in by_symbol.items() if int(_coerce_number(v, integer=True) or 0) > 0))
-    tradable_symbols = int(_coerce_number(validate_result.get("tradable_symbols"), integer=True) or coverage_nonzero or total_symbols)
-    after_filters_symbols = int(_coerce_number(validate_result.get("after_filters_symbols"), integer=True) or tradable_symbols)
+    tradable_symbols = int(
+        _coerce_number(resolved.get("tradable_symbols"), integer=True)
+        or _coerce_number(validate_result.get("tradable_symbols"), integer=True)
+        or coverage_nonzero
+        or total_symbols
+    )
+    after_filters_symbols = int(
+        _coerce_number(resolved.get("after_filters_symbols"), integer=True)
+        or _coerce_number(validate_result.get("after_filters_symbols"), integer=True)
+        or tradable_symbols
+    )
     universe_size = int(_coerce_number(validate_result.get("universe_size"), integer=True) or after_filters_symbols)
 
     trading_days = int(
@@ -205,12 +221,19 @@ def _build_universe_stats(validate_result: dict[str, Any], symbols: list[str]) -
 
     filter_breakdown = validate_result.get("filter_breakdown")
     if not isinstance(filter_breakdown, list):
-        filter_breakdown = [
-            {"name": "all_symbols", "before": total_symbols, "after": total_symbols},
-            {"name": "tradable", "before": total_symbols, "after": tradable_symbols},
-            {"name": "liquidity_filters", "before": tradable_symbols, "after": after_filters_symbols},
-            {"name": "final_universe", "before": after_filters_symbols, "after": universe_size},
-        ]
+        if resolved:
+            filter_breakdown = [
+                {"name": "resolver", "before": total_symbols, "after": total_symbols},
+                {"name": "runtime_filters", "before": tradable_symbols, "after": after_filters_symbols},
+                {"name": "final_universe", "before": after_filters_symbols, "after": universe_size},
+            ]
+        else:
+            filter_breakdown = [
+                {"name": "all_symbols", "before": total_symbols, "after": total_symbols},
+                {"name": "tradable", "before": total_symbols, "after": tradable_symbols},
+                {"name": "liquidity_filters", "before": tradable_symbols, "after": after_filters_symbols},
+                {"name": "final_universe", "before": after_filters_symbols, "after": universe_size},
+            ]
 
     return sanitize_json(
         {
@@ -222,6 +245,11 @@ def _build_universe_stats(validate_result: dict[str, Any], symbols: list[str]) -
             "missing_rate": missing_rate if missing_rate is not None else 0.0,
             "data_snapshot_id": validate_result.get("data_snapshot_id"),
             "filter_breakdown": filter_breakdown,
+            "validation_scope": validate_result.get("validation_scope") or ("runtime_resolved" if resolved else "sample_symbols"),
+            "scope_label": validate_result.get("scope_label") or ("按真实 universe resolver 口径验证" if resolved else "按样本 symbols 验证"),
+            "universe_mode": resolved.get("universe_mode"),
+            "resolve_asof": resolved.get("resolve_asof"),
+            "dynamic_all_a_entry": resolved.get("dynamic_all_a_entry"),
         }
     )
 
@@ -260,6 +288,51 @@ def _parse_symbols_from_query(request: Request) -> list[str]:
     for v in vals:
         out.extend([x.strip() for x in v.split(",") if x.strip()])
     return out
+
+
+def _parse_list_from_query(request: Request, key: str) -> list[str]:
+    vals = request.query_params.getlist(key)
+    if not vals:
+        raw = str(request.query_params.get(key) or "").strip()
+        return [x.strip() for x in raw.split(",") if x.strip()] if raw else []
+    out: list[str] = []
+    for v in vals:
+        out.extend([x.strip() for x in str(v).split(",") if x.strip()])
+    return out
+
+
+def _parse_bool_from_query(request: Request, key: str, default: bool = False) -> bool:
+    raw = request.query_params.get(key)
+    if raw is None:
+        return bool(default)
+    s = str(raw).strip().lower()
+    if not s:
+        return bool(default)
+    return s in {"1", "true", "yes", "y", "on"}
+
+
+def _parse_int_from_query(request: Request, key: str, default: int = 0) -> int:
+    n = _coerce_number(request.query_params.get(key), integer=True)
+    return int(n) if n is not None else int(default)
+
+
+def _parse_float_from_query(request: Request, key: str, default: float = 0.0) -> float:
+    n = _coerce_number(request.query_params.get(key))
+    return float(n) if n is not None else float(default)
+
+
+def _load_runtime_cfg_obj():
+    from backend.core.config.loader import load_config
+
+    bt_root = _bt_root()
+    cfg_path = bt_root / "configs" / "pams_cn_pg.json"
+    if not cfg_path.exists():
+        cfg_path = bt_root.parent / "configs" / "pams_cn_pg.json"
+    if not cfg_path.exists():
+        raise HTTPException(status_code=500, detail=f"config not found: {cfg_path}")
+    cfg_obj, _ = load_config(str(cfg_path))
+    _inject_db_env(cfg_obj)
+    return cfg_obj, cfg_path
 
 
 def _read_result(out_dir: Path) -> dict[str, Any]:
@@ -625,9 +698,6 @@ def validate_backtest_v2_data(
     strict_suspended: bool = Query(False),
     allow_cn_index_fallback: bool = Query(False),
 ):
-    symbols = _parse_symbols_from_query(request)
-    if not symbols:
-        raise HTTPException(status_code=400, detail="symbols is required")
     try:
         start_d = date.fromisoformat(start)
         end_d = date.fromisoformat(end)
@@ -641,6 +711,203 @@ def validate_backtest_v2_data(
         raise HTTPException(status_code=500, detail=f"backtest_V2 root not found: {bt_root}")
 
     from backend.core.data.validate_pg import PGConnConfig, validate_data  # type: ignore
+    from backend.core.data.pg_provider import PostgresDataProvider
+    from backend.core.universe.universe_resolver import resolve_universe_by_mode
+    from backend.core.universe.hs300_csi500 import (
+        UniverseFilterConfig,
+        UniverseLoadError,
+        apply_universe_filters,
+        build_candidates_from_ohlcv,
+    )
+
+    universe_mode = str(request.query_params.get("universe_mode") or ("CUSTOM" if _parse_symbols_from_query(request) else "ALL_A")).strip().upper()
+    symbols = _parse_symbols_from_query(request)
+    industries = _parse_list_from_query(request, "industries")
+    universe_limit_raw = _parse_int_from_query(request, "universe_limit", 0)
+    universe_limit = universe_limit_raw if universe_limit_raw > 0 else None
+    exclude_st = _parse_bool_from_query(request, "exclude_st", True)
+    exclude_suspended = _parse_bool_from_query(request, "exclude_suspended", True)
+    min_list_days = _parse_int_from_query(request, "min_list_days", 120)
+    min_avg_turnover_20d = _parse_float_from_query(request, "min_avg_turnover_20d", 1e8)
+    price_min = _parse_float_from_query(request, "price_min", 0.0)
+    price_max = _parse_float_from_query(request, "price_max", 99999.0)
+    limit_rule = str(request.query_params.get("limit_rule") or "ignore").strip().lower() or "ignore"
+
+    if universe_mode == "CUSTOM" and not symbols:
+        raise HTTPException(status_code=400, detail="symbols is required for CUSTOM universe_mode")
+
+    cfg_obj, cfg_path = _load_runtime_cfg_obj()
+    provider = PostgresDataProvider(
+        db=cfg_obj.db,
+        runtime=cfg_obj.db_runtime,
+        data_source=cfg_obj.data_source,
+        schema_mapping=cfg_obj.schema_mapping,
+        rules_path=cfg_path.parent / "instrument_rules_cn.csv",
+    )
+
+    resolve_asof, dynamic_all_a_entry = resolve_universe_timing(
+        universe_mode,
+        start=start_d,
+        end=end_d,
+    )
+    resolved_symbols: list[str] = []
+    resolved_meta: dict[str, Any] = {}
+
+    try:
+        resolved_symbols, resolved_meta = resolve_universe_by_mode(
+            mode=universe_mode,
+            as_of=resolve_asof,
+            db=cfg_obj.db,
+            runtime=cfg_obj.db_runtime,
+            industries=industries,
+            symbols=symbols,
+            universe_limit=universe_limit,
+        )
+    except UniverseLoadError as exc:
+        failed_meta = dict(exc.meta or {})
+        failed_meta = annotate_universe_meta(
+            failed_meta,
+            mode=universe_mode,
+            start=start_d,
+            end=end_d,
+        )
+        failed_meta.setdefault("tradable_symbols", 0)
+        failed_meta.setdefault("after_filters_symbols", 0)
+        failed_meta.setdefault("raw_count", int(_coerce_number(failed_meta.get("raw_count"), integer=True) or 0))
+        result = {
+            "pass": False,
+            "request_id": f"val_{uuid.uuid4().hex[:10]}",
+            "results_root": str(_results_root().resolve()),
+            "meta": {
+                "symbols_count": 0,
+                "symbols": [],
+                "date_range": {"start": start_d.isoformat(), "end": end_d.isoformat()},
+                "benchmark": benchmark,
+                "universe_mode": universe_mode,
+                "industries": industries,
+                "universe_limit": universe_limit,
+            },
+            "checks": {},
+            "warnings": [],
+            "errors": [{"code": exc.status, "message": str(exc)}],
+            "resolved_symbols_count": 0,
+            "validation_scope": "runtime_resolved",
+            "scope_label": f"按真实 universe resolver 口径验证 ({universe_mode})",
+        }
+        result["universe_stats"] = _build_universe_stats(result, [], resolved_meta=failed_meta)
+        return _sanitize_for_json(result)
+
+    resolved_meta = annotate_universe_meta(
+        resolved_meta,
+        mode=universe_mode,
+        start=start_d,
+        end=end_d,
+    )
+    resolved_meta.setdefault("tradable_symbols", int(len(resolved_symbols)))
+    resolved_meta.setdefault("after_filters_symbols", int(len(resolved_symbols)))
+
+    universe_filters_raw = {
+        "exclude_st": exclude_st,
+        "exclude_delisted": True,
+        "exclude_suspended": exclude_suspended,
+        "min_list_days": min_list_days,
+        "min_avg_turnover_20d": min_avg_turnover_20d,
+        "price_min": price_min,
+        "price_max": price_max,
+        "limit_rule": limit_rule,
+    }
+    resolved_meta["filters_config"] = dict(universe_filters_raw)
+
+    if universe_filters_raw and not dynamic_all_a_entry and resolved_symbols:
+        filter_asof = pd.Timestamp(start_d)
+        history_for_filter = provider.load_ohlcv_daily(
+            resolved_symbols,
+            start_d,
+            end_d,
+            source="stocks",
+        )
+        need_lookback = bool(min_list_days > 1 or min_avg_turnover_20d > 0.0)
+        if need_lookback:
+            lookback_days = max(260, min_list_days * 3)
+            filter_start = (filter_asof - pd.Timedelta(days=lookback_days)).date()
+            history_for_filter = provider.load_ohlcv_daily(
+                resolved_symbols,
+                filter_start,
+                start_d,
+                source="stocks",
+            )
+        filter_asof_date = filter_asof.date()
+        try:
+            st_history_for_filter = provider.load_st_history(resolved_symbols, filter_asof_date, filter_asof_date)
+        except Exception:
+            st_history_for_filter = pd.DataFrame(columns=["ts_code", "start_date", "end_date", "st_type"])
+        try:
+            security_master = provider.load_security_master(resolved_symbols)
+        except Exception:
+            security_master = pd.DataFrame(columns=["symbol", "list_date", "delist_date"])
+
+        candidates = build_candidates_from_ohlcv(
+            history_for_filter,
+            filter_asof,
+            st_history=st_history_for_filter,
+            security_master=security_master,
+        )
+        filter_cfg = UniverseFilterConfig(
+            exclude_st=exclude_st,
+            exclude_delisted=True,
+            exclude_suspended=exclude_suspended,
+            min_list_days=min_list_days,
+            min_avg_turnover_20d=min_avg_turnover_20d,
+            exclude_limit_lock=limit_rule in {"forbid", "skip"},
+            min_price=price_min,
+        )
+        filtered_candidates, _snapshot, excluded_counts = apply_universe_filters(candidates, filter_cfg)
+        filtered_symbols = sorted(
+            {
+                str(s).strip().lower()
+                for s in filtered_candidates.get("symbol", pd.Series(dtype=str)).tolist()
+                if str(s).strip()
+            }
+        )
+        before_count = int(len(resolved_symbols))
+        after_count = int(len(filtered_symbols))
+        resolved_meta["excluded_counts"] = excluded_counts
+        resolved_meta["tradable_symbols"] = after_count
+        resolved_meta["after_filters_symbols"] = after_count
+        if after_count > 0:
+            resolved_symbols = filtered_symbols
+        else:
+            resolved_meta["filter_warning"] = "all symbols filtered out; fallback to pre-filter universe"
+            resolved_meta["after_filters_symbols"] = before_count
+    elif universe_filters_raw and dynamic_all_a_entry:
+        resolved_meta["excluded_counts"] = {}
+        resolved_meta["tradable_symbols"] = int(len(resolved_symbols))
+        resolved_meta["after_filters_symbols"] = int(len(resolved_symbols))
+        resolved_meta["filter_mode"] = "dynamic_daily_gate"
+
+    if not resolved_symbols:
+        result = {
+            "pass": False,
+            "request_id": f"val_{uuid.uuid4().hex[:10]}",
+            "results_root": str(_results_root().resolve()),
+            "meta": {
+                "symbols_count": 0,
+                "symbols": [],
+                "date_range": {"start": start_d.isoformat(), "end": end_d.isoformat()},
+                "benchmark": benchmark,
+                "universe_mode": universe_mode,
+                "industries": industries,
+                "universe_limit": universe_limit,
+            },
+            "checks": {},
+            "warnings": [],
+            "errors": [{"code": "EMPTY:RUNTIME_UNIVERSE", "message": "runtime-resolved universe is empty after filters"}],
+            "resolved_symbols_count": 0,
+            "validation_scope": "runtime_resolved",
+            "scope_label": f"按真实 universe resolver 口径验证 ({universe_mode})",
+        }
+        result["universe_stats"] = _build_universe_stats(result, [], resolved_meta=resolved_meta)
+        return _sanitize_for_json(result)
 
     cfg = PGConnConfig(
         host=os.environ.get("PGHOST", os.environ.get("PAMS_PG_HOST", "pams-postgres")),
@@ -652,7 +919,7 @@ def validate_backtest_v2_data(
     )
     result = validate_data(
         pg=cfg,
-        symbols=symbols,
+        symbols=resolved_symbols,
         start=start_d,
         end=end_d,
         benchmark=benchmark,
@@ -664,7 +931,20 @@ def validate_backtest_v2_data(
     if isinstance(result, dict):
         result.setdefault("request_id", f"val_{uuid.uuid4().hex[:10]}")
         result.setdefault("results_root", str(_results_root().resolve()))
-        result["universe_stats"] = _build_universe_stats(result, symbols)
+        result["resolved_symbols_count"] = int(len(resolved_symbols))
+        result["resolved_symbols_sample"] = list(resolved_symbols[:20])
+        result["tradable_symbols"] = int(_coerce_number(resolved_meta.get("tradable_symbols"), integer=True) or len(resolved_symbols))
+        result["after_filters_symbols"] = int(_coerce_number(resolved_meta.get("after_filters_symbols"), integer=True) or len(resolved_symbols))
+        result["validation_scope"] = "runtime_resolved"
+        result["scope_label"] = f"按真实 universe resolver 口径验证 ({universe_mode})"
+        meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
+        meta["universe_mode"] = universe_mode
+        meta["industries"] = list(industries)
+        meta["universe_limit"] = universe_limit
+        meta["resolve_asof"] = str(resolve_asof)
+        meta["dynamic_all_a_entry"] = bool(dynamic_all_a_entry)
+        result["meta"] = meta
+        result["universe_stats"] = _build_universe_stats(result, resolved_symbols, resolved_meta=resolved_meta)
     return _sanitize_for_json(result)
 
 
@@ -683,18 +963,12 @@ def get_backtest_v2_result(run_id: str):
 
 @router.post("/api/backtest_v2/execution/preview")
 def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
-    cfg_obj: dict[str, Any] = {}
-    cfg_id = str(body.config_id or "").strip()
-    if cfg_id:
-        p = _configs_root() / f"{cfg_id}.json"
-        if p.exists():
-            try:
-                obj = json.loads(p.read_text(encoding="utf-8-sig"))
-                cfg_obj = dict(obj.get("config_json") or {})
-            except Exception:
-                cfg_obj = {}
-    if not cfg_obj and isinstance(body.config_json, dict):
-        cfg_obj = dict(body.config_json or {})
+    resolution = resolve_runtime_config_source(
+        config_id=body.config_id,
+        runtime_config=body.runtime_config_json,
+        draft_config=body.config_json,
+    )
+    cfg_obj = dict(resolution.get("effective_config_json") or {})
 
     results_dir = _resolve_experiment_dir(exp_id=body.exp_id, results_dir=body.results_dir)
     if results_dir is None:
@@ -709,7 +983,6 @@ def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
 
     groups = list(manifest.get("groups") or [])
     scored_groups: list[dict[str, Any]] = []
-    legacy_hits = {"reason_codes_filename": 0, "counters_field_alias": 0}
     for g in groups:
         if not isinstance(g, dict):
             continue
@@ -723,12 +996,9 @@ def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
         run_meta = _load_json_file((results_dir / str(gf.get("run_meta") or "")).resolve()) if gf.get("run_meta") else _load_json_file(group_dir / "run_meta.json")
         if gf.get("reason_codes"):
             reason_path = (results_dir / str(gf.get("reason_codes") or "")).resolve()
-            reason_legacy = reason_path.name == "reason_code_counts.csv"
         else:
-            reason_path, reason_legacy = _resolve_reason_codes_path(group_dir)
-        counters, counter_legacy_hits = _normalized_run_meta_counters(run_meta)
-        legacy_hits["reason_codes_filename"] += int(reason_legacy)
-        legacy_hits["counters_field_alias"] += int(counter_legacy_hits)
+            reason_path = _resolve_reason_codes_path(group_dir)
+        counters = _normalized_run_meta_counters(run_meta)
         cagr = float(_coerce_number(perf.get("cagr")) or 0.0)
         mdd = float(_coerce_number(perf.get("max_drawdown")) or 0.0)
         sharpe = float(_coerce_number(perf.get("sharpe")) or 0.0)
@@ -788,9 +1058,15 @@ def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
         "as_of_date_used": as_of,
         "source": source,
         "results_dir": str(results_dir),
+        "resolved_config_mode": str(resolution.get("resolved_config_mode") or "none"),
+        "resolved_config_id": resolution.get("resolved_config_id"),
+        "resolved_config_hash": resolution.get("resolved_config_hash"),
+        "resolved_config_meta": resolution.get("resolved_config_meta"),
+        "resolved_config_source_type": str(((resolution.get("resolved_config_meta") or {}) if isinstance(resolution.get("resolved_config_meta"), dict) else {}).get("source_type") or ""),
+        "resolved_config_owner": str(((resolution.get("resolved_config_meta") or {}) if isinstance(resolution.get("resolved_config_meta"), dict) else {}).get("owner") or ""),
+        "config_conflict_policy": str(resolution.get("config_conflict_policy") or "none"),
         "candidates": candidates,
         "target_positions": target_positions,
-        "legacy_hits": legacy_hits,
     }
     cfg_hash = _hash_json(cfg_obj) if cfg_obj else "na"
     key = hashlib.sha1(f"{results_dir}|{as_of}|{top_n}|{cfg_hash}".encode("utf-8")).hexdigest()[:12]
