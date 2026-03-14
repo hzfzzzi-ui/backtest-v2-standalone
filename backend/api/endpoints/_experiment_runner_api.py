@@ -10,7 +10,6 @@ from typing import Any, Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .backtest_v2_artifacts import stabilize_experiment_result
 from ._paths import _bt_root, _results_root
 from ._utils import sanitize_json, _sanitize_for_json
 from ._semantic_config_compiler import (
@@ -24,6 +23,8 @@ from backend.core.tools.locked_candidate_presets import (
     write_locked_candidate_artifacts,
 )
 from backend.core.tools.saved_config_access import resolve_runtime_config_source
+from backend.core.services.experiment_artifact_service import stabilize_experiment_output
+from backend.core.services.experiment_runtime_service import run_experiment_request_body
 from ._job_store import (
     _JOBS,
     _JOBS_LOCK,
@@ -42,6 +43,8 @@ router = APIRouter(tags=["backtest_v2"])
 class BacktestV2ExperimentRequest(BaseModel):
     preset: str = "G1-G4"
     config_json: dict[str, Any] | None = None
+    signal_generation: dict[str, Any] | None = None
+    signal_composition: dict[str, Any] | None = None
     symbols: list[str] | None = None
     start_date: str | None = None
     end_date: str | None = None
@@ -89,6 +92,8 @@ def _public_run_rejected_fields(body: BacktestV2ExperimentRequest) -> list[str]:
         ("config_id", bool(str(body.config_id or "").strip())),
         ("runtime_config_json", isinstance(body.runtime_config_json, dict)),
         ("workbench_config", isinstance(body.workbench_config, dict)),
+        ("signal_generation", isinstance(body.signal_generation, dict)),
+        ("signal_composition", isinstance(body.signal_composition, dict)),
         ("universe_mode", body.universe_mode is not None and str(body.universe_mode or "").strip().upper() != "CUSTOM"),
         ("industries", body.industries is not None and bool(body.industries)),
         ("price_adj", body.price_adj is not None and str(body.price_adj or "").strip().lower() != "hfq"),
@@ -144,18 +149,14 @@ def _public_experiment_result_response(result: dict[str, Any] | None) -> dict[st
     payload = dict(result or {})
     exp_id = str(payload.get("exp_id") or payload.get("experiment_id") or "").strip()
     manifest = payload.get("manifest") if isinstance(payload.get("manifest"), dict) else {}
-    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
-    report_rel = str(artifacts.get("report") or "").strip()
     return sanitize_json(
         {
             "experiment_id": exp_id or None,
             "exp_id": exp_id or None,
             "status": str(payload.get("status") or "OK"),
             "baseline_compare_status": manifest.get("baseline_compare_status"),
-            "has_report": bool(report_rel),
             "endpoints": {
                 "manifest": f"/api/backtest_v2/experiments/{exp_id}/manifest" if exp_id else None,
-                "report": f"/api/backtest_v2/experiments/{exp_id}/report" if exp_id else None,
             },
         }
     )
@@ -177,6 +178,198 @@ def _to_int_or_default(value: Any, default: int) -> int:
         return int(value)
     except Exception:
         return int(default)
+
+
+def _request_semantic_blocks(body: BacktestV2ExperimentRequest | None) -> dict[str, Any]:
+    if body is None:
+        return {}
+    payload: dict[str, Any] = {}
+    if isinstance(body.signal_generation, dict):
+        payload["signal_generation"] = sanitize_json(dict(body.signal_generation))
+    if isinstance(body.signal_composition, dict):
+        payload["signal_composition"] = sanitize_json(dict(body.signal_composition))
+    return payload
+
+
+def _semantic_ranking_execution_overrides(wb_cfg: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(wb_cfg, dict):
+        return {}
+    signal_generation = wb_cfg.get("signal_generation") if isinstance(wb_cfg.get("signal_generation"), dict) else {}
+    ranking = signal_generation.get("ranking") if isinstance(signal_generation.get("ranking"), dict) else {}
+    overrides: dict[str, Any] = {}
+    ranking_mode = str(ranking.get("score_source_mode") or "none").strip().lower()
+    if ranking.get("enable_strength_rank") is not None:
+        overrides["enable_strength_rank"] = bool(ranking.get("enable_strength_rank"))
+    if ranking.get("strength_ma") is not None:
+        overrides["strength_ma"] = int(ranking.get("strength_ma"))
+    if ranking.get("strength_top_k_mode") is not None:
+        overrides["strength_top_k_mode"] = str(ranking.get("strength_top_k_mode"))
+    if ranking.get("enable_multifactor_rank") is not None:
+        overrides["enable_multifactor_rank"] = bool(ranking.get("enable_multifactor_rank"))
+    elif ranking_mode and ranking_mode != "none":
+        overrides["enable_multifactor_rank"] = True
+    if ranking.get("mf_topk") is not None:
+        overrides["mf_topk"] = int(ranking.get("mf_topk"))
+    if ranking.get("mf_concentrate_scale") is not None:
+        overrides["mf_concentrate_scale"] = float(ranking.get("mf_concentrate_scale"))
+    if ranking.get("mf_rank_gate_mode") is not None:
+        overrides["mf_rank_gate_mode"] = str(ranking.get("mf_rank_gate_mode"))
+    if ranking.get("momentum_top_pct") is not None:
+        overrides["momentum_top_pct"] = float(ranking.get("momentum_top_pct"))
+    if ranking.get("residual_window") is not None:
+        overrides["residual_window"] = int(ranking.get("residual_window"))
+    if ranking.get("leadership_route_bucket_count") is not None:
+        overrides["leadership_route_bucket_count"] = int(ranking.get("leadership_route_bucket_count"))
+    if ranking.get("residual_benchmark_weight") is not None:
+        overrides["residual_benchmark_weight"] = float(ranking.get("residual_benchmark_weight"))
+    if ranking.get("residual_industry_weight") is not None:
+        overrides["residual_industry_weight"] = float(ranking.get("residual_industry_weight"))
+    if ranking.get("industry_relative_mode") is not None:
+        overrides["industry_relative_mode"] = str(ranking.get("industry_relative_mode"))
+    if ranking.get("industry_relative_regime_mode") is not None:
+        overrides["industry_relative_regime_mode"] = str(ranking.get("industry_relative_regime_mode"))
+    if ranking.get("residual_weight_regime_mode") is not None:
+        overrides["residual_weight_regime_mode"] = str(ranking.get("residual_weight_regime_mode"))
+    if ranking.get("residual_benchmark_weight_fallback") is not None:
+        overrides["residual_benchmark_weight_fallback"] = float(ranking.get("residual_benchmark_weight_fallback"))
+    if ranking.get("residual_industry_weight_fallback") is not None:
+        overrides["residual_industry_weight_fallback"] = float(ranking.get("residual_industry_weight_fallback"))
+    if ranking.get("breakout_quality_gate_min_score") is not None:
+        overrides["breakout_quality_gate_min_score"] = float(ranking.get("breakout_quality_gate_min_score"))
+    if ranking.get("breakout_quality_margin_cap_pct") is not None:
+        overrides["breakout_quality_margin_cap_pct"] = float(ranking.get("breakout_quality_margin_cap_pct"))
+    if ranking.get("breakout_quality_fade_cap_pct") is not None:
+        overrides["breakout_quality_fade_cap_pct"] = float(ranking.get("breakout_quality_fade_cap_pct"))
+    if ranking.get("breakout_quality_open_gap_cap_pct") is not None:
+        overrides["breakout_quality_open_gap_cap_pct"] = float(ranking.get("breakout_quality_open_gap_cap_pct"))
+    if ranking.get("residual_window_regime_mode") is not None:
+        overrides["residual_window_regime_mode"] = str(ranking.get("residual_window_regime_mode"))
+    if ranking.get("residual_window_fallback") is not None:
+        overrides["residual_window_fallback"] = int(ranking.get("residual_window_fallback"))
+    if ranking.get("residual_window_regime_fast_ma") is not None:
+        overrides["residual_window_regime_fast_ma"] = int(ranking.get("residual_window_regime_fast_ma"))
+    if ranking.get("residual_window_regime_slow_ma") is not None:
+        overrides["residual_window_regime_slow_ma"] = int(ranking.get("residual_window_regime_slow_ma"))
+    if ranking.get("residual_refine_mode") is not None:
+        overrides["residual_refine_mode"] = str(ranking.get("residual_refine_mode"))
+    if ranking.get("residual_refine_weight") is not None:
+        overrides["residual_refine_weight"] = float(ranking.get("residual_refine_weight"))
+    if ranking.get("industry_second_stage_min_industry_score") is not None:
+        overrides["industry_second_stage_min_industry_score"] = float(
+            ranking.get("industry_second_stage_min_industry_score")
+        )
+    if ranking.get("residual_weight") is not None:
+        overrides["residual_weight"] = float(ranking.get("residual_weight"))
+    if ranking.get("sector_weight") is not None:
+        overrides["sector_weight"] = float(ranking.get("sector_weight"))
+    if ranking.get("quality_weight") is not None:
+        overrides["quality_weight"] = float(ranking.get("quality_weight"))
+    return sanitize_json(overrides)
+
+
+def _semantic_sizing_execution_overrides(wb_cfg: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(wb_cfg, dict):
+        return {}
+    sizing = wb_cfg.get("sizing") if isinstance(wb_cfg.get("sizing"), dict) else {}
+    if not sizing:
+        return {}
+    overrides: dict[str, Any] = {}
+    if sizing.get("weight_mode") is not None:
+        overrides["weight_mode"] = str(sizing.get("weight_mode"))
+    if sizing.get("min_positions") is not None:
+        overrides["min_positions"] = int(sizing.get("min_positions"))
+    if sizing.get("tilt_strength") is not None:
+        overrides["tilt_strength"] = float(sizing.get("tilt_strength"))
+    if sizing.get("tilt_top_n") is not None:
+        overrides["tilt_top_n"] = int(sizing.get("tilt_top_n"))
+    if sizing.get("tilt_bottom_n") is not None:
+        overrides["tilt_bottom_n"] = int(sizing.get("tilt_bottom_n"))
+    if sizing.get("score_weight_min_scale") is not None:
+        overrides["score_weight_min_scale"] = float(sizing.get("score_weight_min_scale"))
+    if sizing.get("score_weight_max_scale") is not None:
+        overrides["score_weight_max_scale"] = float(sizing.get("score_weight_max_scale"))
+    if sizing.get("candidate_plan_mode") is not None:
+        overrides["candidate_plan_mode"] = str(sizing.get("candidate_plan_mode"))
+    if sizing.get("cash_aware_search_top_n") is not None:
+        overrides["cash_aware_search_top_n"] = int(sizing.get("cash_aware_search_top_n"))
+    if sizing.get("rotation_replace_enabled") is not None:
+        overrides["rotation_replace_enabled"] = bool(sizing.get("rotation_replace_enabled"))
+    if sizing.get("rotation_replace_only_strong_risk_on") is not None:
+        overrides["rotation_replace_only_strong_risk_on"] = bool(sizing.get("rotation_replace_only_strong_risk_on"))
+    if sizing.get("rotation_replace_max_swaps_per_day") is not None:
+        overrides["rotation_replace_max_swaps_per_day"] = int(sizing.get("rotation_replace_max_swaps_per_day"))
+    if sizing.get("rotation_replace_candidate_top_n") is not None:
+        overrides["rotation_replace_candidate_top_n"] = int(sizing.get("rotation_replace_candidate_top_n"))
+    if sizing.get("rotation_replace_min_score_gap") is not None:
+        overrides["rotation_replace_min_score_gap"] = float(sizing.get("rotation_replace_min_score_gap"))
+    return sanitize_json(overrides)
+
+
+def _compile_multi_alpha_runtime_payload(wb_cfg: dict[str, Any]) -> dict[str, Any] | None:
+    signal_generation = wb_cfg.get("signal_generation") if isinstance(wb_cfg.get("signal_generation"), dict) else {}
+    modules = signal_generation.get("modules") if isinstance(signal_generation.get("modules"), list) else []
+    if not modules:
+        return None
+
+    signal_generation_payload: dict[str, Any] = {"modules": []}
+    for raw_module in modules:
+        if not isinstance(raw_module, dict):
+            continue
+        module_name = str(raw_module.get("name") or "").strip().lower()
+        if not module_name:
+            continue
+        module_payload: dict[str, Any] = {
+            "name": module_name,
+            "alpha_id": str(raw_module.get("alpha_id") or module_name).strip() or module_name,
+        }
+        if raw_module.get("enabled") is not None:
+            module_payload["enabled"] = bool(raw_module.get("enabled"))
+        if raw_module.get("family") is not None:
+            module_payload["family"] = str(raw_module.get("family"))
+        if isinstance(raw_module.get("params"), dict):
+            module_payload["params"] = sanitize_json(dict(raw_module.get("params") or {}))
+        signal_generation_payload["modules"].append(sanitize_json(module_payload))
+
+    signal_composition = wb_cfg.get("signal_composition") if isinstance(wb_cfg.get("signal_composition"), dict) else {}
+    signal_composition_payload: dict[str, Any] = {}
+    if signal_composition.get("enabled") is not None:
+        signal_composition_payload["enabled"] = bool(signal_composition.get("enabled"))
+    if signal_composition.get("compose_mode") is not None:
+        signal_composition_payload["compose_mode"] = str(signal_composition.get("compose_mode")).strip().upper()
+    if signal_composition.get("same_symbol_policy") is not None:
+        signal_composition_payload["same_symbol_policy"] = str(signal_composition.get("same_symbol_policy")).strip().upper()
+    if signal_composition.get("holding_ownership") is not None:
+        signal_composition_payload["holding_ownership"] = str(signal_composition.get("holding_ownership")).strip().upper()
+    if isinstance(signal_composition.get("modules"), list):
+        signal_composition_payload["modules"] = sanitize_json(
+            [
+                {
+                    **({"name": str(item.get("name") or "").strip().lower()} if str(item.get("name") or "").strip() else {}),
+                    **({"enabled": bool(item.get("enabled"))} if item.get("enabled") is not None else {}),
+                    **({"role": str(item.get("role"))} if item.get("role") is not None else {}),
+                    **({"weight": float(item.get("weight"))} if item.get("weight") is not None else {}),
+                    **({"priority": int(item.get("priority"))} if item.get("priority") is not None else {}),
+                }
+                for item in signal_composition.get("modules")
+                if isinstance(item, dict)
+            ]
+        )
+    if isinstance(signal_composition.get("regime_matrix"), dict):
+        signal_composition_payload["regime_matrix"] = sanitize_json(
+            {
+                str(key): [str(value) for value in values]
+                for key, values in signal_composition.get("regime_matrix", {}).items()
+                if isinstance(values, list)
+            }
+        )
+
+    return sanitize_json(
+        {
+            "enabled": True,
+            "signal_generation": signal_generation_payload,
+            "signal_composition": signal_composition_payload,
+        }
+    )
 
 
 def _assert_locked_candidate_request_supported(body: BacktestV2ExperimentRequest) -> None:
@@ -213,6 +406,10 @@ def _assert_locked_candidate_request_supported(body: BacktestV2ExperimentRequest
         forbidden.append("config_json")
     if body.workbench_config is not None:
         forbidden.append("workbench_config")
+    if body.signal_generation is not None:
+        forbidden.append("signal_generation")
+    if body.signal_composition is not None:
+        forbidden.append("signal_composition")
     if body.enable_strength_rank is not None:
         forbidden.append("enable_strength_rank")
     if body.strength_ma is not None:
@@ -306,6 +503,10 @@ def _build_runtime_cfg_from_workbench(
         universe["benchmark"] = str(wb_universe.get("benchmark"))
     if isinstance(wb_universe.get("symbols"), list):
         universe["symbols"] = list(wb_universe.get("symbols") or [])
+    if wb_universe.get("membership_mode") is not None:
+        universe["membership_mode"] = str(wb_universe.get("membership_mode"))
+    if wb_universe.get("allow_low_fidelity_history") is not None:
+        universe["allow_low_fidelity_history"] = bool(wb_universe.get("allow_low_fidelity_history"))
     if use_body_universe_fields:
         if body.start_date:
             universe["start"] = str(body.start_date)
@@ -323,6 +524,8 @@ def _build_runtime_cfg_from_workbench(
             "exclude_suspended": bool(wb_filters.get("exclude_suspended", True)),
             "min_list_days": int(wb_filters.get("min_list_days", 120)),
             "min_avg_turnover_20d": float(wb_filters.get("min_avg_turnover_20d", 1e8)),
+            "min_avg_turnover_rate_20d": float(wb_filters.get("min_avg_turnover_rate_20d", 0.0) or 0.0),
+            "turnover_rate_field": str(wb_filters.get("turnover_rate_field", "turnover_rate_f") or "turnover_rate_f"),
             "price_min": float(wb_filters.get("price_min", 0.0)),
             "price_max": float(wb_filters.get("price_max", 99999.0)),
             "atr_pct_range": str(wb_filters.get("atr_pct_range", "0,100")),
@@ -330,17 +533,30 @@ def _build_runtime_cfg_from_workbench(
         }
 
     sig = wb_cfg.get("signal_generation") if isinstance(wb_cfg.get("signal_generation"), dict) else {}
-    strategy_pack = str(sig.get("strategy") or wb_cfg.get("strategy_pack") or "SMA_CROSS").strip().upper()
+    multi_alpha_payload = _compile_multi_alpha_runtime_payload(wb_cfg)
+    raw_strategy_pack = str(sig.get("strategy") or wb_cfg.get("strategy_pack") or "").strip().upper()
+    strategy_pack = raw_strategy_pack or ("COMPOSITE" if multi_alpha_payload is not None else "SMA_CROSS")
     if strategy_pack == "ADAPTIVE_REGIME":
         raise HTTPException(status_code=400, detail="strategy_pack ADAPTIVE_REGIME has been removed; use REGIME_ROUTER")
     strategy_name_map = {
+        "COMPOSITE": "composite",
         "SMA_CROSS": "sma_cross",
         "EMA_CROSS": "ema_cross",
         "REGIME_ROUTER": "regime_router",
         "BREAKOUT_TREND": "breakout_trend",
     }
     strategy_name = strategy_name_map.get(strategy_pack)
+    pos_risk_cfg = wb_cfg.get("position_risk") if isinstance(wb_cfg.get("position_risk"), dict) else {}
+
     if strategy_name is None:
+        if multi_alpha_payload is not None:
+            strategy = cfg.setdefault("strategy", {})
+            strategy["name"] = str(strategy.get("name") or "composite")
+            strategy["params"] = {
+                **dict(strategy.get("params") or {}),
+                "multi_alpha": multi_alpha_payload,
+                "portfolio_mode": str(pos_risk_cfg.get("portfolio_mode", "hard_sleeve_budget") or "hard_sleeve_budget"),
+            }
         return cfg
 
     # --- REGIME_ROUTER 编译路径 (新结构: regime_detection + trend + mr) ---
@@ -393,7 +609,7 @@ def _build_runtime_cfg_from_workbench(
     # Strategy-specific runtime compilation.
     if strategy_name == "breakout_trend":
         bo_cfg = sig.get("breakout") if isinstance(sig.get("breakout"), dict) else {}
-        pos_risk_cfg = wb_cfg.get("position_risk") if isinstance(wb_cfg.get("position_risk"), dict) else {}
+        entry_filter = sig.get("entry_filter") if isinstance(sig.get("entry_filter"), dict) else {}
         strategy = cfg.setdefault("strategy", {})
         order_size = _to_int_or_default(strategy.get("order_size"), 1000)
         strategy["name"] = "breakout_trend"
@@ -404,9 +620,26 @@ def _build_runtime_cfg_from_workbench(
             "enable_dual_breakout": bool(bo_cfg.get("enable_dual_breakout", False)),
             "breakout_window_short": _to_int_or_default(bo_cfg.get("breakout_window_short"), 20),
             "breakout_window_long": _to_int_or_default(bo_cfg.get("breakout_window_long"), 55),
+            "dual_breakout_mode": str(bo_cfg.get("dual_breakout_mode", "or") or "or"),
+            "dual_breakout_gate_ma_window": _to_int_or_default(bo_cfg.get("dual_breakout_gate_ma_window"), 120),
+            "dual_breakout_gate_slope_lookback": _to_int_or_default(bo_cfg.get("dual_breakout_gate_slope_lookback"), 10),
             "breakout_entry_buffer_pct": float(bo_cfg.get("breakout_entry_buffer_pct", 0.0)),
             "entry_confirm_mode": str(bo_cfg.get("entry_confirm_mode", "none")),
             "entry_delay_mode": str(bo_cfg.get("entry_delay_mode", "none")),
+            "enable_entry_gap_guard": bool(bo_cfg.get("entry_gap_guard_enabled", False)),
+            "entry_gap_guard_pct": float(bo_cfg.get("entry_gap_guard_pct", 0.04)),
+            "enable_pullback_candidates": bool(bo_cfg.get("enable_pullback_candidates", False)),
+            "pullback_variant_mode": str(bo_cfg.get("pullback_variant_mode", "pb_reclaim_ma20") or "pb_reclaim_ma20"),
+            "pullback_touch_lookback": _to_int_or_default(bo_cfg.get("pullback_touch_lookback"), 12),
+            "pullback_reclaim_window": _to_int_or_default(bo_cfg.get("pullback_reclaim_window"), 3),
+            "pullback_ma20_touch_band_pct": float(bo_cfg.get("pullback_ma20_touch_band_pct", 0.01)),
+            "pullback_low_lookback": _to_int_or_default(bo_cfg.get("pullback_low_lookback"), 10),
+            "pullback_low_band_pct": float(bo_cfg.get("pullback_low_band_pct", 0.02)),
+            "pullback_box_window": _to_int_or_default(bo_cfg.get("pullback_box_window"), 5),
+            "pullback_box_range_pct_max": float(bo_cfg.get("pullback_box_range_pct_max", 0.08)),
+            "enable_entry_above_slow_ma": bool(entry_filter.get("enable_entry_above_slow_ma", False)),
+            "enable_entry_slow_ma_slope": bool(entry_filter.get("enable_entry_slow_ma_slope", False)),
+            "entry_slope_lookback": int(entry_filter.get("entry_slope_lookback", 5)),
             "portfolio_mode": str(pos_risk_cfg.get("portfolio_mode", "equal_10")),
             "order_size": order_size,
             "enable_v2_trend_filter": True,
@@ -441,6 +674,12 @@ def _build_runtime_cfg_from_workbench(
 
     # ── Shared exit_rules compilation (ALL strategies) ──
     strategy = cfg.setdefault("strategy", {})
+    if multi_alpha_payload is not None:
+        strategy["params"] = {
+            **dict(strategy.get("params") or {}),
+            "multi_alpha": multi_alpha_payload,
+            "portfolio_mode": str(pos_risk_cfg.get("portfolio_mode", "hard_sleeve_budget") or "hard_sleeve_budget"),
+        }
     exit_rules = wb_cfg.get("exit_rules") if isinstance(wb_cfg.get("exit_rules"), dict) else {}
     atr_stop = exit_rules.get("atr_stop") if isinstance(exit_rules.get("atr_stop"), dict) else {}
     if atr_stop:
@@ -450,6 +689,30 @@ def _build_runtime_cfg_from_workbench(
     if trailing:
         strategy.setdefault("params", {})["enable_atr_trail"] = bool(trailing.get("enabled", False))
         strategy["params"]["atr_trail_k"] = float(trailing.get("k", 3.0))
+        if trailing.get("activate_profit_pct") is not None:
+            strategy["params"]["trailing_activate_profit_pct"] = float(trailing.get("activate_profit_pct"))
+        if trailing.get("segmented_trend_exit_mode") is not None:
+            strategy["params"]["segmented_trend_exit_mode"] = str(trailing.get("segmented_trend_exit_mode") or "off").strip().lower()
+        if trailing.get("segmented_mid_profit_pct") is not None:
+            strategy["params"]["segmented_mid_profit_pct"] = float(trailing.get("segmented_mid_profit_pct"))
+        if trailing.get("segmented_high_profit_pct") is not None:
+            strategy["params"]["segmented_high_profit_pct"] = float(trailing.get("segmented_high_profit_pct"))
+        if trailing.get("segmented_high_trail_k") is not None:
+            strategy["params"]["segmented_high_trail_k"] = float(trailing.get("segmented_high_trail_k"))
+        if trailing.get("pre_profit_breakout_failure_enabled") is not None:
+            strategy["params"]["enable_pre_profit_breakout_failure_exit"] = bool(trailing.get("pre_profit_breakout_failure_enabled"))
+        if trailing.get("pre_profit_breakout_failure_max_bars") is not None:
+            strategy["params"]["pre_profit_breakout_failure_max_bars"] = int(trailing.get("pre_profit_breakout_failure_max_bars"))
+        if trailing.get("pre_profit_breakout_failure_atr_buffer_k") is not None:
+            strategy["params"]["pre_profit_breakout_failure_atr_buffer_k"] = float(trailing.get("pre_profit_breakout_failure_atr_buffer_k"))
+        if trailing.get("profit_decay_exit_enabled") is not None:
+            strategy["params"]["enable_profit_decay_exit"] = bool(trailing.get("profit_decay_exit_enabled"))
+        if trailing.get("profit_decay_exit_profit_pct") is not None:
+            strategy["params"]["profit_decay_exit_profit_pct"] = float(trailing.get("profit_decay_exit_profit_pct"))
+        if trailing.get("profit_decay_exit_min_hold_bars") is not None:
+            strategy["params"]["profit_decay_exit_min_hold_bars"] = int(trailing.get("profit_decay_exit_min_hold_bars"))
+        if trailing.get("profit_decay_exit_residual_score_threshold") is not None:
+            strategy["params"]["profit_decay_exit_residual_score_threshold"] = float(trailing.get("profit_decay_exit_residual_score_threshold"))
     time_exit = exit_rules.get("time_exit") if isinstance(exit_rules.get("time_exit"), dict) else {}
     if time_exit:
         strategy["params"]["max_hold_days"] = int(time_exit.get("n_days", 0)) if bool(time_exit.get("enabled", False)) else 0
@@ -485,15 +748,54 @@ def _build_runtime_cfg_from_workbench(
     if trailing:
         exit_cfg["enable_atr_trail"] = bool(trailing.get("enabled", False))
         exit_cfg["atr_trail_k"] = float(trailing.get("k", 3.0))
+        if trailing.get("activate_profit_pct") is not None:
+            exit_cfg["trailing_activate_profit_pct"] = float(trailing.get("activate_profit_pct"))
+        if trailing.get("segmented_trend_exit_mode") is not None:
+            exit_cfg["segmented_trend_exit_mode"] = str(trailing.get("segmented_trend_exit_mode") or "off").strip().lower()
+        if trailing.get("segmented_mid_profit_pct") is not None:
+            exit_cfg["segmented_mid_profit_pct"] = float(trailing.get("segmented_mid_profit_pct"))
+        if trailing.get("segmented_high_profit_pct") is not None:
+            exit_cfg["segmented_high_profit_pct"] = float(trailing.get("segmented_high_profit_pct"))
+        if trailing.get("segmented_high_trail_k") is not None:
+            exit_cfg["segmented_high_trail_k"] = float(trailing.get("segmented_high_trail_k"))
+        if trailing.get("pre_profit_breakout_failure_enabled") is not None:
+            exit_cfg["enable_pre_profit_breakout_failure_exit"] = bool(trailing.get("pre_profit_breakout_failure_enabled"))
+        if trailing.get("pre_profit_breakout_failure_max_bars") is not None:
+            exit_cfg["pre_profit_breakout_failure_max_bars"] = int(trailing.get("pre_profit_breakout_failure_max_bars"))
+        if trailing.get("pre_profit_breakout_failure_atr_buffer_k") is not None:
+            exit_cfg["pre_profit_breakout_failure_atr_buffer_k"] = float(trailing.get("pre_profit_breakout_failure_atr_buffer_k"))
+        if trailing.get("profit_decay_exit_enabled") is not None:
+            exit_cfg["enable_profit_decay_exit"] = bool(trailing.get("profit_decay_exit_enabled"))
+        if trailing.get("profit_decay_exit_profit_pct") is not None:
+            exit_cfg["profit_decay_exit_profit_pct"] = float(trailing.get("profit_decay_exit_profit_pct"))
+        if trailing.get("profit_decay_exit_min_hold_bars") is not None:
+            exit_cfg["profit_decay_exit_min_hold_bars"] = int(trailing.get("profit_decay_exit_min_hold_bars"))
+        if trailing.get("profit_decay_exit_residual_score_threshold") is not None:
+            exit_cfg["profit_decay_exit_residual_score_threshold"] = float(trailing.get("profit_decay_exit_residual_score_threshold"))
     # 趋势退出 (MA20 / LOW10)
     ma20_exit = exit_rules.get("ma20_exit") if isinstance(exit_rules.get("ma20_exit"), dict) else {}
     low10_exit = exit_rules.get("low10_exit") if isinstance(exit_rules.get("low10_exit"), dict) else {}
+    risk_off_exit = exit_rules.get("risk_off_exit") if isinstance(exit_rules.get("risk_off_exit"), dict) else {}
     if ma20_exit:
         strategy.setdefault("params", {})["enable_ma20_exit"] = bool(ma20_exit.get("enabled", False))
         exit_cfg["enable_ma20_exit"] = bool(ma20_exit.get("enabled", False))
     if low10_exit:
         strategy.setdefault("params", {})["enable_low10_exit"] = bool(low10_exit.get("enabled", False))
         exit_cfg["enable_low10_exit"] = bool(low10_exit.get("enabled", False))
+    if risk_off_exit:
+        strategy.setdefault("params", {})["enable_risk_off_exit"] = bool(risk_off_exit.get("enabled", False))
+        if risk_off_exit.get("mode") is not None:
+            strategy.setdefault("params", {})["risk_off_exit_mode"] = str(risk_off_exit.get("mode") or "").strip().lower()
+        if risk_off_exit.get("partial_pct") is not None:
+            strategy.setdefault("params", {})["risk_off_exit_partial_pct"] = float(risk_off_exit.get("partial_pct"))
+        if risk_off_exit.get("partial_mode") is not None:
+            strategy.setdefault("params", {})["risk_off_exit_partial_mode"] = str(risk_off_exit.get("partial_mode") or "").strip().lower()
+        if risk_off_exit.get("partial_only_if_profitable") is not None:
+            strategy.setdefault("params", {})["risk_off_exit_partial_only_if_profitable"] = bool(risk_off_exit.get("partial_only_if_profitable"))
+        if risk_off_exit.get("trans_down_max_positions") is not None:
+            strategy.setdefault("params", {})["risk_off_exit_trans_down_max_positions"] = int(risk_off_exit.get("trans_down_max_positions"))
+        if risk_off_exit.get("trans_down_min_residual_score") is not None:
+            strategy.setdefault("params", {})["risk_off_exit_trans_down_min_residual_score"] = float(risk_off_exit.get("trans_down_min_residual_score"))
 
     # Universe 过滤 → strategy.params（引擎通过 getattr(strategy, ...) 读取）
     universe_filter = wb_cfg.get("universe_filter") if isinstance(wb_cfg.get("universe_filter"), dict) else {}
@@ -507,7 +809,98 @@ def _build_runtime_cfg_from_workbench(
     # 动量排名百分比选股 → strategy.params
     ranking = sig.get("ranking") if isinstance(sig.get("ranking"), dict) else {}
     if ranking:
+        ranking_mode = str(ranking.get("score_source_mode") or "none").strip().lower()
+        default_weights = {
+            "residual_only": (0.5, 0.3, 0.2),
+            "residual_quality": (0.8, 0.0, 0.2),
+            "sector_quality": (0.5, 0.3, 0.2),
+            "provider_final": (0.5, 0.3, 0.2),
+            "quality_then_residual": (1.0, 0.0, 0.0),
+            "leadership_then_residual": (1.0, 0.0, 0.0),
+        }
+        default_residual_weight, default_sector_weight, default_quality_weight = default_weights.get(
+            ranking_mode,
+            (0.5, 0.3, 0.2),
+        )
         strategy.setdefault("params", {})["momentum_top_pct"] = float(ranking.get("momentum_top_pct", 0.0))
+        strategy["params"]["ranking_mode"] = ranking_mode
+        strategy["params"]["enable_residual_ranking"] = bool(
+            ranking_mode in {"residual_only", "residual_quality", "provider_final", "quality_then_residual", "leadership_then_residual"}
+        )
+        strategy["params"]["enable_sector_quality_ranking"] = bool(
+            ranking_mode in {"residual_quality", "sector_quality", "provider_final"}
+        )
+        strategy["params"]["source_aware_residual_mode"] = str(
+            ranking.get("source_aware_residual_mode", "off") or "off"
+        )
+        strategy["params"]["residual_window"] = int(ranking.get("residual_window", 60) or 60)
+        strategy["params"]["residual_benchmark_weight"] = float(
+            ranking.get("residual_benchmark_weight", 0.5) or 0.0
+        )
+        strategy["params"]["residual_industry_weight"] = float(
+            ranking.get("residual_industry_weight", 0.5) or 0.0
+        )
+        strategy["params"]["industry_relative_mode"] = str(
+            ranking.get("industry_relative_mode", "sector_proxy") or "sector_proxy"
+        )
+        strategy["params"]["industry_relative_regime_mode"] = str(
+            ranking.get("industry_relative_regime_mode", "off") or "off"
+        )
+        strategy["params"]["residual_weight_regime_mode"] = str(
+            ranking.get("residual_weight_regime_mode", "off") or "off"
+        )
+        strategy["params"]["residual_benchmark_weight_fallback"] = float(
+            ranking.get(
+                "residual_benchmark_weight_fallback",
+                strategy["params"]["residual_benchmark_weight"],
+            )
+            or 0.0
+        )
+        strategy["params"]["residual_industry_weight_fallback"] = float(
+            ranking.get(
+                "residual_industry_weight_fallback",
+                strategy["params"]["residual_industry_weight"],
+            )
+            or 0.0
+        )
+        strategy["params"]["breakout_quality_gate_min_score"] = float(
+            ranking.get("breakout_quality_gate_min_score", 0.55) or 0.55
+        )
+        strategy["params"]["breakout_quality_margin_cap_pct"] = float(
+            ranking.get("breakout_quality_margin_cap_pct", 0.08) or 0.08
+        )
+        strategy["params"]["breakout_quality_fade_cap_pct"] = float(
+            ranking.get("breakout_quality_fade_cap_pct", 0.035) or 0.035
+        )
+        strategy["params"]["breakout_quality_open_gap_cap_pct"] = float(
+            ranking.get("breakout_quality_open_gap_cap_pct", 0.04) or 0.04
+        )
+        strategy["params"]["leadership_route_bucket_count"] = int(
+            ranking.get("leadership_route_bucket_count", 3) or 3
+        )
+        strategy["params"]["residual_window_regime_mode"] = str(
+            ranking.get("residual_window_regime_mode", "off") or "off"
+        )
+        strategy["params"]["residual_window_fallback"] = int(
+            ranking.get("residual_window_fallback", strategy["params"]["residual_window"])
+            or strategy["params"]["residual_window"]
+        )
+        strategy["params"]["residual_window_regime_fast_ma"] = int(
+            ranking.get("residual_window_regime_fast_ma", 120) or 120
+        )
+        strategy["params"]["residual_window_regime_slow_ma"] = int(
+            ranking.get("residual_window_regime_slow_ma", 200) or 200
+        )
+        strategy["params"]["residual_refine_mode"] = str(
+            ranking.get("residual_refine_mode", "off") or "off"
+        )
+        strategy["params"]["residual_refine_weight"] = float(ranking.get("residual_refine_weight", 0.0) or 0.0)
+        strategy["params"]["industry_second_stage_min_industry_score"] = float(
+            ranking.get("industry_second_stage_min_industry_score", 0.85) or 0.0
+        )
+        strategy["params"]["residual_weight"] = float(ranking.get("residual_weight", default_residual_weight))
+        strategy["params"]["sector_weight"] = float(ranking.get("sector_weight", default_sector_weight))
+        strategy["params"]["quality_weight"] = float(ranking.get("quality_weight", default_quality_weight))
 
     # V2 个股趋势过滤 → strategy.params
     stock_trend = wb_cfg.get("stock_trend_filter") if isinstance(wb_cfg.get("stock_trend_filter"), dict) else {}
@@ -602,8 +995,43 @@ def _build_runtime_cfg_from_workbench(
     sizing_wb = wb_cfg.get("sizing") if isinstance(wb_cfg.get("sizing"), dict) else {}
     if sizing_wb:
         sizing = cfg.setdefault("sizing", {})
-        sizing["weight_mode"] = str(sizing_wb.get("weight_mode", "equal"))
+        weight_mode = str(sizing_wb.get("weight_mode", "equal"))
+        sizing["weight_mode"] = weight_mode
         sizing["min_positions"] = int(sizing_wb.get("min_positions", 10))
+        candidate_plan_mode = str(sizing_wb.get("candidate_plan_mode", "ranked"))
+        sizing["candidate_plan_mode"] = candidate_plan_mode
+        if candidate_plan_mode.strip().lower() == "cash_aware":
+            sizing["cash_aware_search_top_n"] = int(sizing_wb.get("cash_aware_search_top_n", 12))
+        elif sizing_wb.get("cash_aware_search_top_n") is not None:
+            sizing["cash_aware_search_top_n"] = int(sizing_wb.get("cash_aware_search_top_n"))
+        if weight_mode.strip().lower() == "mf_rank_tilt":
+            sizing["tilt_strength"] = float(sizing_wb.get("tilt_strength", 0.15))
+            sizing["tilt_top_n"] = int(sizing_wb.get("tilt_top_n", 3))
+            sizing["tilt_bottom_n"] = int(sizing_wb.get("tilt_bottom_n", 2))
+        elif weight_mode.strip().lower() == "score_weighted":
+            sizing["score_weight_min_scale"] = float(sizing_wb.get("score_weight_min_scale", 0.75))
+            sizing["score_weight_max_scale"] = float(sizing_wb.get("score_weight_max_scale", 1.25))
+        else:
+            if sizing_wb.get("tilt_strength") is not None:
+                sizing["tilt_strength"] = float(sizing_wb.get("tilt_strength"))
+            if sizing_wb.get("tilt_top_n") is not None:
+                sizing["tilt_top_n"] = int(sizing_wb.get("tilt_top_n"))
+            if sizing_wb.get("tilt_bottom_n") is not None:
+                sizing["tilt_bottom_n"] = int(sizing_wb.get("tilt_bottom_n"))
+            if sizing_wb.get("score_weight_min_scale") is not None:
+                sizing["score_weight_min_scale"] = float(sizing_wb.get("score_weight_min_scale"))
+            if sizing_wb.get("score_weight_max_scale") is not None:
+                sizing["score_weight_max_scale"] = float(sizing_wb.get("score_weight_max_scale"))
+        if sizing_wb.get("rotation_replace_enabled") is not None:
+            sizing["rotation_replace_enabled"] = bool(sizing_wb.get("rotation_replace_enabled"))
+        if sizing_wb.get("rotation_replace_only_strong_risk_on") is not None:
+            sizing["rotation_replace_only_strong_risk_on"] = bool(sizing_wb.get("rotation_replace_only_strong_risk_on"))
+        if sizing_wb.get("rotation_replace_max_swaps_per_day") is not None:
+            sizing["rotation_replace_max_swaps_per_day"] = int(sizing_wb.get("rotation_replace_max_swaps_per_day"))
+        if sizing_wb.get("rotation_replace_candidate_top_n") is not None:
+            sizing["rotation_replace_candidate_top_n"] = int(sizing_wb.get("rotation_replace_candidate_top_n"))
+        if sizing_wb.get("rotation_replace_min_score_gap") is not None:
+            sizing["rotation_replace_min_score_gap"] = float(sizing_wb.get("rotation_replace_min_score_gap"))
 
     # ── 交易成本覆盖 ──
     cost_cfg = wb_cfg.get("costs") if isinstance(wb_cfg.get("costs"), dict) else {}
@@ -627,9 +1055,17 @@ def _compile_semantic_config_bundle(
     use_body_universe_fields: bool,
 ) -> dict[str, Any]:
     request_body = body if body is not None else BacktestV2ExperimentRequest()
+    semantic_input = sanitize_json(dict(semantic_cfg or {}))
+    request_semantic_blocks = _request_semantic_blocks(request_body)
+    if request_semantic_blocks:
+        semantic_input = sanitize_json({**semantic_input, **request_semantic_blocks})
+    semantic_execution_overrides = {
+        **_semantic_ranking_execution_overrides(semantic_input),
+        **_semantic_sizing_execution_overrides(semantic_input),
+    }
     compiled = compile_semantic_config_json(
-        semantic_cfg,
-        compiled_plan_payload={},
+        semantic_input,
+        compiled_plan_payload={"execution_overrides": semantic_execution_overrides},
         config_source=config_source,
     )
     resolved_semantic_cfg = (
@@ -640,13 +1076,14 @@ def _compile_semantic_config_bundle(
     runtime_cfg = _build_runtime_cfg_from_workbench(
         base_cfg,
         request_body,
-        resolved_semantic_cfg if isinstance(resolved_semantic_cfg, dict) else semantic_cfg,
+        resolved_semantic_cfg if isinstance(resolved_semantic_cfg, dict) else semantic_input,
         use_body_universe_fields=use_body_universe_fields,
     )
     compiled["compiled_plan"] = sanitize_json(
         {
             **dict(compiled.get("compiled_plan") or {}),
             "runtime_config": sanitize_json(dict(runtime_cfg)),
+            "execution_overrides": semantic_execution_overrides,
         }
     )
     compiled["runtime_config"] = sanitize_json(dict(runtime_cfg))
@@ -674,7 +1111,41 @@ def _execution_override_snapshot(overrides: dict[str, Any]) -> dict[str, Any]:
         "strength_top_k_mode",
         "enable_multifactor_rank",
         "mf_topk",
+        "mf_concentrate_scale",
+        "mf_rank_gate_mode",
         "momentum_top_pct",
+        "residual_window",
+        "residual_benchmark_weight",
+        "residual_industry_weight",
+        "industry_relative_mode",
+        "industry_relative_regime_mode",
+        "residual_weight_regime_mode",
+        "residual_benchmark_weight_fallback",
+        "residual_industry_weight_fallback",
+        "breakout_quality_gate_min_score",
+        "breakout_quality_margin_cap_pct",
+        "breakout_quality_fade_cap_pct",
+        "breakout_quality_open_gap_cap_pct",
+        "leadership_route_bucket_count",
+        "residual_window_regime_mode",
+        "residual_window_fallback",
+        "residual_window_regime_fast_ma",
+        "residual_window_regime_slow_ma",
+        "residual_refine_mode",
+        "residual_refine_weight",
+        "industry_second_stage_min_industry_score",
+        "residual_weight",
+        "sector_weight",
+        "quality_weight",
+        "weight_mode",
+        "min_positions",
+        "tilt_strength",
+        "tilt_top_n",
+        "tilt_bottom_n",
+        "score_weight_min_scale",
+        "score_weight_max_scale",
+        "candidate_plan_mode",
+        "cash_aware_search_top_n",
     )
     return sanitize_json({key: overrides.get(key) for key in keys if key in overrides})
 
@@ -738,7 +1209,7 @@ def _run_locked_candidate_preset_sync(
         pass
 
     try:
-        result = stabilize_experiment_result(
+        result = stabilize_experiment_output(
             bt_root=bt_root,
             result=result if isinstance(result, dict) else {},
             base_cfg=base_cfg,
@@ -794,6 +1265,8 @@ def _run_backtest_v2_experiment_sync(
     body: BacktestV2ExperimentRequest,
     progress_hook: Callable[[int, str], None] | None = None,
 ) -> dict[str, Any]:
+    return run_experiment_request_body(body, progress_hook=progress_hook)
+
     bt_root = _bt_root()
     if not bt_root.exists():
         raise HTTPException(status_code=500, detail=f"backtest_V2 root not found: {bt_root}")
@@ -872,6 +1345,12 @@ def _run_backtest_v2_experiment_sync(
         use_script_cfg = resolved_config_mode == "saved_config_run"
         runtime_config_supplied = isinstance(body.runtime_config_json, dict)
         conflict_policy = str(resolution.get("config_conflict_policy") or "none")
+        request_semantic_blocks = _request_semantic_blocks(body)
+        if request_semantic_blocks:
+            if isinstance(effective_wb_cfg, dict) and not _looks_like_backend_runtime_config(effective_wb_cfg):
+                effective_wb_cfg = sanitize_json({**dict(effective_wb_cfg), **request_semantic_blocks})
+            elif effective_wb_cfg is None:
+                effective_wb_cfg = request_semantic_blocks
 
     overrides: dict[str, Any] = {}
     if not use_script_cfg and not runtime_config_supplied and not isinstance(semantic_cfg_input, dict):
@@ -911,6 +1390,15 @@ def _run_backtest_v2_experiment_sync(
         overrides["workbench_mode"] = str(body.workbench_mode)
     if isinstance(effective_wb_cfg, dict):
         wb_cfg = effective_wb_cfg
+        if not _looks_like_backend_runtime_config(wb_cfg):
+            overrides.update(_semantic_ranking_execution_overrides(wb_cfg))
+            overrides.update(_semantic_sizing_execution_overrides(wb_cfg))
+        pos_risk_cfg = wb_cfg.get("position_risk") if isinstance(wb_cfg.get("position_risk"), dict) else {}
+        if "max_positions" not in overrides and pos_risk_cfg.get("max_positions") is not None:
+            try:
+                overrides["max_positions"] = int(pos_risk_cfg.get("max_positions"))
+            except Exception:
+                pass
         if not _looks_like_backend_runtime_config(wb_cfg):
             semantic_compile = _compile_semantic_config_bundle(
                 base_cfg=base_cfg,
@@ -1034,7 +1522,7 @@ def _run_backtest_v2_experiment_sync(
         pass
 
     try:
-        result = stabilize_experiment_result(
+        result = stabilize_experiment_output(
             bt_root=bt_root,
             result=result if isinstance(result, dict) else {},
             base_cfg=base_cfg,

@@ -13,7 +13,7 @@ def stage_is_applicable(runtime: Any, stage_key: str) -> bool:
         return False
     if key == "S2":
         return bool(
-            runtime.route_id in {"provider_breakout_runtime", "regime_router_inline_runtime"}
+            runtime.route_id in {"provider_breakout_runtime", "regime_router_inline_runtime", "multi_alpha_inline_runtime"}
             or (runtime._market_filter_cfg is not None and runtime._market_filter_cfg.enabled)
             or (runtime._benchmark_regime_cfg is not None and runtime._benchmark_regime_cfg.enabled)
         )

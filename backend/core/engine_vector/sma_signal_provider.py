@@ -215,6 +215,7 @@ class SMASignalProvider:
         self._enable_multifactor_rank = bool(kwargs.get("enable_multifactor_rank", False))
         self._mf_rank_gate_mode = str(kwargs.get("mf_rank_gate_mode") or "ALWAYS_ON")
         st_history = kwargs.get("st_history")
+        membership_history = kwargs.get("membership_history")
         strength_ma = int(kwargs.get("strength_ma", 120))
         self._base_order_value = float(kwargs.get("base_order_value", 0.0))
 
@@ -272,6 +273,7 @@ class SMASignalProvider:
             hist,
             trading_days,
             st_history=st_history,
+            membership_history=membership_history,
             min_price=_min_price,
             min_list_days=_min_list_days,
             min_avg_turnover_20d=_min_avg_turnover_20d,

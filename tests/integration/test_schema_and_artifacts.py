@@ -46,13 +46,14 @@ def test_canonical_artifact_contract_and_missing_fields(tmp_path: Path) -> None:
     )
 
     artifacts = dict(out.get("artifacts") or {})
+    effective_results_dir = Path(out["results_dir"])
     assert artifacts.get("reason_codes") == "reason_codes.csv"
     assert artifacts.get("symbol_performance") == "symbol_performance.csv"
 
-    assert (results_dir / "reason_codes.csv").exists()
-    assert (results_dir / "symbol_performance.csv").exists()
+    assert (effective_results_dir / "reason_codes.csv").exists()
+    assert (effective_results_dir / "symbol_performance.csv").exists()
 
-    run_meta = json.loads((results_dir / "run_meta.json").read_text(encoding="utf-8"))
+    run_meta = json.loads((effective_results_dir / "run_meta.json").read_text(encoding="utf-8"))
     counters = dict(run_meta.get("counters") or {})
     for key in ["raw_signal", "blocked", "orders", "skipped", "closed_trades"]:
         assert key in counters
@@ -63,7 +64,7 @@ def test_canonical_artifact_contract_and_missing_fields(tmp_path: Path) -> None:
     assert "missing_reason_code_source" in missing
     assert "missing_symbol_performance_source" in missing
 
-    sp = pd.read_csv(results_dir / "symbol_performance.csv")
+    sp = pd.read_csv(effective_results_dir / "symbol_performance.csv")
     assert sp.empty
 
 
@@ -126,10 +127,12 @@ def test_builtin_config_metadata_refreshes_even_when_hash_is_unchanged(
 
     refreshed = load_saved_config_record(_config_store._BR35_ATR10_CSI800_10Y_CONFIG_ID)
     assert refreshed is not None
-    assert refreshed.get("display_name") == "BR35+ATR1.0+HS300+ZZ500+10Y"
+    assert refreshed.get("display_name") == "BR35+ATR1.0+HS300+ZZ500+10Y (PIT)"
     assert "hs300_zz500" in list(refreshed.get("tags") or [])
+    assert "pit_dynamic" in list(refreshed.get("tags") or [])
     assert "csi800" not in list(refreshed.get("tags") or [])
     assert ((refreshed.get("config_json") or {}).get("flow_script") or {}).get("script_id") == "br35_atr10_hs300_zz500_10y"
+    assert ((refreshed.get("config_json") or {}).get("universe") or {}).get("membership_mode") == "PIT_DYNAMIC"
 
 
 def test_run_meta_report_consistency_includes_resolved_config_details(tmp_path: Path) -> None:
@@ -158,7 +161,7 @@ def test_run_meta_report_consistency_includes_resolved_config_details(tmp_path: 
         "universe_meta": {"universe_mode": "HS300_ZZ500", "raw_count": 812},
     }
 
-    stabilize_experiment_result(
+    out = stabilize_experiment_result(
         bt_root=bt_root,
         result=result,
         base_cfg=base_cfg,
@@ -173,7 +176,8 @@ def test_run_meta_report_consistency_includes_resolved_config_details(tmp_path: 
         run_profile_summary=None,
     )
 
-    run_meta = json.loads((results_dir / "run_meta.json").read_text(encoding="utf-8"))
+    effective_results_dir = Path(out["results_dir"])
+    run_meta = json.loads((effective_results_dir / "run_meta.json").read_text(encoding="utf-8"))
     consistency = dict(run_meta.get("report_consistency") or {})
     assert consistency.get("resolved_config_mode") == "saved_config_run"
     assert consistency.get("resolved_config_id") == "cfg_br35_atr10_csi800_10y"
@@ -244,19 +248,106 @@ def test_stage_summary_artifact_is_written_and_indexed(tmp_path: Path) -> None:
     )
 
     artifacts = dict(out.get("artifacts") or {})
+    effective_results_dir = Path(out["results_dir"])
     assert artifacts.get("stage_summary") == "stage_summary.json"
 
-    stage_summary = json.loads((results_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    stage_summary = json.loads((effective_results_dir / "stage_summary.json").read_text(encoding="utf-8"))
     assert stage_summary["execution_shell"] == "stage_pipeline_shell_legacy_adapter"
     assert stage_summary["route_id"] == "provider_breakout_runtime"
 
-    run_meta = json.loads((results_dir / "run_meta.json").read_text(encoding="utf-8"))
+    run_meta = json.loads((effective_results_dir / "run_meta.json").read_text(encoding="utf-8"))
     assert (run_meta.get("stage_pipeline") or {}).get("execution_shell") == "stage_pipeline_shell_legacy_adapter"
 
-    audit = json.loads((results_dir / "audit.json").read_text(encoding="utf-8"))
+    audit = json.loads((effective_results_dir / "audit.json").read_text(encoding="utf-8"))
     assert audit.get("legacy_kernel") == "strict_core"
     assert (audit.get("stage_pipeline") or {}).get("stage_order") == ["S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"]
+    assert (audit.get("research_audit") or {}).get("contract_version") == "research_audit@1"
+    assert (audit.get("research_audit") or {}).get("evidence_refs", {}).get("run_meta") == "run_meta.json"
+    assert (audit.get("research_audit") or {}).get("evidence_refs", {}).get("manifest") == "manifest.json"
 
-    manifest = json.loads((results_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((effective_results_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["artifacts"]["stage_summary"] == "stage_summary.json"
     assert (manifest.get("stage_pipeline") or {}).get("route_id") == "provider_breakout_runtime"
+
+
+def test_multi_alpha_artifacts_preserve_source_fields_and_audit_summary(tmp_path: Path) -> None:
+    bt_root = tmp_path / "backtest_V2"
+    bt_root.mkdir(parents=True, exist_ok=True)
+    results_dir = tmp_path / "exp_case_multi_alpha"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        [
+            {
+                "date": "2026-03-02",
+                "symbol": "sh600000",
+                "side": "SELL",
+                "price": 10.0,
+                "qty": 100,
+                "reason_code": "RISK_OFF_EXIT",
+                "exit_owner": "global_risk_override",
+                "entry_alpha_id": "breakout_55",
+                "entry_sleeve_id": "trend",
+                "entry_reason_code": "BREAKOUT_HIGH",
+                "entry_date": "2026-02-20",
+            }
+        ]
+    ).to_csv(results_dir / "portfolio_trades.csv", index=False)
+
+    base_cfg = {
+        "universe": {"start": "2026-03-01", "end": "2026-03-31", "benchmark": "000300.SH"},
+        "signal": {"strategy": "COMPOSITE"},
+    }
+    result = {
+        "exp_id": "exp_case_multi_alpha",
+        "results_dir": str(results_dir),
+        "status": "OK",
+        "total_return": 0.01,
+        "max_drawdown": -0.02,
+        "cagr": 0.01,
+        "sharpe": 0.3,
+        "trades": 1,
+        "metrics": {
+            "audit": {
+                "contract_version": "multi_alpha_audit@1",
+                "summary": {
+                    "raw_signal_counts_by_alpha": {"breakout_55": 2},
+                    "composed_signal_counts_by_alpha": {"breakout_55": 1},
+                    "blocked_signal_counts_by_reason": {"SLEEVE_BUDGET_EXCEEDED": 1},
+                    "conflict_resolution_counts": {"prefer_higher_score": 1},
+                    "source_only_exit_count": 0,
+                    "global_risk_override_count": 1,
+                },
+                "flagged_days": [
+                    {
+                        "date": "2026-03-02",
+                        "global_risk_override_count": 1,
+                    }
+                ],
+            }
+        },
+    }
+
+    out = stabilize_experiment_result(
+        bt_root=bt_root,
+        result=result,
+        base_cfg=base_cfg,
+        overrides={},
+        run_profile_summary=None,
+    )
+
+    effective_results_dir = Path(out["results_dir"])
+    trades_alias = pd.read_csv(effective_results_dir / "trades.csv")
+    orders_alias = pd.read_csv(effective_results_dir / "orders.csv")
+    audit = json.loads((effective_results_dir / "audit.json").read_text(encoding="utf-8"))
+
+    for df in (trades_alias, orders_alias):
+        assert "exit_owner" in df.columns
+        assert "entry_alpha_id" in df.columns
+        assert "entry_sleeve_id" in df.columns
+        assert df.loc[0, "exit_owner"] == "global_risk_override"
+        assert df.loc[0, "entry_alpha_id"] == "breakout_55"
+
+    assert audit["contract_version"] == "multi_alpha_audit@1"
+    assert audit["summary"]["global_risk_override_count"] == 1
+    assert audit["flagged_days"][0]["date"] == "2026-03-02"

@@ -116,13 +116,11 @@ def resolve_declared_artifact_path(results_dir: Path, manifest: dict[str, Any], 
 
 def experiment_surface_flags(results_dir: Path) -> dict[str, bool]:
     manifest_path = results_dir / "manifest.json"
-    report_path = results_dir / "report.html"
     has_manifest = manifest_path.exists()
     manifest = load_manifest(results_dir) if has_manifest else {}
     core_keys = ("perf", "nav", "run_meta", "config")
     has_core_artifacts = bool(manifest) and all(manifest_artifact_rel(manifest, key) for key in core_keys)
     return {
         "has_manifest": has_manifest,
-        "has_report": report_path.exists(),
         "has_core_artifacts": has_core_artifacts,
     }

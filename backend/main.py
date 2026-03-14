@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -16,7 +16,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.api.endpoints.backtest_v2 import router as backtest_v2_router  # noqa: E402
+from backend.api.endpoints.mobile_dashboard import router as mobile_dashboard_router  # noqa: E402
 from backend.api.endpoints.transactions import router as transactions_router  # noqa: E402
+from backend.api.endpoints._mobile_access import (  # noqa: E402
+    is_allowed_mobile_host,
+    is_mobile_protected_path,
+    mobile_private_access_enabled,
+)
 
 
 class NoCacheMiddleware(BaseHTTPMiddleware):
@@ -29,9 +35,22 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class PrivateMobileAccessMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if mobile_private_access_enabled() and is_mobile_protected_path(request.url.path):
+            if not is_allowed_mobile_host(request.headers.get("host")):
+                return JSONResponse(
+                    {"detail": "mobile dashboard is only available on private hosts"},
+                    status_code=403,
+                )
+        return await call_next(request)
+
+
 app = FastAPI(title="backtest-v2-standalone", version="1.0.0")
 app.add_middleware(NoCacheMiddleware)
+app.add_middleware(PrivateMobileAccessMiddleware)
 app.include_router(backtest_v2_router)
+app.include_router(mobile_dashboard_router)
 app.include_router(transactions_router)
 
 app.add_middleware(
@@ -62,3 +81,13 @@ def index() -> FileResponse:
 @app.get("/index.html")
 def page() -> FileResponse:
     return FileResponse(str(FRONTEND_DIR / "index.html"), headers=_NO_CACHE)
+
+
+@app.get("/mobile")
+def mobile_index() -> FileResponse:
+    return FileResponse(str(FRONTEND_DIR / "mobile.html"), headers=_NO_CACHE)
+
+
+@app.get("/mobile.html")
+def mobile_page() -> FileResponse:
+    return FileResponse(str(FRONTEND_DIR / "mobile.html"), headers=_NO_CACHE)

@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.api.endpoints.backtest_v2_artifacts import stabilize_experiment_result  # noqa: E402
+from backend.core.services.experiment_artifact_service import stabilize_experiment_output  # noqa: E402
 from backend.core.tools.experiment_runner import run_experiment  # noqa: E402
 
 
@@ -257,7 +257,7 @@ def _run_one(
 
     try:
         result = run_experiment(tmp_path, preset="single", overrides=overrides, progress_hook=progress)
-        stabilized = stabilize_experiment_result(
+        stabilized = stabilize_experiment_output(
             bt_root=ROOT,
             result=result if isinstance(result, dict) else {},
             base_cfg=stabilize_cfg,

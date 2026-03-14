@@ -14,13 +14,18 @@ const props = defineProps({
 });
 
 const rows = computed(() => normalizeSymbolRows(props.snapshot));
+const stockNames = computed(() => props.snapshot?.artifacts?.stockNames || {});
 const view = computed(() => props.snapshot?.view || {});
 const open = computed(() => !!view.value.openPanels?.symbolPanel);
+
+function displayName(symbol) {
+  return stockZh(symbol, stockNames.value);
+}
 
 const filteredRows = computed(() => {
   const keyword = String(view.value.symbolFilter || '').trim().toLowerCase();
   const list = keyword
-    ? rows.value.filter((row) => String(row.symbol || '').toLowerCase().includes(keyword) || String(stockZh(row.symbol) || '').toLowerCase().includes(keyword))
+    ? rows.value.filter((row) => String(row.symbol || '').toLowerCase().includes(keyword) || String(displayName(row.symbol) || '').toLowerCase().includes(keyword))
     : rows.value.slice();
   const sorter = String(view.value.symbolSort || 'return_desc');
   if (sorter === 'drawdown_asc') list.sort((a, b) => Number(a.max_drawdown || 0) - Number(b.max_drawdown || 0));
@@ -50,7 +55,7 @@ function selectSymbol(symbol) {
 </script>
 
 <template>
-  <section class="wb-result-acc wb-symbol-rank-acc" :class="{ 'wb-open': open }">
+  <section class="wb-result-acc wb-symbol-rank-acc" data-result-panel="symbolPanel" :class="{ 'wb-open': open }">
     <button type="button" class="wb-result-acc-toggle" :aria-expanded="String(open)" @click="togglePanel">
       <span class="wb-acc-summary-main">
         <span class="wb-acc-summary-title">个股排名</span>
@@ -73,13 +78,19 @@ function selectSymbol(symbol) {
         </div>
       </div>
       <div class="wb-table-wrap wb-gap-top wb-symbol-table-wrap wb-scrollbox">
-        <table class="wb-table wb-table-compact">
+        <table class="wb-table wb-table-compact wb-symbol-table-v2">
+          <colgroup>
+            <col class="wb-symbol-col-symbol" />
+            <col class="wb-symbol-col-return" />
+            <col class="wb-symbol-col-drawdown" />
+            <col class="wb-symbol-col-trades" />
+          </colgroup>
           <thead>
             <tr>
               <th>标的</th>
-              <th>收益</th>
-              <th>回撤</th>
-              <th>交易数</th>
+              <th class="num">收益</th>
+              <th class="num">回撤</th>
+              <th class="num">交易数</th>
             </tr>
           </thead>
           <tbody>
@@ -88,14 +99,15 @@ function selectSymbol(symbol) {
             </tr>
             <tr
               v-for="row in filteredRows"
+              v-else
               :key="row.symbol"
-              class="wb-symbol-row"
+              class="wb-symbol-table-row"
               :class="{ active: String(view.selectedSymbol || '') === String(row.symbol || '').toLowerCase() }"
               @click="selectSymbol(row.symbol)"
             >
-              <td>
-                {{ stockZh(row.symbol) }}
-                <span v-if="stockZh(row.symbol) !== row.symbol" class="wb-mini" style="margin-left:6px">{{ row.symbol }}</span>
+              <td class="wb-symbol-grid-symbol">
+                {{ displayName(row.symbol) }}
+                <span v-if="displayName(row.symbol) !== row.symbol" class="wb-mini" style="margin-left:6px">{{ row.symbol }}</span>
               </td>
               <td class="num">{{ fmtPct(row.return_pct) }}</td>
               <td class="num">{{ fmtPct(row.max_drawdown) }}</td>

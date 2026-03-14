@@ -163,7 +163,14 @@ def _breakout_champion_config_json() -> dict[str, Any]:
                 "enable_entry_slow_ma_slope": False,
                 "entry_slope_lookback": 5,
             },
-            "ranking": {"momentum_top_pct": 0},
+            "ranking": {
+                "momentum_top_pct": 0,
+                "enable_strength_rank": False,
+                "strength_ma": 120,
+                "strength_top_k_mode": "FILL_TO_MAX",
+                "enable_multifactor_rank": False,
+                "mf_topk": 10,
+            },
         },
         "stock_trend_filter": {
             "enabled": False,
@@ -293,7 +300,14 @@ def _ema_champion_config_json() -> dict[str, Any]:
                 "enable_entry_slow_ma_slope": False,
                 "entry_slope_lookback": 5,
             },
-            "ranking": {"momentum_top_pct": 0},
+            "ranking": {
+                "momentum_top_pct": 0,
+                "enable_strength_rank": False,
+                "strength_ma": 120,
+                "strength_top_k_mode": "FILL_TO_MAX",
+                "enable_multifactor_rank": False,
+                "mf_topk": 10,
+            },
         },
         "stock_trend_filter": {
             "enabled": False,
@@ -423,7 +437,14 @@ def _exp4_all3_config_json() -> dict[str, Any]:
                 "enable_entry_slow_ma_slope": False,
                 "entry_slope_lookback": 5,
             },
-            "ranking": {"momentum_top_pct": 0},
+            "ranking": {
+                "momentum_top_pct": 0,
+                "enable_strength_rank": False,
+                "strength_ma": 120,
+                "strength_top_k_mode": "FILL_TO_MAX",
+                "enable_multifactor_rank": False,
+                "mf_topk": 10,
+            },
         },
         "benchmark_regime": {
             "enabled": True,
@@ -557,7 +578,14 @@ def _c4_champion_config_json() -> dict[str, Any]:
                 "enable_entry_slow_ma_slope": False,
                 "entry_slope_lookback": 5,
             },
-            "ranking": {"momentum_top_pct": 0},
+            "ranking": {
+                "momentum_top_pct": 0,
+                "enable_strength_rank": False,
+                "strength_ma": 120,
+                "strength_top_k_mode": "FILL_TO_MAX",
+                "enable_multifactor_rank": False,
+                "mf_topk": 10,
+            },
         },
         "benchmark_regime": {"enabled": True, "fast_period": 20, "slow_period": 120, "slope_window": 5},
         "stock_trend_filter": {"enabled": False, "short_ma": 20, "long_ma": 60},
@@ -638,7 +666,7 @@ def _builtin_record_needs_refresh(existing: dict[str, Any] | None, desired: dict
 
 
 def _br35_atr10_csi800_10y_config_json() -> dict[str, Any]:
-    """Builtin manual-load config for BR35 + ATR1.0 + HS300_ZZ500 + 10Y."""
+    """Builtin manual-load config for BR35 + ATR1.0 + HS300_ZZ500 + 10Y (PIT dynamic membership)."""
     return {
         "mode": "experiment",
         "initial_capital": 1000000,
@@ -649,6 +677,7 @@ def _br35_atr10_csi800_10y_config_json() -> dict[str, Any]:
             "start": "2016-03-01",
             "end": "2026-03-01",
             "benchmark": "000300.SH",
+            "membership_mode": "PIT_DYNAMIC",
             "symbols": [],
             "limit": 0,
             "price_adj": "hfq",
@@ -698,7 +727,14 @@ def _br35_atr10_csi800_10y_config_json() -> dict[str, Any]:
                 "enable_entry_slow_ma_slope": False,
                 "entry_slope_lookback": 5,
             },
-            "ranking": {"momentum_top_pct": 0},
+            "ranking": {
+                "momentum_top_pct": 0,
+                "enable_strength_rank": False,
+                "strength_ma": 120,
+                "strength_top_k_mode": "FILL_TO_MAX",
+                "enable_multifactor_rank": False,
+                "mf_topk": 10,
+            },
         },
         "benchmark_regime": {"enabled": True, "fast_period": 20, "slow_period": 120, "slope_window": 5},
         "stock_trend_filter": {"enabled": False, "short_ma": 20, "long_ma": 60},
@@ -744,14 +780,14 @@ def _br35_atr10_csi800_10y_config_json() -> dict[str, Any]:
         },
         "flow_script": {
             "script_id": "br35_atr10_hs300_zz500_10y",
-            "description": "BR35+ATR1.0+HS300_ZZ500+10Y manual load preset",
+            "description": "BR35+ATR1.0+HS300_ZZ500+10Y manual load preset (PIT dynamic membership)",
             "recommended_preset": "single",
         },
     }
 
 
 def _clean_baseline_csi800_10y_config_json() -> dict[str, Any]:
-    """Builtin manual-load config for the current clean baseline."""
+    """Builtin manual-load config for the current PIT dynamic clean baseline."""
     return {
         "mode": "experiment",
         "initial_capital": 1000000,
@@ -762,6 +798,7 @@ def _clean_baseline_csi800_10y_config_json() -> dict[str, Any]:
             "start": "2016-03-01",
             "end": "2026-03-01",
             "benchmark": "000300.SH",
+            "membership_mode": "PIT_DYNAMIC",
             "symbols": [],
             "limit": 0,
             "price_adj": "hfq",
@@ -811,7 +848,14 @@ def _clean_baseline_csi800_10y_config_json() -> dict[str, Any]:
                 "enable_entry_slow_ma_slope": False,
                 "entry_slope_lookback": 5,
             },
-            "ranking": {"momentum_top_pct": 0},
+            "ranking": {
+                "momentum_top_pct": 0,
+                "enable_strength_rank": False,
+                "strength_ma": 120,
+                "strength_top_k_mode": "FILL_TO_MAX",
+                "enable_multifactor_rank": False,
+                "mf_topk": 10,
+            },
         },
         "benchmark_regime": {"enabled": True, "fast_period": 20, "slow_period": 120, "slope_window": 5},
         "stock_trend_filter": {"enabled": False, "short_ma": 20, "long_ma": 60},
@@ -857,7 +901,7 @@ def _clean_baseline_csi800_10y_config_json() -> dict[str, Any]:
         },
         "flow_script": {
             "script_id": "clean_baseline_hs300_zz500_10y",
-            "description": "Current clean baseline manual load preset (exp_20260307_225748064_f5ce)",
+            "description": "Current clean baseline manual load preset (PIT dynamic membership, exp_20260309_023907249_aef2)",
             "recommended_preset": "single",
         },
     }
@@ -872,14 +916,14 @@ def _ensure_builtin_champion_configs() -> None:
         (_C4_CHAMPION_CONFIG_ID, "4-7日冠军配置", ["flow_script", "builtin", "champion", "c4", "breakout55", "profit_release"], _c4_champion_config_json),
         (
             _CLEAN_BASELINE_CSI800_10Y_CONFIG_ID,
-            "Clean Baseline + HS300+ZZ500+10Y",
-            ["flow_script", "builtin", "baseline", "clean_data", "breakout55", "atr12", "hs300_zz500", "10y"],
+            "Clean Baseline + HS300+ZZ500+10Y (PIT)",
+            ["flow_script", "builtin", "baseline", "clean_data", "breakout55", "atr12", "hs300_zz500", "10y", "pit_dynamic"],
             _clean_baseline_csi800_10y_config_json,
         ),
         (
             _BR35_ATR10_CSI800_10Y_CONFIG_ID,
-            "BR35+ATR1.0+HS300+ZZ500+10Y",
-            ["builtin", "candidate", "breakout35", "atr10", "hs300_zz500", "10y"],
+            "BR35+ATR1.0+HS300+ZZ500+10Y (PIT)",
+            ["builtin", "candidate", "breakout35", "atr10", "hs300_zz500", "10y", "pit_dynamic"],
             _br35_atr10_csi800_10y_config_json,
         ),
     ]

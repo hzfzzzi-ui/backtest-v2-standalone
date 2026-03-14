@@ -68,6 +68,7 @@ def load_config(path: str | Path) -> tuple[BacktestConfig, str]:
         start=_parse_date(uni_raw["start"]),
         end=_parse_date(uni_raw["end"]),
         benchmark_compare_symbol=str(uni_raw.get("benchmark_compare_symbol", "000001.SH")),
+        allow_low_fidelity_history=bool(uni_raw.get("allow_low_fidelity_history", False)),
     )
 
     # 旧字段静默忽略（向后兼容）

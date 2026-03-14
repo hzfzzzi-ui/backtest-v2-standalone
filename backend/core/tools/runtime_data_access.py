@@ -17,6 +17,7 @@ from backend.core.universe.hs300_csi500 import (
     UniverseFilterConfig,
     apply_universe_filters,
     build_candidates_from_ohlcv,
+    is_turnover_rate_filter_enabled,
 )
 from backend.core.universe.lineage import annotate_universe_meta, resolve_universe_timing
 from backend.core.universe.universe_resolver import resolve_universe_by_mode
@@ -42,6 +43,33 @@ class ValidationUniverseSnapshot:
     resolve_asof: date
     dynamic_all_a_entry: bool
     universe_filters_raw: dict[str, Any]
+
+
+def _to_ts_symbol(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    lower = text.lower()
+    if lower.startswith(("sh", "sz")) and len(lower) == 8:
+        return f"{lower[2:]}.{lower[:2].upper()}"
+    if "." in text:
+        code, exch = text.split(".", 1)
+        exch_u = exch.upper()
+        if len(code) == 6 and exch_u in {"SH", "SZ"}:
+            return f"{code}.{exch_u}"
+    return text.upper()
+
+
+def _ts_to_internal_symbol(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    lower = text.lower()
+    if "." in lower:
+        code, exch = lower.split(".", 1)
+        if len(code) == 6 and exch in {"sh", "sz"}:
+            return f"{exch}{code}"
+    return lower
 
 
 def _default_bt_root() -> Path:
@@ -155,6 +183,8 @@ def resolve_validation_universe(
     exclude_suspended: bool,
     min_list_days: int,
     min_avg_turnover_20d: float,
+    min_avg_turnover_rate_20d: float,
+    turnover_rate_field: str,
     price_min: float,
     price_max: float,
     limit_rule: str,
@@ -188,6 +218,8 @@ def resolve_validation_universe(
         "exclude_suspended": exclude_suspended,
         "min_list_days": min_list_days,
         "min_avg_turnover_20d": min_avg_turnover_20d,
+        "min_avg_turnover_rate_20d": min_avg_turnover_rate_20d,
+        "turnover_rate_field": turnover_rate_field,
         "price_min": price_min,
         "price_max": price_max,
         "limit_rule": limit_rule,
@@ -202,7 +234,11 @@ def resolve_validation_universe(
             end,
             source="stocks",
         )
-        need_lookback = bool(min_list_days > 1 or min_avg_turnover_20d > 0.0)
+        need_lookback = bool(
+            min_list_days > 1
+            or min_avg_turnover_20d > 0.0
+            or min_avg_turnover_rate_20d > 0.0
+        )
         if need_lookback:
             lookback_days = max(260, min_list_days * 3)
             filter_start = (filter_asof - pd.Timedelta(days=lookback_days)).date()
@@ -227,6 +263,7 @@ def resolve_validation_universe(
             filter_asof,
             st_history=st_history_for_filter,
             security_master=security_master,
+            turnover_rate_field=turnover_rate_field,
         )
         filter_cfg = UniverseFilterConfig(
             exclude_st=exclude_st,
@@ -234,9 +271,13 @@ def resolve_validation_universe(
             exclude_suspended=exclude_suspended,
             min_list_days=min_list_days,
             min_avg_turnover_20d=min_avg_turnover_20d,
+            min_avg_turnover_rate_20d=min_avg_turnover_rate_20d,
+            turnover_rate_field=turnover_rate_field,
             exclude_limit_lock=limit_rule in {"forbid", "skip"},
             min_price=price_min,
         )
+        if is_turnover_rate_filter_enabled(filter_cfg) and turnover_rate_field not in history_for_filter.columns:
+            raise ValueError(f"turnover rate filter field unavailable in history frame: {turnover_rate_field}")
         filtered_candidates, _snapshot, excluded_counts = apply_universe_filters(candidates, filter_cfg)
         filtered_symbols = sorted(
             {
@@ -329,7 +370,11 @@ def resolve_trade_st_flags(
     for row in tdf.itertuples(index=False):
         out[f"{row.date.isoformat()}|{str(row.symbol).lower()}"] = "-"
 
-    symbols = sorted(set(tdf["symbol"].astype(str).tolist()))
+    symbol_map = {
+        str(sym).lower(): _to_ts_symbol(sym)
+        for sym in sorted(set(tdf["symbol"].astype(str).tolist()))
+    }
+    ts_symbols = sorted({ts for ts in symbol_map.values() if ts})
     min_d = tdf["date"].min()
     max_d = tdf["date"].max()
     st_periods: dict[str, list[tuple[Any, Any]]] = {}
@@ -345,11 +390,12 @@ def resolve_trade_st_flags(
                   AND start_date <= %s
                   AND (end_date IS NULL OR end_date >= %s)
                 """,
-                (symbols, max_d, min_d),
+                (ts_symbols, max_d, min_d),
             )
             for sym, sdt, edt in cur.fetchall():
-                ss = str(sym).lower()
-                st_periods.setdefault(ss, []).append((sdt, edt))
+                internal = _ts_to_internal_symbol(sym)
+                if internal:
+                    st_periods.setdefault(internal, []).append((sdt, edt))
         conn.close()
     except Exception:
         st_periods = {}
@@ -358,7 +404,6 @@ def resolve_trade_st_flags(
         sym = str(row.symbol).lower()
         d = row.date
         key = f"{d.isoformat()}|{sym}"
-        tagged = False
         for sdt, edt in st_periods.get(sym, []):
             s = pd.to_datetime(sdt, errors="coerce").date() if sdt is not None else None
             e = pd.to_datetime(edt, errors="coerce").date() if edt is not None else None
@@ -366,11 +411,5 @@ def resolve_trade_st_flags(
                 continue
             if d >= s and (e is None or d <= e):
                 out[key] = "PIT_ST"
-                tagged = True
                 break
-        if tagged:
-            continue
-        nm = str(stock_names.get(sym, ""))
-        if nm and _ST_NAME_PAT.search(nm):
-            out[key] = "NAME_ST_FALLBACK"
     return out

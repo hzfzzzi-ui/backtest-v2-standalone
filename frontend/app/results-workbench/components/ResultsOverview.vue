@@ -21,8 +21,8 @@ defineProps({
           <dd>{{ summary.status }}</dd>
         </div>
         <div>
-          <dt>配置来源</dt>
-          <dd>{{ summary.configSource }}</dd>
+          <dt>有效起点</dt>
+          <dd>{{ summary.effectiveExecutionStartDate }}</dd>
         </div>
       </dl>
     </article>
@@ -99,24 +99,70 @@ defineProps({
       </div>
     </article>
 
-    <article class="wb-kpi-card">
-      <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">最大回撤</span>
-        <strong class="wb-kpi-value">{{ summary.maxDrawdown }}</strong>
+    <article class="wb-kpi-card wb-kpi-pair">
+      <div class="wb-kpi-pair-grid">
+        <div>
+          <span class="wb-kpi-sub">最大回撤</span>
+          <strong>{{ summary.maxDrawdown }}</strong>
+        </div>
+        <div>
+          <span class="wb-kpi-sub">最大回撤时长</span>
+          <strong>{{ summary.maxDrawdownDuration }}</strong>
+        </div>
+      </div>
+    </article>
+
+    <article class="wb-kpi-card wb-kpi-pair">
+      <div class="wb-kpi-pair-grid">
+        <div>
+          <span class="wb-kpi-sub">夏普比率</span>
+          <strong>{{ summary.sharpe }}</strong>
+        </div>
+        <div>
+          <span class="wb-kpi-sub">卡玛比率</span>
+          <strong>{{ summary.calmar }}</strong>
+        </div>
       </div>
     </article>
 
     <article class="wb-kpi-card">
       <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">夏普比率</span>
-        <strong class="wb-kpi-value">{{ summary.sharpe }}</strong>
+        <span class="wb-kpi-sub">滚动夏普(126D)</span>
+        <strong class="wb-kpi-value">{{ summary.rollingSharpe }}</strong>
+      </div>
+    </article>
+
+    <article class="wb-kpi-card wb-kpi-pair">
+      <div class="wb-kpi-pair-grid">
+        <div>
+          <span class="wb-kpi-sub">Alpha</span>
+          <strong>{{ summary.alpha }}</strong>
+        </div>
+        <div>
+          <span class="wb-kpi-sub">Beta</span>
+          <strong>{{ summary.beta }}</strong>
+        </div>
       </div>
     </article>
 
     <article class="wb-kpi-card">
       <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">卡玛比率</span>
-        <strong class="wb-kpi-value">{{ summary.calmar }}</strong>
+        <span class="wb-kpi-sub">单笔交易期望</span>
+        <strong class="wb-kpi-value">{{ summary.expectancyPerTrade }}</strong>
+      </div>
+    </article>
+
+    <article class="wb-kpi-card">
+      <div class="wb-kpi-single">
+        <span class="wb-kpi-sub">Profit Factor</span>
+        <strong class="wb-kpi-value">{{ summary.profitFactor }}</strong>
+      </div>
+    </article>
+
+    <article class="wb-kpi-card">
+      <div class="wb-kpi-single">
+        <span class="wb-kpi-sub">Win Rate</span>
+        <strong class="wb-kpi-value">{{ summary.winRate }}</strong>
       </div>
     </article>
 
@@ -136,15 +182,8 @@ defineProps({
 
     <article class="wb-kpi-card">
       <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">TOP10收益率</span>
-        <strong class="wb-kpi-value">{{ summary.top10AvgReturn }}</strong>
-      </div>
-    </article>
-
-    <article class="wb-kpi-card">
-      <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">评级</span>
-        <strong class="wb-kpi-value">{{ summary.tier }}</strong>
+        <span class="wb-kpi-sub">TOP10收益集中度</span>
+        <strong class="wb-kpi-value">{{ summary.top10ProfitConcentration }}</strong>
       </div>
     </article>
   </section>

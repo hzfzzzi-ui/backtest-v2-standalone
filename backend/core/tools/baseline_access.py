@@ -14,7 +14,7 @@ from backend.core.tools.experiment_artifact_access import load_manifest
 
 
 DEFAULT_BASELINE_ID = "baseline_V1"
-DEFAULT_BASELINE_EXP_ID = "exp_20260308_021045840_cde0"
+DEFAULT_BASELINE_EXP_ID = "exp_20260309_023907249_aef2"
 
 
 def baselines_root() -> Path:
@@ -123,6 +123,7 @@ def _record_meta_view(record: dict[str, Any]) -> dict[str, Any]:
         "owner": str(record.get("owner") or "manual"),
         "locked": bool(record.get("locked", True)),
         "universe_mode": str(cfg.get("universe_mode") or ""),
+        "membership_mode": str(universe.get("membership_mode") or ""),
         "start_year": _extract_year(universe.get("start")),
         "end_year": _extract_year(universe.get("end")),
         "linked_exp_id": str(record.get("linked_exp_id") or ""),
@@ -224,23 +225,26 @@ def write_baseline_index() -> Path:
 
 
 def ensure_default_baseline_v1() -> dict[str, Any] | None:
-    existing = load_baseline_record(DEFAULT_BASELINE_ID)
-    if existing:
-        return existing
     cfg = _extract_experiment_workbench_config(DEFAULT_BASELINE_EXP_ID)
+    existing = load_baseline_record(DEFAULT_BASELINE_ID)
     if not isinstance(cfg, dict):
-        return None
-    return write_baseline_record(
-        {
-            "baseline_id": DEFAULT_BASELINE_ID,
-            "name": DEFAULT_BASELINE_ID,
-            "display_name": DEFAULT_BASELINE_ID,
-            "owner": "manual",
-            "locked": True,
-            "linked_exp_id": DEFAULT_BASELINE_EXP_ID,
-            "config_json": cfg,
-        }
-    )
+        return existing
+    desired_payload = {
+        "baseline_id": DEFAULT_BASELINE_ID,
+        "name": DEFAULT_BASELINE_ID,
+        "display_name": DEFAULT_BASELINE_ID,
+        "owner": "manual",
+        "locked": True,
+        "linked_exp_id": DEFAULT_BASELINE_EXP_ID,
+        "config_json": cfg,
+    }
+    desired = normalize_baseline_record(desired_payload, baseline_id_hint=DEFAULT_BASELINE_ID)
+    if existing:
+        linked_same = str(existing.get("linked_exp_id") or "") == str(desired.get("linked_exp_id") or "")
+        hash_same = str(existing.get("config_hash") or "") == str(desired.get("config_hash") or "")
+        if linked_same and hash_same:
+            return existing
+    return write_baseline_record(desired_payload)
 
 
 def baseline_meta_view(baseline_id: str) -> dict[str, Any] | None:

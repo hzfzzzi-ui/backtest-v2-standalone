@@ -162,31 +162,6 @@ def read_text_artifact(
     return path.read_text(encoding="utf-8-sig")
 
 
-def ensure_optional_report(
-    *,
-    exp_id: str | None = None,
-    results_dir: str | Path | None = None,
-    generate_if_missing: bool = False,
-) -> Path | None:
-    resolved_dir, manifest = open_experiment_handle(exp_id=exp_id, results_dir=results_dir)
-    report_path = optional_artifact_path(resolved_dir, manifest, "report")
-    if report_path and report_path.exists():
-        return report_path
-
-    fallback = _safe_child_path(resolved_dir, "report.html")
-    if fallback and fallback.exists():
-        return fallback
-    if not generate_if_missing:
-        return None
-
-    from backend.core.report.report_generator import generate_report
-
-    generated = Path(generate_report(str(resolved_dir))).resolve()
-    if generated.exists():
-        return generated
-    return None
-
-
 def load_saved_config_record_internal(config_id: str | None) -> dict[str, Any] | None:
     text = str(config_id or "").strip()
     if not text:
@@ -197,13 +172,9 @@ def load_saved_config_record_internal(config_id: str | None) -> dict[str, Any] |
 
 
 def run_internal_experiment_sync(request_payload: dict[str, Any]) -> dict[str, Any]:
-    from backend.api.endpoints._experiment_runner_api import (
-        BacktestV2ExperimentRequest,
-        _run_backtest_v2_experiment_sync,
-    )
+    from backend.core.services.experiment_runtime_service import run_experiment_request
 
-    body = BacktestV2ExperimentRequest(**request_payload)
-    result = _run_backtest_v2_experiment_sync(body)
+    result = run_experiment_request(dict(request_payload or {}))
     return result if isinstance(result, dict) else {}
 
 
@@ -215,9 +186,9 @@ def stabilize_internal_experiment_result(
     overrides: dict[str, Any],
     run_profile_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from backend.api.endpoints.backtest_v2_artifacts import stabilize_experiment_result
+    from backend.core.services.experiment_artifact_service import stabilize_experiment_output
 
-    stabilized = stabilize_experiment_result(
+    stabilized = stabilize_experiment_output(
         bt_root=bt_root,
         result=result,
         base_cfg=base_cfg,

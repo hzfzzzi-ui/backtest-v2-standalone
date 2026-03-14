@@ -1,4 +1,4 @@
-﻿/* 鈹€鈹€ artifacts.js 鈹€鈹€ Artifact loading, normalization, and rendering 鈹€鈹€ */
+/* 鈹€鈹€ artifacts.js 鈹€鈹€ Artifact loading, normalization, and rendering 鈹€鈹€ */
 /* Globals used: state, byId, esc, num, pct, fmtInt, fmtMoney, setTextById, setHtmlById,
    reasonZh,
    apiRequestJson, setStatusItems, addLog,
@@ -106,22 +106,57 @@ function normalizeSymbolPerformanceRows(rows) {
     if (!t) return false;
     return ['1', 'true', 'yes', 'y'].includes(t);
   };
+  const deriveReturnPct = (row) => {
+    const buyNotional = Number(row?.buy_notional);
+    const rawReturnPct = Number(row?.return_pct);
+    const netPnl = Number(row?.net_pnl);
+    const realizedPnl = Number(row?.realized_pnl);
+    const unrealizedApproxPnl = Number(row?.unrealized_approx_pnl);
+    const derivedPnl = Number.isFinite(netPnl)
+      ? netPnl
+      : ((Number.isFinite(realizedPnl) ? realizedPnl : 0) + (Number.isFinite(unrealizedApproxPnl) ? unrealizedApproxPnl : 0));
+    if (Number.isFinite(buyNotional) && buyNotional > 0 && Number.isFinite(derivedPnl)) {
+      return derivedPnl / buyNotional;
+    }
+    return rawReturnPct;
+  };
   (rows || []).forEach((r) => {
     const symbol = String(r.symbol ?? '').trim().toLowerCase();
     if (!symbol) return;
-    const returnPct = Number(r.return_pct);
+    const returnPct = Number(deriveReturnPct(r));
     const maxDrawdown = Number(r.max_drawdown);
     const trades = Number(r.trades);
+    const netPnl = Number(r.net_pnl);
+    const realizedPnl = Number(r.realized_pnl);
+    const buyNotional = Number(r.buy_notional);
     out.push({
       symbol,
       return_pct: Number.isFinite(returnPct) ? returnPct : 0,
       max_drawdown: Number.isFinite(maxDrawdown) ? maxDrawdown : 0,
       trades: Number.isFinite(trades) ? trades : 0,
+      net_pnl: Number.isFinite(netPnl) ? netPnl : 0,
+      realized_pnl: Number.isFinite(realizedPnl) ? realizedPnl : 0,
+      buy_notional: Number.isFinite(buyNotional) ? buyNotional : 0,
       unrealized_approx_pnl: Number.isFinite(Number(r.unrealized_approx_pnl)) ? Number(r.unrealized_approx_pnl) : 0,
       valuation_fallback_used: toBool(r.valuation_fallback_used),
     });
   });
   return out;
+}
+
+function deriveLegacySymbolReturnPct(row) {
+  const buyNotional = Number(row?.buy_notional);
+  const rawReturnPct = Number(row?.return_pct);
+  const netPnl = Number(row?.net_pnl);
+  const realizedPnl = Number(row?.realized_pnl);
+  const unrealizedApproxPnl = Number(row?.unrealized_approx_pnl);
+  const derivedPnl = Number.isFinite(netPnl)
+    ? netPnl
+    : ((Number.isFinite(realizedPnl) ? realizedPnl : 0) + (Number.isFinite(unrealizedApproxPnl) ? unrealizedApproxPnl : 0));
+  if (Number.isFinite(buyNotional) && buyNotional > 0 && Number.isFinite(derivedPnl)) {
+    return derivedPnl / buyNotional;
+  }
+  return rawReturnPct;
 }
 
 function getFilteredSortedSymbolRows() {
@@ -140,7 +175,7 @@ function getFilteredSortedSymbolRows() {
   } else if (sorter === 'trades_desc') {
     filtered.sort((a, b) => Number(b.trades || 0) - Number(a.trades || 0));
   } else {
-    filtered.sort((a, b) => Number(b.return_pct || 0) - Number(a.return_pct || 0));
+    filtered.sort((a, b) => Number(deriveLegacySymbolReturnPct(b) || 0) - Number(deriveLegacySymbolReturnPct(a) || 0));
   }
   return filtered;
 }
@@ -259,19 +294,21 @@ async function loadActiveArtifacts() {
   renderLoadingSkeleton();
   await ensureManifestForActiveResult(result);
   const gf = result.artifacts || {};
-  const [perfR, navR, funnelR, reasonR, runMetaR, configR, tradesR, dailyR, symbolPerfR] = await Promise.all([
+  const [perfR, navR, funnelR, reasonR, runMetaR, configR, auditR, tradesR, dailyR, symbolPerfR, stockNamesR] = await Promise.all([
     readArtifactWithStatus(resultsDir, gf.perf, 'perf', expId),
     readArtifactWithStatus(resultsDir, gf.nav, 'nav', expId),
     readArtifactWithStatus(resultsDir, gf.funnel, 'funnel', expId),
     readArtifactWithStatus(resultsDir, gf.reason_codes || 'reason_codes.csv', 'reason_codes', expId),
     readArtifactWithStatus(resultsDir, gf.run_meta, 'run_meta', expId),
     readArtifactWithStatus(resultsDir, gf.config, 'config', expId),
+    gf.audit ? readArtifactWithStatus(resultsDir, gf.audit, 'audit', expId) : Promise.resolve({ ok: false, key: 'audit', missing: true }),
     gf.trades ? readArtifactWithStatus(resultsDir, gf.trades, 'trades', expId) : Promise.resolve({ ok: false, key: 'trades', missing: true }),
     gf.daily ? readArtifactWithStatus(resultsDir, gf.daily, 'daily', expId) : Promise.resolve({ ok: false, key: 'daily', missing: true }),
     readArtifactWithFallback(resultsDir, gf.symbol_performance || 'symbol_performance.csv', 'symbol_performance', ['symbol_performance.json'], expId),
+    readArtifactWithStatus(resultsDir, gf.stock_names || 'stock_names.json', 'stock_names', expId),
   ]);
-  const allR = [perfR, navR, funnelR, reasonR, runMetaR, configR, tradesR, dailyR, symbolPerfR];
-  const optionalKeys = new Set(['trades', 'daily', 'symbol_performance']);
+  const allR = [perfR, navR, funnelR, reasonR, runMetaR, configR, tradesR, dailyR, symbolPerfR, auditR, stockNamesR];
+  const optionalKeys = new Set(['trades', 'daily', 'symbol_performance', 'audit', 'stock_names']);
   const missing = allR.filter((x) => !x.ok && !optionalKeys.has(String(x.key || ''))).map((x) => x.key);
   const errors = allR
     .filter((x) => !x.ok && x.error && !optionalKeys.has(String(x.key || '')))
@@ -314,11 +351,12 @@ async function loadActiveArtifacts() {
     funnelRows: funnelR.ok ? funnelR.payload?.rows || [] : [],
     reasonRows: reasonR.ok ? reasonR.payload?.rows || [] : [],
     config: configR.ok ? configR.payload?.data || null : null,
+    audit: auditR.ok ? auditR.payload?.data || {} : {},
     tradesRows,
     symbolPerformanceRows: symbolPerfRows,
     dailyRows: dailyR.ok ? dailyR.payload?.rows || [] : [],
     marketStates: _parseMarketStates(dailyR.ok ? dailyR.payload?.rows || [] : []),
-    stockNames: {},
+    stockNames: stockNamesR.ok ? stockNamesR.payload?.data || {} : {},
     missing,
     errors,
   };
@@ -327,24 +365,6 @@ async function loadActiveArtifacts() {
   state.symbol_series_loading = false;
   const hasSelected = state.selected_symbol && symbolPerfRows.some((x) => x.symbol === state.selected_symbol);
   if (!hasSelected) state.selected_symbol = symbolPerfRows[0]?.symbol || '';
-
-  // Fetch Chinese stock names for trade symbols
-  if (tradesRows.length) {
-    const symbols = [...new Set(tradesRows.map((r) => String(r.symbol || '')).filter(Boolean))];
-    if (symbols.length) {
-      try {
-        const resp = await fetch('/api/backtest_v2/stock_names', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbols }),
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          state.active_artifacts.stockNames = data.names || {};
-        }
-      } catch (_) { /* stock names are optional */ }
-    }
-  }
 
   // Sync config_draft with loaded experiment config (use original frontend format)
   const loadedConfig = state.active_artifacts?.config;
@@ -385,10 +405,10 @@ function renderSymbolPerformancePanel() {
     return;
   }
   // Legacy fallback only: symbol ranking is rendered by the Vue workbench when mounted.
-  const body = byId('wbSymbolPerfBody');
+  const wrap = byId('wbSymbolPerfWrap');
   const hint = byId('wbSymbolPerfHint');
   const meta = byId('wbAccSymbolPanelMeta');
-  if (!body) return;
+  if (!wrap) return;
   const allRows = (state.active_artifacts || {}).symbolPerformanceRows || [];
   if (hint) {
     const fb = allRows.filter((r) => r.valuation_fallback_used).length;
@@ -402,24 +422,33 @@ function renderSymbolPerformancePanel() {
     else if (state.chart_mode === 'symbol' && state.selected_symbol) meta.textContent = '默认收起 | ' + String(state.selected_symbol).toUpperCase() + ' | ' + fmtInt(rows.length) + ' 只';
     else meta.textContent = '默认收起 | ' + fmtInt(rows.length) + ' 只';
   }
-  if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="4" class="wb-symbol-empty">鏃犱釜鑲＄哗鏁堟暟鎹?/td></tr>';
-    return;
-  }
-  body.innerHTML = rows.map((r) => {
+  const rowsHtml = !rows.length
+    ? '<div class="wb-symbol-grid-empty">暂无个股绩效数据</div>'
+    : rows.map((r) => {
     const active = String(state.selected_symbol || '') === String(r.symbol);
     const displayName = stockZh(r.symbol);
+    const returnPct = deriveLegacySymbolReturnPct(r);
     const symbolCell = displayName !== r.symbol
       ? (esc(displayName) + '<span class="wb-mini" style="margin-left:6px">' + esc(r.symbol) + '</span>')
       : esc(r.symbol);
-    return '<tr class="wb-symbol-row' + (active ? ' active' : '') + '" data-symbol="' + esc(r.symbol) + '">' +
-      '<td>' + symbolCell + '</td>' +
-      '<td class="num">' + pct(r.return_pct) + '</td>' +
-      '<td class="num">' + pct(r.max_drawdown) + '</td>' +
-      '<td class="num">' + fmtInt(r.trades) + '</td>' +
-      '</tr>';
+    return '<div class="wb-symbol-grid-row' + (active ? ' active' : '') + '" data-symbol="' + esc(r.symbol) + '">' +
+      '<div class="wb-symbol-grid-symbol">' + symbolCell + '</div>' +
+      '<div class="num">' + pct(returnPct) + '</div>' +
+      '<div class="num">' + pct(r.max_drawdown) + '</div>' +
+      '<div class="num">' + fmtInt(r.trades) + '</div>' +
+      '</div>';
   }).join('');
-  body.querySelectorAll('tr[data-symbol]').forEach((tr) => {
+  wrap.innerHTML = ''
+    + '<div class="wb-symbol-grid">'
+    + '<div class="wb-symbol-grid-head">'
+    + '<div>标的</div>'
+    + '<div class="num">收益</div>'
+    + '<div class="num">回撤</div>'
+    + '<div class="num">交易数</div>'
+    + '</div>'
+    + rowsHtml
+    + '</div>';
+  wrap.querySelectorAll('[data-symbol]').forEach((tr) => {
     tr.addEventListener('click', () => {
       const sym = String(tr.getAttribute('data-symbol') || '').toLowerCase();
       if (!sym) return;
@@ -513,24 +542,24 @@ function visibleTradesRows() {
 function tradesTableHtml(rows, totalRows) {
   const symbolMode = state.chart_mode === 'symbol' && state.selected_symbol;
   const title = symbolMode
-    ? ('交易明细 (' + fmtInt(rows.length) + ' 条 / ' + esc(String(state.selected_symbol || '').toUpperCase()) + ')')
-    : ('交易明细 (' + fmtInt(rows.length) + ' 条)');
+    ? ('???? (' + fmtInt(rows.length) + ' ? / ' + esc(String(state.selected_symbol || '').toUpperCase()) + ')')
+    : ('???? (' + fmtInt(rows.length) + ' ?)');
   if (!rows.length) {
     const emptyText = totalRows
-      ? '当前个股视图下没有交易明细'
-      : '运行后显示交易明细';
+      ? '?????????????'
+      : '?????????';
     return '<div class="wb-mini">' + emptyText + '</div>';
   }
-  const labels = ['日期', '标的', '方向', '成交价', '数量', '金额', '佣金', '印花税', '净额', '原因'];
-  const aligns = ['', '', '', 'num', 'num', 'num', 'num', 'num', 'num', ''];
+  const labels = ['??', '??', '??', '???', '??', '??', '??', '???', '??', '??', 'Entry Alpha', 'Sleeve', 'Entry Reason', 'Exit Owner'];
+  const aligns = ['', '', '', 'num', 'num', 'num', 'num', 'num', 'num', '', '', '', '', ''];
   const header = '<tr>' + labels.map((label, idx) => {
     return '<th' + (aligns[idx] ? ' class="num"' : '') + '>' + esc(label) + '</th>';
   }).join('') + '</tr>';
   const body = rows.map((r) => {
     const isBuy = String(r.side || '').toUpperCase() === 'BUY';
     const sideBadge = isBuy
-      ? '<span class="wb-badge-buy">买入</span>'
-      : '<span class="wb-badge-sell">卖出</span>';
+      ? '<span class="wb-badge-buy">??</span>'
+      : '<span class="wb-badge-sell">??</span>';
     const sym = String(r.symbol ?? '');
     const displayName = stockZh(sym);
     const symbolCell = displayName !== sym ? ('<span title="' + esc(sym) + '">' + esc(displayName) + '</span>') : esc(sym);
@@ -549,6 +578,10 @@ function tradesTableHtml(rows, totalRows) {
       + '<td class="num">' + stax + '</td>'
       + '<td class="num">' + netAmt + '</td>'
       + '<td>' + esc(reasonZh(r.reason_code)) + '</td>'
+      + '<td>' + esc(String(r.entry_alpha_id || '-')) + '</td>'
+      + '<td>' + esc(String(r.entry_sleeve_id || '-')) + '</td>'
+      + '<td>' + esc(String(r.entry_reason_code || '-')) + '</td>'
+      + '<td>' + esc(String(r.exit_owner || '-')) + '</td>'
       + '</tr>';
   }).join('');
   return '<div class="wb-mini" style="margin-bottom:4px">' + title + '</div>'
@@ -952,13 +985,9 @@ renderExplainPanel = function renderExplainPanelFinal() {
   // Legacy fallback only: unified stage funnel is rendered by the Vue workbench when mounted.
   const row = state.active_result || {};
   const art = state.active_artifacts || {};
-  const sellSection = byId('wbAccSellFunnel');
-  if (sellSection) sellSection.hidden = true;
   if (!row.exp_id && !Object.keys(art || {}).length) {
     setHtmlById('wbBuyFunnel', '<div class="wb-mini">运行实验后显示统一 9-stage 漏斗。</div>');
-    setHtmlById('wbSellFunnel', '');
     setTextById('wbAccBuyFunnelMeta', '等待结果');
-    setTextById('wbAccSellFunnelMeta', '');
     setTextById('wbAccLogsMeta', '状态输出');
     return;
   }
@@ -969,11 +998,9 @@ renderExplainPanel = function renderExplainPanelFinal() {
   const reasonBuckets = reasonByPrefix(art.reasonRows || []);
   const exitRows = reasonBuckets.exit || [];
   setHtmlById('wbBuyFunnel', renderUnifiedStageFunnel(buyStageRows, counters, exitRows));
-  setHtmlById('wbSellFunnel', '');
   setTextById('wbAccBuyFunnelMeta', buyStageRows.length
     ? ('买入 ' + fmtInt(buyOrders) + ' 笔 | 卖出 ' + fmtInt(sellOrders) + ' 笔 | stage=' + fmtInt(buyStageRows.length))
     : '等待后端 stage counters');
-  setTextById('wbAccSellFunnelMeta', '');
   setTextById('wbAccLogsMeta', row.exp_id ? (String(row.exp_id) + ' | ' + String(row.status || '-')) : '状态输出');
 };
 

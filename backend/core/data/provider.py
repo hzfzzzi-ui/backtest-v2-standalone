@@ -9,7 +9,7 @@ import pandas as pd
 class DataProvider(ABC):
     @abstractmethod
     def load_ohlcv_daily(self, symbols: list[str], start: date, end: date, source: str) -> pd.DataFrame:
-        """Return canonical columns: date,symbol,open,high,low,close,volume,amount."""
+        """Return canonical OHLCV columns plus optional extras on the same date/symbol row."""
 
     @abstractmethod
     def load_trading_calendar_cn(self, start: date, end: date) -> pd.DatetimeIndex:
@@ -52,10 +52,11 @@ class DataProvider(ABC):
     def load_industry_history(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
         """加载股票→行业历史映射（PIT-safe 区间记录）。
 
-        返回至少包含 ts_code/start_date/end_date/industry_l1 的 DataFrame。
+        返回至少包含 ts_code/start_date/end_date/industry_l1 的 DataFrame，
+        如可用应同时返回 standard / industry_l2。
         默认返回空 DataFrame。
         """
-        return pd.DataFrame(columns=["ts_code", "start_date", "end_date", "industry_l1"])
+        return pd.DataFrame(columns=["ts_code", "start_date", "end_date", "standard", "industry_l1", "industry_l2"])
 
     def load_security_master(self, symbols: list[str]) -> pd.DataFrame:
         """Return security master rows with at least symbol/list_date/delist_date.
@@ -63,6 +64,20 @@ class DataProvider(ABC):
         Default implementation returns empty DataFrame when source is unavailable.
         """
         return pd.DataFrame(columns=["symbol", "list_date", "delist_date"])
+
+    def load_index_constituent_history(
+        self,
+        index_code: str,
+        start: date,
+        end: date,
+    ) -> pd.DataFrame:
+        """Load PIT constituent ranges for an index.
+
+        Returns columns: index_code, symbol, start_date, end_date and optional
+        source/event_type/rebalance_calendar_* lineage metadata.
+        Default implementation returns an empty DataFrame.
+        """
+        return pd.DataFrame(columns=["index_code", "symbol", "start_date", "end_date"])
 
     @property
     @abstractmethod

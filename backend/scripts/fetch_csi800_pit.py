@@ -28,6 +28,7 @@ CHANGES_CSV = _cache_dir / "csi800_pit_changes.csv"
 
 START_YEAR = 2007  # CSI800 launched 2007-01-15
 END_YEAR = 2026
+CSI800_LAUNCH_DATE = datetime.date(2007, 1, 15)
 
 
 # ---------------------------------------------------------------------------
@@ -47,10 +48,16 @@ def bs_to_local(bs_code: str) -> str:
 def build_sample_dates() -> list[datetime.date]:
     """每月 1 号作为采样日。"""
     today = datetime.date.today()
-    dates = []
+    dates: list[datetime.date] = []
+    if CSI800_LAUNCH_DATE <= today:
+        # Use the actual launch date as the first snapshot.
+        # Sampling 2007-01-01 leaves 2007-01-15 to 2007-01-31 at only 300 names.
+        dates.append(CSI800_LAUNCH_DATE)
     for year in range(START_YEAR, END_YEAR + 1):
         for month in range(1, 13):
             d = datetime.date(year, month, 1)
+            if d < CSI800_LAUNCH_DATE:
+                continue
             if d <= today:
                 dates.append(d)
     return dates
@@ -103,6 +110,26 @@ def fetch_snapshots(dates: list[datetime.date]) -> list[tuple[str, list[str]]]:
 
     bs.logout()
     return results
+
+
+def validate_snapshots(snapshots: list[tuple[str, list[str]]]) -> None:
+    """Fail fast when the upstream source clearly returns broken monthly snapshots."""
+    launch_seen = False
+    broken_dates: list[str] = []
+    for date_str, stocks in snapshots:
+        count = len(stocks)
+        if date_str == CSI800_LAUNCH_DATE.isoformat():
+            launch_seen = True
+            if count < 700:
+                raise RuntimeError(f"launch snapshot {date_str} only has {count} names")
+            continue
+        if date_str >= "2007-02-01" and count < 700:
+            broken_dates.append(f"{date_str}:{count}")
+    if not launch_seen:
+        raise RuntimeError(f"missing launch snapshot {CSI800_LAUNCH_DATE.isoformat()}")
+    if broken_dates:
+        sample = ", ".join(broken_dates[:5])
+        raise RuntimeError(f"upstream snapshot quality check failed after launch: {sample}")
 
 
 def save_snapshots(snapshots: list[tuple[str, list[str]]]) -> None:
@@ -223,6 +250,9 @@ def main() -> None:
 
     # Step 1: 拉取快照
     snapshots = fetch_snapshots(dates)
+
+    # Guard against silently overwriting a valid local cache with broken upstream output.
+    validate_snapshots(snapshots)
 
     # Step 2: 保存快照
     save_snapshots(snapshots)

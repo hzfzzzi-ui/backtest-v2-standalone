@@ -26,6 +26,7 @@ class UniverseConfig:
     start: date
     end: date
     benchmark_compare_symbol: str = "000001.SH"
+    allow_low_fidelity_history: bool = False
 
 
 @dataclass(slots=True)
@@ -73,6 +74,23 @@ class SizingConfig:
     weight_mode: str = "equal"
     # Minimum position count for sizing denominator (prevents over-concentration)
     min_positions: int = 10
+    # Light rank-based tilt on top of equal sizing. Uses existing mf_rank ordering.
+    tilt_strength: float = 0.0
+    tilt_top_n: int = 3
+    tilt_bottom_n: int = 2
+    # Score-weighted sizing reuses current candidate score and normalizes scales
+    # across planned selections so average exposure remains near baseline.
+    score_weight_min_scale: float = 0.75
+    score_weight_max_scale: float = 1.25
+    # Candidate planner remains baseline-ranked unless explicitly enabled.
+    candidate_plan_mode: str = "ranked"
+    cash_aware_search_top_n: int = 12
+    # Research-only optional rotation replace. Default off preserves baseline.
+    rotation_replace_enabled: bool = False
+    rotation_replace_only_strong_risk_on: bool = True
+    rotation_replace_max_swaps_per_day: int = 1
+    rotation_replace_candidate_top_n: int = 3
+    rotation_replace_min_score_gap: float = 0.15
 
 
 @dataclass(slots=True)
@@ -118,6 +136,18 @@ class ExitConfig:
     atr_stop_k: float = 2.0
     enable_atr_trail: bool = False
     atr_trail_k: float = 3.0
+    trailing_activate_profit_pct: float = 0.0
+    segmented_trend_exit_mode: str = "off"
+    segmented_mid_profit_pct: float = 0.0
+    segmented_high_profit_pct: float = 0.0
+    segmented_high_trail_k: float = 3.0
+    enable_pre_profit_breakout_failure_exit: bool = False
+    pre_profit_breakout_failure_max_bars: int = 0
+    pre_profit_breakout_failure_atr_buffer_k: float = 0.0
+    enable_profit_decay_exit: bool = False
+    profit_decay_exit_profit_pct: float = 0.15
+    profit_decay_exit_min_hold_bars: int = 10
+    profit_decay_exit_residual_score_threshold: float = 0.35
     enable_ma20_exit: bool = False
     enable_low10_exit: bool = False
 

@@ -310,3 +310,15 @@ KPI 面板 SHALL 正确显示所有 8 个 KPI 字段的计算值。
 - **THEN** 卡尔马比率 SHALL 显示数值（非 0.00 除非实际为 0）
 - **THEN** Top10集中度 SHALL 显示百分比（非 —）
 - **THEN** 评级 SHALL 显示 T1/T2/T3/T4（非 —）
+
+### Requirement: 报告导出必须使用 Markdown
+工作台 SHALL 提供 Markdown 报告导出，不再打开或导出后端 `report.html`。
+
+#### Scenario: 导出已有实验报告
+- **WHEN** 用户点击导出报告
+- **THEN** 系统 SHALL 导出当前实验的 Markdown 报告
+- **THEN** 系统 SHALL NOT 打开 `report.html`
+
+#### Scenario: 无实验结果时导出
+- **WHEN** 用户点击导出报告但当前没有可用实验结果
+- **THEN** 系统 SHALL 提示用户先运行或加载实验

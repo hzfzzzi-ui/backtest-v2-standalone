@@ -16,12 +16,20 @@ class BreakoutTrendStrategy(Strategy):
     enable_dual_breakout: bool = False
     breakout_window_short: int = 20
     breakout_window_long: int = 55
+    dual_breakout_mode: str = "or"
+    dual_breakout_gate_ma_window: int = 120
+    dual_breakout_gate_slope_lookback: int = 10
     breakout_entry_buffer_pct: float = 0.0
     # Entry quality controls
-    # none | close_strength | volume_confirm | volatility_confirm
+    # none | close_strength | volume_confirm | volume_ratio_confirm | volatility_confirm
     entry_confirm_mode: str = "none"
     # none | t1_confirm | t2_confirm | pullback_confirm
     entry_delay_mode: str = "none"
+    enable_entry_gap_guard: bool = False
+    entry_gap_guard_pct: float = 0.04
+    enable_entry_above_slow_ma: bool = False
+    enable_entry_slow_ma_slope: bool = False
+    entry_slope_lookback: int = 5
     # Portfolio mode: equal_10 | equal_8 | equal_6 | profit_release
     portfolio_mode: str = "equal_10"
     order_size: int = 1000
@@ -38,6 +46,18 @@ class BreakoutTrendStrategy(Strategy):
     atr_stop_k: float = 2.0
     enable_atr_trail: bool = False
     atr_trail_k: float = 3.0
+    trailing_activate_profit_pct: float = 0.0
+    segmented_trend_exit_mode: str = "off"
+    segmented_mid_profit_pct: float = 0.0
+    segmented_high_profit_pct: float = 0.0
+    segmented_high_trail_k: float = 3.0
+    enable_pre_profit_breakout_failure_exit: bool = False
+    pre_profit_breakout_failure_max_bars: int = 0
+    pre_profit_breakout_failure_atr_buffer_k: float = 0.0
+    enable_profit_decay_exit: bool = False
+    profit_decay_exit_profit_pct: float = 0.15
+    profit_decay_exit_min_hold_bars: int = 10
+    profit_decay_exit_residual_score_threshold: float = 0.35
     # 止盈 / 固定止损
     enable_take_profit: bool = False
     take_profit_mode: str = "pct"
@@ -54,6 +74,12 @@ class BreakoutTrendStrategy(Strategy):
     # 趋势退出
     enable_ma20_exit: bool = False
     enable_low10_exit: bool = False
+    risk_off_exit_mode: str = "risk_on_off"
+    risk_off_exit_partial_pct: float = 1.0
+    risk_off_exit_partial_mode: str = "all_states"
+    risk_off_exit_partial_only_if_profitable: bool = False
+    risk_off_exit_trans_down_max_positions: int = 0
+    risk_off_exit_trans_down_min_residual_score: float = 0.0
     # Regime 退出
     enable_risk_off_exit: bool = False
     # 动量排名选股
@@ -75,7 +101,27 @@ class BreakoutTrendStrategy(Strategy):
     # Unified ranking
     enable_residual_ranking: bool = False
     residual_window: int = 60
+    residual_benchmark_weight: float = 0.5
+    residual_industry_weight: float = 0.5
+    industry_relative_mode: str = "sector_proxy"
+    industry_relative_regime_mode: str = "off"
+    residual_weight_regime_mode: str = "off"
+    residual_benchmark_weight_fallback: float = -1.0
+    residual_industry_weight_fallback: float = -1.0
+    ranking_mode: str = "none"
+    leadership_route_bucket_count: int = 3
+    breakout_quality_gate_min_score: float = 0.55
+    breakout_quality_margin_cap_pct: float = 0.08
+    breakout_quality_fade_cap_pct: float = 0.035
+    breakout_quality_open_gap_cap_pct: float = 0.04
+    residual_window_regime_mode: str = "off"
+    residual_window_fallback: int = 60
+    residual_window_regime_fast_ma: int = 120
+    residual_window_regime_slow_ma: int = 200
     source_aware_residual_mode: str = "off"
+    residual_refine_mode: str = "off"
+    residual_refine_weight: float = 0.0
+    industry_second_stage_min_industry_score: float = 0.85
     enable_sector_quality_ranking: bool = False
     sector_strength_window_short: int = 20
     sector_strength_window_long: int = 60

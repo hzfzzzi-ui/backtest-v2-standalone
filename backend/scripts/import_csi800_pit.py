@@ -85,7 +85,7 @@ def import_changes(conn, csv_path: str) -> int:
                 row["symbol"],
                 row["in_date"],
                 out_date,
-                "jqdatasdk_pit_snapshot",
+                "baostock_pit_snapshot",
             ))
 
     with conn.cursor() as cur:

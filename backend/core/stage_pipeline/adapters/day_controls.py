@@ -12,6 +12,8 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
     market_state = ""
     trade_mode = ""
     benchmark_regime_on = True
+    breadth_score = float("nan")
+    breadth_max_positions = int(runtime.request.max_positions)
     if runtime.route_id == "provider_breakout_runtime":
         dynamic_base_positions = int(runtime.request.max_positions)
         if runtime._portfolio_mode == "equal_8":
@@ -55,6 +57,13 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
             market_state = "BULL"
             trade_mode = "TREND_MAIN"
         benchmark_regime_on = bool(runtime._br_gate_arr[day_index]) if runtime._br_enabled else True
+        if bool(getattr(runtime, "_breadth_enabled", False)):
+            try:
+                breadth_max_positions = int(runtime._breadth_maxpos_arr[day_index])
+                breadth_score = float(runtime._breadth_score_arr[day_index])
+                effective_max_positions = min(int(effective_max_positions), max(0, int(breadth_max_positions)))
+            except Exception:
+                breadth_max_positions = int(effective_max_positions)
         risk_on_today = bool(getattr(runtime.provider, "_risk_on", np.ones(len(runtime.request.data_bundle.trading_days), dtype=bool))[day_index])
     else:
         if runtime._dd_enabled and abs(drawdown) >= runtime._dd_reduce_pct:
@@ -87,4 +96,6 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
         "trade_mode": trade_mode,
         "benchmark_regime_on": bool(benchmark_regime_on),
         "risk_on_today": bool(risk_on_today),
+        "breadth_score": float(breadth_score) if breadth_score == breadth_score else None,
+        "breadth_max_positions": int(breadth_max_positions),
     }

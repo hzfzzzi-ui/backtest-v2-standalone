@@ -255,10 +255,14 @@ def _summarize_run_meta_universe(meta: dict[str, Any]) -> dict[str, Any]:
 
 def _summarize_manifest(manifest: dict[str, Any], ignore_paths: list[str]) -> dict[str, Any]:
     cleaned = _strip_paths(manifest, ignore_paths)
+    artifacts = cleaned.get("artifacts") if isinstance(cleaned.get("artifacts"), dict) else {}
+    if isinstance(artifacts, dict):
+        artifacts = dict(artifacts)
+        artifacts.pop("report", None)
     return {
         "status": cleaned.get("status"),
         "schema_version": cleaned.get("schema_version"),
-        "artifacts": cleaned.get("artifacts") if isinstance(cleaned.get("artifacts"), dict) else {},
+        "artifacts": artifacts,
         "config_snapshots": cleaned.get("config_snapshots") if isinstance(cleaned.get("config_snapshots"), dict) else {},
         "baseline_compare_status": cleaned.get("baseline_compare_status"),
         "metrics": cleaned.get("metrics") if isinstance(cleaned.get("metrics"), dict) else {},
@@ -359,10 +363,6 @@ def _bundle_from_dir(exp_dir: Path, contract: dict[str, Any]) -> dict[str, Any]:
         "portfolio_candidates": {
             "rows": len(candidates_rows),
             "file_hash": _file_hash(candidates_path),
-        },
-        "report": {
-            "exists": (exp_dir / "report.html").exists(),
-            "file_hash": _file_hash(exp_dir / "report.html"),
         },
     }
 
@@ -483,16 +483,6 @@ def compare_experiment_dirs(
     artifact_results.append(result)
     mismatches.extend(diffs)
 
-    result, diffs = _artifact_result(
-        artifact="report",
-        category="diagnostic_drift",
-        expected=expected["report"],
-        actual=actual["report"],
-        non_blocking_categories=non_blocking_categories,
-    )
-    artifact_results.append(result)
-    mismatches.extend(diffs)
-
     blocking = [item for item in mismatches if bool(item.get("blocking"))]
     warnings = [item for item in mismatches if not bool(item.get("blocking"))]
     status = "FAIL" if blocking else ("WARN" if warnings else "PASS")
@@ -566,10 +556,11 @@ def _build_baseline_request(exp_dir: Path) -> dict[str, Any]:
         "initial_capital": overrides.get("initial_capital"),
         "fast_mode": overrides.get("fast_mode"),
     }
-    if isinstance(input_config, dict) and input_config:
+    requested_source = str(overrides.get("config_source") or "").strip().lower()
+    if requested_source == "config_json" and isinstance(input_config, dict) and input_config:
         request_payload["config_json"] = input_config
         return request_payload
-    if isinstance(original_wb, dict) and original_wb:
+    if requested_source == "runtime_config_json" and isinstance(original_wb, dict) and original_wb:
         request_payload["runtime_config_json"] = original_wb
         return request_payload
     if isinstance(compiled_runtime, dict) and compiled_runtime.get("db") and compiled_runtime.get("schema_mapping"):
@@ -578,16 +569,63 @@ def _build_baseline_request(exp_dir: Path) -> dict[str, Any]:
     if isinstance(effective_wb, dict) and effective_wb.get("db") and effective_wb.get("schema_mapping"):
         request_payload["runtime_config_json"] = effective_wb
         return request_payload
+    if isinstance(input_config, dict) and input_config:
+        request_payload["config_json"] = input_config
+        return request_payload
+    if isinstance(original_wb, dict) and original_wb:
+        request_payload["workbench_config"] = original_wb
+        return request_payload
     request_payload["workbench_config"] = draft
     return request_payload
+
+
+def _ensure_rerun_saved_config(exp_dir: Path) -> Path | None:
+    config = _load_json(exp_dir / "config.json")
+    overrides = config.get("overrides") if isinstance(config.get("overrides"), dict) else {}
+    config_id = str(overrides.get("config_id") or "").strip()
+    if not config_id or _saved_config_record(config_id):
+        return None
+
+    effective_wb = overrides.get("workbench_config") if isinstance(overrides.get("workbench_config"), dict) else None
+    if not isinstance(effective_wb, dict) or not effective_wb:
+        return None
+
+    resolved_meta = overrides.get("resolved_config_meta") if isinstance(overrides.get("resolved_config_meta"), dict) else {}
+    _ensure_repo_on_path()
+    from backend.core.tools.saved_config_access import create_saved_config_record  # type: ignore
+
+    record = create_saved_config_record(
+        effective_wb,
+        config_id=config_id,
+        name=str(resolved_meta.get("name") or config_id),
+        display_name=str(resolved_meta.get("display_name") or resolved_meta.get("name") or config_id),
+        tags=list(resolved_meta.get("tags") or []),
+        source_type=str(resolved_meta.get("source_type") or "template"),
+        owner=str(resolved_meta.get("owner") or "builtin"),
+        locked=bool(resolved_meta.get("locked", True)),
+        baseline_of=resolved_meta.get("baseline_of"),
+        legacy_config_id=resolved_meta.get("legacy_config_id"),
+        extra={"saved_at": str(resolved_meta.get("saved_at") or "")},
+    )
+    cfg_root = _repo_root() / "outputs" / "configs"
+    cfg_root.mkdir(parents=True, exist_ok=True)
+    path = cfg_root / f"{config_id}.json"
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
 
 
 def rerun_baseline(baseline_exp_id: str) -> str:
     _ensure_repo_on_path()
     from backend.scripts._internal_helper import run_internal_experiment_sync  # type: ignore
 
-    request_payload = _build_baseline_request(_exp_dir(baseline_exp_id))
-    result = run_internal_experiment_sync(request_payload)
+    exp_dir = _exp_dir(baseline_exp_id)
+    temp_saved_config = _ensure_rerun_saved_config(exp_dir)
+    try:
+        request_payload = _build_baseline_request(exp_dir)
+        result = run_internal_experiment_sync(request_payload)
+    finally:
+        if temp_saved_config is not None:
+            temp_saved_config.unlink(missing_ok=True)
     exp_id = str(result.get("exp_id") or "").strip()
     if not exp_id:
         raise RuntimeError("rerun did not produce exp_id")

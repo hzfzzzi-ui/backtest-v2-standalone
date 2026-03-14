@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from backend.core.config.models import (
     BenchmarkRegimeConfig,
+    BreadthConfig,
     CostConfig,
     ExitConfig,
     MarketFilterConfig,
@@ -67,6 +68,7 @@ class LegacyStagePipelineRequest:
     risk_budget_cfg: RiskBudgetConfig | None = None
     market_filter_cfg: MarketFilterConfig | None = None
     benchmark_regime_cfg: BenchmarkRegimeConfig | None = None
+    breadth_cfg: BreadthConfig | None = None
     disabled_stages: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -115,6 +117,9 @@ class LegacyStageAdapterRuntime:
         self._sizing_cfg = bootstrap.sizing_cfg
         self._weight_mode = str(bootstrap.weight_mode)
         self._min_positions_cfg = int(bootstrap.min_positions_cfg)
+        self._tilt_strength = float(bootstrap.tilt_strength)
+        self._tilt_top_n = int(bootstrap.tilt_top_n)
+        self._tilt_bottom_n = int(bootstrap.tilt_bottom_n)
         self._risk_budget_cfg = bootstrap.risk_budget_cfg
         self._dd_enabled = bool(bootstrap.dd_enabled)
         self._dd_reduce_pct = float(bootstrap.dd_reduce_pct)
@@ -123,16 +128,25 @@ class LegacyStageAdapterRuntime:
         self._min_trade_price = float(bootstrap.min_trade_price)
         self.open_idx = bootstrap.open_idx
         self.close_idx = bootstrap.close_idx
+        self.volume_idx = bootstrap.volume_idx
+        self.amount_idx = bootstrap.amount_idx
+        self.suspended_idx = bootstrap.suspended_idx
+        self.limit_up_idx = bootstrap.limit_up_idx
+        self.limit_down_idx = bootstrap.limit_down_idx
 
         ledger = initialize_runtime_ledger(request.initial_cash)
         self.cash = float(ledger.cash)
         self.positions = ledger.positions
         self.position_avg_cost = ledger.position_avg_cost
+        self.holding_sources = ledger.holding_sources
+        self.composition_audit_rows = ledger.composition_audit_rows
+        self.order_reject_reason_counts = ledger.order_reject_reason_counts
         self.peak_nav = float(ledger.peak_nav)
         self.prev_nav = float(ledger.prev_nav)
         self.trade_rows = ledger.trade_rows
         self.candidate_rows = ledger.candidate_rows
         self.daily_rows = ledger.daily_rows
+        self.deferred_sell_orders = ledger.deferred_sell_orders
         self._prepared_day_index = ledger.prepared_day_index
         self._current_day = ledger.current_day
         self._traded_value_today = float(ledger.traded_value_today)
@@ -153,12 +167,17 @@ class LegacyStageAdapterRuntime:
             data_bundle=self.request.data_bundle,
             market_filter_cfg=self._market_filter_cfg,
             benchmark_regime_cfg=self._benchmark_regime_cfg,
+            breadth_cfg=self.request.breadth_cfg,
+            provider=self.provider,
         )
         self._mf_enabled = bool(route_controls.mf_enabled)
         self._mf_state_arr = route_controls.mf_state_arr
         self._mf_mult_arr = route_controls.mf_mult_arr
         self._br_enabled = bool(route_controls.br_enabled)
         self._br_gate_arr = route_controls.br_gate_arr
+        self._breadth_enabled = bool(route_controls.breadth_enabled)
+        self._breadth_score_arr = route_controls.breadth_score_arr
+        self._breadth_maxpos_arr = route_controls.breadth_maxpos_arr
 
     def is_stage_disabled(self, stage_key: str) -> bool:
         return is_stage_disabled(self.request.disabled_stages, stage_key)
@@ -217,7 +236,9 @@ class LegacyStageAdapterRuntime:
                 close_idx=self.close_idx,
                 open_idx=self.open_idx,
                 next_day=day_context.next_trading_day,
+                holding_sources=self.holding_sources,
                 risk_on=bool(controls["risk_on_today"]),
+                market_state=str(controls.get("market_state", "") or ""),
             )
             day_signals = self.provider.day_signals(day_context.trading_day, day_context.day_index, provider_ctx)
             day_signals = self._postprocess_day_signals(day_context.day_index, day_signals, controls)

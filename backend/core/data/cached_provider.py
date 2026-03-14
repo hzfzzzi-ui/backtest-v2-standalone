@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 _CACHE_PATH = Path("/tmp/ohlcv_cache.parquet")
 _CACHE_TMP = Path("/tmp/ohlcv_cache.parquet.tmp")
 _META_PATH = Path("/tmp/ohlcv_cache.meta.json")
-_CACHE_VERSION = 2
+_CACHE_VERSION = 3
 
 _CHUNK_SIZE = 500_000
 _WARMUP_TIMEOUT_MS = 600_000
@@ -142,6 +142,9 @@ class CachedDataProvider(DataProvider):
     def load_security_master(self, symbols: list[str]) -> pd.DataFrame:
         return self._inner.load_security_master(symbols)
 
+    def load_index_constituent_history(self, index_code: str, start: date, end: date) -> pd.DataFrame:
+        return self._inner.load_index_constituent_history(index_code, start, end)
+
     @property
     def query_audit(self) -> list[dict]:
         return self._inner.query_audit
@@ -169,6 +172,12 @@ class CachedDataProvider(DataProvider):
             "is_suspended",
             "is_st",
             "adj_factor",
+            "turnover_rate",
+            "turnover_rate_f",
+            "volume_ratio",
+            "float_share",
+            "free_share",
+            "circ_mv",
         ]
         cols = self._inner._filter_existing_cols(mapping, ordered_keys, existing)
         if "is_st" not in cols and "is_st" in existing:
@@ -326,6 +335,7 @@ class CachedDataProvider(DataProvider):
                 "max_trade_date": None,
                 "max_created_at": None,
                 "suspended_rows": 0,
+                "schema_columns": sorted(existing),
             }
 
         return {
@@ -333,4 +343,5 @@ class CachedDataProvider(DataProvider):
             "max_trade_date": row[1].isoformat() if row[1] is not None else None,
             "max_created_at": row[2].isoformat() if row[2] is not None else None,
             "suspended_rows": int(row[3] or 0),
+            "schema_columns": sorted(existing),
         }

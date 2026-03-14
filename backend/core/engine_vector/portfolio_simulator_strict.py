@@ -127,6 +127,7 @@ def run_vector_portfolio_backtest_strict(
     st_history: Any = None,
     sector_data: Any = None,
     industry_map: Any = None,
+    industry_history: Any = None,
     risk_budget_cfg: Any = None,
     market_filter_cfg: Any = None,
     benchmark_regime_cfg: Any = None,
@@ -159,6 +160,7 @@ def run_vector_portfolio_backtest_strict(
             st_history=st_history,
             sector_data=sector_data,
             industry_map=industry_map,
+            industry_history=industry_history,
             risk_budget_cfg=risk_budget_cfg,
             sizing_cfg=sizing_cfg,
             market_filter_cfg=market_filter_cfg,
@@ -190,6 +192,7 @@ def run_vector_portfolio_backtest_strict(
             raw_history=raw_history,
             sector_data=sector_data,
             industry_map=industry_map,
+            industry_history=industry_history,
         )
 
     if history.empty:
@@ -208,10 +211,12 @@ def run_vector_portfolio_backtest_strict(
     _min_trade_price = float(_min_price)
     _min_list_days = int(_uf.get("min_list_days", 0) or 0)
     _min_avg_turnover_20d = float(_uf.get("min_avg_turnover_20d", 0.0) or 0.0)
+    _membership_history = getattr(strategy, "state", {}).get("membership_history")
     mx = build_ohlc_matrices_from_history(
         hist,
         trading_days,
         st_history=st_history,
+        membership_history=_membership_history,
         min_price=_min_price,
         min_list_days=_min_list_days,
         min_avg_turnover_20d=_min_avg_turnover_20d,
@@ -243,6 +248,7 @@ def run_vector_portfolio_backtest_strict(
     enable_atr_trail = bool(getattr(strategy, "enable_atr_trail", False))
     atr_stop_k = float(getattr(strategy, "atr_stop_k", 2.0))
     atr_trail_k = float(getattr(strategy, "atr_trail_k", 3.0))
+    trailing_activate_profit_pct = float(getattr(strategy, "trailing_activate_profit_pct", 0.0) or 0.0)
     enable_take_profit = bool(getattr(strategy, "enable_take_profit", False))
     take_profit_mode = str(getattr(strategy, "take_profit_mode", "pct"))
     take_profit_pct = float(getattr(strategy, "take_profit_pct", 0.10))
@@ -268,6 +274,18 @@ def run_vector_portfolio_backtest_strict(
     _sc = sizing_cfg if isinstance(sizing_cfg, SizingConfig) else SizingConfig()
     weight_mode = str(_sc.weight_mode or "equal")
     min_positions = int(_sc.min_positions)
+    tilt_strength = float(_sc.tilt_strength)
+    tilt_top_n = int(_sc.tilt_top_n)
+    tilt_bottom_n = int(_sc.tilt_bottom_n)
+    score_weight_min_scale = float(_sc.score_weight_min_scale)
+    score_weight_max_scale = float(_sc.score_weight_max_scale)
+    candidate_plan_mode = str(_sc.candidate_plan_mode or "ranked")
+    cash_aware_search_top_n = int(_sc.cash_aware_search_top_n)
+    rotation_replace_enabled = bool(_sc.rotation_replace_enabled)
+    rotation_replace_only_strong_risk_on = bool(_sc.rotation_replace_only_strong_risk_on)
+    rotation_replace_max_swaps_per_day = int(_sc.rotation_replace_max_swaps_per_day)
+    rotation_replace_candidate_top_n = int(_sc.rotation_replace_candidate_top_n)
+    rotation_replace_min_score_gap = float(_sc.rotation_replace_min_score_gap)
 
     feats = compute_feature_matrices(
         close=mx.close,
@@ -406,6 +424,7 @@ def run_vector_portfolio_backtest_strict(
                 qty = min(held, int(od["qty"]))
                 if qty <= 0:
                     continue
+                risk_off_partial_state = getattr(provider, "_risk_off_partial_state", None)
                 fill_px = px * (1.0 - _slip_bps)
                 gross = qty * fill_px
                 comm = max(_comm_min, gross * _comm_rate)
@@ -626,7 +645,12 @@ def run_vector_portfolio_backtest_strict(
                 reason = "ATR_STOP_LOSS"
             elif enable_fixed_stop_loss and _entry_px > 0 and _pnl_pct <= -fixed_stop_loss_pct:
                 reason = "FIXED_STOP_LOSS"
-            elif enable_atr_trail and atr_v is not None and cclose <= float(peak_close_state.get(sym, cclose) - atr_trail_k * atr_v):
+            elif (
+                enable_atr_trail
+                and atr_v is not None
+                and (trailing_activate_profit_pct <= 0.0 or _pnl_pct >= trailing_activate_profit_pct)
+                and cclose <= float(peak_close_state.get(sym, cclose) - atr_trail_k * atr_v)
+            ):
                 reason = "ATR_TRAIL_EXIT"
             elif enable_take_profit and _entry_px > 0 and (
                 (take_profit_mode == "atr" and atr_v is not None and _entry_adj > 0 and cclose >= _entry_adj + take_profit_atr_k * atr_v)
@@ -678,6 +702,7 @@ def run_vector_portfolio_backtest_strict(
                             "trail_price": None if atr_v is None else float(peak_close_state.get(sym, cclose) - atr_trail_k * atr_v),
                             "atr_stop_k": float(atr_stop_k),
                             "atr_trail_k": float(atr_trail_k),
+                            "trailing_activate_profit_pct": float(trailing_activate_profit_pct),
                             "ma120": trend_fast_v,
                             "ma200": trend_slow_v,
                             "trend_tier_at_exit": trend_tier,
@@ -816,6 +841,7 @@ def run_vector_portfolio_backtest_strict(
             mf_rank_gate_mode=str(mf_rank_gate_mode or "ALWAYS_ON"),
             risk_on_today=bool(risk_on[i]),
             strong_risk_on_today=bool(strong_risk_on[i]),
+            market_state_today="",
         )
         # Build ATR/close map for inverse-vol sizing
         _acm: dict[str, tuple[float, float]] = {}
@@ -850,8 +876,26 @@ def run_vector_portfolio_backtest_strict(
             debug_plan=debug_plan,
             weight_mode=weight_mode,
             min_positions=min_positions,
+            tilt_strength=tilt_strength,
+            tilt_top_n=tilt_top_n,
+            tilt_bottom_n=tilt_bottom_n,
             atr_close_map=_acm,
             min_trade_price=float(_min_trade_price),
+            decision_close_map={sym: float(close_idx.get((day, sym), 0.0) or 0.0) for sym in next_open},
+            enable_entry_gap_guard=bool(getattr(strategy, "enable_entry_gap_guard", False)),
+            entry_gap_guard_pct=float(getattr(strategy, "entry_gap_guard_pct", 0.0) or 0.0),
+            score_weight_min_scale=score_weight_min_scale,
+            score_weight_max_scale=score_weight_max_scale,
+            candidate_plan_mode=candidate_plan_mode,
+            cash_aware_search_top_n=cash_aware_search_top_n,
+            holding_entry_dates=dict(getattr(strategy, "entry_day", {}) or {}),
+            strong_risk_on_today=bool(strong_risk_on[i]),
+            rotation_replace_enabled=rotation_replace_enabled,
+            rotation_replace_only_strong_risk_on=rotation_replace_only_strong_risk_on,
+            rotation_replace_max_swaps_per_day=rotation_replace_max_swaps_per_day,
+            rotation_replace_candidate_top_n=rotation_replace_candidate_top_n,
+            rotation_replace_min_score_gap=rotation_replace_min_score_gap,
+            rotation_min_hold_days=int(getattr(strategy, "min_hold_days", 0) or 0),
         )
         if not bool(fast_mode):
             candidate_rows.extend(day_candidate_rows)
@@ -1214,6 +1258,18 @@ def _run_vector_portfolio_backtest_breakout(
     _sc_b = sizing_cfg if isinstance(sizing_cfg, _SizingConfig_b) else _SizingConfig_b()
     weight_mode = str(_sc_b.weight_mode or "equal")
     min_positions_cfg = int(_sc_b.min_positions)
+    tilt_strength_cfg = float(_sc_b.tilt_strength)
+    tilt_top_n_cfg = int(_sc_b.tilt_top_n)
+    tilt_bottom_n_cfg = int(_sc_b.tilt_bottom_n)
+    score_weight_min_scale_cfg = float(_sc_b.score_weight_min_scale)
+    score_weight_max_scale_cfg = float(_sc_b.score_weight_max_scale)
+    candidate_plan_mode_cfg = str(_sc_b.candidate_plan_mode or "ranked")
+    cash_aware_search_top_n_cfg = int(_sc_b.cash_aware_search_top_n)
+    rotation_replace_enabled_cfg = bool(_sc_b.rotation_replace_enabled)
+    rotation_replace_only_strong_risk_on_cfg = bool(_sc_b.rotation_replace_only_strong_risk_on)
+    rotation_replace_max_swaps_per_day_cfg = int(_sc_b.rotation_replace_max_swaps_per_day)
+    rotation_replace_candidate_top_n_cfg = int(_sc_b.rotation_replace_candidate_top_n)
+    rotation_replace_min_score_gap_cfg = float(_sc_b.rotation_replace_min_score_gap)
 
     provider = BreakoutTrendProvider()
     _ec = exit_cfg if isinstance(exit_cfg, ExitConfig) else ExitConfig()
@@ -1225,10 +1281,12 @@ def _run_vector_portfolio_backtest_breakout(
         strategy=strategy,
         exit_cfg=_ec,
         st_history=st_history,
+        membership_history=getattr(strategy, "state", {}).get("membership_history"),
         strength_ma=strength_ma,
         base_order_value=float(initial_cash) / float(max(max_positions, 1)),
         sector_data=sector_data,
         industry_map=industry_map,
+        industry_history=_kwargs.get("industry_history"),
     )
 
     day_list = list(trading_days)
@@ -1345,6 +1403,7 @@ def _run_vector_portfolio_backtest_breakout(
     pending: dict[date, list[dict[str, Any]]] = {}
     positions: dict[str, int] = {}
     position_avg_cost: dict[str, float] = {}
+    holding_sources: dict[str, dict[str, Any]] = {}
     cash = float(initial_cash)
     peak_nav = float(initial_cash)
     prev_nav = float(initial_cash)
@@ -1393,6 +1452,8 @@ def _run_vector_portfolio_backtest_breakout(
                     for d in provider.extra_clear_dicts:
                         d.pop(od["symbol"], None)
                     provider.entry_day.pop(od["symbol"], None)
+                elif bool((od.get("meta") or {}).get("risk_off_partial_mark_on_fill", False)) and isinstance(risk_off_partial_state, dict):
+                    risk_off_partial_state[od["symbol"]] = True
                 trade_rows.append({
                     "date": day.isoformat(), "symbol": od["symbol"], "side": "SELL",
                     "price": px, "fill_price": round(fill_px, 4), "qty": qty,
@@ -1423,9 +1484,23 @@ def _run_vector_portfolio_backtest_breakout(
                 new_avg = ((prev_qty * prev_avg) + (qty * fill_px)) / float(new_qty) if new_qty > 0 else 0.0
                 positions[od["symbol"]] = new_qty
                 position_avg_cost[od["symbol"]] = float(new_avg)
+                risk_off_partial_state = getattr(provider, "_risk_off_partial_state", None)
+                if prev_qty <= 0 and isinstance(risk_off_partial_state, dict):
+                    risk_off_partial_state.pop(od["symbol"], None)
                 # fill hook: entry_day
                 if prev_qty == 0 or provider.entry_day_overwrite:
                     provider.entry_day[od["symbol"]] = day
+                # fill hook: entry bar index / breakout floor
+                if prev_qty == 0:
+                    if isinstance(getattr(provider, "entry_bar_index", None), dict):
+                        provider.entry_bar_index[od["symbol"]] = int(i)
+                    if isinstance(getattr(provider, "entry_breakout_floor_raw", None), dict):
+                        try:
+                            breakout_floor_raw = float((od.get("meta") or {}).get("entry_breakout_floor_raw", 0.0) or 0.0)
+                        except Exception:
+                            breakout_floor_raw = 0.0
+                        if breakout_floor_raw > 0.0:
+                            provider.entry_breakout_floor_raw[od["symbol"]] = float(breakout_floor_raw)
                 # fill hook: peak_state_on_buy
                 if provider.peak_state_on_buy is not None:
                     raw_c = float(close_idx.get((day, od["symbol"]), px))
@@ -1558,7 +1633,9 @@ def _run_vector_portfolio_backtest_breakout(
             close_idx=close_idx,
             open_idx=open_idx,
             next_day=next_day,
+            holding_sources=holding_sources,
             risk_on=bool(provider._risk_on[i]),
+            market_state=market_state_name,
         )
         ds = provider.day_signals(day, i, ctx)
 
@@ -1590,6 +1667,7 @@ def _run_vector_portfolio_backtest_breakout(
             mf_rank_gate_mode=str(mf_rank_gate_mode or "ALWAYS_ON"),
             risk_on_today=bool(provider._risk_on[i]),
             strong_risk_on_today=ds.strong_risk_on,
+            market_state_today=market_state_name,
         )
         # Build ATR/close map for inverse-vol sizing (breakout path)
         _acm_b: dict[str, tuple[float, float]] = {}
@@ -1627,8 +1705,26 @@ def _run_vector_portfolio_backtest_breakout(
             debug_plan=debug_plan,
             weight_mode=weight_mode,
             min_positions=min_positions_cfg,
+            tilt_strength=tilt_strength_cfg,
+            tilt_top_n=tilt_top_n_cfg,
+            tilt_bottom_n=tilt_bottom_n_cfg,
             atr_close_map=_acm_b,
             min_trade_price=float(_min_trade_price),
+            decision_close_map={sym: float(close_idx.get((day, sym), 0.0) or 0.0) for sym in next_open},
+            enable_entry_gap_guard=bool(getattr(strategy, "enable_entry_gap_guard", False)),
+            entry_gap_guard_pct=float(getattr(strategy, "entry_gap_guard_pct", 0.0) or 0.0),
+            score_weight_min_scale=score_weight_min_scale_cfg,
+            score_weight_max_scale=score_weight_max_scale_cfg,
+            candidate_plan_mode=candidate_plan_mode_cfg,
+            cash_aware_search_top_n=cash_aware_search_top_n_cfg,
+            holding_entry_dates=dict(getattr(provider, "entry_day", {}) or {}),
+            strong_risk_on_today=bool(ds.strong_risk_on),
+            rotation_replace_enabled=rotation_replace_enabled_cfg,
+            rotation_replace_only_strong_risk_on=rotation_replace_only_strong_risk_on_cfg,
+            rotation_replace_max_swaps_per_day=rotation_replace_max_swaps_per_day_cfg,
+            rotation_replace_candidate_top_n=rotation_replace_candidate_top_n_cfg,
+            rotation_replace_min_score_gap=rotation_replace_min_score_gap_cfg,
+            rotation_min_hold_days=int(getattr(strategy, "min_hold_days", 0) or 0),
         )
         if not bool(fast_mode):
             candidate_rows.extend(day_candidate_rows)
@@ -1651,6 +1747,20 @@ def _run_vector_portfolio_backtest_breakout(
         daily_rows[-1]["positions_after_sell"] = int(positions_after_sell)
         daily_rows[-1]["buy_slots_calculated"] = int(buy_slots)
         daily_rows[-1]["raw_buy_signal_count"] = int(ds.diagnostics.get("raw_buy_signal_count", ds.diagnostics.get("breakout_candidates", 0)))
+        daily_rows[-1]["mf_rank_triggered"] = 1 if bool((debug_plan or {}).get("mf_rank_triggered", False)) else 0
+        daily_rows[-1]["mf_rank_applied"] = 1 if bool((debug_plan or {}).get("mf_rank_applied", False)) else 0
+        daily_rows[-1]["mf_candidates_when_triggered"] = int((debug_plan or {}).get("mf_candidates_when_triggered", 0) or 0)
+        daily_rows[-1]["mf_topk_reject_count"] = int((debug_plan or {}).get("mf_topk_reject_count", 0) or 0)
+        daily_rows[-1]["mf_concentrated_selected_count"] = int((debug_plan or {}).get("mf_concentrated_selected_count", 0) or 0)
+        daily_rows[-1]["mf_gate_on"] = 1 if bool((debug_plan or {}).get("mf_gate_on", False)) else 0
+        daily_rows[-1]["strong_risk_on"] = 1 if bool(ds.strong_risk_on) else 0
+        cands_now = int((debug_plan or {}).get("buy_candidates_count", 0) or 0)
+        slots_now = int((debug_plan or {}).get("buy_slots", 0) or 0)
+        daily_rows[-1]["mf_rank_suppressed_by_strong_gate"] = (
+            1
+            if bool(enable_multifactor_rank) and (not bool(mf_gate_on_today)) and (cands_now > slots_now)
+            else 0
+        )
 
         if orders:
             pending[next_day] = [
@@ -2022,6 +2132,7 @@ def _run_vector_portfolio_backtest_generic_signals(
             mf_rank_gate_mode=str(mf_rank_gate_mode or "ALWAYS_ON"),
             risk_on_today=bool(regime_on_today),
             strong_risk_on_today=bool(strong_risk_on_today),
+            market_state_today=str(strategy.state.get("market_state", "") or ""),
         )
         orders = build_rebalance_orders(
             positions=positions,
@@ -2049,6 +2160,19 @@ def _run_vector_portfolio_backtest_generic_signals(
             weight_mode="equal",
             min_positions=10,
             min_trade_price=float(_min_trade_price),
+            decision_close_map={sym: float(close_idx.get((day, sym), 0.0) or 0.0) for sym in next_open},
+            enable_entry_gap_guard=bool(getattr(strategy, "enable_entry_gap_guard", False)),
+            entry_gap_guard_pct=float(getattr(strategy, "entry_gap_guard_pct", 0.0) or 0.0),
+            candidate_plan_mode=candidate_plan_mode,
+            cash_aware_search_top_n=cash_aware_search_top_n,
+            holding_entry_dates=dict(getattr(strategy, "entry_day", {}) or {}),
+            strong_risk_on_today=bool(strong_risk_on_today),
+            rotation_replace_enabled=rotation_replace_enabled,
+            rotation_replace_only_strong_risk_on=rotation_replace_only_strong_risk_on,
+            rotation_replace_max_swaps_per_day=rotation_replace_max_swaps_per_day,
+            rotation_replace_candidate_top_n=rotation_replace_candidate_top_n,
+            rotation_replace_min_score_gap=rotation_replace_min_score_gap,
+            rotation_min_hold_days=int(getattr(strategy, "min_hold_days", 0) or 0),
         )
         if not bool(fast_mode):
             candidate_rows.extend(day_candidate_rows)

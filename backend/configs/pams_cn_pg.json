@@ -36,7 +36,13 @@
       "limit_up": "limit_up",
       "limit_down": "limit_down",
       "is_suspended": "is_suspended",
-      "adj_factor": "adj_factor"
+      "adj_factor": "adj_factor",
+      "turnover_rate": "turnover_rate",
+      "turnover_rate_f": "turnover_rate_f",
+      "volume_ratio": "volume_ratio",
+      "float_share": "float_share",
+      "free_share": "free_share",
+      "circ_mv": "circ_mv"
     },
     "pit_index_daily": {
       "date": "trade_date",

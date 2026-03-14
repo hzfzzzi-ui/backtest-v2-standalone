@@ -1,4 +1,4 @@
-﻿/* Inlined from ui.js to avoid ES-module scope isolation */
+/* Inlined from ui.js to avoid ES-module scope isolation */
 function setActiveNav() {
   const path = (location.pathname || '/').split('/').pop() || 'index.html';
   document.querySelectorAll('[data-nav]')?.forEach(a => {
@@ -30,7 +30,10 @@ const state = {
   execution_api_enabled: true,
   status_items: [],
   manual_status_items: [],
+  validation_status_items: [],
   api_status: {},
+  multi_alpha_module_state: {},
+  multi_alpha_validation_errors: [],
   status_open: false,
   drawer_panel: 's1',
   drawer_pinned: false,
@@ -47,13 +50,43 @@ const state = {
   compare_selected_ids: [],
 };
 
-const DEFAULT_BOOTSTRAP_BASELINE_ID = 'baseline_V1';
+const DEFAULT_BOOTSTRAP_BASELINE_ID = 'baseline_V10';
 
-const COMPOSE_MODULES = ['Regime', 'Trend Quality', 'Strength Rank', 'MF Rank', 'Risk Gate'];
+const COMPOSE_MODULES = [
+  {
+    name: 'breakout_55',
+    label: 'Breakout 55',
+    alpha_id: 'breakout_55',
+    family: 'trend',
+    role: 'trend',
+    weight: 0.7,
+    priority: 100,
+  },
+  {
+    name: 'rsi_reversal',
+    label: 'RSI Reversal',
+    alpha_id: 'rsi_reversal',
+    family: 'mean_revert',
+    role: 'mean_revert',
+    weight: 0.3,
+    priority: 80,
+  },
+];
+const MULTI_ALPHA_COMPOSE_MODE = 'REGIME_ROUTE';
+const MULTI_ALPHA_SAME_SYMBOL_POLICY = 'PREFER_HIGHER_SCORE';
+const MULTI_ALPHA_HOLDING_OWNERSHIP = 'SOURCE_ONLY';
+const MULTI_ALPHA_PORTFOLIO_MODE = 'hard_sleeve_budget';
+const MULTI_ALPHA_REGIMES = ['TREND_UP', 'RANGE', 'WEAK_DOWN'];
+const DEFAULT_MULTI_ALPHA_REGIME_MATRIX = {
+  TREND_UP: ['breakout_55'],
+  RANGE: ['breakout_55', 'rsi_reversal'],
+  WEAK_DOWN: ['rsi_reversal'],
+};
 
 function byId(id) { return document.getElementById(id); }
 function getStrategySelector() { return byId('wbTrendStrategy') || byId('wbStrategyPack') || byId('wbStrategyFamily'); }
 function getStrategyPackValue() {
+  if (byId('wbEnableComposition')?.checked) return 'COMPOSITE';
   const selected = String((byId('wbTrendStrategy') || byId('wbStrategyPack') || byId('wbStrategyFamily'))?.value || 'EMA_CROSS').toUpperCase();
   if (selected === 'BREAKOUT_TREND') return 'BREAKOUT_TREND';
   const regimeOn = !!byId('wbRegimeEnabled')?.checked;
@@ -106,11 +139,23 @@ function cloneJson(value) {
   try { return JSON.parse(JSON.stringify(value)); } catch (_) { return null; }
 }
 
+function membershipModeDisplayLabel(universeMode, membershipMode) {
+  const normalized = String(membershipMode || '').trim();
+  if (!normalized) return '';
+  if (normalized.toUpperCase() === 'PIT_DYNAMIC') return '';
+  return `成分=${normalized}`;
+}
+
 function cloneConfigMeta(record) {
   if (!record || typeof record !== 'object') return null;
   const universeMode = record.universe_mode || record?.config_json?.universe_mode || null;
+  const membershipMode = record.membership_mode || record?.config_json?.universe?.membership_mode || null;
   const rawDisplay = record.display_name || record.name || record.config_id || '';
-  const displayName = rawDisplay && universeMode ? `${rawDisplay} · 池=${universeMode}` : rawDisplay;
+  const displayNameWithUniverse = rawDisplay && universeMode ? `${rawDisplay} · 池=${universeMode}` : rawDisplay;
+  const membershipLabel = membershipModeDisplayLabel(universeMode, membershipMode);
+  const displayName = displayNameWithUniverse && membershipLabel
+    ? `${displayNameWithUniverse} · ${membershipLabel}`
+    : displayNameWithUniverse;
   return {
     config_id: record.config_id || null,
     config_hash: record.config_hash || null,
@@ -122,6 +167,7 @@ function cloneConfigMeta(record) {
     baseline_of: record.baseline_of || null,
     legacy_config_id: record.legacy_config_id || null,
     universe_mode: universeMode,
+    membership_mode: membershipMode,
   };
 }
 
@@ -159,7 +205,7 @@ function buildResultsWorkbenchSnapshot() {
     ? (bridge.getSnapshot() || {})
     : {};
   const currentView = currentSnapshot?.view || {};
-  const openPanels = Object.keys(currentView?.openPanels || {}).length
+  const openPanels = bridge
     ? { ...(currentView.openPanels || {}) }
     : readLegacyOpenPanels();
   const sourceKind = String(state.loaded_source_kind || '').trim()
@@ -500,6 +546,7 @@ function normalizeLoadItems(baselines, experiments) {
       has_result: !!item.has_result,
       linked_exp_id: String(item.linked_exp_id || '').trim(),
       universe_mode: String(item.universe_mode || '').trim(),
+      membership_mode: String(item.membership_mode || '').trim(),
       start_year: item?.start_year,
       end_year: item?.end_year,
       cagr: item?.cagr,
@@ -516,6 +563,7 @@ function normalizeLoadItems(baselines, experiments) {
       has_result: true,
       linked_exp_id: String(item.exp_id || '').trim(),
       universe_mode: String(item?.universe_mode || '').trim(),
+      membership_mode: String(item?.membership_mode || '').trim(),
       start_year: item?.start_year,
       end_year: item?.end_year,
       cagr: item?.cagr,
@@ -532,6 +580,7 @@ function normalizeLoadItems(baselines, experiments) {
       has_result: false,
       linked_exp_id: '',
       universe_mode: '',
+      membership_mode: '',
       cagr: null,
       trades: null,
     });
@@ -552,6 +601,8 @@ function experimentLoadSummary(item) {
   const yearLabel = loadItemYearLabel(item);
   if (yearLabel) parts.push(yearLabel);
   if (item?.universe_mode) parts.push(item.universe_mode);
+  const membershipLabel = membershipModeDisplayLabel(item?.universe_mode, item?.membership_mode);
+  if (membershipLabel) parts.push(membershipLabel);
   if (!parts.length && item?.kind === 'baseline') {
     parts.push(item?.has_result ? '已关联结果' : '仅配置');
   }
@@ -602,6 +653,7 @@ async function fetchExperimentLoadMetrics(expId) {
     cagr: perf?.cagr,
     max_drawdown: perf?.max_drawdown,
     universe_mode: String(workbenchCfg?.universe_mode || '').trim(),
+    membership_mode: String(workbenchCfg?.universe?.membership_mode || '').trim(),
     start_year: Number.isFinite(startYear) ? startYear : null,
     end_year: Number.isFinite(endYear) ? endYear : null,
   };
@@ -627,6 +679,7 @@ async function enrichLoadItems(items) {
         );
         const universe = detail?.config_json?.universe || {};
         if (!item.universe_mode) item.universe_mode = String(detail?.config_json?.universe_mode || '').trim();
+        if (!item.membership_mode) item.membership_mode = String(universe?.membership_mode || '').trim();
         const start = String(universe?.start || '').trim();
         const end = String(universe?.end || '').trim();
         if (!item.start_year && /^\d{4}/.test(start)) item.start_year = Number(start.slice(0, 4));
@@ -636,6 +689,7 @@ async function enrichLoadItems(items) {
           item.cagr = metrics?.cagr ?? item.cagr;
           item.max_drawdown = metrics?.max_drawdown ?? item.max_drawdown;
           item.universe_mode = item.universe_mode || metrics?.universe_mode || '';
+          item.membership_mode = item.membership_mode || metrics?.membership_mode || '';
           item.start_year = item.start_year || metrics?.start_year;
           item.end_year = item.end_year || metrics?.end_year;
         }
@@ -649,6 +703,7 @@ async function enrichLoadItems(items) {
       item.cagr = metrics?.cagr ?? item.cagr;
       item.max_drawdown = metrics?.max_drawdown ?? item.max_drawdown;
       item.universe_mode = item.universe_mode || metrics?.universe_mode || '';
+      item.membership_mode = item.membership_mode || metrics?.membership_mode || '';
       item.start_year = item.start_year || metrics?.start_year;
       item.end_year = item.end_year || metrics?.end_year;
     } catch (_) {
@@ -749,6 +804,7 @@ function applyLoadedConfigToWorkbench(workbenchConfig, meta) {
     baseline_of: null,
     legacy_config_id: null,
     universe_mode: workbenchConfig?.universe_mode || null,
+    membership_mode: workbenchConfig?.universe?.membership_mode || null,
   };
   state.loaded_config_json = cloneJson(workbenchConfig);
   state.config_id = state.loaded_config_meta.config_id;
@@ -855,13 +911,6 @@ function renderRightInspector() {
   syncResultsWorkbenchSurface();
 }
 
-function renderArtifacts(result) {
-  const files = result?.files || {};
-  const expId = String(result?.exp_id || result?.experiment_id || '').trim();
-  const manifestRef = files.manifest || (expId ? `/api/backtest_v2/experiments/${encodeURIComponent(expId)}/manifest` : '-');
-  byId('wbArtifacts').innerHTML = `exp_id=${esc(expId || '-')}<br>manifest=${esc(manifestRef)}`;
-}
-
 async function saveConfig(kind = 'draft') {
   const cfg = buildConfigDraft();
   const body = {
@@ -929,6 +978,7 @@ async function saveCurrentBaseline() {
     baseline_of: null,
     legacy_config_id: null,
     universe_mode: currentDraft?.universe_mode || null,
+    membership_mode: currentDraft?.universe?.membership_mode || null,
   };
   state.loaded_config_json = cloneJson(currentDraft);
   state.loaded_config_snapshot = stableSerializeConfig(state.config_draft || currentDraft || {});
@@ -958,6 +1008,26 @@ function bindEvents() {
     });
   });
   byId('wbUniverseMode')?.addEventListener('change', () => { updateUniverseInputVisibility(); buildConfigDraft(); renderRunHints(); });
+  document.querySelectorAll('#wbConstituentGroup button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const val = btn.getAttribute('data-val');
+      if (!val) return;
+      if (typeof syncMembershipModeButtons === 'function') syncMembershipModeButtons(val);
+      else {
+        document.querySelectorAll('#wbConstituentGroup button').forEach((button) => button.classList.remove('active'));
+        btn.classList.add('active');
+        const sel = byId('wbConstituent');
+        if (sel) sel.value = val;
+      }
+      buildConfigDraft();
+      renderRunHints();
+    });
+  });
+  byId('wbConstituent')?.addEventListener('change', () => {
+    if (typeof syncMembershipModeButtons === 'function') syncMembershipModeButtons(byId('wbConstituent')?.value || 'dynamic');
+    buildConfigDraft();
+    renderRunHints();
+  });
   // 价格口径按钮绑定
   document.querySelectorAll('#wbAdjGroup button').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -1045,7 +1115,7 @@ function bindEvents() {
   document.querySelectorAll('.wb-analysis-tabs button[data-dock], .wb-dock-tabs button[data-dock]').forEach((btn) => {
     btn.addEventListener('click', () => switchDockTab(btn.getAttribute('data-dock') || 'explain'));
   });
-  document.querySelectorAll('.wb-result-acc').forEach((acc) => {
+  document.querySelectorAll('#wbResultsLegacyRoot .wb-result-acc').forEach((acc) => {
     const summary = acc.querySelector(':scope > .wb-result-acc-toggle');
     const body = acc.querySelector(':scope > .wb-result-acc-body');
     if (!summary || !body) return;
@@ -1128,6 +1198,19 @@ function bindEvents() {
     el.addEventListener('change', () => buildConfigDraft());
   });
 
+  byId('wbEnableComposition')?.addEventListener('change', () => {
+    const enabled = !!byId('wbEnableComposition')?.checked;
+    const portfolioMode = byId('wbPortfolioMode');
+    if (!portfolioMode) return;
+    if (enabled && ['equal_10', 'profit_release', ''].includes(String(portfolioMode.value || '').trim())) {
+      portfolioMode.value = MULTI_ALPHA_PORTFOLIO_MODE;
+    }
+    if (!enabled && String(portfolioMode.value || '').trim() === MULTI_ALPHA_PORTFOLIO_MODE) {
+      portfolioMode.value = 'equal_10';
+    }
+    buildConfigDraft();
+  });
+
   // Exit checkbox ↔ input linkage
   byId('wbExitTrail')?.addEventListener('change', syncExitLinkage);
   byId('wbExitTime')?.addEventListener('change', syncExitLinkage);
@@ -1165,7 +1248,7 @@ function init() {
   bindEvents();
   setDrawerPanel('s1');
   switchMainTab('overview');
-  document.querySelectorAll('.wb-result-acc').forEach((acc) => {
+  document.querySelectorAll('#wbResultsLegacyRoot .wb-result-acc').forEach((acc) => {
     acc.classList.remove('wb-open');
     const body = acc.querySelector(':scope > .wb-result-acc-body');
     if (body) body.hidden = true;

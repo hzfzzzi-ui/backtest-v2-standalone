@@ -126,6 +126,7 @@ def test_run_foundation_compatibility_shell_delegates_to_stage_pipeline_adapter(
     assert adapter_request.enable_multifactor_rank is True
     assert adapter_request.mf_rank_gate_mode == "RISK_ON_ONLY"
     assert adapter_request.momentum_top_pct == 0.15
+    assert adapter_request.breadth_cfg is request.cfg_obj.breadth
 
     stage_summary = result.metrics["stage_summary"]
     assert stage_summary["route_id"] == "provider_breakout_runtime"

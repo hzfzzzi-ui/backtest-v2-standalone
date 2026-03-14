@@ -66,6 +66,17 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _normalize_turnover_rate_field(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    if text not in {"turnover_rate", "turnover_rate_f"}:
+        raise ValueError(f"unsupported turnover rate field: {value}")
+    return text
+
+
 def _pick_samples_for_symbol(df: pd.DataFrame, symbol: str, targets: list[date]) -> list[dict[str, Any]]:
     sub = df[df["symbol"] == symbol].copy()
     if sub.empty:
@@ -112,6 +123,7 @@ def _evaluate_frames(
     schema_missing: dict[str, list[str]],
     start: date,
     end: date,
+    required_turnover_rate_field: str | None = None,
 ) -> dict[str, Any]:
     checks: dict[str, Any] = {}
     warnings: list[dict[str, Any]] = []
@@ -123,7 +135,10 @@ def _evaluate_frames(
     stocks = stocks_df.copy()
     if not stocks.empty:
         stocks["trade_date"] = pd.to_datetime(stocks["trade_date"]).dt.date
-        for c in ["open", "high", "low", "close", "turnover", "limit_up", "limit_down"]:
+        numeric_cols = ["open", "high", "low", "close", "turnover", "limit_up", "limit_down"]
+        if required_turnover_rate_field:
+            numeric_cols.append(required_turnover_rate_field)
+        for c in numeric_cols:
             if c in stocks.columns:
                 stocks[c] = pd.to_numeric(stocks[c], errors="coerce")
         if "volume" in stocks.columns:
@@ -169,6 +184,43 @@ def _evaluate_frames(
     }
     if not sanity_pass:
         pass_flag = False
+
+    liquidity_pass = True
+    liquidity_missing = 0
+    liquidity_negative = 0
+    liquidity_coverage_ratio = None
+    if required_turnover_rate_field:
+        if required_turnover_rate_field not in stocks.columns:
+            liquidity_pass = False
+        elif not stocks.empty:
+            field_series = pd.to_numeric(stocks[required_turnover_rate_field], errors="coerce")
+            liquidity_missing = int(field_series.isna().sum())
+            liquidity_negative = int((field_series < 0).fillna(False).sum())
+            liquidity_coverage_ratio = round(float(field_series.notna().mean()), 6) if len(field_series) > 0 else None
+            liquidity_pass = liquidity_negative == 0
+            if liquidity_missing > 0:
+                warnings.append(
+                    {
+                        "code": "TURNOVER_RATE_COVERAGE_WARNING",
+                        "message": (
+                            f"{required_turnover_rate_field} has missing values; "
+                            "turnover-rate filter should treat those rows as unavailable"
+                        ),
+                        "field": required_turnover_rate_field,
+                        "missing_rows": liquidity_missing,
+                        "coverage_ratio": liquidity_coverage_ratio,
+                    }
+                )
+        checks["turnover_rate_field"] = {
+            "pass": liquidity_pass,
+            "field": required_turnover_rate_field,
+            "missing_rows": liquidity_missing,
+            "negative_rows": liquidity_negative,
+            "coverage_ratio": liquidity_coverage_ratio,
+            "aligned_by_trade_date_symbol": required_turnover_rate_field in stocks.columns,
+        }
+        if not liquidity_pass:
+            pass_flag = False
 
     limit_missing = 0
     limit_invalid = 0
@@ -340,6 +392,7 @@ def validate_data(
     audit_dump: bool = True,
     strict_suspended: bool = False,
     allow_cn_index_fallback: bool = False,
+    required_turnover_rate_field: str | None = None,
     results_root: Path | None = None,
     request_id: str | None = None,
 ) -> dict[str, Any]:
@@ -350,6 +403,7 @@ def validate_data(
     rid = request_id or f"val_{uuid.uuid4().hex[:12]}"
     norm_symbols = [normalize_stock_symbol(s) for s in symbols]
     bench_ts = normalize_index_symbol(benchmark)
+    required_turnover_rate_field = _normalize_turnover_rate_field(required_turnover_rate_field)
     schema_missing: dict[str, list[str]] = {"pams_ohlcv_daily": [], "pit_index_daily": []}
 
     with psycopg.connect(
@@ -376,14 +430,33 @@ def validate_data(
             for t, c in col_rows:
                 cols[str(t)].add(str(c))
             need_stocks = {"symbol", "market", "trade_date", "open", "high", "low", "close", "volume", "turnover", "limit_up", "limit_down", "is_suspended"}
+            if required_turnover_rate_field:
+                need_stocks.add(required_turnover_rate_field)
             need_index = {"index_code", "trade_date", "open", "high", "low", "close", "volume", "turnover"}
             schema_missing["pams_ohlcv_daily"] = sorted(list(need_stocks - cols.get("pams_ohlcv_daily", set())))
             schema_missing["pit_index_daily"] = sorted(list(need_index - cols.get("pit_index_daily", set())))
             schema_ok = not schema_missing["pams_ohlcv_daily"] and not schema_missing["pit_index_daily"]
 
+            stock_columns = [
+                "symbol",
+                "market",
+                "trade_date",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "turnover",
+                "limit_up",
+                "limit_down",
+                "is_suspended",
+            ]
+            if required_turnover_rate_field and required_turnover_rate_field in cols.get("pams_ohlcv_daily", set()):
+                stock_columns.append(required_turnover_rate_field)
+            stock_cols_sql = ", ".join(stock_columns)
             cur.execute(
-                """
-                SELECT symbol, market, trade_date, open, high, low, close, volume, turnover, limit_up, limit_down, is_suspended
+                f"""
+                SELECT {stock_cols_sql}
                 FROM pams_ohlcv_daily
                 WHERE market='CN_A'
                   AND symbol = ANY(%s)
@@ -393,23 +466,7 @@ def validate_data(
                 """,
                 (norm_symbols, start, end),
             )
-            stocks = pd.DataFrame(
-                cur.fetchall(),
-                columns=[
-                    "symbol",
-                    "market",
-                    "trade_date",
-                    "open",
-                    "high",
-                    "low",
-                    "close",
-                    "volume",
-                    "turnover",
-                    "limit_up",
-                    "limit_down",
-                    "is_suspended",
-                ],
-            )
+            stocks = pd.DataFrame(cur.fetchall(), columns=stock_columns)
 
             cur.execute(
                 """
@@ -457,6 +514,7 @@ def validate_data(
         schema_missing=schema_missing,
         start=start,
         end=end,
+        required_turnover_rate_field=required_turnover_rate_field,
     )
     elapsed_ms = int((time.time() - started) * 1000)
     out: dict[str, Any] = {
@@ -470,6 +528,7 @@ def validate_data(
             "benchmark": bench_ts,
             "strict_suspended": bool(strict_suspended),
             "allow_cn_index_fallback": bool(allow_cn_index_fallback),
+            "required_turnover_rate_field": required_turnover_rate_field,
         },
         "checks": evaluated["checks"],
         "warnings": evaluated["warnings"],

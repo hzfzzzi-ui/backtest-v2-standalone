@@ -22,6 +22,7 @@ REASON_MAP = {
     "ATR_STOP_LOSS": "ATR止损",
     "ATR_TRAIL_STOP": "ATR跟踪止损",
     "ATR_TRAIL_EXIT": "ATR跟踪止盈",
+    "PROFIT_DECAY_EXIT": "利润衰减退出",
     "TIME_EXIT": "到期平仓",
     "TREND_REVERSE": "趋势反转",
     "TREND_BREAK_EXIT": "趋势破位平仓",
@@ -450,6 +451,9 @@ def _build_config_summary(config: dict, run_config: dict, resolved_symbol_count:
     turnover_20d = filters.get("min_avg_turnover_20d")
     tn = _safe_float(turnover_20d)
     turnover_display = f"{int(tn / 10000):,} 万" if tn is not None else "-"
+    turnover_rate_20d = _safe_float(filters.get("min_avg_turnover_rate_20d"))
+    turnover_rate_display = f"{turnover_rate_20d:.2f}%" if turnover_rate_20d is not None and turnover_rate_20d > 0 else "-"
+    turnover_rate_field = filters.get("turnover_rate_field") or "-"
     price_min = filters.get("price_min", "-")
     price_max = filters.get("price_max", "-")
     price_range = f"{price_min} ~ {price_max}" if (price_min != "-" or price_max != "-") else "-"
@@ -462,6 +466,8 @@ def _build_config_summary(config: dict, run_config: dict, resolved_symbol_count:
       <tr><td>排除停牌</td><td>{_yes_no(filters.get('exclude_suspended'))}</td></tr>
       <tr><td>最小上市天数</td><td>{_inum(filters.get('min_list_days')) if filters.get('min_list_days') is not None else '-'}</td></tr>
       <tr><td>日均成交额下限</td><td>{turnover_display}</td></tr>
+      <tr><td>20日均换手率下限</td><td>{_e(turnover_rate_display)}</td></tr>
+      <tr><td>换手率字段</td><td>{_e(turnover_rate_field)}</td></tr>
       <tr><td>价格区间</td><td>{_e(price_range)}</td></tr>
       <tr><td>涨跌停规则</td><td>{_e(filters.get('limit_rule') or '-')}</td></tr>
       <tr><td>价格口径</td><td>{_e(_price_adj_label(adj_val))} ({_e(adj_val)})</td></tr>

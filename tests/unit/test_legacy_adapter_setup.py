@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from backend.core.config.models import BenchmarkRegimeConfig, CostConfig, MarketFilterConfig, RiskBudgetConfig, SizingConfig
+from backend.core.config.models import BenchmarkRegimeConfig, BreadthConfig, CostConfig, MarketFilterConfig, RiskBudgetConfig, SizingConfig
 from backend.core.stage_pipeline.adapters.legacy_adapter import LegacyStagePipelineRequest
 from backend.core.stage_pipeline.adapters.route_runtime import (
     build_signal_provider,
@@ -26,7 +26,17 @@ from backend.core.tools.data_bundle_builder import DataBundle
 def _bundle(*, periods: int = 260) -> DataBundle:
     days = [ts.date() for ts in pd.bdate_range("2023-01-02", periods=periods)]
     raw_rows = [
-        {"date": pd.Timestamp(day), "symbol": "sh600000", "open": 10.0 + idx * 0.01, "close": 10.1 + idx * 0.01}
+        {
+            "date": pd.Timestamp(day),
+            "symbol": "sh600000",
+            "open": 10.0 + idx * 0.01,
+            "close": 10.1 + idx * 0.01,
+            "volume": 1000.0 + idx,
+            "amount": 10000.0 + idx * 10,
+            "is_suspended": False,
+            "limit_up": 11.0 + idx * 0.01,
+            "limit_down": 9.0 + idx * 0.01,
+        }
         for idx, day in enumerate(days)
     ]
     benchmark_rows = [
@@ -118,6 +128,11 @@ def test_build_runtime_bootstrap_normalizes_runtime_defaults() -> None:
     assert bootstrap.min_trade_price == 7.5
     assert bootstrap.open_idx[(request.data_bundle.trading_days[0], "sh600000")] > 0
     assert bootstrap.close_idx[(request.data_bundle.trading_days[0], "sh600000")] > 0
+    assert bootstrap.volume_idx[(request.data_bundle.trading_days[0], "sh600000")] > 0
+    assert bootstrap.amount_idx[(request.data_bundle.trading_days[0], "sh600000")] > 0
+    assert bootstrap.suspended_idx[(request.data_bundle.trading_days[0], "sh600000")] is False
+    assert bootstrap.limit_up_idx[(request.data_bundle.trading_days[0], "sh600000")] > 0
+    assert bootstrap.limit_down_idx[(request.data_bundle.trading_days[0], "sh600000")] > 0
 
 
 def test_initialize_runtime_state_helpers_start_clean() -> None:
@@ -129,6 +144,7 @@ def test_initialize_runtime_state_helpers_start_clean() -> None:
     assert ledger.prev_nav == 123456.0
     assert ledger.positions == {}
     assert ledger.trade_rows == []
+    assert ledger.order_reject_reason_counts == {}
     assert ledger.simulation_t0 > 0
 
     assert counters.market_filter_bull_days == 0
@@ -147,6 +163,7 @@ def test_initialize_route_controls_preserves_default_non_breakout_path() -> None
 
     assert controls.mf_enabled is False
     assert controls.br_enabled is False
+    assert controls.breadth_enabled is False
     assert len(controls.mf_state_arr) == 40
     assert len(controls.br_gate_arr) == 40
     assert controls.br_gate_arr.all()
@@ -166,8 +183,38 @@ def test_initialize_route_controls_builds_breakout_arrays_from_benchmark_history
     assert len(controls.mf_state_arr) == 260
     assert len(controls.mf_mult_arr) == 260
     assert len(controls.br_gate_arr) == 260
+    assert len(controls.breadth_score_arr) == 260
+    assert len(controls.breadth_maxpos_arr) == 260
     assert bool(controls.br_gate_arr[-1]) is True
     assert int(controls.mf_state_arr[-1]) == 0
+
+
+def test_initialize_route_controls_builds_breadth_arrays_from_provider_matrices() -> None:
+    bundle = _bundle(periods=40)
+    close = pd.DataFrame(
+        {
+            "a": [10.0 + i * 0.10 for i in range(40)],
+            "b": [10.0 + i * 0.05 for i in range(40)],
+            "c": [10.0 - i * 0.02 for i in range(40)],
+        }
+    ).to_numpy(dtype=float)
+    tradable = pd.DataFrame(True, index=range(40), columns=range(3)).to_numpy(dtype=bool)
+    provider = SimpleNamespace(_mx=SimpleNamespace(close=close, tradable=tradable))
+
+    controls = initialize_route_controls(
+        route_id="provider_breakout_runtime",
+        data_bundle=bundle,
+        market_filter_cfg=MarketFilterConfig(enabled=False),
+        benchmark_regime_cfg=BenchmarkRegimeConfig(enabled=False),
+        breadth_cfg=BreadthConfig(enabled=True, score_type="combo", min_positions=4, max_positions=8),
+        provider=provider,
+    )
+
+    assert controls.breadth_enabled is True
+    assert len(controls.breadth_score_arr) == 40
+    assert len(controls.breadth_maxpos_arr) == 40
+    assert int(controls.breadth_maxpos_arr[-1]) >= 4
+    assert int(controls.breadth_maxpos_arr[-1]) <= 8
 
 
 def test_precompute_signal_provider_passes_expected_inputs_to_provider() -> None:

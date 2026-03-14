@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ import logging
 import pandas as pd
 
 from backend.core.audit.experiment_audit import merge_experiment_audit
+from backend.core.audit.research_audit import build_research_audit
 from backend.core.analytics.symbol_performance import build_symbol_performance
 from backend.core.tools.runtime_data_access import (
     resolve_stock_names as resolve_runtime_stock_names,
@@ -22,6 +24,7 @@ from ._paths import _repo_root, _results_root
 
 logger = logging.getLogger(__name__)
 MANIFEST_SCHEMA_VERSION = "backtest_v2_experiment_manifest@2"
+_ST_NAME_PAT = re.compile(r"(^\*?ST)|(^ST)|退", re.IGNORECASE)
 
 
 def _safe_float(v: Any) -> float | None:
@@ -151,6 +154,30 @@ def _resolve_trade_st_flags(trades_df: pd.DataFrame, stock_names: dict[str, str]
         return {}
 
 
+def _sanitize_historical_stock_names(
+    trades_df: pd.DataFrame,
+    stock_names: dict[str, str],
+    trade_st_flags: dict[str, str],
+) -> dict[str, str]:
+    if not stock_names:
+        return {}
+    symbols_with_pit_st = {
+        str(key).split("|", 1)[1].lower()
+        for key, value in (trade_st_flags or {}).items()
+        if str(key).count("|") == 1 and str(value).upper() == "PIT_ST"
+    }
+    out: dict[str, str] = {}
+    for symbol, name in stock_names.items():
+        sym = str(symbol or "").strip()
+        display_name = str(name or "").strip()
+        if not sym or not display_name:
+            continue
+        if _ST_NAME_PAT.search(display_name) and sym.lower() not in symbols_with_pit_st:
+            continue
+        out[sym] = display_name
+    return out
+
+
 def _generate_experiment_label(base_cfg: dict[str, Any], overrides: dict[str, Any]) -> str:
     """Generate a human-readable label like 'SMA_CROSS 5/20 | CUSTOM 2只 | HFQ | 2024-01~06'."""
     wc = overrides.get("workbench_config") or {}
@@ -190,6 +217,7 @@ def _write_nav_csv(results_dir: Path, result: dict[str, Any]) -> Path:
     out = results_dir / "nav.csv"
     if out.exists():
         return out
+    effective_start = str(result.get("effective_execution_start_date") or "").strip()
 
     candidates = [results_dir / "portfolio_daily.csv", results_dir / "equity_curve.csv"]
     for src in candidates:
@@ -211,6 +239,13 @@ def _write_nav_csv(results_dir: Path, result: dict[str, Any]) -> Path:
                 dates = pd.to_datetime(df[date_col], errors="coerce").dt.strftime("%Y-%m-%d")
             nav = pd.to_numeric(df[nav_col], errors="coerce")
             out_df = pd.DataFrame({"date": dates, "nav": nav}).dropna(subset=["date", "nav"])
+            if effective_start and not out_df.empty:
+                date_ts = pd.to_datetime(out_df["date"], errors="coerce").dt.normalize()
+                out_df = out_df.loc[date_ts >= pd.Timestamp(effective_start).normalize()].copy()
+                if not out_df.empty:
+                    nav0 = float(pd.to_numeric(out_df["nav"], errors="coerce").iloc[0])
+                    if nav0 > 0:
+                        out_df["nav"] = pd.to_numeric(out_df["nav"], errors="coerce") / nav0
             if not out_df.empty:
                 out_df.to_csv(out, index=False)
                 return out
@@ -237,6 +272,16 @@ def _safe_read_csv(path: Path) -> pd.DataFrame:
         return pd.read_csv(path)
     except Exception:
         return pd.DataFrame()
+
+
+def _safe_read_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return None
+    return dict(payload) if isinstance(payload, dict) else None
 
 
 def _write_csv_alias(src: Path, dst: Path, empty_columns: list[str] | None = None) -> Path:
@@ -396,6 +441,13 @@ def _sum_int_column(df: pd.DataFrame, column: str) -> int | None:
     return int(values.sum())
 
 
+def _sum_reason_aliases(reason_counts: dict[str, Any], *aliases: str) -> int:
+    total = 0
+    for alias in aliases:
+        total += int(reason_counts.get(str(alias), 0) or 0)
+    return int(total)
+
+
 def _build_buy_stage_funnel(
     result: dict[str, Any],
     results_dir: Path,
@@ -483,7 +535,7 @@ def _build_buy_stage_funnel(
         "S4 个股趋势",
         tradable_symbol_days,
         raw_buy_signal,
-        "从全回测期可交易股票-日期事件收缩到原始买点事件；大多数事件并未触发 breakout/pullback 买点",
+        "从全回测期可交易标的日频事件收缩到原始买入信号",
         available=tradable_symbol_days is not None and raw_buy_signal is not None,
     ))
     rows.append(stage_row(
@@ -491,26 +543,26 @@ def _build_buy_stage_funnel(
         "S5 个股排序",
         raw_buy_signal,
         buy_candidates,
-        "原始买点事件经过排序与候选预筛后的保留数量",
+        "候选排序与可交易预筛后的保留数量",
         available=raw_buy_signal is not None and buy_candidates is not None,
     ))
     rows.append(stage_row(
         "s6",
         "S6 入场信号",
         buy_candidates,
-        buy_orders_count,
-        "当前基线稳定口径直接落到最终 entry orders；55 日突破等入场事件在本层收口为实际开仓次数",
+        after_held,
+        "去除已持仓/重复信号后的可入场候选",
         available=buy_candidates is not None,
     ))
     rows.append(stage_row(
         "s7",
-        "S7 仓位控制",
-        buy_orders_count,
+        "S7 组合构建",
+        after_held,
         after_slot if after_slot_measured else buy_orders_count,
         "仓位槽位与组合容量约束后的保留数量"
         if after_slot_measured
-        else "当前基线未稳定输出独立 slot stage 计数，沿用最终开仓数量展示仓位控制层",
-        available=buy_orders_count is not None,
+        else "当前引擎未稳定输出 slot stage，直接落到实际 BUY orders",
+        available=after_held is not None,
     ))
     rows.append(stage_row(
         "s8",
@@ -554,6 +606,53 @@ def _build_counters(
     counters["orders"] = int(_f.get("orders", result.get("orders", 0)) or 0)
     counters["skipped"] = int(_f.get("skipped", result.get("skipped", 0)) or 0)
     counters["closed_trades"] = int(_f.get("closed_trades", result.get("closed_trades", 0)) or 0)
+
+    daily_path = results_dir / ARTIFACT_FILENAMES["daily"]
+    if daily_path.exists():
+        try:
+            ddf = pd.read_csv(daily_path)
+        except Exception:
+            ddf = pd.DataFrame()
+        if not ddf.empty:
+            def _num_series(name: str) -> pd.Series:
+                if name not in ddf.columns:
+                    return pd.Series(0.0, index=ddf.index, dtype=float)
+                return pd.to_numeric(ddf[name], errors="coerce").fillna(0.0)
+
+            mtr = _num_series("mf_rank_triggered")
+            mra = _num_series("mf_rank_applied")
+            mfc = _num_series("mf_candidates_when_triggered")
+            mtk = _num_series("mf_topk_reject_count")
+            mcs = _num_series("mf_concentrated_selected_count")
+            mg = _num_series("mf_gate_on")
+            sro = _num_series("strong_risk_on")
+            mssg = _num_series("mf_rank_suppressed_by_strong_gate")
+            selected_count = _num_series("selected_count")
+
+            mf_rank_trigger_days = int((mtr > 0).sum())
+            mf_rank_applied_days = int((mra > 0).sum())
+            mf_gate_on_days = int((mg > 0).sum())
+            strong_risk_on_days = int((sro > 0).sum())
+            mf_rank_suppressed_by_strong_gate_days = int((mssg > 0).sum())
+
+            counters["mf_rank_trigger_days"] = mf_rank_trigger_days
+            counters["mf_rank_trigger_rate"] = float((mtr > 0).mean()) if len(mtr) > 0 else 0.0
+            counters["mf_rank_applied_days"] = mf_rank_applied_days
+            counters["mf_rank_applied_rate"] = float((mra > 0).mean()) if len(mra) > 0 else counters["mf_rank_applied_rate"]
+            counters["mf_avg_candidates_when_triggered"] = (
+                float(mfc[mtr > 0].mean()) if mf_rank_trigger_days > 0 else 0.0
+            )
+            counters["mf_topk_reject_count"] = int(mtk.sum())
+            selected_sum = float(selected_count.sum())
+            counters["mf_concentrated_buy_rate"] = (
+                float(float(mcs.sum()) / selected_sum) if selected_sum > 0 else 0.0
+            )
+            counters["mf_gate_on_days"] = mf_gate_on_days
+            counters["mf_gate_on_rate"] = float((mg > 0).mean()) if len(mg) > 0 else 0.0
+            counters["gate_on_rate"] = float(counters["mf_gate_on_rate"])
+            counters["strong_risk_on_days"] = strong_risk_on_days
+            counters["strong_risk_on_rate"] = float((sro > 0).mean()) if len(sro) > 0 else 0.0
+            counters["mf_rank_suppressed_by_strong_gate_days"] = mf_rank_suppressed_by_strong_gate_days
 
     # --- 从 portfolio_trades.csv 派生 exit 计数器 ---
     trades_path = results_dir / ARTIFACT_FILENAMES["trades"]
@@ -609,8 +708,8 @@ def _build_counters(
 
     # --- 从 candidate_diag_reason_counts 派生 constraint 计数器 ---
     diag = dict(result.get("candidate_diag_reason_counts") or {})
-    counters["cash_skip_count"] = int(diag.get("SKIP_CASH_INSUFFICIENT", 0) or 0)
-    counters["lot_skip_count"] = int(diag.get("SKIP_LOT_TOO_SMALL", 0) or 0)
+    counters["cash_skip_count"] = _sum_reason_aliases(diag, "SKIP_CASH_INSUFFICIENT", "SKIP_NO_CASH")
+    counters["lot_skip_count"] = _sum_reason_aliases(diag, "SKIP_LOT_TOO_SMALL", "SKIP_QTY_ZERO")
     counters["cap_hit_single"] = int(diag.get("BLOCK_SINGLE_CAP", 0) or 0)
     counters["cap_hit_industry"] = int(diag.get("BLOCK_INDUSTRY_CAP", 0) or 0)
     counters["min_hold_block_count"] = int(diag.get("BLOCK_MIN_HOLD", 0) or 0)
@@ -669,15 +768,19 @@ def _load_runtime_universe(results_dir: Path) -> dict[str, Any]:
     return dict(u) if isinstance(u, dict) else {}
 
 
-def _load_last_close_map(
+def _empty_close_history_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=["symbol", "trade_date", "close"])
+
+
+def _load_close_history_df(
     *,
     symbols: list[str],
     start_date: str,
     end_date: str,
     base_cfg: dict[str, Any],
-) -> dict[str, float]:
+) -> pd.DataFrame:
     if not symbols or not start_date or not end_date:
-        return {}
+        return _empty_close_history_frame()
     try:
         import psycopg
         from backend.core.data.mapping import safe_ident
@@ -710,17 +813,111 @@ def _load_last_close_map(
             rows = cur.fetchall()
         conn.close()
         if not rows:
-            return {}
+            return _empty_close_history_frame()
         df = pd.DataFrame(rows, columns=["symbol", "trade_date", "close"])
         df["symbol"] = df["symbol"].astype(str).str.lower()
         df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
         df["close"] = pd.to_numeric(df["close"], errors="coerce")
-        df = df.dropna(subset=["trade_date", "close"]).sort_values(["symbol", "trade_date"])
-        last_close = df.groupby("symbol", as_index=False).tail(1)
-        return {str(r.symbol): float(r.close) for r in last_close.itertuples(index=False)}
+        return df.dropna(subset=["trade_date", "close"]).sort_values(["symbol", "trade_date"]).reset_index(drop=True)
     except Exception as exc:
-        logger.warning("load_last_close_map failed: %s", exc)
+        logger.warning("load_close_history_df failed: %s", exc)
+        return _empty_close_history_frame()
+
+
+def _last_close_map_from_history(df: pd.DataFrame | None) -> dict[str, float]:
+    if df is None or df.empty:
         return {}
+    last_close = df.groupby("symbol", as_index=False).tail(1)
+    return {str(r.symbol): float(r.close) for r in last_close.itertuples(index=False)}
+
+
+def _load_last_close_map(
+    *,
+    symbols: list[str],
+    start_date: str,
+    end_date: str,
+    base_cfg: dict[str, Any],
+) -> dict[str, float]:
+    df = _load_close_history_df(
+        symbols=symbols,
+        start_date=start_date,
+        end_date=end_date,
+        base_cfg=base_cfg,
+    )
+    return _last_close_map_from_history(df)
+
+
+def _empty_symbol_performance_frame() -> pd.DataFrame:
+    return build_symbol_performance(
+        trades_df=pd.DataFrame(),
+        last_close_map={},
+        last_date=None,
+    )
+
+
+def _resolve_validation_audit_ref(
+    *,
+    explicit_ref: dict[str, Any] | None,
+    result: dict[str, Any],
+    overrides: dict[str, Any],
+) -> dict[str, Any] | None:
+    for candidate in (
+        explicit_ref,
+        result.get("validation_audit_ref"),
+        overrides.get("validation_audit_ref"),
+    ):
+        if isinstance(candidate, dict) and candidate:
+            return sanitize_json(dict(candidate))
+    return None
+
+
+def _finalize_research_audit(
+    *,
+    bt_root: Path,
+    results_dir: Path,
+    result: dict[str, Any],
+    base_cfg: dict[str, Any],
+    overrides: dict[str, Any],
+    validation_audit_ref: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    audit_path = results_dir / "audit.json"
+    audit_payload = _safe_read_json(audit_path)
+    stage_summary_obj = _extract_stage_summary(result)
+    stage_pipeline_obj = _extract_stage_pipeline_summary(result, stage_summary_obj)
+    if not isinstance(audit_payload, dict):
+        base_audit = (result.get("metrics") or {}).get("audit")
+        if not isinstance(base_audit, dict):
+            base_audit = {}
+        audit_payload = merge_experiment_audit(
+            base_audit,
+            stage_pipeline=stage_pipeline_obj if isinstance(stage_pipeline_obj, dict) else None,
+            stage_summary=stage_summary_obj if isinstance(stage_summary_obj, dict) else None,
+            exp_id=str(result.get("exp_id") or ""),
+        )
+    if not isinstance(audit_payload, dict):
+        audit_payload = {}
+
+    research_audit = build_research_audit(
+        results_dir=results_dir,
+        result=result,
+        manifest=result.get("manifest") if isinstance(result.get("manifest"), dict) else None,
+        stage_summary=stage_summary_obj if isinstance(stage_summary_obj, dict) else None,
+        stage_pipeline=stage_pipeline_obj if isinstance(stage_pipeline_obj, dict) else None,
+        validation_audit_ref=_resolve_validation_audit_ref(
+            explicit_ref=validation_audit_ref,
+            result=result,
+            overrides=overrides,
+        ),
+        bt_root=bt_root,
+        artifact_presence={
+            "run_meta": (results_dir / "run_meta.json").exists(),
+            "manifest": (results_dir / "manifest.json").exists(),
+            "audit": True,
+        },
+    )
+    audit_payload["research_audit"] = sanitize_json(research_audit)
+    audit_path.write_text(json.dumps(sanitize_json(audit_payload), ensure_ascii=False, indent=2), encoding="utf-8")
+    return audit_payload
 
 
 def ensure_standard_artifacts(
@@ -743,6 +940,11 @@ def ensure_standard_artifacts(
         "tier": str(result.get("tier") or ""),
         "trades": _safe_int(result.get("trades")),
         "turnover": _safe_float(result.get("turnover")),
+        "candidate_ready_date": str(result.get("candidate_ready_date") or ""),
+        "effective_signal_start_date": str(result.get("effective_signal_start_date") or ""),
+        "effective_execution_start_date": str(result.get("effective_execution_start_date") or ""),
+        "metrics_from_effective_start": bool(result.get("metrics_from_effective_start", False)),
+        "effective_observation_days": _safe_int(result.get("effective_observation_days")),
     }
     perf_path = results_dir / ARTIFACT_FILENAMES["perf"]
     perf_path.write_text(json.dumps(sanitize_json(perf_obj), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -806,38 +1008,59 @@ def ensure_standard_artifacts(
         pd.DataFrame(columns=["reason_code", "count"]).to_csv(reason_path, index=False)
         missing_fields.append(MISSING_FIELD_KEYS["reason_codes"])
 
-    # stock_names.json — 从 trades 提取 symbols，查 DB 获取中文名
+    # stock_names.json / trade_st_flags.json — 仅使用 PIT 安全 ST 信息修正历史展示名
     stock_names: dict[str, str] = {}
-    if trades_path.exists():
-        try:
-            tdf_sn = pd.read_csv(trades_path)
-            if not tdf_sn.empty and "symbol" in tdf_sn.columns:
-                unique_symbols = list(tdf_sn["symbol"].dropna().unique())
-                stock_names = _resolve_stock_names(unique_symbols)
-        except Exception:
-            pass
-    stock_names_path = results_dir / "stock_names.json"
-    stock_names_path.write_text(json.dumps(stock_names, ensure_ascii=False, indent=2), encoding="utf-8")
     trade_st_flags_path = results_dir / "trade_st_flags.json"
     trade_st_flags: dict[str, str] = {}
+    stock_names_path = results_dir / "stock_names.json"
     if trades_path.exists():
         try:
-            tdf_st = pd.read_csv(trades_path)
-            trade_st_flags = _resolve_trade_st_flags(tdf_st, stock_names)
+            tdf_trades = pd.read_csv(trades_path)
+            if not tdf_trades.empty and "symbol" in tdf_trades.columns:
+                unique_symbols = list(tdf_trades["symbol"].dropna().unique())
+                raw_stock_names = _resolve_stock_names(unique_symbols)
+                trade_st_flags = _resolve_trade_st_flags(tdf_trades, raw_stock_names)
+                stock_names = _sanitize_historical_stock_names(tdf_trades, raw_stock_names, trade_st_flags)
         except Exception as exc:
-            logger.warning("build trade_st_flags failed: %s", exc)
+            logger.warning("build stock_names/trade_st_flags failed: %s", exc)
+            stock_names = {}
             trade_st_flags = {}
+    stock_names_path.write_text(json.dumps(stock_names, ensure_ascii=False, indent=2), encoding="utf-8")
     trade_st_flags_path.write_text(json.dumps(trade_st_flags, ensure_ascii=False, indent=2), encoding="utf-8")
 
     trades_alias_path = _write_csv_alias(
         trades_path,
         results_dir / ARTIFACT_FILENAMES["trades_alias"],
-        empty_columns=["date", "symbol", "side", "price", "qty", "reason_code"],
+        empty_columns=[
+            "date",
+            "symbol",
+            "side",
+            "price",
+            "qty",
+            "reason_code",
+            "exit_owner",
+            "entry_alpha_id",
+            "entry_sleeve_id",
+            "entry_reason_code",
+            "entry_date",
+        ],
     )
     orders_path = _write_csv_alias(
         trades_path,
         results_dir / ARTIFACT_FILENAMES["orders"],
-        empty_columns=["date", "symbol", "side", "price", "qty", "reason_code"],
+        empty_columns=[
+            "date",
+            "symbol",
+            "side",
+            "price",
+            "qty",
+            "reason_code",
+            "exit_owner",
+            "entry_alpha_id",
+            "entry_sleeve_id",
+            "entry_reason_code",
+            "entry_date",
+        ],
     )
     candidate_signals_path, candidate_signals_df = _build_candidate_signals(results_dir)
     alpha_funnel_path = _build_alpha_funnel(results_dir, candidate_signals_df)
@@ -850,13 +1073,6 @@ def ensure_standard_artifacts(
             tdf_sp = pd.read_csv(trades_path)
             if not tdf_sp.empty and "symbol" in tdf_sp.columns:
                 symbols = [str(x).lower() for x in tdf_sp["symbol"].dropna().unique().tolist()]
-                start_s, end_s = _resolve_backtest_range(base_cfg, overrides)
-                last_close_map = _load_last_close_map(
-                    symbols=symbols,
-                    start_date=start_s,
-                    end_date=end_s,
-                    base_cfg=base_cfg,
-                )
                 last_date = None
                 try:
                     nav_df = pd.read_csv(nav_path)
@@ -865,15 +1081,35 @@ def ensure_standard_artifacts(
                         last_date = ts.date() if pd.notna(ts) else None
                 except Exception:
                     last_date = None
+                history_start, history_end = _resolve_backtest_range(base_cfg, overrides)
+                trade_date_col = "date" if "date" in tdf_sp.columns else ("trade_date" if "trade_date" in tdf_sp.columns else None)
+                if trade_date_col is not None:
+                    trade_dates = pd.to_datetime(tdf_sp[trade_date_col], errors="coerce").dropna()
+                    if not trade_dates.empty:
+                        history_start = trade_dates.min().date().isoformat()
+                        history_end_date = trade_dates.max().date()
+                        if last_date is not None:
+                            history_end_date = max(history_end_date, last_date)
+                        history_end = history_end_date.isoformat()
+                close_history_df = _load_close_history_df(
+                    symbols=symbols,
+                    start_date=history_start,
+                    end_date=history_end,
+                    base_cfg=base_cfg,
+                )
+                last_close_map = _last_close_map_from_history(close_history_df)
                 sp_df = build_symbol_performance(
                     trades_df=tdf_sp,
                     last_close_map=last_close_map,
                     last_date=last_date,
+                    daily_close_df=close_history_df,
                 )
             else:
                 sp_df = pd.DataFrame()
         else:
-            sp_df = pd.DataFrame()
+            sp_df = _empty_symbol_performance_frame()
+        if sp_df.empty and not list(sp_df.columns):
+            sp_df = _empty_symbol_performance_frame()
         sp_df.to_csv(symbol_perf_csv_path, index=False)
         if sp_df.empty:
             missing_fields.append(MISSING_FIELD_KEYS["symbol_performance"])
@@ -883,7 +1119,7 @@ def ensure_standard_artifacts(
         )
     except Exception as exc:
         logger.warning("build symbol_performance failed: %s", exc)
-        pd.DataFrame().to_csv(symbol_perf_csv_path, index=False)
+        _empty_symbol_performance_frame().to_csv(symbol_perf_csv_path, index=False)
         symbol_perf_json_path.write_text(json.dumps({"rows": []}, ensure_ascii=False, indent=2), encoding="utf-8")
         missing_fields.append(MISSING_FIELD_KEYS["symbol_performance"])
 
@@ -990,6 +1226,7 @@ def ensure_standard_artifacts(
         "price_adj_mode": str(result.get("price_adj_mode") or "hfq"),
         "adj_factor_stats": sanitize_json(result.get("adj_factor_stats") or {}),
         "missing_fields": sorted(set(missing_fields)),
+        "warmup": sanitize_json(result.get("warmup_analysis") or {}),
         "report_consistency": {
             "sources": {
                 "start": start_src,
@@ -1113,14 +1350,6 @@ def write_manifest(results_dir: Path, result: dict[str, Any]) -> tuple[Path, dic
         for key in core_keys
         if str(artifacts.get(key) or "").strip()
     }
-    report_rel = str(artifacts.get("report") or "").strip() or None
-    optional_artifacts = {
-        "report": {
-            "path": report_rel,
-            "available": bool(report_rel and (results_dir / report_rel).exists()),
-            "kind": "html_export",
-        }
-    }
     stage_summary = _extract_stage_summary(result)
     stage_pipeline = _extract_stage_pipeline_summary(result, stage_summary)
     manifest = {
@@ -1132,7 +1361,6 @@ def write_manifest(results_dir: Path, result: dict[str, Any]) -> tuple[Path, dic
         "artifacts": artifacts,
         "config_snapshots": config_snapshots,
         "core_artifacts": core_artifacts,
-        "optional_artifacts": optional_artifacts,
         "baseline_compare_status": _baseline_compare_status(results_dir),
         "metrics": {
             "total_return": _safe_float(result.get("total_return")),
@@ -1141,6 +1369,8 @@ def write_manifest(results_dir: Path, result: dict[str, Any]) -> tuple[Path, dic
             "sharpe": _safe_float(result.get("sharpe")),
             "trades": _safe_int(result.get("trades")),
             "turnover": _safe_float(result.get("turnover")),
+            "effective_execution_start_date": str(result.get("effective_execution_start_date") or ""),
+            "metrics_from_effective_start": bool(result.get("metrics_from_effective_start", False)),
         },
     }
     if isinstance(stage_pipeline, dict) and stage_pipeline:
@@ -1179,8 +1409,6 @@ def _append_to_experiment_index(
 
     exp_id = str(result.get("exp_id") or "")
     label = _generate_experiment_label(base_cfg, overrides)
-    has_report = (results_dir / "report.html").exists()
-
     entry = {
         "exp_id": exp_id,
         "label": label,
@@ -1191,7 +1419,6 @@ def _append_to_experiment_index(
         "sharpe": _safe_float(result.get("sharpe")),
         "trades": _safe_int(result.get("trades")),
         "has_manifest": (results_dir / "manifest.json").exists(),
-        "has_report": has_report,
     }
 
     # Remove existing entry for same exp_id (re-run)
@@ -1208,55 +1435,15 @@ def stabilize_experiment_result(
     base_cfg: dict[str, Any],
     overrides: dict[str, Any],
     run_profile_summary: dict[str, Any] | None,
+    validation_audit_ref: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    out = dict(result or {})
+    from backend.core.services.experiment_artifact_service import stabilize_experiment_output
 
-    results_dir = _resolve_runtime_path(str(out.get("results_dir") or ""), bt_root)
-    if results_dir is None:
-        results_dir = (_results_root() / "experiments" / str(out.get("exp_id") or "exp_unknown")).resolve()
-    results_dir.mkdir(parents=True, exist_ok=True)
-
-    out["exp_id"] = str(out.get("exp_id") or "")
-    out["results_dir"] = str(results_dir)
-    out["status"] = str(out.get("status") or "OK")
-
-    out = ensure_standard_artifacts(
-        results_dir=results_dir,
-        result=out,
+    return stabilize_experiment_output(
+        bt_root=bt_root,
+        result=result,
         base_cfg=base_cfg,
         overrides=overrides,
+        run_profile_summary=run_profile_summary,
+        validation_audit_ref=validation_audit_ref,
     )
-    # Generate report.html (failure does not block)
-    report_ok = False
-    try:
-        from backend.core.report.report_generator import generate_report
-        generate_report(str(results_dir))
-        report_ok = True
-    except Exception as exc:
-        logger.warning("Report generation failed: %s", exc)
-
-    # Update artifacts with report path
-    artifacts = dict(out.get("artifacts") or {})
-    if report_ok:
-        artifacts["report"] = "report.html"
-    else:
-        artifacts["report"] = None
-    out["artifacts"] = artifacts
-
-    manifest_path, manifest_obj = write_manifest(results_dir, out)
-
-    files = dict(out.get("files") or {})
-    files["manifest"] = _to_rel(manifest_path, results_dir)
-    out["files"] = files
-    out["manifest"] = manifest_obj
-
-    if run_profile_summary:
-        out["run_profile_summary"] = run_profile_summary
-
-    # Append to experiment index
-    try:
-        _append_to_experiment_index(results_dir, out, base_cfg, overrides)
-    except Exception as exc:
-        logger.warning("Failed to update experiment index: %s", exc)
-
-    return sanitize_json(out)

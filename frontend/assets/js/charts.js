@@ -265,7 +265,22 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
   const hasBench = Array.isArray(benchOhlc) && benchOhlc.length > 0;
   const mode = String(opts.mode || 'portfolio');
   const markers = Array.isArray(opts.markers) ? opts.markers : [];
-  const useRelativeBenchLine = mode === 'symbol' && showBenchmark && hasBench;
+  const useUnifiedRightScale = mode === 'portfolio';
+  const showLeftBenchmarkScale = !!showBenchmark && hasBench && !useUnifiedRightScale;
+  const useRelativeBenchLine = !!showBenchmark && hasBench;
+  const benchFirstClose = Number(benchOhlc[0]?.close) || 1;
+  const normalizedBenchLineData = useRelativeBenchLine
+    ? benchOhlc.map((p) => ({ time: p.time, value: Number(p.close) / benchFirstClose }))
+    : [];
+  const normalizedBenchOhlc = useRelativeBenchLine
+    ? benchOhlc.map((p) => ({
+        time: p.time,
+        open: Number(p.open) / benchFirstClose,
+        high: Number(p.high) / benchFirstClose,
+        low: Number(p.low) / benchFirstClose,
+        close: Number(p.close) / benchFirstClose,
+      }))
+    : [];
 
 
   // 无任何数据时显示空状态
@@ -298,8 +313,20 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
       horzLines: { color: 'rgba(51,65,85,0.4)' },
     },
     crosshair: { mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 0 },
-    leftPriceScale: { visible: useRelativeBenchLine, borderColor: '#334155' },
-    rightPriceScale: { borderColor: '#334155' },
+    leftPriceScale: { visible: showLeftBenchmarkScale, borderColor: '#334155', autoScale: true },
+    rightPriceScale: { visible: true, borderColor: '#334155', autoScale: true },
+    handleScale: {
+      mouseWheel: true,
+      pinch: true,
+      axisPressedMouseMove: {
+        time: true,
+        price: true,
+      },
+      axisDoubleClickReset: {
+        time: true,
+        price: true,
+      },
+    },
     timeScale: {
       borderColor: '#334155',
       timeVisible: false,
@@ -310,39 +337,70 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
   });
   _lwChartNav = chart;
   let symbolBadgeUpdater = null;
+  let refreshVisiblePriceScales = () => {};
 
   // Benchmark 蜡烛图（兼容 v4.0+ 和 v4.2+ API）
   if (showBenchmark && hasBench) {
-    if (useRelativeBenchLine) {
-      const benchFirstClose = Number(benchOhlc[0]?.close) || 1;
-      const benchLineData = benchOhlc.map((p) => ({ time: p.time, value: Number(p.close) / benchFirstClose }));
+    if (useUnifiedRightScale) {
+      // 组合模式下保留基准蜡烛图，但先归一化到与 NAV 相同的右轴比例尺。
+      const candleSeries = typeof chart.addCandlestickSeries === 'function'
+        ? chart.addCandlestickSeries({
+            upColor: '#26a69a',
+            downColor: '#ef5350',
+            borderDownColor: '#ef5350',
+            borderUpColor: '#26a69a',
+            wickDownColor: '#ef5350',
+            wickUpColor: '#26a69a',
+            priceScaleId: 'right',
+            priceLineVisible: false,
+            lastValueVisible: false,
+          })
+        : chart.addSeries(LWC.CandlestickSeries, {
+            upColor: '#26a69a',
+            downColor: '#ef5350',
+            borderDownColor: '#ef5350',
+            borderUpColor: '#26a69a',
+            wickDownColor: '#ef5350',
+            wickUpColor: '#26a69a',
+            priceScaleId: 'right',
+            priceLineVisible: false,
+            lastValueVisible: false,
+          });
+      candleSeries.setData(normalizedBenchOhlc);
+    } else if (useRelativeBenchLine) {
       const benchLine = typeof chart.addLineSeries === 'function'
         ? chart.addLineSeries({
             color: '#58a6ff',
             lineWidth: 2,
+            lineStyle: LWC.LineStyle ? LWC.LineStyle.Solid : 0,
             priceScaleId: 'left',
             crosshairMarkerVisible: false,
             priceLineVisible: false,
+            lastValueVisible: false,
           })
         : chart.addSeries(LWC.LineSeries, {
             color: '#58a6ff',
             lineWidth: 2,
+            lineStyle: LWC.LineStyle ? LWC.LineStyle.Solid : 0,
             priceScaleId: 'left',
             crosshairMarkerVisible: false,
             priceLineVisible: false,
+            lastValueVisible: false,
           });
-      benchLine.setData(benchLineData);
+      benchLine.setData(normalizedBenchLineData);
     } else {
       const candleSeries = typeof chart.addCandlestickSeries === 'function'
         ? chart.addCandlestickSeries({
             upColor: '#26a69a', downColor: '#ef5350',
             borderDownColor: '#ef5350', borderUpColor: '#26a69a',
             wickDownColor: '#ef5350', wickUpColor: '#26a69a',
+            priceScaleId: 'left',
           })
         : chart.addSeries(LWC.CandlestickSeries, {
             upColor: '#26a69a', downColor: '#ef5350',
             borderDownColor: '#ef5350', borderUpColor: '#26a69a',
             wickDownColor: '#ef5350', wickUpColor: '#26a69a',
+            priceScaleId: 'left',
           });
       candleSeries.setData(benchOhlc);
     }
@@ -356,6 +414,30 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
       time: p.date,
       value: mode === 'symbol' ? Number(p.value) : (Number(p.value) / firstVal),
     }));
+    const rightValues = lineData
+      .map((p) => Number(p.value))
+      .filter((v) => Number.isFinite(v));
+    if (useUnifiedRightScale && normalizedBenchOhlc.length) {
+      rightValues.push(
+        ...normalizedBenchOhlc
+          .flatMap((p) => [Number(p.open), Number(p.high), Number(p.low), Number(p.close)])
+          .filter((v) => Number.isFinite(v)),
+      );
+    }
+    const fixedRightAutoscaleProvider = rightValues.length
+      ? (() => {
+          const minValue = Math.min(...rightValues);
+          const maxValue = Math.max(...rightValues);
+          const span = Math.max(maxValue - minValue, Math.max(Math.abs(maxValue), 1) * 0.02, 1e-6);
+          const pad = span * 0.08;
+          return () => ({
+            priceRange: {
+              minValue: minValue - pad,
+              maxValue: maxValue + pad,
+            },
+          });
+        })()
+      : null;
 
     // 停牌区间分段：个股模式下用灰色停牌段 + 橙色正常段
     const suspRanges = Array.isArray(opts.suspensionRanges) ? opts.suspensionRanges : [];
@@ -400,8 +482,14 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
         return Array.from(m.values()).sort((a, b) => (a.time < b.time ? -1 : 1));
       };
       const suspLine = _addLine('#999');
+      if (fixedRightAutoscaleProvider) {
+        try { suspLine.applyOptions({ autoscaleInfoProvider: fixedRightAutoscaleProvider }); } catch (_) {}
+      }
       suspLine.setData(dedup(suspData));
       primaryLine = _addLine('#f59e0b');
+      if (fixedRightAutoscaleProvider) {
+        try { primaryLine.applyOptions({ autoscaleInfoProvider: fixedRightAutoscaleProvider }); } catch (_) {}
+      }
       primaryLine.setData(dedup(normalData));
       if (mode === 'symbol') {
         const lastValue = Number(lineData[lineData.length - 1]?.value);
@@ -409,6 +497,9 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
       }
     } else {
       primaryLine = _addLine(mode === 'symbol' ? '#f59e0b' : '#58a6ff');
+      if (fixedRightAutoscaleProvider) {
+        try { primaryLine.applyOptions({ autoscaleInfoProvider: fixedRightAutoscaleProvider }); } catch (_) {}
+      }
       primaryLine.setData(lineData);
       if (mode === 'symbol') {
         const lastValue = Number(lineData[lineData.length - 1]?.value);
@@ -459,6 +550,31 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
     chart.timeScale().fitContent();
   }
   if (typeof symbolBadgeUpdater === 'function') requestAnimationFrame(symbolBadgeUpdater);
+
+  refreshVisiblePriceScales = () => {
+    try { chart.priceScale('right').applyOptions({ autoScale: true }); } catch (_) {}
+    if (showLeftBenchmarkScale) {
+      try { chart.priceScale('left').applyOptions({ autoScale: true }); } catch (_) {}
+    }
+    if (typeof symbolBadgeUpdater === 'function') requestAnimationFrame(symbolBadgeUpdater);
+  };
+  if (typeof container.__wbPriceScaleWheelHandler === 'function') {
+    container.removeEventListener('wheel', container.__wbPriceScaleWheelHandler);
+  }
+  container.__wbPriceScaleWheelHandler = () => {
+    requestAnimationFrame(refreshVisiblePriceScales);
+  };
+  container.addEventListener('wheel', container.__wbPriceScaleWheelHandler, { passive: true });
+  const timeScaleApi = chart.timeScale();
+  if (typeof timeScaleApi?.subscribeVisibleLogicalRangeChange === 'function') {
+    timeScaleApi.subscribeVisibleLogicalRangeChange(() => {
+      requestAnimationFrame(refreshVisiblePriceScales);
+    });
+  } else if (typeof timeScaleApi?.subscribeVisibleTimeRangeChange === 'function') {
+    timeScaleApi.subscribeVisibleTimeRangeChange(() => {
+      requestAnimationFrame(refreshVisiblePriceScales);
+    });
+  }
 
   // 响应容器大小变化
   const ro = new ResizeObserver(() => {

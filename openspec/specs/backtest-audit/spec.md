@@ -1,5 +1,9 @@
-## ADDED Requirements
+# backtest-audit Specification
 
+## Purpose
+定义回测审计产物、恒等式校验、T+1 执行验证，以及多 alpha 组合场景下的组合与归因审计要求。
+
+## Requirements
 ### Requirement: 审计产物输出
 系统 SHALL 在每次回测完成后输出 `audit.json` 到实验目录，包含恒等式检查汇总和异常日详情。
 
@@ -11,9 +15,7 @@
 #### Scenario: audit.json 生成失败不阻塞回测
 - **WHEN** 审计数据收集或写入过程中发生异常
 - **THEN** 系统 SHALL 记录错误日志，但不影响回测结果的正常返回
-- **THEN** manifest.json 的 artifacts 字段 SHALL 包含 `"audit": null`
-
----
+- **THEN** manifest.json 的 artifacts 字段 SHALL 包含 `"audit": null"`
 
 ### Requirement: 现金守恒检查
 系统 SHALL 在每个交易日的 fill 执行后验证现金守恒恒等式。
@@ -38,8 +40,6 @@
 - **THEN** cash_after SHALL 等于 cash_before + Σ(sell_net) - Σ(buy_net)
 - **THEN** cash_check SHALL 为 true
 
----
-
 ### Requirement: 持仓守恒检查
 系统 SHALL 在每个交易日的 fill 执行后验证持仓守恒恒等式。
 
@@ -51,8 +51,6 @@
 #### Scenario: 单标的数量守恒
 - **WHEN** 某标的在某交易日执行了买入 qty_buy 或卖出 qty_sell
 - **THEN** 该标的的 position_after SHALL 等于 position_before + qty_buy - qty_sell
-
----
 
 ### Requirement: NAV 一致性检查
 系统 SHALL 在每个交易日的 NAV 快照后验证 NAV 等于现金加市值。
@@ -66,21 +64,17 @@
 - **WHEN** 某交易日计算 NAV 快照
 - **THEN** nav SHALL 不为 NaN 且不为负数
 
----
-
 ### Requirement: T+1 执行验证
-系统 SHALL 验证所有信号遵循 T+1 执行规则（信号日产生，次日成交）。
+系统 SHALL 验证所有原始 alpha 信号、组合后信号和最终订单都遵循 T+1 执行规则（`t` 日信号形成，`t+1` 日成交）。
 
-#### Scenario: 信号次日执行
-- **WHEN** 某交易日产生 N 个信号并构建订单
-- **THEN** 订单 SHALL 排入 pending[next_trading_day]，不在信号日当天执行
-- **THEN** t1_check SHALL 为 true
+#### Scenario: 组合后信号次日执行
+- **WHEN** 某交易日生成 `raw_alpha_signals` 与 `composed_buy_signals`
+- **THEN** 基于这些信号生成的订单 SHALL 排入 `pending[next_trading_day]`
+- **THEN** 系统 SHALL 不在信号日当天执行这些订单
 
 #### Scenario: 全周期无违规
 - **WHEN** 回测完成
-- **THEN** audit_summary.t1_check_fail SHALL 为 0
-
----
+- **THEN** `audit_summary.t1_check_fail` SHALL 为 `0`
 
 ### Requirement: 成交价格合理性检查
 系统 SHALL 记录每笔成交的价格合理性指标，用于外部审查。
@@ -98,8 +92,6 @@
 - **WHEN** 回测完成
 - **THEN** audit_summary SHALL 包含 fill_gap_pct 的 P50、P95、Max 统计值
 
----
-
 ### Requirement: 成本审计
 系统 SHALL 汇总全周期的交易成本明细。
 
@@ -111,8 +103,6 @@
 #### Scenario: 成本参数记录
 - **WHEN** 回测完成
 - **THEN** audit_summary SHALL 包含 cost_config 字段，记录实际使用的 commission_rate、commission_min、stamp_tax_rate、slippage_bps
-
----
 
 ### Requirement: 数据质量检查点
 系统 SHALL 在仿真循环开始前检查输入数据的质量。
@@ -128,8 +118,6 @@
 #### Scenario: 标的覆盖
 - **WHEN** 数据加载完成
 - **THEN** audit_summary.data_quality SHALL 包含 symbols_count（标的数量）和 symbols_with_full_coverage（全周期有数据的标的数）
-
----
 
 ### Requirement: 可疑模式自动检测
 系统 SHALL 自动检测并标记可疑的回测行为模式。
@@ -166,19 +154,71 @@
 - **WHEN** flags 数组超过 50 条
 - **THEN** 系统 SHALL 截断并在末尾追加一条 `"... and N more flags truncated"` 记录
 
----
-
 ### Requirement: audit.json 输出格式
-audit.json SHALL 遵循固定 schema，便于机器解析。
+`audit.json` SHALL 遵循固定 schema，便于机器解析，并在多 alpha 组合场景下扩展组合与归因字段。
 
 #### Scenario: 顶层结构
-- **WHEN** audit.json 生成
-- **THEN** 顶层 SHALL 包含 `version`（"1.0"）、`exp_id`、`generated_at`（ISO 时间戳）、`summary`、`data_quality`、`flagged_days`、`flags` 字段
+- **WHEN** `audit.json` 生成
+- **THEN** 顶层 SHALL 包含 `version`、`exp_id`、`generated_at`、`summary`、`data_quality`、`flagged_days`、`flags` 字段
 
 #### Scenario: summary 结构
-- **WHEN** audit.json 生成
-- **THEN** summary SHALL 包含：`trading_days_count`、`cash_check_pass`/`cash_check_fail`、`pos_check_pass`/`pos_check_fail`、`nav_check_pass`/`nav_check_fail`、`t1_check_pass`/`t1_check_fail`、`total_fills`、`total_signals`、`orphan_fills`、`fill_gap_pct_p50`/`p95`/`max`、`total_commission`/`total_stamp_tax`/`total_slippage`、`cost_as_pct_of_initial`、`cost_config`
+- **WHEN** `audit.json` 生成
+- **THEN** `summary` SHALL 继续包含现有审计统计字段
+- **THEN** `summary` SHALL 额外包含 `raw_signal_counts_by_alpha`、`composed_signal_counts_by_alpha`、`blocked_signal_counts_by_reason`、`conflict_resolution_counts`、`source_only_exit_count`、`global_risk_override_count`
 
 #### Scenario: flagged_days 结构
-- **WHEN** 某交易日的任一检查失败或有异常成交
-- **THEN** flagged_days 数组 SHALL 包含该日的完整审计记录：`date`、`cash_before`/`cash_after`/`fills_net`/`costs_total`/`cash_check`、`positions_before`/`positions_after`/`buys_filled`/`sells_filled`/`pos_check`、`nav`/`cash`/`market_value`/`nav_check`、`signals_generated`/`orders_scheduled`/`fills_from_yesterday`/`t1_check`、`fills`（含 sym/side/signal_close/fill_open/fill_price/gap_pct/slip_bps）
+- **WHEN** 某交易日的任一检查失败、发生组合冲突或出现来源感知退出
+- **THEN** `flagged_days` SHALL 包含该日的完整审计记录
+- **THEN** 该记录 SHALL 能表示 `raw_alpha_signals`、`composed_buy_signals`、`composed_sell_signals`、`same_symbol_conflicts`、`source_exit_count`、`global_risk_override_count`
+
+### Requirement: 组合层审计输出
+系统 SHALL 为多 alpha 组合输出最小可验证的审计统计，至少覆盖“组合前”“组合后”“冲突裁决后”三个层面。
+
+#### Scenario: 原始信号与组合后信号计数
+- **WHEN** 某交易日启用多 alpha 组合
+- **THEN** 审计输出 SHALL 记录每个 `alpha_id` 的原始信号数量
+- **THEN** 审计输出 SHALL 记录每个 `alpha_id` 的组合后放行数量
+
+#### Scenario: 同股冲突裁决被审计
+- **WHEN** 某交易日某标的发生同股冲突裁决
+- **THEN** 审计输出 SHALL 记录冲突涉及的 `alpha_id`、被放行的策略和裁决原因
+
+### Requirement: 来源退出审计输出
+系统 SHALL 区分“来源策略退出”和“全局风险覆盖退出”，并在审计结果中分别统计。
+
+#### Scenario: 来源策略退出被记录
+- **WHEN** 某持仓因其 `entry_alpha_id` 对应的 `S9` 规则而退出
+- **THEN** 审计输出 SHALL 记录该笔退出属于 `source_only`
+- **THEN** 退出统计 SHALL 归入对应 `alpha_id`
+
+#### Scenario: 全局风险覆盖退出被记录
+- **WHEN** 某持仓因 `S8` 的全局风险规则而被强平
+- **THEN** 审计输出 SHALL 记录该笔退出属于 `global_risk_override`
+- **THEN** 该笔退出 SHALL 不计入任意来源策略的正常退出次数
+
+### Requirement: audit.json 必须兼容 research_audit 子树
+系统 MUST 在保留现有 execution audit trail 的前提下，允许 `audit.json` 承载 `research_audit` 子树。
+
+#### Scenario: execution audit 与 research audit 共存
+- **WHEN** 一次实验同时生成 execution audit trail 和 research audit
+- **THEN** `audit.json` SHALL 同时保留现有 execution audit 字段
+- **THEN** `audit.json` SHALL 追加 `research_audit` 子树
+- **THEN** 系统 SHALL NOT 因追加 `research_audit` 而删除既有 `stage_pipeline`、`warnings` 或其他已存在的 execution audit 字段
+
+#### Scenario: research audit 生成失败不破坏 execution audit
+- **WHEN** research audit 的生成过程发生异常
+- **THEN** 系统 SHALL 优先保留现有 execution audit 内容
+- **THEN** 系统 SHALL 记录 research audit 的错误日志，而不是破坏既有 `audit.json` 写盘流程
+
+### Requirement: research_audit 不得重复存储已有审计产物
+系统 MUST 让 `research_audit` 引用现有 artifact 作为证据，而不是复制 `run_meta`、`stage_summary`、`manifest` 的完整内容。
+
+#### Scenario: 引用 stage 与实验元信息
+- **WHEN** `research_audit` 需要引用 stage 执行信息或实验元信息
+- **THEN** `research_audit` SHALL 通过 `evidence_refs` 或精简 `evidence` 字段引用 `run_meta.json`、`stage_summary.json`、`manifest.json`
+- **THEN** `research_audit` SHALL NOT 内嵌这些文件的完整 payload
+
+#### Scenario: 复用已有审计摘要
+- **WHEN** `research_audit` 需要表达 execution shell、stage 顺序或警告摘要
+- **THEN** 系统 SHALL 优先复用现有 `stage_pipeline`、`stage_summary` 和 execution audit 内容
+- **THEN** 系统 SHALL NOT 再定义第二套等价字段保存同一事实

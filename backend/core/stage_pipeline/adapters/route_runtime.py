@@ -6,14 +6,17 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from backend.core.config.models import BenchmarkRegimeConfig, ExitConfig, MarketFilterConfig, RiskBudgetConfig, SizingConfig
+from backend.core.config.models import BenchmarkRegimeConfig, BreadthConfig, ExitConfig, MarketFilterConfig, RiskBudgetConfig, SizingConfig
+from backend.core.engine_vector.breadth import compute_breadth_scores, compute_dynamic_maxpos
 from backend.core.engine_vector.breakout_signal_provider import BreakoutTrendProvider
 from backend.core.engine_vector.generic_signal_provider import GenericSignalProvider
+from backend.core.engine_vector.multi_alpha_signal_provider import MultiAlphaSignalProvider
 from backend.core.engine_vector.regime_router_signal_provider import RegimeRouterSignalProvider
 from backend.core.engine_vector.signal_provider import SignalProvider
 from backend.core.engine_vector.sma_signal_provider import SMASignalProvider
 from backend.core.strategies.breakout_trend import BreakoutTrendStrategy
 from backend.core.strategies.composite_strategy import CompositeStrategy
+from backend.core.strategies.multi_alpha_strategy import MultiAlphaStrategy
 from backend.core.strategies.regime_router import RegimeRouter
 from backend.core.tools.data_bundle_builder import DataBundle
 
@@ -25,11 +28,16 @@ class LegacyRouteControls:
     mf_mult_arr: np.ndarray
     br_enabled: bool
     br_gate_arr: np.ndarray
+    breadth_enabled: bool
+    breadth_score_arr: np.ndarray
+    breadth_maxpos_arr: np.ndarray
 
 
 def build_signal_provider(strategy: Any) -> tuple[str, SignalProvider]:
     if isinstance(strategy, BreakoutTrendStrategy):
         return "provider_breakout_runtime", BreakoutTrendProvider()
+    if isinstance(strategy, MultiAlphaStrategy):
+        return "multi_alpha_inline_runtime", MultiAlphaSignalProvider()
     if isinstance(strategy, CompositeStrategy):
         return "generic_inline_runtime", GenericSignalProvider()
     if isinstance(strategy, RegimeRouter):
@@ -63,13 +71,18 @@ def initialize_route_controls(
     data_bundle: DataBundle,
     market_filter_cfg: MarketFilterConfig | None,
     benchmark_regime_cfg: BenchmarkRegimeConfig | None,
+    breadth_cfg: BreadthConfig | None = None,
+    provider: Any | None = None,
 ) -> LegacyRouteControls:
     day_count = len(data_bundle.trading_days)
     mf_state_arr = np.zeros(day_count, dtype=np.int8)
     mf_mult_arr = np.ones(day_count, dtype=float)
     br_gate_arr = np.ones(day_count, dtype=bool)
+    breadth_score_arr = np.full(day_count, np.nan, dtype=float)
+    breadth_maxpos_arr = np.full(day_count, 0, dtype=np.int32)
     mf_enabled = False
     br_enabled = False
+    breadth_enabled = False
 
     if str(route_id) != "provider_breakout_runtime":
         return LegacyRouteControls(
@@ -78,6 +91,9 @@ def initialize_route_controls(
             mf_mult_arr=mf_mult_arr,
             br_enabled=br_enabled,
             br_gate_arr=br_gate_arr,
+            breadth_enabled=breadth_enabled,
+            breadth_score_arr=breadth_score_arr,
+            breadth_maxpos_arr=breadth_maxpos_arr,
         )
 
     benchmark = data_bundle.benchmark
@@ -134,12 +150,48 @@ def initialize_route_controls(
         allow = (ma_fast > ma_slow) & (slow_slope >= 0.0)
         br_gate_arr = allow.fillna(False).to_numpy(dtype=bool)
 
+    breadth_enabled = bool(breadth_cfg is not None and breadth_cfg.enabled)
+    if breadth_enabled:
+        mx = getattr(provider, "_mx", None)
+        close = getattr(mx, "close", None)
+        tradable = getattr(mx, "tradable", None)
+        if isinstance(close, np.ndarray) and isinstance(tradable, np.ndarray) and close.shape == tradable.shape and close.shape[0] == day_count:
+            breadth = compute_breadth_scores(
+                close=close,
+                tradable=tradable.astype(bool),
+                ema_fast_period=max(2, int(breadth_cfg.ema_fast)),
+                ema_slow_period=max(int(breadth_cfg.ema_fast) + 1, int(breadth_cfg.ema_slow)),
+            )
+            score_type = str(breadth_cfg.score_type or "B").strip().upper()
+            score_map = {
+                "A": breadth.scores_A,
+                "B": breadth.scores_B,
+                "C": breadth.scores_C,
+                "COMBO": breadth.scores_combo,
+            }
+            breadth_score_arr = np.array(score_map.get(score_type, breadth.scores_B), dtype=float)
+            breadth_maxpos_arr = compute_dynamic_maxpos(
+                scores=breadth_score_arr,
+                mapping_mode=str(breadth_cfg.mapping_mode or "smooth"),
+                min_pos=max(0, int(breadth_cfg.min_positions)),
+                max_pos=max(0, int(breadth_cfg.max_positions)),
+                step_high=float(breadth_cfg.step_high),
+                step_mid=float(breadth_cfg.step_mid),
+                smooth_lo=float(breadth_cfg.smooth_lo),
+                smooth_range=max(float(breadth_cfg.smooth_range), 1e-6),
+            ).astype(np.int32)
+        else:
+            breadth_enabled = False
+
     return LegacyRouteControls(
         mf_enabled=mf_enabled,
         mf_state_arr=mf_state_arr,
         mf_mult_arr=mf_mult_arr,
         br_enabled=br_enabled,
         br_gate_arr=br_gate_arr,
+        breadth_enabled=breadth_enabled,
+        breadth_score_arr=breadth_score_arr,
+        breadth_maxpos_arr=breadth_maxpos_arr,
     )
 
 
@@ -172,6 +224,8 @@ def precompute_signal_provider(
         base_order_value=float(initial_cash) / float(max(max_positions, 1)),
         sector_data=data_bundle.sector_data,
         industry_map=data_bundle.industry_map,
+        industry_history=data_bundle.industry_history,
+        membership_history=data_bundle.membership_history,
         history_lookback_days=history_lookback_days,
         enable_multifactor_rank=bool(enable_multifactor_rank),
         mf_rank_gate_mode=str(mf_rank_gate_mode or "ALWAYS_ON"),

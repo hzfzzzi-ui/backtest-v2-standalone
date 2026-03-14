@@ -4,7 +4,6 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
 
 from ._paths import _experiments_root
 from backend.core.tools.experiment_artifact_access import (
@@ -151,7 +150,6 @@ def list_experiments():
             row["label"] = compact_label
             changed = True
         row["has_manifest"] = bool(flags.get("has_manifest"))
-        row["has_report"] = bool(flags.get("has_report"))
         row["has_core_artifacts"] = bool(flags.get("has_core_artifacts"))
         row.update(_experiment_surface_meta(exp_dir))
         valid.append(row)
@@ -159,19 +157,6 @@ def list_experiments():
         _write_index(valid)
     valid.sort(key=lambda e: str(e.get("created_at", "")), reverse=True)
     return valid
-
-
-@router.get("/api/backtest_v2/experiments/{exp_id}/report")
-def get_experiment_report(exp_id: str):
-    """Return report.html as text/html."""
-    report_path = _experiments_root() / exp_id / "report.html"
-    if not report_path.exists():
-        return JSONResponse(
-            status_code=404,
-            content={"status": "unavailable", "exp_id": exp_id, "artifact": "report.html", "detail": "report not found"},
-        )
-    html = report_path.read_text(encoding="utf-8")
-    return HTMLResponse(content=html)
 
 
 @router.delete("/api/backtest_v2/experiments/{exp_id}")
@@ -239,7 +224,6 @@ def compare_experiments(body: dict[str, Any]):
                 "label": _compact_experiment_label(idx_row or {"exp_id": exp_id}),
                 "created_at": str(idx_row.get("created_at") or ""),
                 "has_manifest": bool(manifest),
-                "has_report": bool(flags.get("has_report")),
                 "perf": {
                     "total_return": perf.get("total_return"),
                     "cagr": perf.get("cagr"),

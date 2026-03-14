@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <title>A股回测系统</title>
-  <link rel="stylesheet" href="assets/css/workbench.css?v=20260309_stageflow54" />
+  <link rel="stylesheet" href="assets/css/workbench.css?v=20260312_funnelfix01" />
 </head>
 <body>
   <div class="wb-app">
@@ -24,7 +24,7 @@
         <button id="wbRunBtn" class="wb-btn-run">运行</button>
         <button id="wbQuickLoad" class="pill wb-cmd-btn">加载</button>
         <button id="wbSaveBaseline" class="pill wb-cmd-btn">保存基线</button>
-        <span id="wbLoadHint" class="wb-run-status">基线：baseline_V1</span>
+        <span id="wbLoadHint" class="wb-run-status">基线：baseline_V10</span>
         <select id="wbPresetSelect" class="formInput wb-input-sm wb-preset-select" title="运行入口" hidden>
           <option value="">默认入口</option>
           <option value="v2-breakout-br35-atr10-candidate">候选 BR35 + ATR1.0</option>
@@ -114,8 +114,8 @@
 
         <!-- Hidden: config tracking elements for JS -->
         <span id="wbConfigId" class="wb-code" hidden>-</span>
-        <div class="wb-inline wb-gap-bottom">
-              <span id="wbSchemaBadge" class="wb-chip wb-ok">结构正常</span>
+        <div class="wb-inline wb-gap-bottom" hidden>
+              <span id="wbSchemaBadge" class="wb-chip wb-ok" hidden>结构正常</span>
         </div>
 
         <!-- ── Universe module ── -->
@@ -255,14 +255,14 @@
           </div>
 
           <!-- 14. 成分口径 -->
-          <div class="wb-field">
+          <div class="wb-field" id="wbConstituentWrap" hidden>
             <label class="wb-field-label">成分口径</label>
             <div class="wb-seg-full" id="wbConstituentGroup">
-              <button class="active" data-val="dynamic">动态成分</button>
-              <button data-val="fixed">固定成分</button>
+              <button class="active" data-val="dynamic">历史动态</button>
+              <button data-val="fixed">起始日快照</button>
             </div>
-            <select id="wbConstituent" hidden><option value="dynamic" selected>动态成分</option><option value="fixed">固定成分</option></select>
-            <div class="wb-mini wb-gap-top"><span class="wb-badge-unimpl">未实现</span> 实际口径由 `universe_mode` 决定，当前没有独立的动态/固定成分开关。</div>
+            <select id="wbConstituent" hidden><option value="dynamic" selected>历史动态</option><option value="fixed">起始日快照</option></select>
+            <div class="wb-mini wb-gap-top">当前已接通成分时点控制。仅对“沪深300+中证500 / 中证1000”生效；主线实验默认使用历史动态成分。</div>
           </div>
 
           <!-- 15. 行业体系 & PIT -->
@@ -374,25 +374,6 @@
                 <div><label class="formLabel">排名窗口</label><input id="wbSectorRankWindow" type="number" class="formInput" value="60" /></div>
                 <div><label class="formLabel">保留比例</label><input id="wbSectorTopPct" type="number" step="0.05" class="formInput" value="0.30" /></div>
               </div>
-              <hr class="wb-acc-separator" />
-              <div class="wb-inline wb-gap-bottom">
-                <label><input type="checkbox" id="wbEnableComposition" checked /> 启用</label>
-                <select id="wbComposeMode" class="formInput wb-input-sm"><option value="WEIGHTED_SCORE">加权评分</option><option value="AND">同时满足</option><option value="OR">任一满足</option></select>
-                <div style="margin-left:auto"><label class="formLabel" style="display:inline">评分阈值</label> <input id="wbScoreThreshold" type="number" class="formInput wb-input-sm" value="0.6" style="width:60px" /></div>
-                <span class="wb-badge-unimpl">未实现</span>
-              </div>
-              <div id="wbSignalCompositionNotice" class="wb-hint-warn">
-                组合模块当前只保留在草稿和对照界面里，主实验不消费。
-              </div>
-              <div id="wbPipelineFlow" class="wb-pipeline wb-gap-top">
-                <table class="wb-table wb-table-compact">
-                  <thead>
-                    <tr><th>模块</th><th>启用</th><th>角色</th><th>权重</th><th>优先级</th></tr>
-                  </thead>
-                  <tbody id="wbComposeRows"></tbody>
-                </table>
-              </div>
-              <div class="wb-mini wb-gap-top">输出: <span id="wbCompOutput">当前只用于研究对照，不进入主链</span></div>
             </div>
           </details>
         </section>
@@ -422,12 +403,19 @@
           <details class="wb-acc" open>
             <summary>个股排序</summary>
             <div class="wb-acc-body">
-              <div class="wb-grid2">
+              <div class="wb-grid3">
                 <div><label class="formLabel">排序保留比例</label><input id="wbMomentumTopPct" type="number" step="0.05" class="formInput" value="0" /></div>
-                <div><label class="formLabel">说明</label><input class="formInput" value="0 = 不启用排序截断" disabled /></div>
+                <div>
+                  <label class="formLabel">排序来源</label>
+                  <select id="wbScoreSourceMode" class="formInput">
+                    <option value="">沿用默认/已加载</option>
+                    <option value="residual_only">Residual Alpha</option>
+                  </select>
+                </div>
+                <div><label class="formLabel">Residual 窗口</label><input id="wbResidualWindow" type="number" class="formInput" placeholder="留空=沿用当前/默认" /></div>
               </div>
               <div class="wb-mini wb-gap-top">
-                排序截断开启后才会在主链实际过滤候选。
+                `V10` 当前显式使用 `score_source_mode=residual_only` 与 `residual_window=40`。窗口留空时保留已加载配置或后端默认口径。
               </div>
             </div>
           </details>
@@ -485,6 +473,29 @@
               </div>
               <hr class="wb-acc-separator" />
               <div class="wb-field">
+                <label class="wb-field-label">S6B 信号组合</label>
+                <div class="wb-inline wb-gap-bottom">
+                  <label><input type="checkbox" id="wbEnableComposition" /> 启用</label>
+                  <div><label class="formLabel">组合模式</label><select id="wbComposeMode" class="formInput wb-input-sm"><option value="REGIME_ROUTE">REGIME_ROUTE</option></select></div>
+                  <div><label class="formLabel">同股冲突</label><select id="wbSameSymbolPolicy" class="formInput wb-input-sm"><option value="PREFER_HIGHER_SCORE">PREFER_HIGHER_SCORE</option></select></div>
+                  <div><label class="formLabel">持仓归属</label><select id="wbHoldingOwnership" class="formInput wb-input-sm"><option value="SOURCE_ONLY">SOURCE_ONLY</option></select></div>
+                </div>
+                <div id="wbSignalCompositionNotice" class="wb-hint-warn">
+                  第一阶段只支持 breakout_55 + rsi_reversal + REGIME_ROUTE + PREFER_HIGHER_SCORE + SOURCE_ONLY。
+                </div>
+                <div id="wbPipelineFlow" class="wb-pipeline wb-gap-top">
+                  <table class="wb-table wb-table-compact">
+                    <thead>
+                      <tr><th>模块</th><th>启用</th><th>角色</th><th>权重</th><th>优先级</th></tr>
+                    </thead>
+                    <tbody id="wbComposeRows"></tbody>
+                  </table>
+                </div>
+                <div id="wbRegimeMatrix" class="wb-gap-top"></div>
+                <div class="wb-mini wb-gap-top">输出: <span id="wbCompOutput">关闭组合时不注入；启用后输出 canonical signal_generation.modules + signal_composition。</span></div>
+              </div>
+              <hr class="wb-acc-separator" />
+              <div class="wb-field">
                 <label class="wb-field-label">入场过滤</label>
                 <div class="wb-inline">
                   <label><input id="wbEntryAboveSlowMa" type="checkbox" /> 仅允许站上慢线</label>
@@ -509,7 +520,7 @@
                 <div><label class="formLabel">行业上限%</label><input id="wbIndustryCap" type="number" class="formInput" value="30" /></div>
                 <div><label class="formLabel">最小手数</label><input id="wbLot" type="number" class="formInput" value="100" /></div>
                 <div><label class="formLabel">现金不足策略</label><select id="wbCashPolicy" class="formInput"><option value="skip">跳过</option><option value="scale_down">缩量</option></select></div>
-                <div><label class="formLabel">组合模式</label><select id="wbPortfolioMode" class="formInput"><option value="equal_10">等权 10 仓</option><option value="profit_release">利润释放</option></select></div>
+                <div><label class="formLabel">组合模式</label><select id="wbPortfolioMode" class="formInput"><option value="hard_sleeve_budget">hard_sleeve_budget</option><option value="equal_10" selected>等权 10 仓（单策略）</option><option value="profit_release">利润释放（单策略）</option></select></div>
                 <div><label class="formLabel">权重模式</label><select id="wbWeightMode" class="formInput"><option value="equal">等权</option><option value="atr">ATR 权重</option><option value="risk_budget">风险预算</option></select></div>
                 <div><label class="formLabel">最低持仓数</label><input id="wbMinPositions" type="number" class="formInput" value="10" /></div>
               </div>
@@ -599,6 +610,10 @@
                 <div><label class="formLabel">ATR 倍数</label><input id="wbAtrK" type="number" class="formInput" value="0.8" /></div>
                 <label><input id="wbExitTrail" type="checkbox" /> 移动止盈</label>
                 <div><label class="formLabel">移动止盈倍数 <span class="muted">(×ATR)</span></label><input id="wbTrailK" type="number" class="formInput" value="2.0" /></div>
+                <div><label class="formLabel">激活盈利阈值%</label><input id="wbTrailingActivateProfitPct" type="number" step="0.1" class="formInput" placeholder="留空=沿用当前/默认" /></div>
+                <label><input id="wbPreProfitBreakoutFailureEnabled" type="checkbox" /> Pre-profit 失败突破退出</label>
+                <div><label class="formLabel">失败确认窗口 <span class="muted">(bars)</span></label><input id="wbPreProfitBreakoutFailureMaxBars" type="number" class="formInput" value="5" /></div>
+                <div><label class="formLabel">突破失败缓冲 <span class="muted">(×ATR)</span></label><input id="wbPreProfitBreakoutFailureAtrBufferK" type="number" step="0.1" class="formInput" value="0.5" /></div>
                 <label><input id="wbExitTime" type="checkbox" /> 时间退出</label>
                 <div><label class="formLabel">持有天数 <span class="muted">(天)</span></label><input id="wbExitDays" type="number" class="formInput" value="20" /></div>
                 <label><input id="wbExitTakeProfit" type="checkbox" /> 止盈</label>
@@ -614,6 +629,9 @@
               </div>
               <div id="wbAtrNote" class="wb-atr-note">
                 ATR 窗口: 14日 · 价格口径: 前复权 · 触发价: 次日开盘
+              </div>
+              <div class="wb-mini wb-gap-top">
+                `V10` 退出增强来自 `activate_profit_pct` 与 `pre-profit breakout failure` 这一组 trailing 扩展字段。
               </div>
               <div id="wbExitStats" class="wb-stat-row">
                 <div class="wb-stat-item"><span class="wb-stat-label">信号反转</span><span class="wb-stat-value" data-key="reversal_exit_count">—</span></div>
@@ -816,8 +834,14 @@
                   </select>
                 </div>
               </div>
-              <div class="wb-table-wrap wb-gap-top wb-symbol-table-wrap wb-scrollbox">
-                <table class="wb-table">
+              <div id="wbSymbolPerfWrap" class="wb-table-wrap wb-gap-top wb-symbol-table-wrap wb-scrollbox">
+                <table class="wb-table wb-symbol-table">
+                  <colgroup>
+                    <col class="wb-symbol-col-symbol" />
+                    <col class="wb-symbol-col-return" />
+                    <col class="wb-symbol-col-drawdown" />
+                    <col class="wb-symbol-col-trades" />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>标的</th>
@@ -859,7 +883,6 @@
                 <span id="wbAccLogsMeta" class="wb-mini">状态输出</span>
               </button>
               <div class="wb-result-acc-body" hidden>
-                <div id="wbArtifacts" class="wb-mini"></div>
                 <div id="wbLogs" class="wb-log wb-gap-top"></div>
               </div>
             </section>
@@ -896,15 +919,15 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="assets/js/results-workbench-bridge.js?v=20260309_stageflow54"></script>
-  <script src="assets/js/backtest_v2.js?v=20260309_stageflow54"></script>
-  <script src="assets/js/api-client.js?v=20260309_stageflow54"></script>
-  <script src="assets/js/ui-controls.js?v=20260309_stageflow54"></script>
-  <script src="assets/js/charts.js?v=20260309_stageflow54"></script>
-  <script src="assets/js/artifacts.js?v=20260309_stageflow54"></script>
+  <script src="assets/js/results-workbench-bridge.js?v=20260312_frontendfix06"></script>
+  <script src="assets/js/backtest_v2.js?v=20260312_frontendfix06"></script>
+  <script src="assets/js/api-client.js?v=20260312_frontendfix06"></script>
+  <script src="assets/js/ui-controls.js?v=20260312_frontendfix06"></script>
+  <script src="assets/js/charts.js?v=20260312_frontendfix08"></script>
+  <script src="assets/js/artifacts.js?v=20260312_frontendfix06"></script>
   <script src="assets/js/compare.js?v=20260307_9stage_fix"></script>
-  <script src="assets/js/report.js?v=20260309_stageflow54"></script>
-  <script src="assets/dist/results-workbench-vue-shell.js?v=20260309_stageflow54"></script>
+  <script src="assets/js/report.js?v=20260309_stageflow59"></script>
+  <script src="assets/dist/results-workbench-vue-shell.js?v=20260312_funnelfix01"></script>
   <script>init();</script>
 </body>
 </html>

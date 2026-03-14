@@ -256,3 +256,79 @@ def test_order_planning_module_preserves_s7_shape(monkeypatch) -> None:
     assert output.summary_fragment["sell_orders_count"] == 1
     assert runtime.candidate_rows == [{"symbol": "sh600000", "selected": True}]
     assert len(diag_calls) == 1
+
+
+def test_order_planning_module_merges_deferred_sell_orders(monkeypatch) -> None:
+    current_day = {
+        "day": date(2026, 3, 2),
+        "controls": {"effective_max_positions": 5, "risk_on_today": True},
+        "day_signals": DaySignals(
+            sell_signals=[],
+            buy_signals=[SimpleNamespace(symbol="SH600000")],
+            exit_syms=set(),
+            strength_map={"sh600000": 1.0},
+            mf_score_map={"sh600000": 2.0},
+            mf_gate_on_today=True,
+            strong_risk_on=False,
+            exit_counts=ExitCounts(),
+            diagnostics={},
+        ),
+        "next_open": {"sh600000": 10.0, "sh600001": 9.8},
+        "nav": 100000.0,
+        "holding_symbols": ("sh600001",),
+    }
+
+    monkeypatch.setattr(
+        "backend.core.stage_pipeline.adapters.order_planning.resolve_mf_gate_on_today",
+        lambda **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "backend.core.stage_pipeline.adapters.order_planning.build_rebalance_orders",
+        lambda **kwargs: [
+            SimpleNamespace(side=Side.BUY, symbol="SH600000", qty=100, reason_code="ENTRY", meta={"rank": 2}),
+        ],
+    )
+
+    runtime = SimpleNamespace(
+        _current_day=current_day,
+        request=SimpleNamespace(
+            enable_multifactor_rank=True,
+            mf_rank_gate_mode="ALWAYS_ON",
+            fast_mode=False,
+            lot_size=100,
+            enable_strength_rank=False,
+            strength_ma=120,
+            strength_top_k_mode="FILL_TO_MAX",
+            mf_topk=10,
+            mf_concentrate_topn=3,
+            mf_concentrate_scale=1.5,
+            momentum_top_pct=0.0,
+        ),
+        provider=SimpleNamespace(_feats=None, _mx=None, _sym_to_col={}),
+        positions={"sh600001": 100},
+        cash=100000.0,
+        _weight_mode="equal",
+        _min_positions_cfg=0,
+        _min_trade_price=5.0,
+        candidate_rows=[],
+        deferred_sell_orders=[
+            {
+                "side": Side.SELL,
+                "symbol": "sh600001",
+                "qty": 100,
+                "reason_code": "ATR_TRAIL_EXIT",
+                "meta": {"deferred_execution": True, "deferred_from_date": "2026-03-01"},
+            }
+        ],
+        _prepared_day_index=0,
+        _apply_daily_decision_diagnostics=lambda **_kwargs: None,
+    )
+
+    output = build_s7_order_stage_output(runtime)
+
+    assert output.sell_symbols == ("sh600001",)
+    assert output.buy_symbols == ("sh600000",)
+    assert output.summary_fragment["deferred_sell_orders_count"] == 1
+    assert output.payload["next_day_orders"][0]["side"] == Side.SELL
+    assert output.payload["next_day_orders"][0]["symbol"] == "sh600001"
+    assert runtime.deferred_sell_orders == []

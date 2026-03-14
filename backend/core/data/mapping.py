@@ -6,6 +6,33 @@ import pandas as pd
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+OPTIONAL_EXTRA_COLUMNS: tuple[str, ...] = (
+    "limit_up",
+    "limit_down",
+    "is_suspended",
+    "is_st",
+    "adj_factor",
+    "turnover_rate",
+    "turnover_rate_f",
+    "volume_ratio",
+    "float_share",
+    "free_share",
+    "circ_mv",
+)
+
+NUMERIC_CANONICAL_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close", "volume", "amount")
+NUMERIC_OPTIONAL_COLUMNS: tuple[str, ...] = (
+    "limit_up",
+    "limit_down",
+    "adj_factor",
+    "turnover_rate",
+    "turnover_rate_f",
+    "volume_ratio",
+    "float_share",
+    "free_share",
+    "circ_mv",
+)
+
 
 def safe_ident(name: str) -> str:
     if not _IDENT.match(name):
@@ -89,28 +116,25 @@ def to_canonical(
         out["amount"] = pd.NA
 
     optional_cols = {
-        "limit_up": mapping.get("limit_up", ""),
-        "limit_down": mapping.get("limit_down", ""),
-        "is_suspended": mapping.get("is_suspended", ""),
-        "is_st": mapping.get("is_st", ""),
-        "adj_factor": mapping.get("adj_factor", ""),
+        key: mapping.get(key, "")
+        for key in OPTIONAL_EXTRA_COLUMNS
     }
     for key, src_col in optional_cols.items():
         if src_col and src_col in df.columns:
             out[key] = df[src_col]
 
     base_cols = ["date", "symbol", "open", "high", "low", "close", "volume", "amount"]
-    keep_cols = base_cols + [c for c in ("limit_up", "limit_down", "is_suspended", "is_st", "adj_factor") if c in out.columns]
+    keep_cols = base_cols + [c for c in OPTIONAL_EXTRA_COLUMNS if c in out.columns]
     out = out[keep_cols]
     out["date"] = pd.to_datetime(out["date"]).dt.normalize()
 
     # Convert numeric columns from Decimal to float (fixes PostgreSQL Decimal issues)
-    for col in ["open", "high", "low", "close", "volume", "amount"]:
+    for col in NUMERIC_CANONICAL_COLUMNS:
         if col in out.columns:
             out[col] = pd.to_numeric(out[col], errors="coerce").astype(float)
 
-    # Convert optional limit/suspension columns to float
-    for col in ["limit_up", "limit_down"]:
+    # Convert optional numeric extras to float while preserving nullable semantics.
+    for col in NUMERIC_OPTIONAL_COLUMNS:
         if col in out.columns:
             out[col] = pd.to_numeric(out[col], errors="coerce")
 

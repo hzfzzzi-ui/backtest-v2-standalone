@@ -1,0 +1,83 @@
+{
+  "preset": "single",
+  "config_json": {
+    "mode": "experiment",
+    "initial_capital": 1000000,
+    "universe_mode": "HS300_ZZ500",
+    "industries": [],
+    "universe": {
+      "start": "2024-01-01",
+      "end": "2025-03-01",
+      "benchmark": "000300.SH",
+      "symbols": [],
+      "limit": 0,
+      "price_adj": "hfq",
+      "filters": {
+        "exclude_st": true,
+        "exclude_suspended": true,
+        "min_list_days": 120,
+        "min_avg_turnover_20d": 100000000,
+        "price_min": 5,
+        "price_max": 99999,
+        "atr_pct_range": "0,100",
+        "limit_rule": "ignore"
+      }
+    },
+    "signal_generation": {
+      "enabled": true,
+      "modules": [
+        {
+          "name": "breakout_55",
+          "alpha_id": "breakout_55",
+          "family": "trend"
+        },
+        {
+          "name": "rsi_reversal",
+          "alpha_id": "rsi_reversal",
+          "family": "mean_revert"
+        }
+      ]
+    },
+    "signal_composition": {
+      "enabled": true,
+      "compose_mode": "REGIME_ROUTE",
+      "same_symbol_policy": "PREFER_HIGHER_SCORE",
+      "holding_ownership": "SOURCE_ONLY",
+      "modules": [
+        {
+          "name": "breakout_55",
+          "role": "trend",
+          "priority": 100,
+          "weight": 0.7
+        },
+        {
+          "name": "rsi_reversal",
+          "role": "mean_revert",
+          "priority": 80,
+          "weight": 0.3
+        }
+      ],
+      "regime_matrix": {
+        "TREND_UP": [
+          "breakout_55"
+        ],
+        "RANGE": [
+          "breakout_55",
+          "rsi_reversal"
+        ],
+        "WEAK_DOWN": [
+          "rsi_reversal"
+        ]
+      }
+    },
+    "position_risk": {
+      "enabled": true,
+      "portfolio_mode": "hard_sleeve_budget",
+      "max_positions": 10,
+      "single_stock_cap": 0.1,
+      "industry_cap": 0.3,
+      "lot": 100,
+      "cash_shortage_policy": "skip"
+    }
+  }
+}

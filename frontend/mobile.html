@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <title>回测手机看板</title>
+  <link rel="stylesheet" href="/assets/css/mobile-dashboard.css?v=20260312_mobile3" />
+</head>
+<body>
+  <div class="md-app">
+    <div class="md-bg-orb md-bg-orb-a"></div>
+    <div class="md-bg-orb md-bg-orb-b"></div>
+
+    <header class="md-topbar">
+      <div>
+        <div class="md-kicker">Semi-Auto Guide</div>
+        <h1>回测手机看板</h1>
+      </div>
+      <div class="md-topbar-actions">
+        <span id="mdSessionBadge" class="md-badge md-badge-soft">未连接</span>
+        <button id="mdLogoutBtn" class="md-ghost-btn" type="button" hidden>退出</button>
+      </div>
+    </header>
+
+    <main class="md-main">
+      <section id="mdAuthView" class="md-auth-card">
+        <div class="md-auth-copy">
+          <div class="md-auth-eyebrow">私网访问</div>
+          <h2>输入手机看板口令</h2>
+          <p>建议仅在可信局域网或私有网络中通过 HTTP 访问。</p>
+        </div>
+        <form id="mdLoginForm" class="md-auth-form">
+          <label class="md-field">
+            <span>访问口令</span>
+            <input id="mdPasswordInput" type="password" autocomplete="current-password" placeholder="请输入口令" />
+          </label>
+          <button id="mdLoginBtn" class="md-primary-btn" type="submit">进入看板</button>
+          <div id="mdAuthMessage" class="md-inline-message" aria-live="polite"></div>
+        </form>
+      </section>
+
+      <section id="mdDashboardView" class="md-dashboard" hidden>
+        <section class="md-hero-card">
+          <div class="md-hero-head">
+            <div class="md-hero-copy">
+              <div class="md-section-eyebrow">最新实验</div>
+              <h2 id="mdExperimentTitle">暂无实验</h2>
+              <div id="mdExperimentSubtitle" class="md-hero-subtitle">--</div>
+              <div id="mdExperimentTags" class="md-chip-row" hidden></div>
+            </div>
+            <div id="mdUpdatedAt" class="md-updated-at">--</div>
+          </div>
+          <div class="md-kpi-grid">
+            <article class="md-kpi-card">
+              <span>年化</span>
+              <strong id="mdCagr">--</strong>
+            </article>
+            <article class="md-kpi-card">
+              <span>回撤</span>
+              <strong id="mdDrawdown">--</strong>
+            </article>
+            <article class="md-kpi-card">
+              <span>夏普</span>
+              <strong id="mdSharpe">--</strong>
+            </article>
+            <article class="md-kpi-card">
+              <span>持仓数</span>
+              <strong id="mdPositionCount">--</strong>
+            </article>
+          </div>
+          <div class="md-meta-grid">
+            <div class="md-meta-item">
+              <span>交易模式</span>
+              <strong id="mdTradeMode">--</strong>
+            </div>
+            <div class="md-meta-item">
+              <span>市场状态</span>
+              <strong id="mdMarketState">--</strong>
+            </div>
+            <div class="md-meta-item">
+              <span>信号日期</span>
+              <strong id="mdSignalDate">--</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="md-grid-section">
+          <article class="md-panel md-panel-buy">
+            <div class="md-panel-head">
+              <div>
+                <div class="md-section-eyebrow">建议动作</div>
+                <h3>买入候选</h3>
+              </div>
+              <span id="mdBuyCount" class="md-badge md-badge-buy">0</span>
+            </div>
+            <div id="mdBuyList" class="md-list"></div>
+          </article>
+
+          <article class="md-panel md-panel-sell">
+            <div class="md-panel-head">
+              <div>
+                <div class="md-section-eyebrow">调仓动作</div>
+                <h3>卖出候选</h3>
+              </div>
+              <span id="mdSellCount" class="md-badge md-badge-sell">0</span>
+            </div>
+            <div id="mdSellList" class="md-list"></div>
+          </article>
+        </section>
+
+        <section class="md-grid-section">
+          <article class="md-panel">
+            <div class="md-panel-head">
+              <div>
+                <div class="md-section-eyebrow">当前仓位</div>
+                <h3>持仓概览</h3>
+              </div>
+              <span id="mdHoldCount" class="md-badge md-badge-soft">0</span>
+            </div>
+            <div id="mdPositionList" class="md-list"></div>
+          </article>
+
+          <article class="md-panel">
+            <div class="md-panel-head">
+              <div>
+                <div class="md-section-eyebrow">市场摘要</div>
+                <h3>风险环境</h3>
+              </div>
+              <span id="mdMarketBadge" class="md-badge md-badge-soft">--</span>
+            </div>
+            <div id="mdMarketSummary" class="md-market-summary"></div>
+          </article>
+        </section>
+
+        <section class="md-panel">
+          <div class="md-panel-head">
+            <div>
+              <div class="md-section-eyebrow">Approval Queue</div>
+              <h3>Pending Tickets</h3>
+            </div>
+            <span id="mdPendingCount" class="md-badge md-badge-soft">0</span>
+          </div>
+          <div id="mdPendingList" class="md-list"></div>
+        </section>
+
+        <section class="md-panel">
+          <div class="md-panel-head">
+            <div>
+              <div class="md-section-eyebrow">系统提示</div>
+              <h3>告警与降级</h3>
+            </div>
+          </div>
+          <div id="mdWarningsList" class="md-warning-list"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="/assets/js/mobile-dashboard.js?v=20260312_mobile3"></script>
+</body>
+</html>

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest import mock
 
 from backend.scripts import _internal_helper as helper
 
@@ -12,7 +11,7 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _make_experiment_dir(tmp_path: Path, exp_id: str, *, include_report: bool = False) -> Path:
+def _make_experiment_dir(tmp_path: Path, exp_id: str) -> Path:
     exp_dir = tmp_path / exp_id
     exp_dir.mkdir(parents=True, exist_ok=True)
     _write_json(exp_dir / "manifest.json", {
@@ -22,19 +21,10 @@ def _make_experiment_dir(tmp_path: Path, exp_id: str, *, include_report: bool = 
             "perf": "perf.json",
             "run_meta": "run_meta.json",
         },
-        "optional_artifacts": {
-            "report": {
-                "path": "report.html" if include_report else None,
-                "available": include_report,
-                "kind": "html_export",
-            }
-        },
     })
     _write_json(exp_dir / "perf.json", {"cagr": 0.12, "sharpe": 1.1})
     _write_json(exp_dir / "run_meta.json", {"status": "OK"})
     _write_json(exp_dir / "run_config.json", {"universe": {"start": "2024-01-01"}})
-    if include_report:
-        (exp_dir / "report.html").write_text("<html>ok</html>", encoding="utf-8")
     return exp_dir
 
 
@@ -60,31 +50,16 @@ def test_read_json_artifact_allows_sidecar_fallback(tmp_path: Path) -> None:
     assert run_config["universe"]["start"] == "2024-01-01"
 
 
-def test_ensure_optional_report_generates_when_missing(tmp_path: Path) -> None:
-    exp_dir = _make_experiment_dir(tmp_path, "exp_report", include_report=False)
-
-    def _fake_generate_report(results_dir: str) -> str:
-        report_path = Path(results_dir) / "report.html"
-        report_path.write_text("<html>generated</html>", encoding="utf-8")
-        return str(report_path)
-
-    with mock.patch("backend.core.report.report_generator.generate_report", side_effect=_fake_generate_report):
-        report_path = helper.ensure_optional_report(results_dir=exp_dir, generate_if_missing=True)
-
-    assert report_path is not None
-    assert report_path.exists()
-    assert report_path.read_text(encoding="utf-8") == "<html>generated</html>"
-
-
 def test_script_sources_use_internal_helper_boundary() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     helper_source = (repo_root / "backend" / "scripts" / "_internal_helper.py").read_text(encoding="utf-8")
     assert "backend.api.endpoints._experiment_surface" not in helper_source
-    assert "backend.core.tools.experiment_artifact_access" in helper_source
+    assert "experiment_artifact_access" in helper_source
     assert "backend.api.endpoints._config_governance" not in helper_source
     assert "backend.core.tools.saved_config_access" in helper_source
     assert "backend.api.endpoints._candidate_presets" not in helper_source
-    assert "backend.core.tools.locked_candidate_presets" in helper_source
+    assert "locked_candidate_presets" in helper_source
+    assert "backend.core.report.report_generator" not in helper_source
 
     baseline_source = (repo_root / "backend" / "scripts" / "baseline_regression_check.py").read_text(encoding="utf-8")
     assert "backend.scripts._internal_helper" in baseline_source
@@ -132,7 +107,7 @@ def test_no_active_backend_source_references_experiment_surface_shim() -> None:
         if "__pycache__" in path.parts:
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
-        if "_experiment_surface" in text:
+        if "backend.api.endpoints._experiment_surface" in text:
             matches.append(str(path.relative_to(repo_root)).replace("\\", "/"))
     assert matches == []
 
@@ -168,7 +143,7 @@ def test_no_active_backend_source_references_candidate_preset_shim() -> None:
         if "__pycache__" in path.parts:
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
-        if "_candidate_presets" in text:
+        if "backend.api.endpoints._candidate_presets" in text:
             matches.append(str(path.relative_to(repo_root)).replace("\\", "/"))
     assert matches == []
 

@@ -73,10 +73,16 @@ BacktestV2ArtifactReadRequest = PublicBacktestV2ArtifactReadRequest
 
 
 def _resolve_reason_codes_path(group_dir: Path) -> Path:
-    return resolve_artifact_path(group_dir, "reason_codes")
+    canonical = resolve_artifact_path(group_dir, "reason_codes")
+    if canonical.exists():
+        return canonical
+    legacy = (group_dir / "reason_code_counts.csv").resolve()
+    if legacy.exists():
+        return legacy
+    return canonical
 
 
-def _normalized_run_meta_counters(run_meta: dict[str, Any]) -> dict[str, Any]:
+def _normalized_run_meta_counters(run_meta: dict[str, Any]) -> tuple[dict[str, Any], int]:
     counters = run_meta.get("counters") if isinstance(run_meta, dict) else {}
     return protocol_normalize_counters(counters if isinstance(counters, dict) else {})
 
@@ -561,6 +567,8 @@ def validate_backtest_v2_data(
     exclude_suspended = _parse_bool_from_query(request, "exclude_suspended", True)
     min_list_days = _parse_int_from_query(request, "min_list_days", 120)
     min_avg_turnover_20d = _parse_float_from_query(request, "min_avg_turnover_20d", 1e8)
+    min_avg_turnover_rate_20d = _parse_float_from_query(request, "min_avg_turnover_rate_20d", 0.0)
+    turnover_rate_field = str(request.query_params.get("turnover_rate_field") or "turnover_rate_f").strip().lower() or "turnover_rate_f"
     price_min = _parse_float_from_query(request, "price_min", 0.0)
     price_max = _parse_float_from_query(request, "price_max", 99999.0)
     limit_rule = str(request.query_params.get("limit_rule") or "ignore").strip().lower() or "ignore"
@@ -581,10 +589,14 @@ def validate_backtest_v2_data(
             exclude_suspended=exclude_suspended,
             min_list_days=min_list_days,
             min_avg_turnover_20d=min_avg_turnover_20d,
+            min_avg_turnover_rate_20d=min_avg_turnover_rate_20d,
+            turnover_rate_field=turnover_rate_field,
             price_min=price_min,
             price_max=price_max,
             limit_rule=limit_rule,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except UniverseLoadError as exc:
         failed_meta = dict(exc.meta or {})
         failed_meta = annotate_universe_meta(
@@ -655,17 +667,21 @@ def validate_backtest_v2_data(
         password=os.environ.get("PGPASSWORD", os.environ.get("PAMS_PG_PASSWORD", "")),
         statement_timeout_ms=60000,
     )
-    result = validate_data(
-        pg=cfg,
-        symbols=resolved_symbols,
-        start=start_d,
-        end=end_d,
-        benchmark=benchmark,
-        audit_dump=audit_dump,
-        strict_suspended=strict_suspended,
-        allow_cn_index_fallback=allow_cn_index_fallback,
-        results_root=_results_root(),
-    )
+    try:
+        result = validate_data(
+            pg=cfg,
+            symbols=resolved_symbols,
+            start=start_d,
+            end=end_d,
+            benchmark=benchmark,
+            audit_dump=audit_dump,
+            strict_suspended=strict_suspended,
+            allow_cn_index_fallback=allow_cn_index_fallback,
+            required_turnover_rate_field=turnover_rate_field if min_avg_turnover_rate_20d > 0.0 else None,
+            results_root=_results_root(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if isinstance(result, dict):
         result.setdefault("request_id", f"val_{uuid.uuid4().hex[:10]}")
         result.setdefault("results_root", str(_results_root().resolve()))
@@ -681,6 +697,8 @@ def validate_backtest_v2_data(
         meta["universe_limit"] = universe_limit
         meta["resolve_asof"] = str(resolve_asof)
         meta["dynamic_all_a_entry"] = bool(dynamic_all_a_entry)
+        meta["min_avg_turnover_rate_20d"] = float(min_avg_turnover_rate_20d)
+        meta["turnover_rate_field"] = turnover_rate_field
         result["meta"] = meta
         result["universe_stats"] = _build_universe_stats(result, resolved_symbols, resolved_meta=resolved_meta)
     return _sanitize_for_json(result)
@@ -740,7 +758,7 @@ def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
             reason_path = (results_dir / str(gf.get("reason_codes") or "")).resolve()
         else:
             reason_path = _resolve_reason_codes_path(group_dir)
-        counters = _normalized_run_meta_counters(run_meta)
+        counters, _legacy_counter_hits = _normalized_run_meta_counters(run_meta)
         cagr = float(_coerce_number(perf.get("cagr")) or 0.0)
         mdd = float(_coerce_number(perf.get("max_drawdown")) or 0.0)
         sharpe = float(_coerce_number(perf.get("sharpe")) or 0.0)

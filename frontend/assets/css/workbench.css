@@ -882,6 +882,80 @@ input[type="checkbox"] {
   overflow-x: hidden;
   scrollbar-gutter: stable;
 }
+.wb-symbol-table {
+  table-layout: fixed;
+}
+.wb-symbol-grid {
+  display: grid;
+  grid-auto-rows: minmax(40px, auto);
+}
+.wb-symbol-grid-head,
+.wb-symbol-grid-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(92px, 0.7fr) minmax(92px, 0.7fr) minmax(72px, 0.45fr);
+  gap: 0;
+  align-items: center;
+}
+.wb-symbol-grid-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(14,21,32,.98);
+  border-bottom: 1px solid var(--wb-line);
+}
+.wb-symbol-grid-head > div,
+.wb-symbol-grid-row > div {
+  padding: 8px 10px;
+  min-width: 0;
+}
+.wb-symbol-grid-head > div {
+  font-size: 12px;
+  color: var(--wb-text-soft);
+  font-weight: 600;
+}
+.wb-symbol-grid-row {
+  min-height: 40px;
+  border-bottom: 1px solid var(--wb-line-dim);
+  cursor: pointer;
+  transition: background var(--wb-transition);
+}
+.wb-symbol-grid-button {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.wb-symbol-grid-row:hover {
+  background: rgba(82,168,255,.06);
+}
+.wb-symbol-grid-row.active {
+  background: rgba(82, 168, 255, 0.16) !important;
+}
+.wb-symbol-grid-symbol {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-symbol-grid-empty {
+  padding: 14px 10px;
+  color: var(--wb-text-soft);
+  text-align: center;
+}
+.wb-symbol-col-symbol {
+  width: 48%;
+}
+.wb-symbol-col-return,
+.wb-symbol-col-drawdown,
+.wb-symbol-col-trades {
+  width: 17.3333%;
+}
+.wb-symbol-table th:first-child,
+.wb-symbol-table td:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .wb-symbol-panel .wb-table th {
   font-size: 12px;
   padding: 8px 10px;
@@ -1831,7 +1905,7 @@ input[type="checkbox"] {
   padding: 0 16px;
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   background:
     linear-gradient(180deg, rgba(17,24,35,.96), rgba(13,19,30,.98)),
     radial-gradient(circle at top center, rgba(82,168,255,.08), transparent 44%);
@@ -1847,7 +1921,7 @@ input[type="checkbox"] {
   min-width: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .wb-run-status:empty,
@@ -2362,4 +2436,241 @@ html {
   .wb-result-overview {
     grid-template-columns: 1fr;
   }
+}
+
+.wb-symbol-table-v2 {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.wb-symbol-table-v2 thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(14, 21, 32, 0.98);
+}
+
+.wb-symbol-table-row {
+  cursor: pointer;
+  transition: background var(--wb-transition);
+}
+
+.wb-symbol-table-row:hover {
+  background: rgba(82, 168, 255, 0.06);
+}
+
+.wb-symbol-table-row.active {
+  background: rgba(82, 168, 255, 0.16) !important;
+}
+
+.wb-funnel-v2 {
+  display: grid;
+  gap: 16px;
+}
+
+.wb-funnel-v2-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.wb-funnel-v2-summary-card,
+.wb-funnel-v2-stage,
+.wb-funnel-v2-section {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.wb-funnel-v2-summary-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+}
+
+.wb-funnel-v2-summary-card strong {
+  font-size: 22px;
+  color: var(--wb-text);
+}
+
+.wb-funnel-v2-section {
+  padding: 14px;
+}
+
+.wb-funnel-v2-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.wb-funnel-v2-chain,
+.wb-funnel-v2-execution-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.wb-funnel-v2-chain {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.wb-funnel-v2-execution-grid,
+.wb-funnel-v2-side-grid {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  display: grid;
+  gap: 16px;
+}
+
+.wb-funnel-v2-stage {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.wb-funnel-v2-stage-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wb-funnel-v2-stage-code {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #8fbfff;
+}
+
+.wb-funnel-v2-stage-title {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--wb-text);
+}
+
+.wb-funnel-v2-stage-note {
+  line-height: 1.55;
+}
+
+.wb-funnel-v2-stage-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.wb-funnel-v2-status-ok {
+  background: rgba(81, 207, 102, 0.12);
+  border-color: rgba(81, 207, 102, 0.24);
+  color: #9fe8a9;
+}
+
+.wb-funnel-v2-status-derived {
+  background: rgba(82, 168, 255, 0.12);
+  border-color: rgba(82, 168, 255, 0.24);
+  color: #a8d1ff;
+}
+
+.wb-funnel-v2-status-missing {
+  background: rgba(255, 184, 77, 0.10);
+  border-color: rgba(255, 184, 77, 0.22);
+  color: #ffd08a;
+}
+
+.wb-funnel-v2-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.wb-funnel-v2-metric {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(7, 12, 20, 0.42);
+}
+
+.wb-funnel-v2-metric span {
+  font-size: 12px;
+  color: var(--wb-text-soft);
+}
+
+.wb-funnel-v2-metric strong {
+  font-size: 16px;
+  color: var(--wb-text);
+}
+
+.wb-funnel-v2-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wb-funnel-v2-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(82, 168, 255, 0.08);
+  color: #bfd9f8;
+  font-size: 11px;
+}
+
+.wb-funnel-v2-exit-list {
+  display: grid;
+  gap: 10px;
+}
+
+.wb-funnel-v2-exit-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(7, 12, 20, 0.42);
+}
+
+.wb-funnel-v2-exit-meta,
+.wb-funnel-v2-exit-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wb-funnel-v2-exit-stat strong {
+  color: var(--wb-text);
+}
+
+.wb-funnel-v2-exit-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.wb-funnel-v2-exit-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(82, 168, 255, 0.9), rgba(82, 168, 255, 0.35));
+}
+
+.wb-funnel-v2-notes {
+  display: grid;
+  gap: 8px;
+  padding-left: 18px;
+}
+
+.wb-funnel-v2-note {
+  color: var(--wb-text-soft);
+  line-height: 1.6;
 }

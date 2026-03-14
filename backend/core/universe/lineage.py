@@ -58,11 +58,17 @@ UNIVERSE_LINEAGE: dict[str, UniverseLineage] = {
         resolve_asof_policy="start_date",
         dynamic_all_a_entry=False,
         import_assets=(
-            "backend/scripts/fetch_csi1000_pit.py",
-            "backend/scripts/fetch_csi1000_pit_monthly.py",
+            "data_cache/csi1000_rebalance_calendar.csv",
+            "backend/scripts/fetch_csi1000_pit_by_calendar.py",
             "backend/scripts/import_csi1000_pit.py",
+            "backend/scripts/fetch_csi1000_pit_monthly.py (fallback/approximate only)",
+            "backend/scripts/fetch_csi1000_pit.py (fallback/static only)",
         ),
-        notes="Runtime expects point-in-time CSI1000 constituent rows under index_code=000852.SH.",
+        notes=(
+            "Runtime expects point-in-time CSI1000 constituent rows under index_code=000852.SH. "
+            "Formal lineage is rebalance_calendar -> calendar snapshots -> changes -> import; "
+            "legacy monthly/static scripts are fallback only."
+        ),
     ),
     "INDUSTRY": UniverseLineage(
         mode="INDUSTRY",

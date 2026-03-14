@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable
@@ -11,10 +11,12 @@ from backend.core.config.models import BacktestConfig
 from backend.core.data.pg_provider import PostgresDataProvider
 from backend.core.data.price_adjust import apply_price_adjustment
 from backend.core.data.provider import DataProvider
+from backend.core.universe.membership_audit import audit_membership_history, should_block_static_fallback
 from backend.core.universe.hs300_csi500 import (
     UniverseFilterConfig,
     apply_universe_filters,
     build_candidates_from_ohlcv,
+    is_turnover_rate_filter_enabled,
 )
 from backend.core.universe.lineage import annotate_universe_meta, resolve_universe_timing
 from backend.core.universe.universe_resolver import resolve_universe_by_mode
@@ -39,6 +41,14 @@ class DataBundle:
     price_adj_mode: str
     adj_factor_stats: dict[str, Any]
     summary: dict[str, Any]
+    membership_history: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(columns=["index_code", "symbol", "start_date", "end_date"])
+    )
+    industry_history: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(
+            columns=["ts_code", "start_date", "end_date", "standard", "industry_l1", "industry_l2"]
+        )
+    )
 
 
 def _emit_progress(progress_hook: Callable[[int, str], None] | None, pct: int, message: str) -> None:
@@ -55,6 +65,93 @@ def _extract_universe_filters_raw(cfg_merged: dict[str, Any]) -> dict[str, Any]:
         return dict((cfg_merged.get("universe") or {}).get("filters") or {})
     except Exception:
         return {}
+
+
+def _extract_universe_membership_mode(cfg_merged: dict[str, Any]) -> str:
+    try:
+        return str((cfg_merged.get("universe") or {}).get("membership_mode") or "").strip().upper()
+    except Exception:
+        return ""
+
+
+def _extract_allow_low_fidelity_history(cfg_merged: dict[str, Any]) -> bool:
+    try:
+        return bool((cfg_merged.get("universe") or {}).get("allow_low_fidelity_history", False))
+    except Exception:
+        return False
+
+
+def _index_code_for_dynamic_membership(universe_mode: str) -> str | None:
+    return {
+        "HS300_ZZ500": "000906.SH",
+        "CSI1000": "000852.SH",
+    }.get(str(universe_mode or "").strip().upper())
+
+
+def _load_dynamic_index_membership_bundle(
+    *,
+    provider: DataProvider,
+    universe_mode: str,
+    start: date,
+    end: date,
+    universe_limit: int | None,
+) -> tuple[list[str], pd.DataFrame, dict[str, Any]]:
+    index_code = _index_code_for_dynamic_membership(universe_mode)
+    if not index_code:
+        raise ValueError(f"membership_mode PIT_DYNAMIC not supported for universe_mode={universe_mode}")
+
+    membership_history = provider.load_index_constituent_history(index_code, start, end)
+    if membership_history is None or membership_history.empty:
+        raise ValueError(
+            f"pit dynamic universe requires historical constituent rows: mode={universe_mode}, index_code={index_code}"
+        )
+
+    membership_history = membership_history.copy()
+    membership_history["symbol"] = membership_history["symbol"].astype(str).str.lower()
+    membership_history["start_date"] = pd.to_datetime(membership_history["start_date"], errors="coerce").dt.normalize()
+    membership_history["end_date"] = pd.to_datetime(membership_history["end_date"], errors="coerce").dt.normalize()
+    membership_history = membership_history.dropna(subset=["symbol", "start_date"]).reset_index(drop=True)
+    if membership_history.empty:
+        raise ValueError(
+            f"pit dynamic universe has no valid membership rows after normalization: mode={universe_mode}, index_code={index_code}"
+        )
+
+    overlap_mask = membership_history["start_date"].le(pd.Timestamp(end))
+    overlap_mask &= membership_history["end_date"].isna() | membership_history["end_date"].gt(pd.Timestamp(start))
+    membership_history = membership_history.loc[overlap_mask].reset_index(drop=True)
+    if membership_history.empty:
+        raise ValueError(
+            f"pit dynamic universe has no rows overlapping backtest window: mode={universe_mode}, index_code={index_code}"
+        )
+
+    symbols = sorted(membership_history["symbol"].dropna().astype(str).unique().tolist())
+    if universe_limit is not None:
+        symbols = symbols[:universe_limit]
+        membership_history = membership_history.loc[
+            membership_history["symbol"].astype(str).isin(set(symbols))
+        ].reset_index(drop=True)
+    if not symbols:
+        raise ValueError(
+            f"pit dynamic universe produced zero union symbols: mode={universe_mode}, index_code={index_code}"
+        )
+
+    return symbols, membership_history, {
+        "universe_mode": universe_mode,
+        "symbols_source": "pit_index_constituents",
+        "load_table": "pit_index_constituents",
+        "index_code": index_code,
+        "membership_mode": "PIT_DYNAMIC",
+        "membership_history_mode": "PIT_DYNAMIC",
+        "historical_membership_dynamic": True,
+        "pit_dynamic": True,
+        "dynamic_membership": True,
+        "membership_history_rows": int(len(membership_history)),
+        "union_symbol_count": int(len(symbols)),
+        "constituents_load_status": "OK",
+        "as_of": "dynamic_history_range",
+        "resolve_asof": "dynamic_history_range",
+        "filter_mode": "dynamic_membership_gate",
+    }
 
 
 def _create_data_provider(cfg_obj: BacktestConfig, rules_path: str | Path) -> DataProvider:
@@ -85,8 +182,10 @@ def _build_data_bundle_summary(
     st_history: pd.DataFrame,
     sector_data: dict[str, pd.DataFrame],
     industry_map: dict[str, str],
+    industry_history: pd.DataFrame,
     price_adj_mode: str,
     dynamic_all_a_entry: bool,
+    membership_history: pd.DataFrame,
 ) -> dict[str, Any]:
     history_date_min = None
     history_date_max = None
@@ -115,8 +214,24 @@ def _build_data_bundle_summary(
         "st_rows": int(len(st_history)),
         "sector_series_count": int(len(sector_data)),
         "industry_map_count": int(len(industry_map)),
+        "industry_history_rows": int(len(industry_history)),
         "price_adj_mode": str(price_adj_mode),
         "dynamic_all_a_entry": bool(dynamic_all_a_entry),
+        "membership_mode": str(universe_meta.get("membership_mode") or "SNAPSHOT"),
+        "historical_membership_dynamic": bool(universe_meta.get("historical_membership_dynamic")),
+        "membership_history_rows": int(len(membership_history)),
+        "membership_source": str(universe_meta.get("membership_source") or "unknown"),
+        "membership_data_quality": str(universe_meta.get("membership_data_quality") or "unknown"),
+        "audit_status": str(universe_meta.get("audit_status") or ""),
+        "audit_reason": str(universe_meta.get("audit_reason") or ""),
+        "distinct_start_dates": int(universe_meta.get("distinct_start_dates") or 0),
+        "open_rows": int(universe_meta.get("open_rows") or 0),
+        "closed_rows": int(universe_meta.get("closed_rows") or 0),
+        "covers_required_start": universe_meta.get("covers_required_start"),
+        "covers_required_end": universe_meta.get("covers_required_end"),
+        "rebalance_calendar_version": universe_meta.get("rebalance_calendar_version"),
+        "rebalance_calendar_source": universe_meta.get("rebalance_calendar_source"),
+        "rebalance_calendar_generated_at": universe_meta.get("rebalance_calendar_generated_at"),
         "history_date_start": history_date_min,
         "history_date_end": history_date_max,
         "benchmark_date_start": benchmark_date_min,
@@ -142,6 +257,8 @@ def build_data_bundle(
 ) -> DataBundle:
     provider = provider or _create_data_provider(cfg_obj, rules_path)
     universe_filters_raw = _extract_universe_filters_raw(cfg_merged)
+    membership_mode = _extract_universe_membership_mode(cfg_merged)
+    allow_low_fidelity_history = _extract_allow_low_fidelity_history(cfg_merged)
 
     universe_mode = str(overrides.get("universe_mode", "CUSTOM")).strip().upper()
     universe_industries = list(overrides.get("industries") or [])
@@ -155,34 +272,85 @@ def build_data_bundle(
         end=cfg_obj.universe.end,
     )
 
-    _emit_progress(progress_hook, 10, f"解析 Universe ({universe_mode})")
-    symbols, universe_meta = resolve_universe_by_mode(
-        mode=universe_mode,
-        as_of=resolve_asof,
-        db=cfg_obj.db,
-        runtime=cfg_obj.db_runtime,
-        industries=universe_industries,
-        symbols=user_symbols,
-        universe_limit=int(overrides.get("universe_limit") or 0) or None,
-    )
+    universe_limit = int(overrides.get("universe_limit") or 0) or None
+    membership_history = pd.DataFrame(columns=["index_code", "symbol", "start_date", "end_date"])
+    dynamic_membership_entry = membership_mode == "PIT_DYNAMIC"
+
+    _emit_progress(progress_hook, 10, f"Resolving universe ({universe_mode})")
+    if dynamic_membership_entry:
+        symbols, membership_history, universe_meta = _load_dynamic_index_membership_bundle(
+            provider=provider,
+            universe_mode=universe_mode,
+            start=cfg_obj.universe.start,
+            end=cfg_obj.universe.end,
+            universe_limit=universe_limit,
+        )
+    else:
+        symbols, universe_meta = resolve_universe_by_mode(
+            mode=universe_mode,
+            as_of=resolve_asof,
+            db=cfg_obj.db,
+            runtime=cfg_obj.db_runtime,
+            industries=universe_industries,
+            symbols=user_symbols,
+            universe_limit=universe_limit,
+        )
     universe_meta = annotate_universe_meta(
         universe_meta,
         mode=universe_mode,
         start=cfg_obj.universe.start,
         end=cfg_obj.universe.end,
     )
+    if dynamic_membership_entry:
+        universe_meta["membership_mode"] = "PIT_DYNAMIC"
+        universe_meta["membership_history_mode"] = "PIT_DYNAMIC"
+        universe_meta["historical_membership_dynamic"] = True
+        universe_meta["pit_dynamic"] = True
+        universe_meta["dynamic_membership"] = True
+        universe_meta["membership_history_rows"] = int(len(membership_history))
+        universe_meta["union_symbol_count"] = int(len(symbols))
+        universe_meta["resolve_asof"] = "dynamic_history_range"
+        universe_meta["as_of"] = "dynamic_history_range"
+        universe_meta["filter_mode"] = "dynamic_membership_gate"
+        universe_meta["allow_low_fidelity_history"] = bool(allow_low_fidelity_history)
+        membership_audit = audit_membership_history(
+            membership_history,
+            required_start=cfg_obj.universe.start,
+            required_end=cfg_obj.universe.end,
+            require_calendar_metadata=bool(universe_mode == "CSI1000"),
+        )
+        universe_meta.update(membership_audit)
+        if should_block_static_fallback(
+            universe_mode=universe_mode,
+            membership_mode=membership_mode,
+            membership_data_quality=str(membership_audit.get("membership_data_quality") or ""),
+            allow_low_fidelity_history=bool(allow_low_fidelity_history),
+        ):
+            raise ValueError(
+                "csi1000 PIT_DYNAMIC membership history was classified as static_fallback; "
+                f"audit_reason={membership_audit.get('audit_reason')} "
+                f"distinct_start_dates={membership_audit.get('distinct_start_dates')} "
+                f"open_rows={membership_audit.get('open_rows')} "
+                f"covers_required_start={membership_audit.get('covers_required_start')} "
+                f"covers_required_end={membership_audit.get('covers_required_end')} "
+                f"rebalance_calendar_version={membership_audit.get('rebalance_calendar_version')} "
+                "set universe.allow_low_fidelity_history=true only for explicit low-fidelity research"
+            )
 
-    _emit_progress(progress_hook, 20, f"加载行情数据: {len(symbols)} 标的 ({universe_mode})")
+    _emit_progress(progress_hook, 20, f"Loading OHLCV for {len(symbols)} symbols ({universe_mode})")
     history = provider.load_ohlcv_daily(symbols, cfg_obj.universe.start, cfg_obj.universe.end, source="stocks")
 
-    if universe_filters_raw and not dynamic_all_a_entry:
-        _emit_progress(progress_hook, 30, "应用 Universe 过滤器")
+    dynamic_universe_entry = dynamic_all_a_entry or dynamic_membership_entry
+    if universe_filters_raw and not dynamic_universe_entry:
+        _emit_progress(progress_hook, 30, "Applying static universe filters")
         uf_cfg = UniverseFilterConfig(
             exclude_st=bool(universe_filters_raw.get("exclude_st", True)),
             exclude_delisted=bool(universe_filters_raw.get("exclude_delisted", True)),
             exclude_suspended=bool(universe_filters_raw.get("exclude_suspended", True)),
             min_list_days=int(universe_filters_raw.get("min_list_days", 120)),
             min_avg_turnover_20d=float(universe_filters_raw.get("min_avg_turnover_20d", 1e8)),
+            min_avg_turnover_rate_20d=float(universe_filters_raw.get("min_avg_turnover_rate_20d", 0.0) or 0.0),
+            turnover_rate_field=str(universe_filters_raw.get("turnover_rate_field", "turnover_rate_f") or "turnover_rate_f"),
             exclude_limit_lock=str(universe_filters_raw.get("limit_rule", "ignore")).strip().lower() in {"forbid", "skip"},
             min_price=float(
                 universe_filters_raw.get(
@@ -197,6 +365,7 @@ def build_data_bundle(
         need_lookback = bool(
             int(universe_filters_raw.get("min_list_days", 120) or 0) > 1
             or float(universe_filters_raw.get("min_avg_turnover_20d", 0.0) or 0.0) > 0.0
+            or float(universe_filters_raw.get("min_avg_turnover_rate_20d", 0.0) or 0.0) > 0.0
         )
         if need_lookback:
             lookback_days = max(260, int(universe_filters_raw.get("min_list_days", 120) or 120) * 3)
@@ -222,7 +391,10 @@ def build_data_bundle(
             filter_asof,
             st_history=st_history_for_filter,
             security_master=security_master,
+            turnover_rate_field=uf_cfg.turnover_rate_field,
         )
+        if is_turnover_rate_filter_enabled(uf_cfg) and uf_cfg.turnover_rate_field not in history_for_filter.columns:
+            raise ValueError(f"turnover rate filter field unavailable in history frame: {uf_cfg.turnover_rate_field}")
         filtered_candidates, _snapshot, excluded_counts = apply_universe_filters(candidates, uf_cfg)
         filtered_symbols = sorted(
             {
@@ -243,12 +415,12 @@ def build_data_bundle(
         else:
             universe_meta["filter_warning"] = "all symbols filtered out; fallback to pre-filter universe"
             universe_meta["after_filters_symbols"] = before_count
-    elif universe_filters_raw and dynamic_all_a_entry:
+    elif universe_filters_raw and dynamic_universe_entry:
         universe_meta["filters_config"] = dict(universe_filters_raw)
         universe_meta["excluded_counts"] = {}
         universe_meta["tradable_symbols"] = int(len(symbols))
         universe_meta["after_filters_symbols"] = int(len(symbols))
-        universe_meta["filter_mode"] = "dynamic_daily_gate"
+        universe_meta["filter_mode"] = "dynamic_membership_gate" if dynamic_membership_entry else "dynamic_daily_gate"
 
     benchmark = provider.load_benchmark_daily(cfg_obj.universe.benchmark, cfg_obj.universe.start, cfg_obj.universe.end)
     calendar = provider.load_trading_calendar_cn(cfg_obj.universe.start, cfg_obj.universe.end)
@@ -268,7 +440,7 @@ def build_data_bundle(
         }
     signal_history = apply_price_adjustment(history, price_adj_mode) if price_adj_mode != "none" else history
 
-    _emit_progress(progress_hook, 40, "加载辅助数据 (ST/行业)")
+    _emit_progress(progress_hook, 40, "Loading auxiliary data")
     st_history = provider.load_st_history(symbols, cfg_obj.universe.start, cfg_obj.universe.end)
     sector_data: dict[str, pd.DataFrame] = {}
     try:
@@ -280,6 +452,7 @@ def build_data_bundle(
     except Exception:
         pass
     industry_map = provider.load_industry_mapping(symbols)
+    industry_history = provider.load_industry_history(symbols, cfg_obj.universe.start, cfg_obj.universe.end)
 
     summary = _build_data_bundle_summary(
         symbols=symbols,
@@ -292,8 +465,10 @@ def build_data_bundle(
         st_history=st_history,
         sector_data=sector_data,
         industry_map=industry_map,
+        industry_history=industry_history,
         price_adj_mode=price_adj_mode,
         dynamic_all_a_entry=dynamic_all_a_entry,
+        membership_history=membership_history,
     )
 
     return DataBundle(
@@ -311,7 +486,9 @@ def build_data_bundle(
         st_history=st_history,
         sector_data=sector_data,
         industry_map=industry_map,
+        industry_history=industry_history,
         price_adj_mode=price_adj_mode,
         adj_factor_stats=adj_factor_stats,
         summary=summary,
+        membership_history=membership_history,
     )

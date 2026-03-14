@@ -31,11 +31,27 @@ class UniverseFilterConfig:
     exclude_suspended: bool = True
     min_list_days: int = 120
     min_avg_turnover_20d: float = 1e8
+    min_avg_turnover_rate_20d: float = 0.0
+    turnover_rate_field: str = "turnover_rate_f"
     exclude_limit_lock: bool = False
     min_price: float = 5.0
 
 
 _ST_NAME_PAT = re.compile(r"(^\*?ST)|(^ST)|退", re.IGNORECASE)
+_TURNOVER_RATE_FIELDS = {"turnover_rate", "turnover_rate_f"}
+
+
+def normalize_turnover_rate_field(value: Any) -> str:
+    text = str(value or "turnover_rate_f").strip().lower()
+    if text not in _TURNOVER_RATE_FIELDS:
+        raise ValueError(f"unsupported turnover_rate_field: {value}")
+    return text
+
+
+def is_turnover_rate_filter_enabled(cfg: UniverseFilterConfig | None) -> bool:
+    if cfg is None:
+        return False
+    return float(cfg.min_avg_turnover_rate_20d or 0.0) > 0.0
 
 
 def load_constituents_from_db(
@@ -178,6 +194,7 @@ def apply_universe_filters(
         ("is_suspended", False),
         ("list_days", 9999),
         ("avg_turnover_20d", 0.0),
+        ("avg_turnover_rate_20d", pd.NA),
         ("last_close", 0.0),
         ("limit_lock", False),
     ]:
@@ -198,6 +215,12 @@ def apply_universe_filters(
             reason = "EXCLUDE_LIST_DAYS"
         elif float(r.get("avg_turnover_20d", 0.0) or 0.0) < float(cfg.min_avg_turnover_20d):
             reason = "EXCLUDE_LOW_TURNOVER"
+        elif is_turnover_rate_filter_enabled(cfg):
+            avg_turnover_rate = pd.to_numeric(pd.Series([r.get("avg_turnover_rate_20d")]), errors="coerce").iloc[0]
+            if pd.isna(avg_turnover_rate):
+                reason = "EXCLUDE_TURNOVER_RATE_UNAVAILABLE"
+            elif float(avg_turnover_rate) < float(cfg.min_avg_turnover_rate_20d):
+                reason = "EXCLUDE_LOW_TURNOVER_RATE"
         elif cfg.exclude_limit_lock and bool(r.get("limit_lock", False)):
             reason = "EXCLUDE_LIMIT_LOCK"
         elif cfg.min_price > 0 and float(r.get("last_close", 0.0) or 0.0) < cfg.min_price:
@@ -294,12 +317,14 @@ def build_candidates_from_ohlcv(
     as_of: pd.Timestamp,
     st_history: pd.DataFrame | None = None,
     security_master: pd.DataFrame | None = None,
+    turnover_rate_field: str = "turnover_rate_f",
 ) -> pd.DataFrame:
     if ohlcv.empty:
         return pd.DataFrame()
     df = ohlcv.copy()
     df["date"] = pd.to_datetime(df["date"])
     df["symbol"] = df["symbol"].astype(str).map(_to_internal_symbol)
+    turnover_rate_field = normalize_turnover_rate_field(turnover_rate_field)
     use = df[df["date"] <= as_of].copy()
     if use.empty:
         return pd.DataFrame()
@@ -316,6 +341,11 @@ def build_candidates_from_ohlcv(
             avg_turnover = float(pd.to_numeric(g.tail(20)[turn_col], errors="coerce").fillna(0.0).mean())
         else:
             avg_turnover = 0.0
+        avg_turnover_rate: float | Any = pd.NA
+        if turnover_rate_field in g.columns:
+            turnover_rate_window = pd.to_numeric(g.tail(20)[turnover_rate_field], errors="coerce")
+            if len(turnover_rate_window) == 20 and turnover_rate_window.notna().all():
+                avg_turnover_rate = float(turnover_rate_window.mean())
         last = g.iloc[-1]
         sm_list_date, sm_delist_date = sm_map.get(str(symbol), (None, None))
         if sm_list_date is not None:
@@ -323,8 +353,7 @@ def build_candidates_from_ohlcv(
         is_suspended = bool(float(last.get("volume", 0.0) or 0.0) <= 0.0)
         last_close = float(last.get("close", 0.0) or 0.0)
         sec_name = sm_name_map.get(str(symbol), "")
-        is_st_by_name = bool(_ST_NAME_PAT.search(sec_name)) if sec_name else False
-        is_st = str(symbol) in st_symbols or is_st_by_name
+        is_st = str(symbol) in st_symbols
         is_delisted = bool(sm_delist_date is not None and sm_delist_date <= as_of_ts)
         out_rows.append(
             {
@@ -338,6 +367,7 @@ def build_candidates_from_ohlcv(
                 "is_suspended": is_suspended,
                 "list_days": list_days,
                 "avg_turnover_20d": avg_turnover,
+                "avg_turnover_rate_20d": avg_turnover_rate,
                 "last_close": last_close,
                 "limit_lock": False,
             }

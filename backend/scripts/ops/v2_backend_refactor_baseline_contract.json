@@ -34,9 +34,6 @@
       "run_meta_universe",
       "config_truth",
       "manifest"
-    ],
-    "diagnostic_only": [
-      "report.html"
     ]
   },
   "allowed_drift_fields": {
@@ -73,8 +70,6 @@
       "saved_config_meta.saved_at"
     ]
   },
-  "non_blocking_categories": [
-    "diagnostic_drift"
-  ],
+  "non_blocking_categories": [],
   "verification_command": "python backend/scripts/baseline_regression_check.py --rerun --write-to-candidate"
 }

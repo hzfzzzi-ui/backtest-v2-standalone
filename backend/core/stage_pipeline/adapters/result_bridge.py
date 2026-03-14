@@ -8,12 +8,62 @@ import pandas as pd
 from backend.core.portfolio.portfolio_builder import PortfolioBacktestResult, _compute_metrics
 
 
+def _merge_count_map(target: dict[str, int], source: dict[str, Any] | None) -> dict[str, int]:
+    for key, value in dict(source or {}).items():
+        target[str(key)] = int(target.get(str(key), 0)) + int(value or 0)
+    return target
+
+
+def _build_multi_alpha_audit(runtime: Any) -> dict[str, Any] | None:
+    rows = [dict(row) for row in list(getattr(runtime, "composition_audit_rows", []) or ())]
+    if not rows:
+        return None
+    raw_counts: dict[str, int] = {}
+    composed_counts: dict[str, int] = {}
+    blocked_counts: dict[str, int] = {}
+    conflict_counts: dict[str, int] = {}
+    source_only_exit_count = 0
+    global_risk_override_count = 0
+    flagged_days: list[dict[str, Any]] = []
+    for row in rows:
+        _merge_count_map(raw_counts, row.get("raw_signal_counts_by_alpha"))
+        _merge_count_map(composed_counts, row.get("composed_signal_counts_by_alpha"))
+        _merge_count_map(blocked_counts, row.get("blocked_signal_counts_by_reason"))
+        _merge_count_map(conflict_counts, row.get("conflict_resolution_counts"))
+        source_only_exit_count += int(row.get("source_exit_count", 0) or 0)
+        global_risk_override_count += int(row.get("global_risk_override_count", 0) or 0)
+        if bool(row.get("flagged")):
+            flagged_days.append(dict(row))
+    return {
+        "contract_version": "multi_alpha_audit@1",
+        "summary": {
+            "raw_signal_counts_by_alpha": dict(sorted(raw_counts.items())),
+            "composed_signal_counts_by_alpha": dict(sorted(composed_counts.items())),
+            "blocked_signal_counts_by_reason": dict(sorted(blocked_counts.items())),
+            "conflict_resolution_counts": dict(sorted(conflict_counts.items())),
+            "source_only_exit_count": int(source_only_exit_count),
+            "global_risk_override_count": int(global_risk_override_count),
+        },
+        "flagged_days": flagged_days,
+    }
+
+
 def augment_metrics(runtime: Any, metrics: dict[str, Any]) -> None:
-    metrics["candidate_diag_reason_counts"] = dict(getattr(runtime.provider, "diag_reason_counts", {}) or {})
+    candidate_diag_reason_counts = dict(getattr(runtime.provider, "diag_reason_counts", {}) or {})
+    _merge_count_map(candidate_diag_reason_counts, getattr(runtime, "order_reject_reason_counts", {}) or {})
+    metrics["candidate_diag_reason_counts"] = dict(sorted(candidate_diag_reason_counts.items()))
     metrics["blocked_by_trend_count"] = int(getattr(runtime.provider, "blocked_by_trend_count", 0) or 0)
     metrics["total_buy_signals"] = int(getattr(runtime.provider, "total_buy_signals", 0) or 0)
     metrics["min_hold_block_count"] = int(getattr(runtime.provider, "min_hold_block_count", 0) or 0)
     metrics["cooldown_block_count"] = int(getattr(runtime.provider, "cooldown_block_count", 0) or 0)
+    multi_alpha_audit = _build_multi_alpha_audit(runtime)
+    if isinstance(multi_alpha_audit, dict):
+        summary = dict(multi_alpha_audit.get("summary") or {})
+        metrics["source_only_exit_count"] = int(summary.get("source_only_exit_count", 0) or 0)
+        metrics["global_risk_override_count"] = int(summary.get("global_risk_override_count", 0) or 0)
+        audit_payload = dict(metrics.get("audit") or {})
+        audit_payload.update(multi_alpha_audit)
+        metrics["audit"] = audit_payload
     if runtime.route_id == "provider_breakout_runtime":
         diag = dict(getattr(runtime.provider, "diag_reason_counts", {}) or {})
         metrics["exit_atr_stop_count"] = int(diag.get("ATR_STOP_LOSS", 0))
@@ -31,6 +81,22 @@ def augment_metrics(runtime: Any, metrics: dict[str, Any]) -> None:
         metrics["trade_mode_main_days"] = int(runtime.trade_mode_main_days)
         metrics["trade_mode_light_days"] = int(runtime.trade_mode_light_days)
         metrics["trade_mode_notrade_days"] = int(runtime.trade_mode_notrade_days)
+        daily_df = pd.DataFrame(getattr(runtime, "daily_rows", []) or [])
+        if not daily_df.empty:
+            if "breadth_score" in daily_df.columns:
+                breadth_score = pd.to_numeric(daily_df["breadth_score"], errors="coerce")
+                metrics["breadth_score_mean"] = float(breadth_score.dropna().mean()) if breadth_score.notna().any() else 0.0
+            else:
+                metrics["breadth_score_mean"] = 0.0
+            if "breadth_max_positions" in daily_df.columns:
+                breadth_maxpos = pd.to_numeric(daily_df["breadth_max_positions"], errors="coerce")
+                metrics["breadth_maxpos_mean"] = float(breadth_maxpos.dropna().mean()) if breadth_maxpos.notna().any() else 0.0
+            else:
+                metrics["breadth_maxpos_mean"] = 0.0
+        else:
+            metrics["breadth_score_mean"] = 0.0
+            metrics["breadth_maxpos_mean"] = 0.0
+        metrics["breadth_gate_block_count"] = 0
         return
     for field_name in (
         "atr_stop_exit_count",

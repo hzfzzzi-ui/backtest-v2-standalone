@@ -22,6 +22,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
+import requests
 
 try:
     import psycopg
@@ -81,6 +82,49 @@ SW_L1_MAP: dict[str, str] = {
     "47": "社会服务",   # 旧:休闲服务 → 2021:社会服务
 }
 
+# 历史申万前缀元数据。核心目的是保留历史分类语义，并给运行时一个
+# contemporaneous-compatible 的指数代码桥接，而不是把所有历史记录都折算成 SW2021。
+SW_PREFIX_META: dict[str, dict[str, str]] = {
+    "11": {"standard": "SW2021", "industry_l1": "农林牧渔", "index_code": "801010.SI"},
+    "21": {"standard": "SW_LEGACY", "industry_l1": "采掘", "index_code": "801020.SI"},
+    "22": {"standard": "SW2021", "industry_l1": "基础化工", "index_code": "801030.SI"},
+    "23": {"standard": "SW2021", "industry_l1": "钢铁", "index_code": "801040.SI"},
+    "24": {"standard": "SW2021", "industry_l1": "有色金属", "index_code": "801050.SI"},
+    "25": {"standard": "SW_LEGACY", "industry_l1": "化工", "index_code": "801030.SI"},
+    "26": {"standard": "SW_LEGACY", "industry_l1": "钢铁", "index_code": "801040.SI"},
+    "27": {"standard": "SW2021", "industry_l1": "电子", "index_code": "801080.SI"},
+    "28": {"standard": "SW2021", "industry_l1": "汽车", "index_code": "801880.SI"},
+    "31": {"standard": "SW_LEGACY", "industry_l1": "建筑材料", "index_code": "801061.SI"},
+    "32": {"standard": "SW_LEGACY", "industry_l1": "建筑装饰", "index_code": "801062.SI"},
+    "33": {"standard": "SW2021", "industry_l1": "家用电器", "index_code": "801110.SI"},
+    "34": {"standard": "SW2021", "industry_l1": "食品饮料", "index_code": "801120.SI"},
+    "35": {"standard": "SW2021", "industry_l1": "纺织服饰", "index_code": "801130.SI"},
+    "36": {"standard": "SW2021", "industry_l1": "轻工制造", "index_code": "801140.SI"},
+    "37": {"standard": "SW2021", "industry_l1": "医药生物", "index_code": "801150.SI"},
+    "41": {"standard": "SW2021", "industry_l1": "公用事业", "index_code": "801160.SI"},
+    "42": {"standard": "SW2021", "industry_l1": "交通运输", "index_code": "801170.SI"},
+    "43": {"standard": "SW2021", "industry_l1": "房地产", "index_code": "801180.SI"},
+    "44": {"standard": "SW_LEGACY", "industry_l1": "商业贸易", "index_code": "801200.SI"},
+    "45": {"standard": "SW2021", "industry_l1": "商贸零售", "index_code": "801200.SI"},
+    "46": {"standard": "SW2021", "industry_l1": "社会服务", "index_code": "801210.SI"},
+    "47": {"standard": "SW_LEGACY", "industry_l1": "休闲服务", "index_code": "801210.SI"},
+    "48": {"standard": "SW2021", "industry_l1": "银行", "index_code": "801780.SI"},
+    "49": {"standard": "SW2021", "industry_l1": "非银金融", "index_code": "801790.SI"},
+    "51": {"standard": "SW2021", "industry_l1": "综合", "index_code": "801230.SI"},
+    "61": {"standard": "SW2021", "industry_l1": "建筑材料", "index_code": "801710.SI"},
+    "62": {"standard": "SW2021", "industry_l1": "建筑装饰", "index_code": "801720.SI"},
+    "63": {"standard": "SW2021", "industry_l1": "电力设备", "index_code": "801730.SI"},
+    "64": {"standard": "SW2021", "industry_l1": "机械设备", "index_code": "801890.SI"},
+    "65": {"standard": "SW2021", "industry_l1": "国防军工", "index_code": "801740.SI"},
+    "71": {"standard": "SW2021", "industry_l1": "计算机", "index_code": "801750.SI"},
+    "72": {"standard": "SW2021", "industry_l1": "传媒", "index_code": "801760.SI"},
+    "73": {"standard": "SW2021", "industry_l1": "通信", "index_code": "801770.SI"},
+    "74": {"standard": "SW2021", "industry_l1": "煤炭", "index_code": "801950.SI"},
+    "75": {"standard": "SW2021", "industry_l1": "石油石化", "index_code": "801960.SI"},
+    "76": {"standard": "SW2021", "industry_l1": "环保", "index_code": "801970.SI"},
+    "77": {"standard": "SW2021", "industry_l1": "美容护理", "index_code": "801980.SI"},
+}
+
 # ── 申万 L1 行业名 → 行业指数代码 ─────────────────────────────────────
 # industry_l1 名称（pit_industry_history 中的值）→ 申万行业指数代码（pit_index_daily 中的 index_code）
 SW_L1_INDEX_MAP: dict[str, str] = {
@@ -120,7 +164,8 @@ SW_L1_INDEX_MAP: dict[str, str] = {
 _INDUSTRY_CSV = "industry_clf_hist_sw.csv"
 _INDEX_CSV = "index_stock_cons_000906.csv"
 _SW_INDEX_DAILY_CSV = "sw_index_daily.csv"
-_SW_INDEX_START_DATE = "2010-01-01"
+_SW_INDEX_START_DATE = "2007-01-01"
+_SW_INDEX_EXTRA_CODES: tuple[str, ...] = ("801020", "801061", "801062")
 
 
 def _get_db_conn():
@@ -140,7 +185,22 @@ def _get_db_conn():
 def _map_industry_l1(code: str) -> str | None:
     """从6位 industry_code 的前2位映射到 L1 行业名。"""
     prefix = str(code).strip()[:2]
-    return SW_L1_MAP.get(prefix)
+    meta = SW_PREFIX_META.get(prefix)
+    return None if meta is None else str(meta["industry_l1"])
+
+
+def _resolve_prefix_meta(code: str) -> dict[str, str] | None:
+    prefix = str(code).strip()[:2]
+    meta = SW_PREFIX_META.get(prefix)
+    return dict(meta) if meta is not None else None
+
+
+def resolve_sw_index_code_from_industry_code(code: str) -> str | None:
+    meta = _resolve_prefix_meta(code)
+    if meta is None:
+        return None
+    index_code = str(meta.get("index_code") or "").strip().upper()
+    return index_code or None
 
 
 def _compute_end_dates(df: pd.DataFrame) -> pd.DataFrame:
@@ -182,18 +242,20 @@ def _fetch_index_raw() -> pd.DataFrame:
 
 def _fetch_sw_index_daily(start_date: str = _SW_INDEX_START_DATE) -> pd.DataFrame:
     """从 AKShare 拉取所有申万 L1 行业指数日线数据。"""
-    if ak is None:
-        raise RuntimeError("akshare 未安装")
-
-    info = ak.sw_index_first_info()
-    # col[0] = index code like "801010.SI"
-    codes = info.iloc[:, 0].str.replace(".SI", "", regex=False).tolist()
-    print(f"[fetch] 申万 L1 行业指数: {len(codes)} 个")
+    codes = sorted(
+        {
+            str(meta["index_code"]).replace(".SI", "")
+            for meta in SW_PREFIX_META.values()
+            if str(meta.get("standard")) == "SW2021"
+        }
+        | set(_SW_INDEX_EXTRA_CODES)
+    )
+    print(f"[fetch] 申万行业指数: {len(codes)} 个（含历史兼容代码）")
 
     all_frames = []
     for i, code in enumerate(codes):
         print(f"[fetch] ({i + 1}/{len(codes)}) 拉取 {code} 日线 ...")
-        df = ak.index_hist_sw(symbol=code, period="day")
+        df = _fetch_sw_index_daily_by_code(code)
         all_frames.append(df)
         if i < len(codes) - 1:
             time.sleep(0.3)
@@ -207,6 +269,50 @@ def _fetch_sw_index_daily(start_date: str = _SW_INDEX_START_DATE) -> pd.DataFram
 
     print(f"[fetch] 合计 {len(combined)} 条 (>= {start_date})")
     return combined
+
+
+def _fetch_sw_index_daily_by_code(code: str, retries: int = 3) -> pd.DataFrame:
+    url = "https://www.swsresearch.com/institute-sw/api/index_publish/trend/"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        ),
+    }
+    params = {"swindexcode": str(code).replace(".SI", ""), "period": "DAY"}
+    last_exc: Exception | None = None
+    for attempt in range(1, int(retries) + 1):
+        try:
+            resp = requests.get(url, params=params, headers=headers, verify=False, timeout=60)
+            resp.raise_for_status()
+            data_json = resp.json()
+            rows = list(data_json.get("data") or [])
+            if not rows:
+                return pd.DataFrame(columns=["代码", "日期", "收盘", "开盘", "最高", "最低", "成交量", "成交额"])
+            temp_df = pd.DataFrame(rows)
+            temp_df.rename(
+                columns={
+                    "swindexcode": "代码",
+                    "bargaindate": "日期",
+                    "openindex": "开盘",
+                    "maxindex": "最高",
+                    "minindex": "最低",
+                    "closeindex": "收盘",
+                    "bargainamount": "成交量",
+                    "bargainsum": "成交额",
+                },
+                inplace=True,
+            )
+            temp_df = temp_df[["代码", "日期", "收盘", "开盘", "最高", "最低", "成交量", "成交额"]]
+            temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
+            for col in ("收盘", "开盘", "最高", "最低", "成交量", "成交额"):
+                temp_df[col] = pd.to_numeric(temp_df[col], errors="coerce")
+            return temp_df
+        except Exception as exc:  # pragma: no cover - depends on network
+            last_exc = exc
+            if attempt < int(retries):
+                time.sleep(float(attempt))
+    raise RuntimeError(f"failed to fetch SW index daily for {code}: {last_exc}")
 
 
 def fetch_and_save(csv_dir: str) -> None:
@@ -269,10 +375,11 @@ def _transform_industry(raw: pd.DataFrame) -> pd.DataFrame:
         start_raw = row["start_date"]
         code_raw = str(row["industry_code"]).strip()
 
-        l1 = _map_industry_l1(code_raw)
-        if l1 is None:
+        meta = _resolve_prefix_meta(code_raw)
+        if meta is None:
             unmapped.add(code_raw[:2])
             continue
+        l1 = str(meta["industry_l1"])
 
         ts_code = normalize_stock_symbol(symbol_raw)
 
@@ -284,7 +391,7 @@ def _transform_industry(raw: pd.DataFrame) -> pd.DataFrame:
         records.append({
             "ts_code": ts_code,
             "start_date": start_date,
-            "standard": "SW2021",
+            "standard": str(meta["standard"]),
             "industry_l1": l1,
             "industry_l2": code_raw,
         })

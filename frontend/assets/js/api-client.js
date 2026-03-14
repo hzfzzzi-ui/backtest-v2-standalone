@@ -12,9 +12,56 @@ function _apiFailureItems() {
     }));
 }
 
-function _mergeStatusItems(manualItems) {
-  const manual = Array.isArray(manualItems) ? manualItems : [];
-  return [...manual, ..._apiFailureItems()];
+function _mergeStatusItems() {
+  const manual = Array.isArray(state.manual_status_items) ? state.manual_status_items : [];
+  const validation = Array.isArray(state.validation_status_items) ? state.validation_status_items : [];
+  return [...validation, ...manual, ..._apiFailureItems()];
+}
+
+function _refreshStatusCenter() {
+  state.status_items = _mergeStatusItems();
+  const count = state.status_items.length;
+  const countEl = byId('wbStatusCount');
+  if (countEl) {
+    countEl.textContent = String(count);
+    countEl.hidden = count === 0;
+  }
+
+  const bell = byId('wbStatusBell');
+  if (bell) {
+    bell.classList.remove('wb-bell-ok', 'wb-bell-error');
+    bell.classList.add(count > 0 ? 'wb-bell-error' : 'wb-bell-ok');
+  }
+
+  const listEl = byId('wbStatusList');
+  if (listEl) {
+    if (!count) {
+      listEl.innerHTML = '<div class="wb-status-item">暂无错误状态</div>';
+    } else {
+      listEl.innerHTML = state.status_items.map((x) => {
+        const file = String(x.file || '');
+        const detail = String(x.detail || '');
+        const tip = file.startsWith('/app/outputs') ? '<div class="wb-mini">浏览器不可直连容器内 /app/outputs</div>' : '';
+        const detailHtml = detail ? `<div class="wb-code wb-mini" style="color:var(--wb-red);margin-top:4px">${esc(detail)}</div>` : '';
+        return `<div class="wb-status-item"><div><strong>${esc(x.title || '状态')}</strong></div><div class="wb-mini">${esc(x.message || '')}</div><div class="wb-code wb-mini">${esc(file)}</div>${detailHtml}${tip}</div>`;
+      }).join('');
+    }
+  }
+
+  const banner = byId('wbErrorBanner');
+  const bannerText = byId('wbErrorBannerText');
+  if (banner && bannerText) {
+    if (!count) {
+      banner.hidden = true;
+      bannerText.textContent = '';
+    } else {
+      const top = state.status_items[0];
+      banner.hidden = false;
+      bannerText.textContent = `${top.title || '错误'}: ${top.message || top.file || '未知'}`;
+    }
+  }
+
+  if (count > 0) toggleStatusPanel(true);
 }
 
 function _upsertApiStatus(key, patch) {
@@ -112,49 +159,12 @@ async function apiRequestJson(key, url, options = {}) {
 
 function setStatusItems(items) {
   state.manual_status_items = Array.isArray(items) ? items : [];
-  state.status_items = _mergeStatusItems(state.manual_status_items);
-  const count = state.status_items.length;
-  const countEl = byId('wbStatusCount');
-  if (countEl) {
-    countEl.textContent = String(count);
-    countEl.hidden = count === 0;
-  }
+  _refreshStatusCenter();
+}
 
-  const bell = byId('wbStatusBell');
-  if (bell) {
-    bell.classList.remove('wb-bell-ok', 'wb-bell-error');
-    bell.classList.add(count > 0 ? 'wb-bell-error' : 'wb-bell-ok');
-  }
-
-  const listEl = byId('wbStatusList');
-  if (listEl) {
-    if (!count) {
-      listEl.innerHTML = '<div class="wb-status-item">暂无错误状态</div>';
-    } else {
-      listEl.innerHTML = state.status_items.map((x) => {
-        const file = String(x.file || '');
-        const detail = String(x.detail || '');
-        const tip = file.startsWith('/app/outputs') ? '<div class="wb-mini">浏览器不可直连容器内 /app/outputs</div>' : '';
-        const detailHtml = detail ? `<div class="wb-code wb-mini" style="color:var(--wb-red);margin-top:4px">${esc(detail)}</div>` : '';
-        return `<div class="wb-status-item"><div><strong>${esc(x.title || '状态')}</strong></div><div class="wb-mini">${esc(x.message || '')}</div><div class="wb-code wb-mini">${esc(file)}</div>${detailHtml}${tip}</div>`;
-      }).join('');
-    }
-  }
-
-  const banner = byId('wbErrorBanner');
-  const bannerText = byId('wbErrorBannerText');
-  if (banner && bannerText) {
-    if (!count) {
-      banner.hidden = true;
-      bannerText.textContent = '';
-    } else {
-      const top = state.status_items[0];
-      banner.hidden = false;
-      bannerText.textContent = `${top.title || '错误'}: ${top.message || top.file || '未知'}`;
-    }
-  }
-
-  if (count > 0) toggleStatusPanel(true);
+function setValidationStatusItems(items) {
+  state.validation_status_items = Array.isArray(items) ? items : [];
+  _refreshStatusCenter();
 }
 
 function toggleStatusPanel(force = null) {

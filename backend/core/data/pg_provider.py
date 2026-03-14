@@ -137,6 +137,7 @@ class PostgresDataProvider(DataProvider):
         ohlcv_keys = [
             "date", "symbol", "open", "high", "low", "close", "volume", "amount",
             "limit_up", "limit_down", "is_suspended", "adj_factor",
+            "turnover_rate", "turnover_rate_f", "volume_ratio", "float_share", "free_share", "circ_mv",
         ]
         cols = self._filter_existing_cols(mapping, ohlcv_keys, existing_cols)
         # Optional daily ST flag fallback: when schema mapping does not expose is_st,
@@ -431,7 +432,7 @@ class PostgresDataProvider(DataProvider):
     def load_industry_history(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
         """加载股票→行业历史映射（PIT-safe 区间记录）从 pit_industry_history。"""
         if not symbols:
-            return pd.DataFrame(columns=["ts_code", "start_date", "end_date", "industry_l1"])
+            return pd.DataFrame(columns=["ts_code", "start_date", "end_date", "standard", "industry_l1", "industry_l2"])
 
         ts_symbols: list[str] = []
         for s in symbols:
@@ -445,7 +446,7 @@ class PostgresDataProvider(DataProvider):
                 ts_symbols.append(s_lower)
 
         q = (
-            "SELECT ts_code, start_date, end_date, industry_l1 "
+            "SELECT ts_code, start_date, end_date, standard, industry_l1, industry_l2 "
             "FROM pit_industry_history "
             "WHERE ts_code = ANY(%s) "
             "AND start_date <= %s "
@@ -513,6 +514,55 @@ class PostgresDataProvider(DataProvider):
                 "end": "",
             },
         )
+        return raw
+
+    def load_index_constituent_history(self, index_code: str, start: date, end: date) -> pd.DataFrame:
+        """Load PIT constituent ranges for a historical index universe."""
+        try:
+            existing = self._get_table_columns("pit_index_constituents")
+        except Exception:
+            return pd.DataFrame(columns=["index_code", "symbol", "start_date", "end_date"])
+        if not existing:
+            return pd.DataFrame(columns=["index_code", "symbol", "start_date", "end_date"])
+
+        base_cols = ["index_code", "symbol", "start_date", "end_date"]
+        optional_cols = [
+            col
+            for col in (
+                "source",
+                "event_type",
+                "rebalance_calendar_version",
+                "rebalance_calendar_source",
+                "rebalance_calendar_generated_at",
+            )
+            if col in existing
+        ]
+        select_cols = base_cols + optional_cols
+        q = (
+            f"SELECT {', '.join(select_cols)} "
+            "FROM pit_index_constituents "
+            "WHERE index_code = %s "
+            "AND start_date <= %s "
+            "AND (end_date IS NULL OR end_date >= %s) "
+            "ORDER BY start_date, symbol"
+        )
+        raw = self._exec_df(
+            q,
+            (str(index_code).strip().upper(), end, start),
+            {
+                "provider": "postgres",
+                "source": "index_constituent_history",
+                "table": "pit_index_constituents",
+                "symbols": [str(index_code).strip().upper()],
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+        )
+        if raw.empty:
+            return pd.DataFrame(columns=select_cols)
+        raw = raw.copy()
+        raw["index_code"] = raw["index_code"].astype(str).str.upper()
+        raw["symbol"] = raw["symbol"].astype(str).map(normalize_stock_symbol)
         return raw
 
     def load_instrument_rules(self, symbols: list[str]) -> pd.DataFrame:

@@ -19,10 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.api.endpoints._experiment_runner_api import (  # noqa: E402
-    BacktestV2ExperimentRequest,
-    _build_runtime_cfg_from_workbench,
-)
+from backend.core.services.experiment_runtime_service import build_runtime_cfg_from_workbench  # noqa: E402
 from backend.core.tools.experiment_runner import run_experiment  # noqa: E402
 
 
@@ -34,17 +31,20 @@ def _build_runtime_from_wb(
     base_cfg: dict[str, Any],
     wb_cfg: dict[str, Any],
 ) -> dict[str, Any]:
-    body = BacktestV2ExperimentRequest(
-        preset="single",
-        universe_mode=str(wb_cfg.get("universe_mode", "ALL_A")),
-        start_date=str((wb_cfg.get("universe") or {}).get("start", "2016-03-01")),
-        end_date=str((wb_cfg.get("universe") or {}).get("end", "2026-03-01")),
-        benchmark=str((wb_cfg.get("universe") or {}).get("benchmark", "000300.SH")),
-        max_positions=int(((wb_cfg.get("position_risk") or {}).get("max_positions", 10))),
-        fast_mode=True,
-        price_adj=str((wb_cfg.get("universe") or {}).get("price_adj", "hfq")),
+    return build_runtime_cfg_from_workbench(
+        base_cfg=base_cfg,
+        request_payload={
+            "preset": "single",
+            "universe_mode": str(wb_cfg.get("universe_mode", "ALL_A")),
+            "start_date": str((wb_cfg.get("universe") or {}).get("start", "2016-03-01")),
+            "end_date": str((wb_cfg.get("universe") or {}).get("end", "2026-03-01")),
+            "benchmark": str((wb_cfg.get("universe") or {}).get("benchmark", "000300.SH")),
+            "max_positions": int(((wb_cfg.get("position_risk") or {}).get("max_positions", 10))),
+            "fast_mode": True,
+            "price_adj": str((wb_cfg.get("universe") or {}).get("price_adj", "hfq")),
+        },
+        wb_cfg=wb_cfg,
     )
-    return _build_runtime_cfg_from_workbench(base_cfg, body, wb_cfg)
 
 
 def _apply_variant(base_wb: dict[str, Any], variant: str) -> dict[str, Any]:

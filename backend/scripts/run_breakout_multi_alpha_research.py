@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from backend.core.services.experiment_artifact_service import ensure_standard_artifacts  # noqa: E402
 from backend.core.tools.experiment_runner import run_experiment  # noqa: E402
 
 
@@ -363,8 +364,6 @@ def _run_one(
     runtime_cfg: dict[str, Any],
     overrides: dict[str, Any],
 ) -> dict[str, Any]:
-    from backend.api.endpoints.backtest_v2_artifacts import ensure_standard_artifacts
-
     execution_cfg = deepcopy(runtime_cfg)
     _normalize_db_runtime(execution_cfg)
 

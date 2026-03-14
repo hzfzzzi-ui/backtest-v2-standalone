@@ -20,6 +20,7 @@ from .rsi_reversal import RSIReversalStrategy
 from .regime_router import RegimeDetector, RegimeRouter
 from .breakout_trend import BreakoutTrendStrategy
 from .composite_strategy import CompositeStrategy
+from .multi_alpha_strategy import MultiAlphaStrategy
 
 
 StrategySupportClass = Literal["product-supported", "research-only", "deprecated"]
@@ -396,9 +397,17 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
             enable_dual_breakout=bool(params.get("enable_dual_breakout", False)),
             breakout_window_short=int(params.get("breakout_window_short", 20)),
             breakout_window_long=int(params.get("breakout_window_long", 55)),
+            dual_breakout_mode=str(params.get("dual_breakout_mode", "or") or "or").strip().lower(),
+            dual_breakout_gate_ma_window=int(params.get("dual_breakout_gate_ma_window", 120)),
+            dual_breakout_gate_slope_lookback=int(params.get("dual_breakout_gate_slope_lookback", 10)),
             breakout_entry_buffer_pct=float(params.get("breakout_entry_buffer_pct", 0.0)),
             entry_confirm_mode=str(params.get("entry_confirm_mode", "none")),
             entry_delay_mode=str(params.get("entry_delay_mode", "none")),
+            enable_entry_gap_guard=bool(params.get("enable_entry_gap_guard", False)),
+            entry_gap_guard_pct=float(params.get("entry_gap_guard_pct", 0.04)),
+            enable_entry_above_slow_ma=bool(params.get("enable_entry_above_slow_ma", False)),
+            enable_entry_slow_ma_slope=bool(params.get("enable_entry_slow_ma_slope", False)),
+            entry_slope_lookback=int(params.get("entry_slope_lookback", 5)),
             portfolio_mode=str(params.get("portfolio_mode", "equal_10")),
             order_size=int(params.get("order_size", cfg.order_size)),
             min_price=float(params.get("min_price", 0.0)),
@@ -410,6 +419,18 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
             atr_stop_k=float(params.get("atr_stop_k", 2.0)),
             enable_atr_trail=bool(params.get("enable_atr_trail", False)),
             atr_trail_k=float(params.get("atr_trail_k", 3.0)),
+            trailing_activate_profit_pct=float(params.get("trailing_activate_profit_pct", 0.0)),
+            segmented_trend_exit_mode=str(params.get("segmented_trend_exit_mode", "off") or "off").strip().lower(),
+            segmented_mid_profit_pct=float(params.get("segmented_mid_profit_pct", 0.0)),
+            segmented_high_profit_pct=float(params.get("segmented_high_profit_pct", 0.0)),
+            segmented_high_trail_k=float(params.get("segmented_high_trail_k", params.get("atr_trail_k", 3.0))),
+            enable_pre_profit_breakout_failure_exit=bool(params.get("enable_pre_profit_breakout_failure_exit", False)),
+            pre_profit_breakout_failure_max_bars=int(params.get("pre_profit_breakout_failure_max_bars", 0)),
+            pre_profit_breakout_failure_atr_buffer_k=float(params.get("pre_profit_breakout_failure_atr_buffer_k", 0.0)),
+            enable_profit_decay_exit=bool(params.get("enable_profit_decay_exit", False)),
+            profit_decay_exit_profit_pct=float(params.get("profit_decay_exit_profit_pct", 0.15)),
+            profit_decay_exit_min_hold_bars=int(params.get("profit_decay_exit_min_hold_bars", 10)),
+            profit_decay_exit_residual_score_threshold=float(params.get("profit_decay_exit_residual_score_threshold", 0.35)),
             enable_take_profit=bool(params.get("enable_take_profit", False)),
             take_profit_mode=str(params.get("take_profit_mode", "pct")),
             take_profit_pct=float(params.get("take_profit_pct", 0.10)),
@@ -423,6 +444,12 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
             enable_ma20_exit=bool(params.get("enable_ma20_exit", False)),
             enable_low10_exit=bool(params.get("enable_low10_exit", False)),
             enable_risk_off_exit=bool(params.get("enable_risk_off_exit", False)),
+            risk_off_exit_mode=str(params.get("risk_off_exit_mode", "risk_on_off") or "risk_on_off").strip().lower(),
+            risk_off_exit_partial_pct=float(params.get("risk_off_exit_partial_pct", 1.0)),
+            risk_off_exit_partial_mode=str(params.get("risk_off_exit_partial_mode", "all_states") or "all_states").strip().lower(),
+            risk_off_exit_partial_only_if_profitable=bool(params.get("risk_off_exit_partial_only_if_profitable", False)),
+            risk_off_exit_trans_down_max_positions=int(params.get("risk_off_exit_trans_down_max_positions", 0)),
+            risk_off_exit_trans_down_min_residual_score=float(params.get("risk_off_exit_trans_down_min_residual_score", 0.0)),
             momentum_top_pct=float(params.get("momentum_top_pct", 0.0)),
             enable_sector_gate=bool(params.get("enable_sector_gate", False)),
             sector_rank_window=int(params.get("sector_rank_window", 60)),
@@ -438,7 +465,35 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
             pullback_box_range_pct_max=float(params.get("pullback_box_range_pct_max", 0.08)),
             enable_residual_ranking=bool(params.get("enable_residual_ranking", False)),
             residual_window=int(params.get("residual_window", 60)),
+            residual_benchmark_weight=float(params.get("residual_benchmark_weight", 0.5)),
+            residual_industry_weight=float(params.get("residual_industry_weight", 0.5)),
+            industry_relative_mode=str(params.get("industry_relative_mode", "sector_proxy") or "sector_proxy"),
+            industry_relative_regime_mode=str(
+                params.get("industry_relative_regime_mode", "off") or "off"
+            ),
+            residual_weight_regime_mode=str(params.get("residual_weight_regime_mode", "off")),
+            residual_benchmark_weight_fallback=float(
+                params.get("residual_benchmark_weight_fallback", params.get("residual_benchmark_weight", 0.5))
+            ),
+            residual_industry_weight_fallback=float(
+                params.get("residual_industry_weight_fallback", params.get("residual_industry_weight", 0.5))
+            ),
+            ranking_mode=str(params.get("ranking_mode", "none") or "none"),
+            leadership_route_bucket_count=int(params.get("leadership_route_bucket_count", 3)),
+            breakout_quality_gate_min_score=float(params.get("breakout_quality_gate_min_score", 0.55)),
+            breakout_quality_margin_cap_pct=float(params.get("breakout_quality_margin_cap_pct", 0.08)),
+            breakout_quality_fade_cap_pct=float(params.get("breakout_quality_fade_cap_pct", 0.035)),
+            breakout_quality_open_gap_cap_pct=float(params.get("breakout_quality_open_gap_cap_pct", 0.04)),
+            residual_window_regime_mode=str(params.get("residual_window_regime_mode", "off")),
+            residual_window_fallback=int(params.get("residual_window_fallback", params.get("residual_window", 60))),
+            residual_window_regime_fast_ma=int(params.get("residual_window_regime_fast_ma", 120)),
+            residual_window_regime_slow_ma=int(params.get("residual_window_regime_slow_ma", 200)),
             source_aware_residual_mode=str(params.get("source_aware_residual_mode", "off")),
+            residual_refine_mode=str(params.get("residual_refine_mode", "off")),
+            residual_refine_weight=float(params.get("residual_refine_weight", 0.0)),
+            industry_second_stage_min_industry_score=float(
+                params.get("industry_second_stage_min_industry_score", 0.85)
+            ),
             enable_sector_quality_ranking=bool(params.get("enable_sector_quality_ranking", False)),
             sector_strength_window_short=int(params.get("sector_strength_window_short", 20)),
             sector_strength_window_long=int(params.get("sector_strength_window_long", 60)),
@@ -474,6 +529,12 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
             router.regime_filter_cfg = rf_cfg  # type: ignore[attr-defined]
         return router
     if name == "composite":
+        multi_alpha_cfg = params.get("multi_alpha")
+        if isinstance(multi_alpha_cfg, dict):
+            return MultiAlphaStrategy(
+                multi_alpha=dict(multi_alpha_cfg),
+                portfolio_mode=str(params.get("portfolio_mode", "hard_sleeve_budget") or "hard_sleeve_budget"),
+            )
         # 组合策略
         sub_strategies = []
         strategies_config = params.get("strategies", [])

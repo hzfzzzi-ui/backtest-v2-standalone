@@ -93,6 +93,7 @@ def run_foundation_compatibility_shell(request: FoundationCompatibilityRequest):
             risk_budget_cfg=request.cfg_obj.risk_budget,
             market_filter_cfg=request.cfg_obj.market_filter,
             benchmark_regime_cfg=request.cfg_obj.benchmark_regime,
+            breadth_cfg=request.cfg_obj.breadth,
         )
     )
     base_result = adapter_result.portfolio_result

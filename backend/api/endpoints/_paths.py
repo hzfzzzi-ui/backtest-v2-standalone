@@ -36,6 +36,12 @@ def _execution_root() -> Path:
     return root
 
 
+def _mobile_ops_root() -> Path:
+    root = _results_root() / "mobile_ops"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _jobs_root() -> Path:
     root = _results_root() / "jobs"
     root.mkdir(parents=True, exist_ok=True)

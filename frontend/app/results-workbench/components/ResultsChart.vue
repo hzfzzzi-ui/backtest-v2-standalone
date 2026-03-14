@@ -161,7 +161,7 @@ watch(
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
         </svg>
-        <span>运行实验后，在这里查看净值和基准走势。</span>
+        <span>运行实验后，在这里查看净值与基准走势。</span>
       </div>
     </div>
 

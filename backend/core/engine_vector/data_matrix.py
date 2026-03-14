@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
@@ -20,6 +20,14 @@ class OhlcMatrices:
     tradable: np.ndarray
 
 
+def _normalize_symbol_like(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if "." in text:
+        code, exch = text.split(".", 1)
+        return f"{exch}{code}".lower()
+    return text
+
+
 def _build_st_lookup(
     st_df: pd.DataFrame,
     sym_to_col: dict[str, int],
@@ -29,43 +37,41 @@ def _build_st_lookup(
     if st_df.empty:
         return lookup
     for row in st_df.itertuples(index=False):
-        ts_code = str(getattr(row, "ts_code", "")).strip()
-        # Convert TS format (600000.SH) to internal (sh600000)
-        if "." in ts_code:
-            code, exch = ts_code.split(".", 1)
-            internal = exch.lower() + code
-        else:
-            internal = ts_code.lower()
+        internal = _normalize_symbol_like(getattr(row, "ts_code", ""))
         c = sym_to_col.get(internal)
         if c is None:
             continue
         s_date = pd.Timestamp(getattr(row, "start_date"))
         e_val = getattr(row, "end_date", None)
         e_date = pd.Timestamp(e_val) if pd.notna(e_val) else pd.Timestamp("2099-12-31")
-        if c not in lookup:
-            lookup[c] = []
-        lookup[c].append((s_date, e_date))
+        lookup.setdefault(c, []).append((s_date, e_date))
     return lookup
 
 
-def _is_in_st(
-    lookup: dict[int, list[tuple[pd.Timestamp, pd.Timestamp]]],
-    col: int,
-    dt: pd.Timestamp,
-) -> bool:
-    periods = lookup.get(col)
-    if not periods:
-        return False
-    for s, e in periods:
-        if s <= dt <= e:
-            return True
-    return False
+def _build_membership_lookup(
+    membership_df: pd.DataFrame,
+    sym_to_col: dict[str, int],
+) -> dict[int, list[tuple[pd.Timestamp, pd.Timestamp | None]]]:
+    lookup: dict[int, list[tuple[pd.Timestamp, pd.Timestamp | None]]] = {}
+    if membership_df.empty:
+        return lookup
+    for row in membership_df.itertuples(index=False):
+        internal = _normalize_symbol_like(getattr(row, "symbol", ""))
+        c = sym_to_col.get(internal)
+        if c is None:
+            continue
+        s_date = pd.Timestamp(getattr(row, "start_date"))
+        e_val = getattr(row, "end_date", None)
+        e_date = pd.Timestamp(e_val) if pd.notna(e_val) else None
+        lookup.setdefault(c, []).append((s_date, e_date))
+    return lookup
 
 
 def build_ohlc_matrices_from_history(
     history: pd.DataFrame,
     trading_days: list[date],
     st_history: pd.DataFrame | None = None,
+    membership_history: pd.DataFrame | None = None,
     min_price: float = 0.0,
     min_list_days: int = 0,
     min_avg_turnover_20d: float = 0.0,
@@ -93,8 +99,12 @@ def build_ohlc_matrices_from_history(
     has_suspended = "is_suspended" in hist.columns
     has_is_st = "is_st" in hist.columns
     st_lookup = _build_st_lookup(st_history, sym_to_col) if st_history is not None and not st_history.empty else {}
+    membership_lookup = (
+        _build_membership_lookup(membership_history, sym_to_col)
+        if membership_history is not None and not membership_history.empty
+        else {}
+    )
 
-    # 向量化行/列索引构建
     hist["_row"] = hist["date"].dt.normalize().map(date_to_row)
     hist["_col"] = hist["symbol"].map(sym_to_col)
     valid_mask = hist["_row"].notna() & hist["_col"].notna()
@@ -102,7 +112,6 @@ def build_ohlc_matrices_from_history(
     r_arr = v["_row"].to_numpy(dtype=int)
     c_arr = v["_col"].to_numpy(dtype=int)
 
-    # 批量赋值
     open_m[r_arr, c_arr] = pd.to_numeric(v["open"], errors="coerce").to_numpy(dtype=float)
     high_m[r_arr, c_arr] = pd.to_numeric(v["high"], errors="coerce").to_numpy(dtype=float)
     low_m[r_arr, c_arr] = pd.to_numeric(v["low"], errors="coerce").to_numpy(dtype=float)
@@ -115,7 +124,6 @@ def build_ohlc_matrices_from_history(
     else:
         amount_m[r_arr, c_arr] = close_m[r_arr, c_arr] * volume_m[r_arr, c_arr]
 
-    # tradable 向量化：valid OHLC + has volume
     ok_price = (
         ~np.isnan(close_m[r_arr, c_arr]) & (close_m[r_arr, c_arr] > 0)
         & ~np.isnan(open_m[r_arr, c_arr]) & (open_m[r_arr, c_arr] > 0)
@@ -123,7 +131,6 @@ def build_ohlc_matrices_from_history(
     ok_volume = ~np.isnan(volume_m[r_arr, c_arr]) & (volume_m[r_arr, c_arr] > 0)
     tradable[r_arr, c_arr] = ok_price & ok_volume
 
-    # suspended 过滤（向量化）
     if has_suspended:
         susp_vals = v["is_suspended"]
         is_susp = susp_vals.notna() & susp_vals.astype(bool)
@@ -132,7 +139,6 @@ def build_ohlc_matrices_from_history(
             susp_c = c_arr[is_susp.to_numpy()]
             tradable[susp_r, susp_c] = False
 
-    # 日级 ST 硬拦截（优先使用行情表 is_st，弥补 pit_st_history 缺口）
     if has_is_st:
         st_vals = v["is_st"]
         is_st = st_vals.notna() & st_vals.astype(bool)
@@ -141,11 +147,9 @@ def build_ohlc_matrices_from_history(
             st_c = c_arr[is_st.to_numpy()]
             tradable[st_r, st_c] = False
 
-    # 低价过滤：close < min_price 的日期设为不可交易
     if min_price > 0:
         tradable &= ~(close_m < min_price) | np.isnan(close_m)
 
-    # 动态上市天数过滤：在满足 min_list_days 前不可交易
     if int(min_list_days) > 0 and t > 0 and n > 0:
         has_bar = ~np.isnan(close_m)
         first_idx = np.full(n, -1, dtype=int)
@@ -160,19 +164,29 @@ def build_ohlc_matrices_from_history(
                 continue
             tradable[np.arange(t, dtype=int) < (fi + int(min_list_days) - 1), c] = False
 
-    # 动态20日均成交额过滤：达标后才可交易
     if float(min_avg_turnover_20d) > 0 and t > 0 and n > 0:
         amt20 = pd.DataFrame(amount_m).rolling(20, min_periods=20).mean().to_numpy(dtype=float)
         tradable &= (~np.isnan(amt20)) & (amt20 >= float(min_avg_turnover_20d))
 
-    # ST 过滤（按区间清除）
     if st_lookup:
         for col_idx, periods in st_lookup.items():
             for s_date, e_date in periods:
                 row_mask = (dates >= s_date) & (dates <= e_date)
                 tradable[row_mask, col_idx] = False
 
-    # 清理临时列
+    if membership_lookup:
+        membership_mask = np.zeros((t, n), dtype=bool)
+        for col_idx, periods in membership_lookup.items():
+            col_mask = np.zeros(t, dtype=bool)
+            for s_date, e_date in periods:
+                if e_date is None:
+                    row_mask = dates >= s_date
+                else:
+                    row_mask = (dates >= s_date) & (dates < e_date)
+                col_mask |= row_mask
+            membership_mask[:, col_idx] = col_mask
+        tradable &= membership_mask
+
     hist.drop(columns=["_row", "_col"], inplace=True)
 
     return OhlcMatrices(
