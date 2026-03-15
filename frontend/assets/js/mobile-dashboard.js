@@ -1,6 +1,6 @@
 (function mobileDashboardBootstrap() {
   const POLL_INTERVAL_MS = 15000;
-  const state = {
+  const state = (window.createMobileDashboardState && window.createMobileDashboardState()) || {
     authenticated: false,
     configured: false,
     pollTimer: null,
@@ -315,9 +315,10 @@
   }
 
   function renderDashboard(payload) {
-    state.dashboard = payload;
-    const experiment = payload && payload.experiment ? payload.experiment : null;
-    const guidance = payload && payload.guidance ? payload.guidance : {};
+    const normalizedPayload = (window.getMobileDashboardPayload && window.getMobileDashboardPayload(payload)) || payload || {};
+    state.dashboard = normalizedPayload;
+    const experiment = normalizedPayload && normalizedPayload.experiment ? normalizedPayload.experiment : null;
+    const guidance = normalizedPayload && normalizedPayload.guidance ? normalizedPayload.guidance : {};
     const positions = Array.isArray(payload && payload.positions) ? payload.positions : [];
     const buyCards = getCardsByBucket('buy');
     const sellCards = getCardsByBucket('sell');

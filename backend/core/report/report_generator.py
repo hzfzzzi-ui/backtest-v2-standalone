@@ -438,8 +438,8 @@ def _build_config_summary(config: dict, run_config: dict, resolved_symbol_count:
       <tr><td>Risk Budget</td><td>{_enabled_txt(risk_budget_w.get('enabled', rc_risk_budget.get('enabled')))}</td></tr>
       <tr><td>RB atr_stop_k</td><td>{_e(risk_budget_w.get('atr_stop_k', rc_risk_budget.get('atr_stop_k', '-')))}</td></tr>
       <tr><td>RB base_portfolio_risk</td><td>{_e(risk_budget_w.get('base_portfolio_risk', '-'))}</td></tr>
-      <tr><td>RB legacy dd_reduce_pct</td><td>{_e(risk_budget_w.get('dd_reduce_pct', rc_risk_budget.get('dd_reduce_pct', '-')))}</td></tr>
-      <tr><td>RB legacy dd_reduce_scale</td><td>{_e(risk_budget_w.get('dd_reduce_scale', rc_risk_budget.get('dd_reduce_scale', '-')))}</td></tr>
+      <tr><td>RB historical dd_reduce_pct</td><td>{_e(risk_budget_w.get('dd_reduce_pct', rc_risk_budget.get('dd_reduce_pct', '-')))}</td></tr>
+      <tr><td>RB historical dd_reduce_scale</td><td>{_e(risk_budget_w.get('dd_reduce_scale', rc_risk_budget.get('dd_reduce_scale', '-')))}</td></tr>
       <tr><td>Market Filter</td><td>{_enabled_txt(market_filter_w.get('enabled', _dig(rc, 'market_filter.enabled')))}</td></tr>
       <tr><td>MF slope_ma / slope_window</td><td>{_e(market_filter_w.get('slope_ma_period', _dig(rc, 'market_filter.slope_ma_period') if _dig(rc, 'market_filter.slope_ma_period') is not None else '-'))} / {_e(market_filter_w.get('slope_window', _dig(rc, 'market_filter.slope_window') if _dig(rc, 'market_filter.slope_window') is not None else '-'))}</td></tr>
       <tr><td>Breadth</td><td>{_enabled_txt(breadth_w.get('enabled', _dig(rc, 'breadth.enabled')))}</td></tr>

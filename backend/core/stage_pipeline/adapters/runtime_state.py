@@ -11,7 +11,7 @@ from backend.core.portfolio.portfolio_builder import build_backtest_price_indice
 
 
 @dataclass(frozen=True, slots=True)
-class LegacyRuntimeBootstrap:
+class RuntimeBootstrap:
     cost_cfg: CostConfig
     sizing_cfg: SizingConfig
     risk_budget_cfg: RiskBudgetConfig
@@ -41,7 +41,7 @@ class LegacyRuntimeBootstrap:
 
 
 @dataclass(slots=True)
-class LegacyRuntimeLedger:
+class RuntimeLedger:
     cash: float
     positions: dict[str, int] = field(default_factory=dict)
     position_avg_cost: dict[str, float] = field(default_factory=dict)
@@ -61,7 +61,7 @@ class LegacyRuntimeLedger:
 
 
 @dataclass(slots=True)
-class LegacyRuntimeCounters:
+class RuntimeCounters:
     market_filter_bull_days: int = 0
     market_filter_bear_days: int = 0
     market_state_trans_down_days: int = 0
@@ -127,7 +127,7 @@ def build_runtime_bootstrap(
     *,
     market_filter_cfg: MarketFilterConfig | None,
     benchmark_regime_cfg: BenchmarkRegimeConfig | None,
-) -> LegacyRuntimeBootstrap:
+) -> RuntimeBootstrap:
     cost_cfg = request.cost_cfg if request.cost_cfg is not None else CostConfig()
     sizing_cfg = request.sizing_cfg if request.sizing_cfg is not None else SizingConfig()
     risk_budget_cfg = request.risk_budget_cfg if request.risk_budget_cfg is not None else RiskBudgetConfig()
@@ -139,7 +139,7 @@ def build_runtime_bootstrap(
         trading_days=request.data_bundle.trading_days,
     )
     volume_idx, amount_idx, suspended_idx, limit_up_idx, limit_down_idx = build_execution_guard_indices(request.data_bundle.raw_history)
-    return LegacyRuntimeBootstrap(
+    return RuntimeBootstrap(
         cost_cfg=cost_cfg,
         sizing_cfg=sizing_cfg,
         risk_budget_cfg=risk_budget_cfg,
@@ -169,9 +169,9 @@ def build_runtime_bootstrap(
     )
 
 
-def initialize_runtime_ledger(initial_cash: float) -> LegacyRuntimeLedger:
+def initialize_runtime_ledger(initial_cash: float) -> RuntimeLedger:
     initial_cash = float(initial_cash)
-    return LegacyRuntimeLedger(
+    return RuntimeLedger(
         cash=initial_cash,
         peak_nav=initial_cash,
         prev_nav=initial_cash,
@@ -179,5 +179,5 @@ def initialize_runtime_ledger(initial_cash: float) -> LegacyRuntimeLedger:
     )
 
 
-def initialize_runtime_counters() -> LegacyRuntimeCounters:
-    return LegacyRuntimeCounters()
+def initialize_runtime_counters() -> RuntimeCounters:
+    return RuntimeCounters()

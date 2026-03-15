@@ -254,6 +254,9 @@ def test_order_planning_module_preserves_s7_shape(monkeypatch) -> None:
     assert output.reason_counts["NO_CASH"] == 1
     assert output.summary_fragment["buy_orders_count"] == 1
     assert output.summary_fragment["sell_orders_count"] == 1
+    assert output.payload["execution_intent"]["as_of_date"] == "2026-03-02"
+    assert output.payload["execution_intent"]["buy_candidates"] == ["sh600000"]
+    assert output.payload["execution_intent"]["sell_candidates"] == ["sh600001"]
     assert runtime.candidate_rows == [{"symbol": "sh600000", "selected": True}]
     assert len(diag_calls) == 1
 

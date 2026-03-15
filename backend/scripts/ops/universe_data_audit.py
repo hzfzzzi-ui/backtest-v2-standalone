@@ -98,12 +98,12 @@ def _redundancy_findings() -> list[dict[str, Any]]:
         },
         {
             "surface": "CSI800 import path",
-            "finding": "Legacy CSI800 import paths previously replaced the whole pit_index_constituents table.",
+            "finding": "Historical CSI800 import paths previously replaced the whole pit_index_constituents table.",
             "impact": "CSI1000 rows could be deleted even though runtime consumes them by index_code.",
         },
         {
             "surface": "data_cache/index_stock_cons_000906.csv",
-            "finding": "Legacy static CSI800 snapshot still exists alongside reconstructed PIT change files.",
+            "finding": "Historical static CSI800 snapshot still exists alongside reconstructed PIT change files.",
             "impact": "Historical cleanup should prefer csi800_pit_changes.csv over static one-shot snapshots when PIT behavior matters.",
         },
         {

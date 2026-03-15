@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from backend.api.endpoints.backtest_v2_artifacts import (
+from backend.api.backtest_v2.impl import (
     _build_counters,
     _sanitize_historical_stock_names,
     write_manifest,
@@ -41,7 +41,7 @@ def test_write_manifest_includes_foundation_protocol_fields(tmp_path: Path) -> N
             "trades": 4,
             "turnover": 0.2,
             "stage_pipeline": {
-                "execution_shell": "stage_pipeline_shell_legacy_adapter",
+                "execution_shell": "stage_pipeline_shell_bridge",
                 "stage_order": ["S1", "S2", "S7"],
                 "enabled_stages": ["S1", "S2", "S7"],
             },
@@ -71,7 +71,7 @@ def test_write_manifest_includes_foundation_protocol_fields(tmp_path: Path) -> N
         "stage_summary": "stage_summary.json",
     }
     assert "optional_artifacts" not in manifest
-    assert manifest["stage_pipeline"]["execution_shell"] == "stage_pipeline_shell_legacy_adapter"
+    assert manifest["stage_pipeline"]["execution_shell"] == "stage_pipeline_shell_bridge"
     assert manifest["stage_summary"]["artifact"] == "stage_summary.json"
 
 

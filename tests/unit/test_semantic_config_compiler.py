@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from fastapi import HTTPException
 
-from backend.api.endpoints._semantic_config_compiler import (
+from backend.api.backtest_v2.semantic_config_compiler import (
     SEMANTIC_CONFIG_SCHEMA_VERSION,
     compile_semantic_config_json,
     validate_semantic_config_json,
@@ -835,3 +835,4 @@ def test_compile_semantic_config_json_emits_provenance_and_compiled_plan() -> No
     assert compiled["resolved_config"]["schema_version"] == SEMANTIC_CONFIG_SCHEMA_VERSION
     assert compiled["resolved_config"]["config_source"] == "config_json"
     assert compiled["compiled_plan"]["runtime_config"]["strategy"]["name"] == "breakout_trend"
+

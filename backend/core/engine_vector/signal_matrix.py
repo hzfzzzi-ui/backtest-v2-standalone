@@ -57,7 +57,7 @@ def build_signal_matrices(
         & ~np.isnan(trend_slow_ma)
         & (trend_fast_ma > trend_slow_ma)
     )
-    legacy_trend_ok = (
+    baseline_trend_ok = (
         ~np.isnan(trend_fast_ma)
         & ~np.isnan(trend_slow_ma)
         & ~np.isnan(close)
@@ -93,7 +93,7 @@ def build_signal_matrices(
     if bool(enable_trend_continuity_filter):
         quality_trend_on &= continuity_pass
     if enable_trend_filter:
-        trend_ok = quality_trend_on if (bool(enable_trend_slope_filter) or bool(enable_trend_continuity_filter)) else legacy_trend_ok
+        trend_ok = quality_trend_on if (bool(enable_trend_slope_filter) or bool(enable_trend_continuity_filter)) else baseline_trend_ok
 
     risk_on_matrix = np.repeat(risk_on.reshape(-1, 1), n, axis=1)
     ma_is_valid = (

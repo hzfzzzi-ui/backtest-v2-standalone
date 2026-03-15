@@ -8,21 +8,13 @@ import pandas as pd
 
 from backend.core.config.models import BenchmarkRegimeConfig, BreadthConfig, ExitConfig, MarketFilterConfig, RiskBudgetConfig, SizingConfig
 from backend.core.engine_vector.breadth import compute_breadth_scores, compute_dynamic_maxpos
-from backend.core.engine_vector.breakout_signal_provider import BreakoutTrendProvider
-from backend.core.engine_vector.generic_signal_provider import GenericSignalProvider
-from backend.core.engine_vector.multi_alpha_signal_provider import MultiAlphaSignalProvider
-from backend.core.engine_vector.regime_router_signal_provider import RegimeRouterSignalProvider
+from backend.core.engine_vector.route_registry import build_signal_provider_for_strategy
 from backend.core.engine_vector.signal_provider import SignalProvider
-from backend.core.engine_vector.sma_signal_provider import SMASignalProvider
-from backend.core.strategies.breakout_trend import BreakoutTrendStrategy
-from backend.core.strategies.composite_strategy import CompositeStrategy
-from backend.core.strategies.multi_alpha_strategy import MultiAlphaStrategy
-from backend.core.strategies.regime_router import RegimeRouter
 from backend.core.tools.data_bundle_builder import DataBundle
 
 
 @dataclass(frozen=True, slots=True)
-class LegacyRouteControls:
+class RouteControls:
     mf_enabled: bool
     mf_state_arr: np.ndarray
     mf_mult_arr: np.ndarray
@@ -34,15 +26,7 @@ class LegacyRouteControls:
 
 
 def build_signal_provider(strategy: Any) -> tuple[str, SignalProvider]:
-    if isinstance(strategy, BreakoutTrendStrategy):
-        return "provider_breakout_runtime", BreakoutTrendProvider()
-    if isinstance(strategy, MultiAlphaStrategy):
-        return "multi_alpha_inline_runtime", MultiAlphaSignalProvider()
-    if isinstance(strategy, CompositeStrategy):
-        return "generic_inline_runtime", GenericSignalProvider()
-    if isinstance(strategy, RegimeRouter):
-        return "regime_router_inline_runtime", RegimeRouterSignalProvider()
-    return "strict_inline_runtime", SMASignalProvider()
+    return build_signal_provider_for_strategy(strategy)
 
 
 def coerce_market_filter_cfg(value: MarketFilterConfig | Mapping[str, Any] | None) -> MarketFilterConfig | None:
@@ -73,7 +57,7 @@ def initialize_route_controls(
     benchmark_regime_cfg: BenchmarkRegimeConfig | None,
     breadth_cfg: BreadthConfig | None = None,
     provider: Any | None = None,
-) -> LegacyRouteControls:
+) -> RouteControls:
     day_count = len(data_bundle.trading_days)
     mf_state_arr = np.zeros(day_count, dtype=np.int8)
     mf_mult_arr = np.ones(day_count, dtype=float)
@@ -85,7 +69,7 @@ def initialize_route_controls(
     breadth_enabled = False
 
     if str(route_id) != "provider_breakout_runtime":
-        return LegacyRouteControls(
+        return RouteControls(
             mf_enabled=mf_enabled,
             mf_state_arr=mf_state_arr,
             mf_mult_arr=mf_mult_arr,
@@ -183,7 +167,7 @@ def initialize_route_controls(
         else:
             breadth_enabled = False
 
-    return LegacyRouteControls(
+    return RouteControls(
         mf_enabled=mf_enabled,
         mf_state_arr=mf_state_arr,
         mf_mult_arr=mf_mult_arr,

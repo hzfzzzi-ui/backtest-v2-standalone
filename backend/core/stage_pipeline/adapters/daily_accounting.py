@@ -6,7 +6,10 @@ from datetime import date
 from typing import Any, Mapping
 
 from backend.core.engine_vector.signal_provider import DaySignals
-from backend.core.portfolio.portfolio_builder import calc_buy_slots, compute_nav_snapshot
+from backend.core.portfolio.nav_snapshot import compute_nav_snapshot
+from backend.core.portfolio.sizing import calc_buy_slots
+from backend.core.stage_pipeline.contracts import AccountingSnapshot
+from backend.core.stage_pipeline.adapters.fill_accounting import capture_accounting_snapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +17,7 @@ class DailySnapshot:
     nav: float
     market_value: float
     controls: dict[str, Any]
+    accounting_snapshot: AccountingSnapshot
 
 
 def build_daily_row(
@@ -121,10 +125,21 @@ def prepare_daily_snapshot(runtime: Any, *, day_index: int, day: date) -> DailyS
         )
     )
     runtime.prev_nav = nav
+    accounting_snapshot = getattr(runtime, "_last_accounting_snapshot", None)
+    if not isinstance(accounting_snapshot, AccountingSnapshot):
+        accounting_snapshot = capture_accounting_snapshot(
+            runtime,
+            daily_marks={
+                "day": day.isoformat(),
+                "nav": float(nav),
+                "market_value": float(market_value),
+            },
+        )
     return DailySnapshot(
         nav=float(nav),
         market_value=float(market_value),
         controls=dict(controls),
+        accounting_snapshot=accounting_snapshot,
     )
 
 

@@ -4,14 +4,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from backend.api.endpoints._paths import _results_root
-from backend.api.endpoints._utils import sanitize_json
+from backend.api.shared.paths import results_root as _results_root
+from backend.api.shared.json_utils import sanitize_json
 
 logger = logging.getLogger(__name__)
 
 
-def _artifact_api_module():
-    from backend.api.endpoints import backtest_v2_artifacts as api_module
+def _api_module():
+    from backend.api.backtest_v2 import impl as api_module
 
     return api_module
 
@@ -23,7 +23,7 @@ def ensure_standard_artifacts(
     base_cfg: dict[str, Any],
     overrides: dict[str, Any],
 ) -> dict[str, Any]:
-    from backend.api.endpoints.backtest_v2_artifacts import ensure_standard_artifacts as _ensure_standard_artifacts
+    from backend.api.backtest_v2.artifacts_impl import ensure_standard_artifacts as _ensure_standard_artifacts
 
     payload = _ensure_standard_artifacts(
         results_dir=results_dir,
@@ -35,9 +35,8 @@ def ensure_standard_artifacts(
 
 
 def write_manifest(results_dir: Path, result: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
-    from backend.api.endpoints.backtest_v2_artifacts import write_manifest as _write_manifest
-
-    path, manifest = _write_manifest(results_dir, result)
+    api_module = _api_module()
+    path, manifest = api_module.write_manifest(results_dir, result)
     return path, manifest if isinstance(manifest, dict) else {}
 
 
@@ -50,7 +49,7 @@ def stabilize_experiment_output(
     run_profile_summary: dict[str, Any] | None = None,
     validation_audit_ref: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    api_module = _artifact_api_module()
+    api_module = _api_module()
     out = dict(result or {})
 
     results_dir = api_module._resolve_runtime_path(str(out.get("results_dir") or ""), bt_root)
@@ -79,7 +78,9 @@ def stabilize_experiment_output(
     out["manifest"] = manifest_obj
 
     try:
-        audit_payload = api_module._finalize_research_audit(
+        from backend.api.backtest_v2 import artifacts_impl
+
+        audit_payload = artifacts_impl._finalize_research_audit(
             bt_root=bt_root,
             results_dir=results_dir,
             result=out,
@@ -98,7 +99,9 @@ def stabilize_experiment_output(
         out["run_profile_summary"] = run_profile_summary
 
     try:
-        api_module._append_to_experiment_index(results_dir, out, base_cfg, overrides)
+        from backend.api.backtest_v2 import artifacts_impl
+
+        artifacts_impl._append_to_experiment_index(results_dir, out, base_cfg, overrides)
     except Exception as exc:
         logger.warning("Failed to update experiment index: %s", exc)
 

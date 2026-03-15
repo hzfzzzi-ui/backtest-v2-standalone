@@ -15,10 +15,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.api.endpoints.backtest_v2 import router as backtest_v2_router  # noqa: E402
-from backend.api.endpoints.mobile_dashboard import router as mobile_dashboard_router  # noqa: E402
+from backend.api.backtest_v2.router import router as backtest_v2_router  # noqa: E402
+from backend.api.mobile import router as mobile_dashboard_router  # noqa: E402
 from backend.api.endpoints.transactions import router as transactions_router  # noqa: E402
-from backend.api.endpoints._mobile_access import (  # noqa: E402
+from backend.api.shared.mobile_access import (  # noqa: E402
     is_allowed_mobile_host,
     is_mobile_protected_path,
     mobile_private_access_enabled,

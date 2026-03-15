@@ -43,13 +43,13 @@ function normalizeRunMetaCounters(metaObj) {
   return meta;
 }
 
-async function readArtifactWithFallback(resultsDir, relPath, keyName, fallbacks = [], expId = null) {
+async function readArtifactWithAlternates(resultsDir, relPath, keyName, alternates = [], expId = null) {
   const primaryRel = relPath || `${keyName}.csv`;
   const first = await readArtifactWithStatus(resultsDir, primaryRel, keyName, expId);
-  if (first.ok) return { ...first, usedLegacyFallback: false };
-  for (const altRel of (fallbacks || [])) {
+  if (first.ok) return { ...first, usedFallbackPath: false };
+  for (const altRel of (alternates || [])) {
     const fb = await readArtifactWithStatus(resultsDir, altRel, keyName, expId);
-    if (fb.ok) return { ...fb, usedLegacyFallback: true };
+    if (fb.ok) return { ...fb, usedFallbackPath: true };
   }
   return first;
 }
@@ -144,7 +144,7 @@ function normalizeSymbolPerformanceRows(rows) {
   return out;
 }
 
-function deriveLegacySymbolReturnPct(row) {
+function deriveFallbackSymbolReturnPct(row) {
   const buyNotional = Number(row?.buy_notional);
   const rawReturnPct = Number(row?.return_pct);
   const netPnl = Number(row?.net_pnl);
@@ -175,7 +175,7 @@ function getFilteredSortedSymbolRows() {
   } else if (sorter === 'trades_desc') {
     filtered.sort((a, b) => Number(b.trades || 0) - Number(a.trades || 0));
   } else {
-    filtered.sort((a, b) => Number(deriveLegacySymbolReturnPct(b) || 0) - Number(deriveLegacySymbolReturnPct(a) || 0));
+  filtered.sort((a, b) => Number(deriveFallbackSymbolReturnPct(b) || 0) - Number(deriveFallbackSymbolReturnPct(a) || 0));
   }
   return filtered;
 }
@@ -204,7 +204,10 @@ async function loadBenchmarkSeries(navPoints) {
   const end = navPoints?.[navPoints.length - 1]?.date || state.config_draft?.universe?.end;
   const url = `/api/backtest_v2/series/benchmark?symbol=${encodeURIComponent(symbol)}&start=${encodeURIComponent(start || '')}&end=${encodeURIComponent(end || '')}`;
   try {
-    const j = await apiRequestJson('series_benchmark', url);
+    const j = await apiRequestJson('series_benchmark', url, {
+      retryCount: 0,
+      suppressStatusOnError: true,
+    });
     const raw = j?.points || [];
     const points = normalizeNavRows(raw.map((x) => ({ date: x.date, nav: x.nav })));
     // 淇濈暀 OHLC 鏁版嵁渚涜湣鐑涘浘娓叉煋
@@ -228,7 +231,10 @@ async function loadSymbolSeries(symbol, navPoints) {
   const end = navPoints?.[navPoints.length - 1]?.date || state.config_draft?.universe?.end;
   const url = `/api/backtest_v2/series/symbol?symbol=${encodeURIComponent(target)}&start=${encodeURIComponent(start || '')}&end=${encodeURIComponent(end || '')}`;
   try {
-    const j = await apiRequestJson('series_symbol', url);
+    const j = await apiRequestJson('series_symbol', url, {
+      retryCount: 0,
+      suppressStatusOnError: true,
+    });
     const raw = j?.points || [];
     const points = normalizeNavRows(raw.map((x) => ({ date: x.date, nav: x.nav })));
     const ohlc = raw.map((x) => ({
@@ -304,7 +310,7 @@ async function loadActiveArtifacts() {
     gf.audit ? readArtifactWithStatus(resultsDir, gf.audit, 'audit', expId) : Promise.resolve({ ok: false, key: 'audit', missing: true }),
     gf.trades ? readArtifactWithStatus(resultsDir, gf.trades, 'trades', expId) : Promise.resolve({ ok: false, key: 'trades', missing: true }),
     gf.daily ? readArtifactWithStatus(resultsDir, gf.daily, 'daily', expId) : Promise.resolve({ ok: false, key: 'daily', missing: true }),
-    readArtifactWithFallback(resultsDir, gf.symbol_performance || 'symbol_performance.csv', 'symbol_performance', ['symbol_performance.json'], expId),
+    readArtifactWithAlternates(resultsDir, gf.symbol_performance || 'symbol_performance.csv', 'symbol_performance', ['symbol_performance.json'], expId),
     readArtifactWithStatus(resultsDir, gf.stock_names || 'stock_names.json', 'stock_names', expId),
   ]);
   const allR = [perfR, navR, funnelR, reasonR, runMetaR, configR, tradesR, dailyR, symbolPerfR, auditR, stockNamesR];
@@ -374,7 +380,9 @@ async function loadActiveArtifacts() {
   }
 
   refreshConfigPanels();
-  if (typeof publishResultsWorkbenchSnapshot === 'function') publishResultsWorkbenchSnapshot();
+  if (typeof publishResultsWorkbenchSnapshot === 'function') {
+    publishResultsWorkbenchSnapshot({ lazySections: ['nav', 'symbol_stats', 'stage_funnel'] });
+  }
 }
 
 function reasonByPrefix(rows) {
@@ -401,10 +409,15 @@ function reasonByPrefix(rows) {
 
 function renderSymbolPerformancePanel() {
   if (window.resultsWorkbenchBridge?.isMounted?.()) {
-    if (typeof publishResultsWorkbenchSnapshot === 'function') publishResultsWorkbenchSnapshot();
+    if (typeof publishResultsWorkbenchSnapshot === 'function') {
+      publishResultsWorkbenchSnapshot({ lazySections: ['symbol_stats'] });
+    }
     return;
   }
-  // Legacy fallback only: symbol ranking is rendered by the Vue workbench when mounted.
+  if (typeof window.isDesktopFallbackModeEnabled === 'function' && !window.isDesktopFallbackModeEnabled()) {
+    return;
+  }
+// Fallback only: symbol ranking is rendered by the Vue workbench when mounted.
   const wrap = byId('wbSymbolPerfWrap');
   const hint = byId('wbSymbolPerfHint');
   const meta = byId('wbAccSymbolPanelMeta');
@@ -427,7 +440,7 @@ function renderSymbolPerformancePanel() {
     : rows.map((r) => {
     const active = String(state.selected_symbol || '') === String(r.symbol);
     const displayName = stockZh(r.symbol);
-    const returnPct = deriveLegacySymbolReturnPct(r);
+    const returnPct = deriveFallbackSymbolReturnPct(r);
     const symbolCell = displayName !== r.symbol
       ? (esc(displayName) + '<span class="wb-mini" style="margin-left:6px">' + esc(r.symbol) + '</span>')
       : esc(r.symbol);
@@ -598,10 +611,15 @@ function _reasonCodeOf(row) {
 
 renderPerfPanel = function renderPerfPanelV2() {
   if (window.resultsWorkbenchBridge?.isMounted?.()) {
-    if (typeof publishResultsWorkbenchSnapshot === 'function') publishResultsWorkbenchSnapshot();
+    if (typeof publishResultsWorkbenchSnapshot === 'function') {
+      publishResultsWorkbenchSnapshot({ lazySections: ['nav'] });
+    }
     return;
   }
-  // Legacy fallback only: KPI/chart/report updates are owned by the Vue workbench when mounted.
+  if (typeof window.isDesktopFallbackModeEnabled === 'function' && !window.isDesktopFallbackModeEnabled()) {
+    return;
+  }
+// Fallback only: KPI/chart/report updates are owned by the Vue workbench when mounted.
   const row = state.active_result || {};
   const art = state.active_artifacts || {};
   const p = art.perf || {};
@@ -691,7 +709,10 @@ renderTradesList = function renderTradesListV2() {
     if (typeof publishResultsWorkbenchSnapshot === 'function') publishResultsWorkbenchSnapshot();
     return;
   }
-  // Legacy fallback only: trades panel is rendered by the Vue workbench when mounted.
+  if (typeof window.isDesktopFallbackModeEnabled === 'function' && !window.isDesktopFallbackModeEnabled()) {
+    return;
+  }
+// Fallback only: trades panel is rendered by the Vue workbench when mounted.
   const allRows = (state.active_artifacts || {}).tradesRows || [];
   const rows = visibleTradesRows();
   const html = tradesTableHtml(rows, allRows.length);
@@ -709,7 +730,10 @@ renderExecutionPanel = function renderExecutionPanelV2() {
     if (typeof publishResultsWorkbenchSnapshot === 'function') publishResultsWorkbenchSnapshot();
     return;
   }
-  // Legacy fallback only: execution preview stays outside the migrated workbench surface.
+  if (typeof window.isDesktopFallbackModeEnabled === 'function' && !window.isDesktopFallbackModeEnabled()) {
+    return;
+  }
+// Fallback only: execution preview stays outside the migrated workbench surface.
   if (!byId('wbExecDateNote') && !byId('wbExecCandidates') && !byId('wbExecTargets')) return;
 };
 
@@ -979,10 +1003,15 @@ function renderUnifiedStageFunnel(stageRows, counters, exitRows) {
 
 renderExplainPanel = function renderExplainPanelFinal() {
   if (window.resultsWorkbenchBridge?.isMounted?.()) {
-    if (typeof publishResultsWorkbenchSnapshot === 'function') publishResultsWorkbenchSnapshot();
+    if (typeof publishResultsWorkbenchSnapshot === 'function') {
+      publishResultsWorkbenchSnapshot({ lazySections: ['stage_funnel'] });
+    }
     return;
   }
-  // Legacy fallback only: unified stage funnel is rendered by the Vue workbench when mounted.
+  if (typeof window.isDesktopFallbackModeEnabled === 'function' && !window.isDesktopFallbackModeEnabled()) {
+    return;
+  }
+// Fallback only: unified stage funnel is rendered by the Vue workbench when mounted.
   const row = state.active_result || {};
   const art = state.active_artifacts || {};
   if (!row.exp_id && !Object.keys(art || {}).length) {

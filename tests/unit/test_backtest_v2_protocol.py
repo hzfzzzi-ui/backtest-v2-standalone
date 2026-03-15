@@ -1,7 +1,6 @@
-from backend.api.endpoints.backtest_v2_protocol import (
+from backend.api.backtest_v2.protocol import (
     ARTIFACT_FILENAMES,
-    ARTIFACT_LEGACY_ALIASES,
-    COUNTER_LEGACY_ALIASES,
+    ARTIFACT_HISTORICAL_ALIASES,
     candidate_artifact_names,
     normalize_counters,
 )
@@ -9,23 +8,23 @@ from backend.api.endpoints.backtest_v2_protocol import (
 
 def test_protocol_constants_and_aliases() -> None:
     assert ARTIFACT_FILENAMES["reason_codes"] == "reason_codes.csv"
-    assert "reason_code_counts.csv" in ARTIFACT_LEGACY_ALIASES["reason_codes"]
+    assert ARTIFACT_FILENAMES["trades"] == "portfolio_trades.csv"
+    assert ARTIFACT_HISTORICAL_ALIASES == {}
     names = candidate_artifact_names("reason_codes")
-    assert names[0] == "reason_codes.csv"
-    assert "reason_code_counts.csv" in names
+    assert names == ["reason_codes.csv"]
 
 
-def test_normalize_counters_accepts_legacy_names() -> None:
+def test_normalize_counters_keeps_canonical_fields_only() -> None:
     out, hits = normalize_counters(
         {
-            "raw_signal_count": 10,
-            "blocked_count": 3,
-            "orders_count": 7,
-            "skipped_count": 1,
-            "closed_trades_count": 6,
+            "raw_signal": 10,
+            "blocked": 3,
+            "orders": 7,
+            "skipped": 1,
+            "closed_trades": 6,
         }
     )
-    assert hits == len(COUNTER_LEGACY_ALIASES)
+    assert hits == 0
     assert out["raw_signal"] == 10
     assert out["blocked"] == 3
     assert out["orders"] == 7

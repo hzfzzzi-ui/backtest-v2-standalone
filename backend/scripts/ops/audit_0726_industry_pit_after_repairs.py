@@ -157,7 +157,7 @@ def main() -> None:
     name_missing = pd.isna(name_arr)
     code_missing = pd.isna(code_arr)
     pit_gap_mask = relevant_mask & name_missing
-    compat_gap_mask = relevant_mask & (~name_missing) & code_missing
+    crosswalk_gap_mask = relevant_mask & (~name_missing) & code_missing
 
     static_map_available = np.array([str(sym).lower() in industry_map for sym in symbols], dtype=bool)
     pit_gap_static_map_available_mask = pit_gap_mask & static_map_available.reshape(1, -1)
@@ -180,7 +180,7 @@ def main() -> None:
     }
 
     pit_gap_days_by_symbol = pit_gap_mask.sum(axis=0).astype(int)
-    compat_gap_days_by_symbol = compat_gap_mask.sum(axis=0).astype(int)
+    crosswalk_gap_days_by_symbol = crosswalk_gap_mask.sum(axis=0).astype(int)
     relevant_days_by_symbol = relevant_mask.sum(axis=0).astype(int)
     coverage_rows = []
     for idx, sym in enumerate(symbols):
@@ -189,20 +189,20 @@ def main() -> None:
                 "symbol": sym,
                 "relevant_days": int(relevant_days_by_symbol[idx]),
                 "pit_gap_days": int(pit_gap_days_by_symbol[idx]),
-                "compat_gap_days": int(compat_gap_days_by_symbol[idx]),
+                "crosswalk_gap_days": int(crosswalk_gap_days_by_symbol[idx]),
             }
         )
     coverage_df = pd.DataFrame(coverage_rows).sort_values(
-        ["pit_gap_days", "compat_gap_days", "relevant_days", "symbol"],
+        ["pit_gap_days", "crosswalk_gap_days", "relevant_days", "symbol"],
         ascending=[False, False, False, True],
     )
     coverage_df.to_csv(output_dir / "pit_coverage_by_symbol.csv", index=False, encoding="utf-8-sig")
 
-    compat_rows = []
+    crosswalk_rows = []
     pit_rows = []
-    row_idx, col_idx = np.where(compat_gap_mask)
+    row_idx, col_idx = np.where(crosswalk_gap_mask)
     for r, c in zip(row_idx.tolist(), col_idx.tolist()):
-        compat_rows.append(
+        crosswalk_rows.append(
             {
                 "trade_date": str(date_index[r].date()),
                 "symbol": symbols[c],
@@ -217,8 +217,8 @@ def main() -> None:
                 "symbol": symbols[c],
             }
         )
-    pd.DataFrame(compat_rows).to_csv(
-        output_dir / "sw_contemporaneous_compat_rows.csv", index=False, encoding="utf-8-sig"
+    pd.DataFrame(crosswalk_rows).to_csv(
+        output_dir / "sw_contemporaneous_crosswalk_rows.csv", index=False, encoding="utf-8-sig"
     )
     pd.DataFrame(pit_rows).to_csv(
         output_dir / "pit_gap_rows.csv", index=False, encoding="utf-8-sig"
@@ -234,11 +234,11 @@ def main() -> None:
         "standard_counts": standard_counts,
         "pit_gap_symbols": int((pit_gap_days_by_symbol > 0).sum()),
         "pit_gap_days": int(pit_gap_mask.sum()),
-        "compat_gap_symbols": int((compat_gap_days_by_symbol > 0).sum()),
-        "compat_gap_days": int(compat_gap_mask.sum()),
+        "crosswalk_gap_symbols": int((crosswalk_gap_days_by_symbol > 0).sum()),
+        "crosswalk_gap_days": int(crosswalk_gap_mask.sum()),
         "latest_mapping_fallback_removed": bool(pit_gap_static_map_available_mask.sum() > 0 or int(pit_gap_mask.sum()) == 0),
         "pit_gap_days_with_static_mapping_available": int(pit_gap_static_map_available_mask.sum()),
-        "pit_safe_runtime_industry_labels": bool(int(pit_gap_mask.sum()) == 0 and int(compat_gap_mask.sum()) == 0),
+        "pit_safe_runtime_industry_labels": bool(int(pit_gap_mask.sum()) == 0 and int(crosswalk_gap_mask.sum()) == 0),
         "sector_index_code_count": int(len(sector_data)),
     }
     (output_dir / "summary.json").write_text(

@@ -67,7 +67,7 @@ UNIVERSE_LINEAGE: dict[str, UniverseLineage] = {
         notes=(
             "Runtime expects point-in-time CSI1000 constituent rows under index_code=000852.SH. "
             "Formal lineage is rebalance_calendar -> calendar snapshots -> changes -> import; "
-            "legacy monthly/static scripts are fallback only."
+            "historical monthly/static scripts are fallback only."
         ),
     ),
     "INDUSTRY": UniverseLineage(

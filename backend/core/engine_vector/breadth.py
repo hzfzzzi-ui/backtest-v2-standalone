@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -61,7 +62,9 @@ def compute_breadth_scores(
     up_mask = r_1d > 0  # (T, N) bool
     # 将不可交易 / NaN 收益设为 NaN 以排除
     up_valid = np.where(tradable & ~np.isnan(r_1d), up_mask.astype(float), np.nan)
-    raw_breadth_up = np.nanmean(up_valid, axis=1)  # (T,)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        raw_breadth_up = np.nanmean(up_valid, axis=1)  # (T,)
     scores_A = _sma_1d(raw_breadth_up, 5)
 
     # ── 指标 B: breadth_momo ──
@@ -70,14 +73,18 @@ def compute_breadth_scores(
     ema_slow = _ewm_mean_matrix(close, ema_slow_period)  # (T, N)
     momo_mask = ema_fast > ema_slow  # (T, N) bool
     momo_valid = np.where(tradable & ~np.isnan(ema_fast) & ~np.isnan(ema_slow), momo_mask.astype(float), np.nan)
-    raw_breadth_momo = np.nanmean(momo_valid, axis=1)  # (T,)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        raw_breadth_momo = np.nanmean(momo_valid, axis=1)  # (T,)
     scores_B = _sma_1d(raw_breadth_momo, 5)
 
     # ── 指标 C: dispersion ──
     # 横截面收益标准差 -> 20日 rolling zscore -> 映射到 [0, 1]
     # 将不可交易的收益设为 NaN
     r_masked = np.where(tradable & ~np.isnan(r_1d), r_1d, np.nan)
-    raw_disp = np.nanstd(r_masked, axis=1)  # (T,)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        raw_disp = np.nanstd(r_masked, axis=1)  # (T,)
 
     # 20日 rolling zscore
     disp_s = pd.Series(raw_disp, dtype=float)

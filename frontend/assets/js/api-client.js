@@ -86,6 +86,11 @@ function _setApiFailed(key, endpoint, method, httpStatus, durationMs, errorText)
   _upsertApiStatus(key, { status: 'failed', endpoint, method, httpStatus, durationMs, error: String(errorText || '未知错误') });
 }
 
+function _clearApiStatus(key) {
+  if (!state.api_status || !state.api_status[key]) return;
+  delete state.api_status[key];
+}
+
 function _apiTag(key) {
   const s = state.api_status?.[key];
   if (!s || !s.status) return 'not_requested';
@@ -109,12 +114,14 @@ function _sleep(ms) {
 async function apiRequestJson(key, url, options = {}) {
   const requestOptions = { ...options };
   const method = String(requestOptions.method || 'GET').toUpperCase();
+  const suppressStatusOnError = !!requestOptions.suppressStatusOnError;
   const retryCount = Number.isFinite(Number(requestOptions.retryCount))
     ? Math.max(0, Number(requestOptions.retryCount))
     : (method === 'GET' ? 1 : 0);
   const retryDelayMs = Number.isFinite(Number(requestOptions.retryDelayMs))
     ? Math.max(0, Number(requestOptions.retryDelayMs))
     : 350;
+  delete requestOptions.suppressStatusOnError;
   delete requestOptions.retryCount;
   delete requestOptions.retryDelayMs;
 
@@ -135,6 +142,7 @@ async function apiRequestJson(key, url, options = {}) {
       }
       const payload = await r.json();
       _setApiSuccess(key, url, method, r.status, durationMs);
+      if (suppressStatusOnError) _clearApiStatus(key);
       setStatusItems(state.manual_status_items || []);
       return payload;
     } catch (e) {
@@ -143,6 +151,11 @@ async function apiRequestJson(key, url, options = {}) {
       const httpStatus = Number.isFinite(Number(e?.httpStatus)) ? Number(e.httpStatus) : null;
       const isFinalAttempt = attempt >= retryCount;
       if (isFinalAttempt) {
+        if (suppressStatusOnError) {
+          _clearApiStatus(key);
+          setStatusItems(state.manual_status_items || []);
+          throw e;
+        }
         _setApiFailed(key, url, method, httpStatus, durationMs, e?.message || String(e));
         setStatusItems(state.manual_status_items || []);
         throw e;
@@ -152,6 +165,11 @@ async function apiRequestJson(key, url, options = {}) {
   }
 
   const durationMs = Date.now() - startedAt;
+  if (suppressStatusOnError) {
+    _clearApiStatus(key);
+    setStatusItems(state.manual_status_items || []);
+    throw lastError || new Error('未知错误');
+  }
   _setApiFailed(key, url, method, null, durationMs, lastError?.message || '未知错误');
   setStatusItems(state.manual_status_items || []);
   throw lastError || new Error('未知错误');

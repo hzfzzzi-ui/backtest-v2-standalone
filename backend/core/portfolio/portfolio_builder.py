@@ -1,38 +1,30 @@
+"""Frozen portfolio loop facade and shared helpers.
+
+New execution logic must not be introduced here. Pure helpers should continue
+to move into dedicated portfolio modules, while routing and execution changes
+must land in `foundation_shell.py` and `stage_pipeline/*`. The preserved loop
+stays isolated in `frozen_loop.py` and should not regain orchestration logic.
+"""
+
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from datetime import date
-from math import floor, sqrt
+from math import sqrt
 from typing import Any
 
 import pandas as pd
 
 from backend.core.config.models import BenchmarkRegimeConfig, BreadthConfig, CostConfig, ExitConfig, MarketFilterConfig, RiskBudgetConfig, RiskConfig, SizingConfig
-from backend.core.core.models import Position, Signal
-from backend.core.core.types import Side
-from backend.core.strategies.base import Strategy
+from backend.core.core.models import Position, Side, Signal
+from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today as _resolve_mf_gate_on_today
+from backend.core.portfolio.metrics import compute_backtest_metrics
+from backend.core.portfolio.nav_snapshot import compute_nav_snapshot as _compute_nav_snapshot
+from backend.core.portfolio.price_index import build_backtest_price_indices as _build_backtest_price_indices
 from backend.core.portfolio.selection_order import normalize_candidate_order, sort_by_strength_with_tiebreak
-
-
-@dataclass(slots=True)
-class PortfolioOrder:
-    side: Side
-    symbol: str
-    qty: int
-    reason_code: str
-    order_value_scale: float = 1.0
-    trend_tier: str = ""
-    strong_trend: bool = False
-    meta: dict[str, Any] | None = None
-
-
-@dataclass(slots=True)
-class PortfolioBacktestResult:
-    daily: pd.DataFrame
-    trades: pd.DataFrame
-    candidates: pd.DataFrame
-    metrics: dict[str, Any]
+from backend.core.portfolio.sizing import calc_buy_slots as _calc_buy_slots, calc_lot_qty as _calc_lot_qty
+from backend.core.portfolio.types import PortfolioBacktestResult, PortfolioOrder
+from backend.core.strategies.base import Strategy
 
 
 def build_backtest_price_indices(
@@ -40,42 +32,7 @@ def build_backtest_price_indices(
     history: pd.DataFrame,
     trading_days: list[date],
 ) -> tuple[dict[tuple[date, str], float], dict[tuple[date, str], float]]:
-    """Build execution open lookup plus valuation close lookup.
-
-    Execution keeps raw per-day opens. Valuation closes use same-symbol forward fill
-    over the trading calendar, but never extend past the last real bar.
-    """
-    hist = history.copy()
-    hist["date"] = pd.to_datetime(hist["date"]).dt.normalize()
-    hist["symbol"] = hist["symbol"].astype(str).str.lower()
-    hist = hist.sort_values(["date", "symbol"]).reset_index(drop=True)
-
-    open_idx: dict[tuple[date, str], float] = {}
-    for row in hist.itertuples(index=False):
-        d = pd.Timestamp(row.date).date()
-        s = str(row.symbol).lower()
-        open_idx[(d, s)] = float(row.open)
-
-    if hist.empty or not trading_days:
-        return open_idx, {}
-
-    cal = pd.DatetimeIndex(pd.to_datetime([pd.Timestamp(d).normalize() for d in trading_days]))
-    close_wide = (
-        hist.pivot_table(index="date", columns="symbol", values="close", aggfunc="last")
-        .sort_index()
-        .reindex(cal)
-        .ffill()
-    )
-    last_dates = hist.groupby("symbol", sort=False)["date"].max()
-    for sym, last_dt in last_dates.items():
-        close_wide.loc[close_wide.index > pd.Timestamp(last_dt), str(sym).lower()] = pd.NA
-
-    close_idx: dict[tuple[date, str], float] = {}
-    stacked = close_wide.stack()
-    stacked = stacked[stacked.notna()]
-    for (dt, sym), value in stacked.items():
-        close_idx[(pd.Timestamp(dt).date(), str(sym).lower())] = float(value)
-    return open_idx, close_idx
+    return _build_backtest_price_indices(history=history, trading_days=trading_days)
 
 
 def compute_nav_snapshot(
@@ -94,22 +51,14 @@ def compute_nav_snapshot(
     这样持仓估值与 raw 价格空间一致，同时消除除权除息的虚假跳变。
     当只提供 close_idx 时，向后兼容使用 raw close。
     """
-    _use_hfq = hfq_close_idx is not None and position_entry_adj is not None
-    _val_idx = hfq_close_idx if _use_hfq else close_idx
-    _entry_adj = position_entry_adj or {}
-    market_value = 0.0
-    pos_values: list[tuple[str, float]] = []
-    for sym, qty in positions.items():
-        c = float(_val_idx.get((day, sym), 0.0) or 0.0)
-        if _use_hfq:
-            ea = _entry_adj.get(sym, 1.0)
-            v = c / ea * qty if ea > 1e-8 else c * qty
-        else:
-            v = c * qty
-        market_value += v
-        pos_values.append((sym, v))
-    nav = float(cash) + float(market_value)
-    return nav, market_value, pos_values
+    return _compute_nav_snapshot(
+        cash=cash,
+        positions=positions,
+        close_idx=close_idx,
+        day=day,
+        hfq_close_idx=hfq_close_idx,
+        position_entry_adj=position_entry_adj,
+    )
 
 
 def _estimate_buy_slots_after_sell(
@@ -134,16 +83,11 @@ def _estimate_buy_slots_after_sell(
 
 
 def calc_buy_slots(max_positions: int, positions_after_sell: int) -> int:
-    max_pos = max(0, int(max_positions))
-    pos_cnt = max(0, int(positions_after_sell))
-    return max(0, max_pos - pos_cnt)
+    return _calc_buy_slots(max_positions=max_positions, positions_after_sell=positions_after_sell)
 
 
 def calc_lot_qty(target_amount: float, open_price: float, lot_size: int) -> int:
-    if target_amount <= 0 or open_price <= 0 or lot_size <= 0:
-        return 0
-    raw = floor(target_amount / open_price)
-    return int(raw // lot_size * lot_size)
+    return _calc_lot_qty(target_amount=target_amount, open_price=open_price, lot_size=lot_size)
 
 
 def resolve_mf_gate_on_today(
@@ -154,21 +98,13 @@ def resolve_mf_gate_on_today(
     strong_risk_on_today: bool,
     market_state_today: str = "",
 ) -> bool:
-    if not bool(enable_multifactor_rank):
-        return False
-    mode = str(mf_rank_gate_mode or "ALWAYS_ON").upper()
-    market_state = str(market_state_today or "").upper()
-    if mode in {"ALWAYS", "ALWAYS_ON"}:
-        return True
-    if mode in {"ONLY_RISK_ON", "RISK_ON_ONLY"}:
-        return bool(risk_on_today)
-    if mode in {"STRONG_RISK_ON", "ONLY_STRONG_RISK_ON"}:
-        return bool(strong_risk_on_today)
-    if mode == "BULL_ONLY":
-        return market_state == "BULL"
-    if mode == "TRANS_UP_OR_BULL":
-        return market_state in {"TRANS_UP", "BULL"}
-    return False
+    return _resolve_mf_gate_on_today(
+        enable_multifactor_rank=enable_multifactor_rank,
+        mf_rank_gate_mode=mf_rank_gate_mode,
+        risk_on_today=risk_on_today,
+        strong_risk_on_today=strong_risk_on_today,
+        market_state_today=market_state_today,
+    )
 
 
 def _safe_float_or_none(value: Any) -> float | None:
@@ -709,8 +645,8 @@ def build_rebalance_orders(
             continue
         close_v = float(meta.get("close", 0.0) or 0.0)
         slow_v = float(meta.get("slow_ma", 0.0) or 0.0)
-        legacy_strength = (close_v / slow_v - 1.0) if slow_v > 0 else -1e9
-        strength = strength_map.get(sym) if enable_strength_rank else legacy_strength
+        baseline_strength = (close_v / slow_v - 1.0) if slow_v > 0 else -1e9
+        strength = strength_map.get(sym) if enable_strength_rank else baseline_strength
         ranked.append(
             {
                 "signal": sig,
@@ -723,7 +659,7 @@ def build_rebalance_orders(
                     and bool(meta.get("industry_second_stage_active"))
                     else None
                 ),
-                "legacy_strength": legacy_strength,
+                "baseline_strength": baseline_strength,
                 "selected": False,
                 "selected_rank": None,
                 "reject_reason": "",
@@ -1171,534 +1107,6 @@ def build_rebalance_orders(
     return orders
 
 
-def run_portfolio_backtest(
-    *,
-    strategy: Strategy,
-    history: pd.DataFrame,
-    benchmark: pd.DataFrame,
-    trading_days: list[date],
-    benchmark_symbol: str,
-    initial_cash: float,
-    max_positions: int,
-    lot_size: int,
-    enable_strength_rank: bool = False,
-    strength_ma: int = 120,
-    strength_top_k_mode: str = "FILL_TO_MAX",
-    history_lookback_days: int | None = None,
-    engine_mode: str = "SLOW_AUDIT",
-    fast_mode: bool = False,
-    debug_first_divergence: bool = False,
-    enable_multifactor_rank: bool = False,
-    mf_topk: int = 10,
-    mf_concentrate_topn: int = 3,
-    mf_concentrate_scale: float = 1.5,
-    mf_rank_gate_mode: str = "ALWAYS_ON",
-    momentum_top_pct: float = 0.0,
-    cost_cfg: CostConfig | None = None,
-    exit_cfg: ExitConfig | None = None,
-    risk_cfg: RiskConfig | None = None,
-    sizing_cfg: SizingConfig | None = None,
-    raw_history: pd.DataFrame | None = None,
-    base_order_value: float = 0.0,
-    st_history: pd.DataFrame | None = None,
-    sector_data: dict[str, pd.DataFrame] | None = None,
-    industry_map: dict[str, str] | None = None,
-    industry_history: pd.DataFrame | None = None,
-    risk_budget_cfg: RiskBudgetConfig | None = None,
-    market_filter_cfg: MarketFilterConfig | None = None,
-    benchmark_regime_cfg: BenchmarkRegimeConfig | None = None,
-    breadth_cfg: BreadthConfig | None = None,
-) -> PortfolioBacktestResult:
-    if str(engine_mode).upper() == "VECTOR_FAST_STRICT":
-        from backend.core.engine_vector.portfolio_simulator_strict import run_vector_portfolio_backtest_strict
-
-        return run_vector_portfolio_backtest_strict(
-            strategy=strategy,
-            history=history,
-            benchmark=benchmark,
-            trading_days=trading_days,
-            benchmark_symbol=benchmark_symbol,
-            initial_cash=initial_cash,
-            max_positions=max_positions,
-            lot_size=lot_size,
-            enable_strength_rank=enable_strength_rank,
-            strength_ma=strength_ma,
-            strength_top_k_mode=strength_top_k_mode,
-            history_lookback_days=history_lookback_days,
-            fast_mode=bool(fast_mode),
-            debug_first_divergence=bool(debug_first_divergence),
-            enable_multifactor_rank=bool(enable_multifactor_rank),
-            mf_topk=int(mf_topk),
-            mf_concentrate_topn=int(mf_concentrate_topn),
-            mf_concentrate_scale=float(mf_concentrate_scale),
-            mf_rank_gate_mode=str(mf_rank_gate_mode),
-            momentum_top_pct=float(momentum_top_pct),
-            cost_cfg=cost_cfg,
-            exit_cfg=exit_cfg,
-            risk_cfg=risk_cfg,
-            sizing_cfg=sizing_cfg,
-            raw_history=raw_history,
-            base_order_value=float(base_order_value),
-            st_history=st_history,
-            sector_data=sector_data,
-            industry_map=industry_map,
-            industry_history=industry_history,
-            risk_budget_cfg=risk_budget_cfg,
-            market_filter_cfg=market_filter_cfg,
-            benchmark_regime_cfg=benchmark_regime_cfg,
-            breadth_cfg=breadth_cfg,
-        )
-    if history.empty:
-        raise ValueError("history is empty")
-    if not trading_days:
-        raise ValueError("trading_days is empty")
-
-    hist = history.copy()
-    hist["date"] = pd.to_datetime(hist["date"])
-    hist["symbol"] = hist["symbol"].astype(str).str.lower()
-    hist = hist.sort_values(["date", "symbol"]).reset_index(drop=True)
-
-    bench = benchmark.copy()
-    if not bench.empty:
-        bench["date"] = pd.to_datetime(bench["date"])
-        bench["symbol"] = f"BENCH:{benchmark_symbol}"
-        bench = bench.sort_values(["date"]).reset_index(drop=True)
-    # Build one combined history table once, avoid per-day concat in main loop.
-    if not bench.empty:
-        combined = pd.concat([hist, bench], ignore_index=True)
-        combined = combined.sort_values(["date", "symbol"]).reset_index(drop=True)
-    else:
-        combined = hist
-    combined_date_series = combined["date"]
-
-    open_idx, close_idx = build_backtest_price_indices(
-        history=hist,
-        trading_days=trading_days,
-    )
-
-    pending: dict[date, list[PortfolioOrder]] = {}
-    positions: dict[str, int] = {}
-    position_avg_cost: dict[str, float] = {}
-    cash = float(initial_cash)
-    peak_nav = float(initial_cash)
-    prev_nav = float(initial_cash)
-    blocked_by_trend_count = 0
-    total_buy_signals = 0
-    trade_rows: list[dict[str, Any]] = []
-    candidate_rows: list[dict[str, Any]] = []
-    daily_rows: list[dict[str, Any]] = []
-    debug_trace: dict[str, Any] = {}
-    _sc_cfg = sizing_cfg if isinstance(sizing_cfg, SizingConfig) else SizingConfig()
-    _weight_mode_cfg = str(_sc_cfg.weight_mode or "equal")
-    _min_positions_cfg = int(_sc_cfg.min_positions)
-    _tilt_strength_cfg = float(_sc_cfg.tilt_strength)
-    _tilt_top_n_cfg = int(_sc_cfg.tilt_top_n)
-    _tilt_bottom_n_cfg = int(_sc_cfg.tilt_bottom_n)
-    _score_weight_min_scale_cfg = float(_sc_cfg.score_weight_min_scale)
-    _score_weight_max_scale_cfg = float(_sc_cfg.score_weight_max_scale)
-    _candidate_plan_mode_cfg = str(_sc_cfg.candidate_plan_mode or "ranked")
-    _cash_aware_search_top_n_cfg = int(_sc_cfg.cash_aware_search_top_n)
-    _rotation_replace_enabled_cfg = bool(_sc_cfg.rotation_replace_enabled)
-    _rotation_replace_only_strong_risk_on_cfg = bool(_sc_cfg.rotation_replace_only_strong_risk_on)
-    _rotation_replace_max_swaps_per_day_cfg = int(_sc_cfg.rotation_replace_max_swaps_per_day)
-    _rotation_replace_candidate_top_n_cfg = int(_sc_cfg.rotation_replace_candidate_top_n)
-    _rotation_replace_min_score_gap_cfg = float(_sc_cfg.rotation_replace_min_score_gap)
-
-    day_list = list(trading_days)
-    # Precompute per-day slice end offsets to avoid repeated full DataFrame scans.
-    day_slice_end_combined: dict[pd.Timestamp, int] = {}
-    day_slice_start_combined: dict[pd.Timestamp, int] = {}
-    use_lookback = isinstance(history_lookback_days, int) and int(history_lookback_days) > 0
-    lookback_n = int(history_lookback_days) if use_lookback else 0
-    for day in day_list:
-        day_ts = pd.Timestamp(day)
-        day_slice_end_combined[day_ts] = int(combined_date_series.searchsorted(day_ts, side="right"))
-    if use_lookback:
-        for i, day in enumerate(day_list):
-            day_ts = pd.Timestamp(day)
-            start_day = day_list[max(0, i - lookback_n)]
-            start_ts = pd.Timestamp(start_day)
-            day_slice_start_combined[day_ts] = int(combined_date_series.searchsorted(start_ts, side="left"))
-    else:
-        for day in day_list:
-            day_slice_start_combined[pd.Timestamp(day)] = 0
-
-    # Precompute strength(close/MA-1) lookup by (date, symbol) once.
-    strength_lookup: dict[tuple[pd.Timestamp, str], float | None] = {}
-    if enable_strength_rank:
-        strength_src = hist[["date", "symbol", "close"]].copy()
-        strength_src["close"] = pd.to_numeric(strength_src["close"], errors="coerce")
-        strength_src["strength_ma"] = (
-            strength_src.groupby("symbol", sort=False)["close"]
-            .transform(lambda s: s.rolling(int(strength_ma)).mean())
-        )
-        strength_src["strength"] = (
-            strength_src["close"] / strength_src["strength_ma"] - 1.0
-        )
-        for row in strength_src.itertuples(index=False):
-            key = (pd.Timestamp(row.date), str(row.symbol))
-            val = None
-            try:
-                if pd.notna(row.strength):
-                    val = float(row.strength)
-            except Exception:
-                val = None
-            strength_lookup[key] = val
-
-    for i, day in enumerate(day_list):
-        traded_value = 0.0
-        for od in pending.pop(day, []):
-            px = float(open_idx.get((day, od.symbol), 0.0) or 0.0)
-            if px <= 0:
-                continue
-            if od.side == Side.SELL:
-                held = int(positions.get(od.symbol, 0))
-                qty = min(held, int(od.qty))
-                if qty <= 0:
-                    continue
-                value = qty * px
-                cash += value
-                traded_value += value
-                positions[od.symbol] = held - qty
-                if positions[od.symbol] <= 0:
-                    positions.pop(od.symbol, None)
-                    position_avg_cost.pop(od.symbol, None)
-                trade_rows.append(
-                    {
-                        "date": day.isoformat(),
-                        "symbol": od.symbol,
-                        "side": "SELL",
-                        "price": px,
-                        "qty": qty,
-                        "value": value,
-                        "reason_code": od.reason_code,
-                        "triggered_rule": str((od.meta or {}).get("triggered_rule", "")),
-                        "break_streak": int((od.meta or {}).get("break_streak", 0) or 0),
-                        "meta_json": json.dumps(od.meta or {}, ensure_ascii=False),
-                    }
-                )
-            else:
-                qty = int(od.qty)
-                value = qty * px
-                if qty <= 0 or value > cash:
-                    continue
-                cash -= value
-                traded_value += value
-                prev_qty = int(positions.get(od.symbol, 0))
-                prev_avg = float(position_avg_cost.get(od.symbol, 0.0))
-                new_qty = prev_qty + qty
-                new_avg = ((prev_qty * prev_avg) + (qty * px)) / float(new_qty) if new_qty > 0 else 0.0
-                positions[od.symbol] = new_qty
-                position_avg_cost[od.symbol] = float(new_avg)
-                trade_rows.append(
-                    {
-                        "date": day.isoformat(),
-                        "symbol": od.symbol,
-                        "side": "BUY",
-                        "price": px,
-                        "qty": qty,
-                        "value": value,
-                        "reason_code": od.reason_code,
-                        "triggered_rule": str((od.meta or {}).get("triggered_rule", "")),
-                        "break_streak": int((od.meta or {}).get("break_streak", 0) or 0),
-                        "meta_json": json.dumps(od.meta or {}, ensure_ascii=False),
-                    }
-                )
-
-        nav, market_value, pos_values = compute_nav_snapshot(cash=cash, positions=positions, close_idx=close_idx, day=day)
-        peak_nav = max(peak_nav, nav)
-        daily_ret = (nav / prev_nav - 1.0) if prev_nav > 0 else 0.0
-        drawdown = (nav / peak_nav - 1.0) if peak_nav > 0 else 0.0
-        gross_exposure = (market_value / nav) if nav > 0 else 0.0
-        turnover_pct = (traded_value / prev_nav) if prev_nav > 0 else 0.0
-        top5 = [{"symbol": s, "value": round(v, 2)} for s, v in sorted(pos_values, key=lambda x: x[1], reverse=True)[:5]]
-        daily_rows.append(
-            {
-                "date": day.isoformat(),
-                "nav": nav,
-                "cash": cash,
-                "positions_count": len(positions),
-                "daily_return": daily_ret,
-                "drawdown": drawdown,
-                "gross_exposure": gross_exposure,
-                "turnover_pct": turnover_pct,
-                "top5_positions_json": json.dumps(top5, ensure_ascii=False),
-                "candidates_count": 0,
-                "selected_count": 0,
-                "top5_selected_strength_json": "[]",
-                "top5_rejected_strength_json": "[]",
-                "buy_slots_before_buy": 0,
-                "mean_order_value_scale": 0.0,
-                "weak_trend_buy_rate": 0.0,
-                "strong_trend_buy_rate": 0.0,
-            }
-        )
-        prev_nav = nav
-
-        if i >= len(day_list) - 1:
-            continue
-        next_day = day_list[i + 1]
-
-        day_ts = pd.Timestamp(day)
-        history_view = combined.iloc[day_slice_start_combined[day_ts] : day_slice_end_combined[day_ts]]
-
-        strategy_positions = {
-            sym: Position(symbol=sym, total_qty=int(q), sellable_qty=int(q), avg_cost=float(position_avg_cost.get(sym, 0.0)))
-            for sym, q in positions.items()
-            if int(q) > 0
-        }
-        strategy.state["base_order_value"] = float(nav) / float(max_positions) if int(max_positions) > 0 else 0.0
-        sigs = strategy.generate_signals(day, history_view, strategy_positions)
-        sell_sigs: list[Signal] = []
-        buy_sigs: list[Signal] = []
-        day_gate_by_symbol: dict[str, dict[str, Any]] = {}
-        raw_buy_candidates: list[str] = []
-        for sig in sigs:
-            sig_side = str(sig.side.value).upper()
-            sig_action = str(sig.action or sig.side.value).upper()
-            if sig_side == "BUY":
-                sym_k = str(sig.symbol).lower()
-                raw_buy_candidates.append(sym_k)
-                meta_d = dict(sig.meta) if isinstance(sig.meta, dict) else {}
-                day_gate_by_symbol[sym_k] = {
-                    "cross_up": str(sig.reason_code or sig.reason or "").upper()
-                    in {
-                        "SMA_CROSS_UP",
-                        "EMA_CROSS_UP",
-                        "SMA_CROSS_UP_BLOCKED",
-                        "EMA_CROSS_UP_BLOCKED",
-                        "ENTRY_BUFFER_BLOCKED",
-                        "BUY_BLOCKED_TREND_FILTER",
-                    },
-                    "entry_buffer_ok": bool(meta_d.get("buffer_ok")) if "buffer_ok" in meta_d else None,
-                    "trend_ok": bool(meta_d.get("trend_ok")) if "trend_ok" in meta_d else None,
-                    "regime_ok": bool(meta_d.get("regime_on")) if "regime_on" in meta_d else None,
-                    "tradable": None,
-                    "ma_is_valid": (meta_d.get("slow_ma") is not None and meta_d.get("fast_ma") is not None),
-                    "close": meta_d.get("close"),
-                    "fast_ma": meta_d.get("fast_ma"),
-                    "slow_ma": meta_d.get("slow_ma"),
-                    "fast_ma_prev": meta_d.get("fast_ma_prev"),
-                    "slow_ma_prev": meta_d.get("slow_ma_prev"),
-                    "ma120": meta_d.get("ma120", meta_d.get("trend_fast_value")),
-                    "ma200": meta_d.get("ma200", meta_d.get("trend_slow_value")),
-                    "trend_fast": meta_d.get("trend_fast_value"),
-                    "trend_slow": meta_d.get("trend_slow_value"),
-                    "reason_code": str(sig.reason_code or sig.reason or ""),
-                }
-            if sig.side == Side.BUY:
-                total_buy_signals += 1
-                if str(sig.action or "").upper() == "BLOCKED" and str(sig.reason_code or "") == "BUY_BLOCKED_TREND_FILTER":
-                    blocked_by_trend_count += 1
-            if sig_action == "BLOCKED":
-                continue
-            if sig.side == Side.SELL:
-                sell_sigs.append(sig)
-            elif sig.side == Side.BUY:
-                buy_sigs.append(sig)
-        buy_slots_before_buy = _estimate_buy_slots_after_sell(
-            positions=positions,
-            sell_signals=sell_sigs,
-            max_positions=max_positions,
-        )
-
-        next_open = {
-            sym: float(open_idx.get((next_day, sym), 0.0) or 0.0)
-            for sym in set([str(s.symbol).lower() for s in sell_sigs + buy_sigs] + list(positions.keys()))
-        }
-        for sym in raw_buy_candidates:
-            g = day_gate_by_symbol.setdefault(sym, {})
-            px = float(next_open.get(sym, 0.0) or 0.0)
-            g["open_next"] = px
-            g["tradable"] = bool(px > 0)
-            rc = str((g.get("reason_code") or "")).upper()
-            if not rc:
-                # derive from signals list
-                for s in sigs:
-                    if str(s.symbol).lower() == sym and str(s.side.value).upper() == "BUY":
-                        rc = str(s.reason_code or s.reason or "").upper()
-                        break
-            g["buy_raw_ok"] = rc in {"SMA_CROSS_UP", "EMA_CROSS_UP"}
-        strength_map: dict[str, float | None] = {}
-        if enable_strength_rank and buy_sigs:
-            for sig in buy_sigs:
-                sym_l = str(sig.symbol).lower()
-                strength_map[sym_l] = strength_lookup.get((day_ts, sym_l))
-        day_candidate_rows: list[dict[str, Any]] = []
-        debug_plan: dict[str, Any] = {}
-        regime_on_today = bool(strategy.state.get("regime_on", True))
-        strong_risk_on_today = bool(strategy.state.get("strong_risk_on", regime_on_today))
-        mf_gate_on_today = resolve_mf_gate_on_today(
-            enable_multifactor_rank=bool(enable_multifactor_rank),
-            mf_rank_gate_mode=str(mf_rank_gate_mode or "ALWAYS_ON"),
-            risk_on_today=bool(regime_on_today),
-            strong_risk_on_today=bool(strong_risk_on_today),
-        )
-        orders = build_rebalance_orders(
-            positions=positions,
-            cash_available=cash,
-            nav_close=nav,
-            max_positions=max_positions,
-            lot_size=lot_size,
-            sell_signals=sell_sigs,
-            buy_signals=buy_sigs,
-            next_open=next_open,
-            enable_strength_rank=bool(enable_strength_rank),
-            strength_ma=int(strength_ma),
-            strength_top_k_mode=str(strength_top_k_mode),
-            strength_map=strength_map,
-            enable_multifactor_rank=bool(enable_multifactor_rank),
-            mf_topk=int(mf_topk),
-            mf_concentrate_topn=int(mf_concentrate_topn),
-            mf_concentrate_scale=float(mf_concentrate_scale),
-            mf_gate_on_today=bool(mf_gate_on_today),
-            mf_score_map={},
-            decision_date=day,
-            candidate_audit=day_candidate_rows,
-            debug_plan=debug_plan,
-            weight_mode=_weight_mode_cfg,
-            min_positions=_min_positions_cfg,
-            tilt_strength=_tilt_strength_cfg,
-            tilt_top_n=_tilt_top_n_cfg,
-            tilt_bottom_n=_tilt_bottom_n_cfg,
-            min_trade_price=float(getattr(strategy, "min_price", 0.0) or 0.0),
-            decision_close_map={
-                str(sig.symbol).lower(): float(close_idx.get((day, str(sig.symbol).lower()), 0.0) or 0.0)
-                for sig in buy_sigs
-            },
-            enable_entry_gap_guard=bool(getattr(strategy, "enable_entry_gap_guard", False)),
-            entry_gap_guard_pct=float(getattr(strategy, "entry_gap_guard_pct", 0.0) or 0.0),
-            score_weight_min_scale=_score_weight_min_scale_cfg,
-            score_weight_max_scale=_score_weight_max_scale_cfg,
-            candidate_plan_mode=_candidate_plan_mode_cfg,
-            cash_aware_search_top_n=_cash_aware_search_top_n_cfg,
-            holding_entry_dates=dict(getattr(strategy, "entry_day", {}) or {}),
-            strong_risk_on_today=bool(strong_risk_on_map.get(day, False)),
-            rotation_replace_enabled=_rotation_replace_enabled_cfg,
-            rotation_replace_only_strong_risk_on=_rotation_replace_only_strong_risk_on_cfg,
-            rotation_replace_max_swaps_per_day=_rotation_replace_max_swaps_per_day_cfg,
-            rotation_replace_candidate_top_n=_rotation_replace_candidate_top_n_cfg,
-            rotation_replace_min_score_gap=_rotation_replace_min_score_gap_cfg,
-            rotation_min_hold_days=int(getattr(strategy, "min_hold_days", 0) or 0),
-        )
-        if debug_first_divergence:
-            rank_pos_map: dict[str, int] = {}
-            for idx_rank, row in enumerate([r for r in day_candidate_rows if bool(r.get("is_candidate"))], start=1):
-                rank_pos_map[str(row.get("symbol", "")).lower()] = int(idx_rank)
-                gate = day_gate_by_symbol.setdefault(str(row.get("symbol", "")).lower(), {})
-                gate["rank_position"] = int(idx_rank)
-                gate["strength_value"] = row.get("strength")
-            sell_list: list[dict[str, Any]] = []
-            held_before = {str(k): int(v) for k, v in positions.items() if int(v) > 0}
-            for sig in sell_sigs:
-                sym = str(sig.symbol).lower()
-                qh = int(held_before.get(sym, 0))
-                q = qh if int(sig.qty) <= 0 else min(qh, int(sig.qty))
-                if q <= 0:
-                    continue
-                sell_list.append(
-                    {
-                        "symbol": sym,
-                        "reason": str(sig.reason_code or sig.reason or "SELL"),
-                        "next_open_price": float(next_open.get(sym, 0.0) or 0.0),
-                        "qty": int(q),
-                    }
-                )
-            debug_trace[day.isoformat()] = {
-                "cash_before": float(cash),
-                "held_symbols_before": held_before,
-                "sell_list": sell_list,
-                "buy_candidates_raw": sorted(list(set(raw_buy_candidates))),
-                "buy_gate_by_symbol": day_gate_by_symbol,
-                "buy_candidates_count": int((debug_plan or {}).get("buy_candidates_count", 0)),
-                "buy_slots": int((debug_plan or {}).get("buy_slots", 0)),
-                "sorting_triggered": bool(int((debug_plan or {}).get("buy_candidates_count", 0)) > int((debug_plan or {}).get("buy_slots", 0))),
-                "sorted_selected_symbols": list((debug_plan or {}).get("selected_symbols", [])),
-                "selected_symbols": list((debug_plan or {}).get("selected_symbols", [])),
-                "buys_executed": list((debug_plan or {}).get("buys_executed", [])),
-                "positions_after": {str(k): int(v) for k, v in positions.items() if int(v) > 0},
-                "nav_end_of_day": float(nav),
-            }
-        candidate_rows.extend(day_candidate_rows)
-        if daily_rows:
-            candidates_only = [r for r in day_candidate_rows if bool(r.get("is_candidate"))]
-            selected = [r for r in candidates_only if bool(r.get("selected"))]
-            rejected = [r for r in candidates_only if not bool(r.get("selected"))]
-            selected_sorted = sorted(
-                selected,
-                key=lambda x: (x.get("strength") is not None, float(x.get("strength") or -1e18)),
-                reverse=True,
-            )[:5]
-            rejected_sorted = sorted(
-                rejected,
-                key=lambda x: (x.get("strength") is not None, float(x.get("strength") or -1e18)),
-                reverse=True,
-            )[:5]
-            daily_rows[-1]["candidates_count"] = int(len(candidates_only))
-            daily_rows[-1]["selected_count"] = int(len(selected))
-            daily_rows[-1]["top5_selected_strength_json"] = json.dumps(
-                [{"symbol": r.get("symbol"), "strength": r.get("strength")} for r in selected_sorted],
-                ensure_ascii=False,
-            )
-            daily_rows[-1]["top5_rejected_strength_json"] = json.dumps(
-                [{"symbol": r.get("symbol"), "strength": r.get("strength"), "reason": r.get("reject_reason")} for r in rejected_sorted],
-                ensure_ascii=False,
-            )
-            daily_rows[-1]["buy_slots_before_buy"] = int(buy_slots_before_buy)
-            selected_scales = list((debug_plan or {}).get("selected_order_value_scales", []) or [])
-            weak_selected_count = int((debug_plan or {}).get("weak_trend_selected_count", 0) or 0)
-            strong_selected_count = int((debug_plan or {}).get("strong_trend_selected_count", 0) or 0)
-            selected_n_dbg = int(len((debug_plan or {}).get("selected_symbols", []) or []))
-            daily_rows[-1]["mean_order_value_scale"] = (
-                float(sum(float(x) for x in selected_scales) / len(selected_scales))
-                if len(selected_scales) > 0
-                else 0.0
-            )
-            daily_rows[-1]["weak_trend_buy_rate"] = (
-                float(weak_selected_count) / float(selected_n_dbg)
-                if selected_n_dbg > 0
-                else 0.0
-            )
-            daily_rows[-1]["strong_trend_buy_rate"] = (
-                float(strong_selected_count) / float(selected_n_dbg)
-                if selected_n_dbg > 0
-                else 0.0
-            )
-            daily_rows[-1]["mf_rank_triggered"] = 1 if bool((debug_plan or {}).get("mf_rank_triggered", False)) else 0
-            daily_rows[-1]["mf_rank_applied"] = 1 if bool((debug_plan or {}).get("mf_rank_applied", False)) else 0
-            daily_rows[-1]["mf_candidates_when_triggered"] = int((debug_plan or {}).get("mf_candidates_when_triggered", 0) or 0)
-            daily_rows[-1]["mf_topk_reject_count"] = int((debug_plan or {}).get("mf_topk_reject_count", 0) or 0)
-            daily_rows[-1]["mf_concentrated_selected_count"] = int((debug_plan or {}).get("mf_concentrated_selected_count", 0) or 0)
-            daily_rows[-1]["mf_gate_on"] = 1 if bool((debug_plan or {}).get("mf_gate_on", False)) else 0
-            daily_rows[-1]["strong_risk_on"] = 1 if bool(strong_risk_on_today) else 0
-            cands_now = int((debug_plan or {}).get("buy_candidates_count", 0) or 0)
-            slots_now = int((debug_plan or {}).get("buy_slots", 0) or 0)
-            daily_rows[-1]["mf_rank_suppressed_by_strong_gate"] = (
-                1
-                if bool(enable_multifactor_rank) and (not bool(mf_gate_on_today)) and (cands_now > slots_now)
-                else 0
-            )
-        if orders:
-            pending[next_day] = orders
-
-    daily_df = pd.DataFrame(daily_rows)
-    trades_df = pd.DataFrame(trade_rows)
-    candidates_df = pd.DataFrame(candidate_rows)
-    metrics = _compute_metrics(
-        daily_df,
-        trades_df,
-        max_positions=max_positions,
-        blocked_by_trend_count=blocked_by_trend_count,
-        total_buy_signals=total_buy_signals,
-        candidates_df=candidates_df,
-        enable_strength_rank=bool(enable_strength_rank),
-        strength_ma=int(strength_ma),
-    )
-    if debug_first_divergence:
-        metrics["debug_trace"] = debug_trace
-    return PortfolioBacktestResult(daily=daily_df, trades=trades_df, candidates=candidates_df, metrics=metrics)
-
-
 def _compute_metrics(
     daily_df: pd.DataFrame,
     trades_df: pd.DataFrame,
@@ -1710,202 +1118,16 @@ def _compute_metrics(
     enable_strength_rank: bool = False,
     strength_ma: int = 120,
 ) -> dict[str, Any]:
-    if daily_df.empty:
-        return {
-            "total_return": 0.0,
-            "cagr": 0.0,
-            "max_drawdown": 0.0,
-            "sharpe": 0.0,
-            "vol_annual": 0.0,
-            "max_daily_drawdown": 0.0,
-            "trades": 0,
-            "avg_positions": 0.0,
-            "turnover_avg": 0.0,
-            "max_positions": int(max_positions),
-            "blocked_by_trend_count": int(blocked_by_trend_count),
-            "trend_filter_block_rate": 0.0,
-            "not_in_topk_reject_count": 0,
-            "avg_candidates_per_day": 0.0,
-            "avg_selected_per_day": 0.0,
-            "avg_buys_per_day": 0.0,
-            "avg_buy_slots_per_day": 0.0,
-            "trigger_when_slots_small_rate": 0.0,
-            "mean_order_value_scale": 0.0,
-            "WEAK_TREND_BUY_RATE": 0.0,
-            "STRONG_TREND_BUY_RATE": 0.0,
-            "TREND_BREAK_EXIT_RATE": 0.0,
-            "TREND_BREAK_EXIT_COUNT": 0,
-            "mean_break_streak_at_exit": 0.0,
-            "days_held_median": 0.0,
-            "rank_trigger_days": 0,
-            "rank_trigger_rate": 0.0,
-            "mf_rank_trigger_days": 0,
-            "mf_rank_trigger_rate": 0.0,
-            "mf_rank_applied_days": 0,
-            "mf_rank_applied_rate": 0.0,
-            "mf_avg_candidates_when_triggered": 0.0,
-            "mf_topk_reject_count": 0,
-            "mf_concentrated_buy_rate": 0.0,
-            "mf_gate_on_days": 0,
-            "mf_gate_on_rate": 0.0,
-            "strong_risk_on_days": 0,
-            "strong_risk_on_rate": 0.0,
-            "mf_rank_suppressed_by_strong_gate_days": 0,
-            "trend_slope_block_count": 0,
-            "trend_continuity_block_count": 0,
-            "avg_trend_on_rate": 0.0,
-            "avg_quality_trend_on_rate": 0.0,
-            "strength_rank_enabled": bool(enable_strength_rank),
-            "strength_ma": int(strength_ma),
-        }
-    nav0 = float(daily_df["nav"].iloc[0])
-    nav1 = float(daily_df["nav"].iloc[-1])
-    total_return = (nav1 / nav0 - 1.0) if nav0 > 0 else 0.0
-    n = int(len(daily_df))
-    years = max(n / 252.0, 1e-9)
-    cagr = (nav1 / nav0) ** (1.0 / years) - 1.0 if nav0 > 0 and nav1 > 0 else 0.0
-    max_drawdown = float(daily_df["drawdown"].min())
-    daily_ret = pd.to_numeric(daily_df["daily_return"], errors="coerce").fillna(0.0)
-    vol_annual = float(daily_ret.std(ddof=0) * sqrt(252.0))
-    sharpe = float((daily_ret.mean() / daily_ret.std(ddof=0)) * sqrt(252.0)) if float(daily_ret.std(ddof=0)) > 0 else 0.0
-    calmar = float(cagr / abs(max_drawdown)) if max_drawdown != 0 else 0.0
-    max_daily_drawdown = float(daily_ret.min())
-    avg_positions = float(pd.to_numeric(daily_df["positions_count"], errors="coerce").fillna(0.0).mean())
-    turnover_avg = float(pd.to_numeric(daily_df["turnover_pct"], errors="coerce").fillna(0.0).mean())
-    not_in_topk_reject_count = 0
-    rank_trigger_days = 0
-    if candidates_df is not None and not candidates_df.empty and "reject_reason" in candidates_df.columns:
-        rr = candidates_df["reject_reason"].astype(str)
-        not_in_topk_reject_count = int(rr.eq("NOT_IN_TOPK").sum())
-    if "candidates_count" in daily_df.columns and "buy_slots_before_buy" in daily_df.columns:
-        # Use the same daily aggregate definition for both slow/vector to keep strict comparability.
-        cc = pd.to_numeric(daily_df["candidates_count"], errors="coerce").fillna(0.0)
-        bs = pd.to_numeric(daily_df["buy_slots_before_buy"], errors="coerce").fillna(0.0)
-        rank_trigger_days = int((cc > bs).sum())
-    mf_rank_trigger_days = 0
-    mf_avg_candidates_when_triggered = 0.0
-    if "mf_rank_triggered" in daily_df.columns:
-        mtr = pd.to_numeric(daily_df["mf_rank_triggered"], errors="coerce").fillna(0.0)
-        mf_rank_trigger_days = int((mtr > 0).sum())
-        if "mf_candidates_when_triggered" in daily_df.columns:
-            mfc = pd.to_numeric(daily_df["mf_candidates_when_triggered"], errors="coerce").fillna(0.0)
-            picked = mfc[mtr > 0]
-            if len(picked) > 0:
-                mf_avg_candidates_when_triggered = float(picked.mean())
-    mf_rank_applied_days = 0
-    mf_rank_applied_rate = 0.0
-    if "mf_rank_applied" in daily_df.columns:
-        mra = pd.to_numeric(daily_df["mf_rank_applied"], errors="coerce").fillna(0.0)
-        mf_rank_applied_days = int((mra > 0).sum())
-        mf_rank_applied_rate = float((mra > 0).mean()) if len(mra) > 0 else 0.0
-    mf_topk_reject_count = int(
-        pd.to_numeric(daily_df.get("mf_topk_reject_count"), errors="coerce").fillna(0.0).sum()
-    ) if "mf_topk_reject_count" in daily_df.columns else 0
-    mf_concentrated_buy_rate = 0.0
-    if "mf_concentrated_selected_count" in daily_df.columns and "selected_count" in daily_df.columns:
-        mfc_sel = float(pd.to_numeric(daily_df["mf_concentrated_selected_count"], errors="coerce").fillna(0.0).sum())
-        msel = float(pd.to_numeric(daily_df["selected_count"], errors="coerce").fillna(0.0).sum())
-        mf_concentrated_buy_rate = (mfc_sel / msel) if msel > 0 else 0.0
-    mf_gate_on_days = 0
-    mf_gate_on_rate = 0.0
-    if "mf_gate_on" in daily_df.columns:
-        mg = pd.to_numeric(daily_df["mf_gate_on"], errors="coerce").fillna(0.0)
-        mf_gate_on_days = int((mg > 0).sum())
-        mf_gate_on_rate = float((mg > 0).mean()) if len(mg) > 0 else 0.0
-    strong_risk_on_days = 0
-    strong_risk_on_rate = 0.0
-    if "strong_risk_on" in daily_df.columns:
-        sro = pd.to_numeric(daily_df["strong_risk_on"], errors="coerce").fillna(0.0)
-        strong_risk_on_days = int((sro > 0).sum())
-        strong_risk_on_rate = float((sro > 0).mean()) if len(sro) > 0 else 0.0
-    mf_rank_suppressed_by_strong_gate_days = 0
-    if "mf_rank_suppressed_by_strong_gate" in daily_df.columns:
-        mssg = pd.to_numeric(daily_df["mf_rank_suppressed_by_strong_gate"], errors="coerce").fillna(0.0)
-        mf_rank_suppressed_by_strong_gate_days = int((mssg > 0).sum())
-    trend_slope_block_count = int(pd.to_numeric(daily_df.get("trend_slope_block_count"), errors="coerce").fillna(0.0).sum()) if "trend_slope_block_count" in daily_df.columns else 0
-    trend_continuity_block_count = int(pd.to_numeric(daily_df.get("trend_continuity_block_count"), errors="coerce").fillna(0.0).sum()) if "trend_continuity_block_count" in daily_df.columns else 0
-    avg_trend_on_rate = float(pd.to_numeric(daily_df.get("base_trend_on_rate"), errors="coerce").fillna(0.0).mean()) if "base_trend_on_rate" in daily_df.columns else 0.0
-    avg_quality_trend_on_rate = float(pd.to_numeric(daily_df.get("quality_trend_on_rate"), errors="coerce").fillna(0.0).mean()) if "quality_trend_on_rate" in daily_df.columns else 0.0
-    avg_candidates_per_day = float(pd.to_numeric(daily_df.get("candidates_count"), errors="coerce").fillna(0.0).mean()) if "candidates_count" in daily_df.columns else 0.0
-    avg_selected_per_day = float(pd.to_numeric(daily_df.get("selected_count"), errors="coerce").fillna(0.0).mean()) if "selected_count" in daily_df.columns else 0.0
-    avg_buys_per_day = float(avg_selected_per_day)
-    buy_slots_series = pd.to_numeric(daily_df.get("buy_slots_before_buy"), errors="coerce").fillna(0.0) if "buy_slots_before_buy" in daily_df.columns else pd.Series([0.0] * len(daily_df))
-    avg_buy_slots_per_day = float(buy_slots_series.mean()) if len(buy_slots_series) > 0 else 0.0
-    trigger_when_slots_small_rate = float((buy_slots_series <= 1).mean()) if len(buy_slots_series) > 0 else 0.0
-    mean_order_value_scale = float(pd.to_numeric(daily_df.get("mean_order_value_scale"), errors="coerce").fillna(0.0).mean()) if "mean_order_value_scale" in daily_df.columns else 0.0
-    weak_trend_buy_rate = float(pd.to_numeric(daily_df.get("weak_trend_buy_rate"), errors="coerce").fillna(0.0).mean()) if "weak_trend_buy_rate" in daily_df.columns else 0.0
-    strong_trend_buy_rate = float(pd.to_numeric(daily_df.get("strong_trend_buy_rate"), errors="coerce").fillna(0.0).mean()) if "strong_trend_buy_rate" in daily_df.columns else 0.0
-    trend_break_exit_rate = 0.0
-    trend_break_exit_count = 0
-    mean_break_streak_at_exit = 0.0
-    days_held_median = 0.0
-    if not trades_df.empty and "side" in trades_df.columns and "reason_code" in trades_df.columns:
-        sell_part = trades_df[trades_df["side"].astype(str).str.upper() == "SELL"].copy()
-        if not sell_part.empty:
-            rc = sell_part["reason_code"].astype(str).str.upper()
-            trend_break_exit_count = int((rc == "TREND_BREAK_EXIT").sum())
-            trend_break_exit_rate = float(trend_break_exit_count / len(sell_part))
-            if "break_streak" in sell_part.columns:
-                bsv = pd.to_numeric(sell_part.loc[rc == "TREND_BREAK_EXIT", "break_streak"], errors="coerce").dropna()
-                if len(bsv) > 0:
-                    mean_break_streak_at_exit = float(bsv.mean())
-            if "hold_days" in sell_part.columns:
-                hd = pd.to_numeric(sell_part["hold_days"], errors="coerce").dropna()
-                if len(hd) > 0:
-                    days_held_median = float(hd.median())
-    trading_days = int(len(daily_df))
-    return {
-        "total_return": total_return,
-        "cagr": cagr,
-        "max_drawdown": max_drawdown,
-        "sharpe": sharpe,
-        "calmar": calmar,
-        "vol_annual": vol_annual,
-        "max_daily_drawdown": max_daily_drawdown,
-        "trades": int(len(trades_df)),
-        "avg_positions": avg_positions,
-        "turnover_avg": turnover_avg,
-        "max_positions": int(max_positions),
-        "blocked_by_trend_count": int(blocked_by_trend_count),
-        "trend_filter_block_rate": (float(blocked_by_trend_count) / float(total_buy_signals)) if total_buy_signals > 0 else 0.0,
-        "not_in_topk_reject_count": int(not_in_topk_reject_count),
-        "avg_candidates_per_day": float(avg_candidates_per_day),
-        "avg_selected_per_day": float(avg_selected_per_day),
-        "avg_buys_per_day": float(avg_buys_per_day),
-        "avg_buy_slots_per_day": float(avg_buy_slots_per_day),
-        "trigger_when_slots_small_rate": float(trigger_when_slots_small_rate),
-        "mean_order_value_scale": float(mean_order_value_scale),
-        "WEAK_TREND_BUY_RATE": float(weak_trend_buy_rate),
-        "STRONG_TREND_BUY_RATE": float(strong_trend_buy_rate),
-        "TREND_BREAK_EXIT_RATE": float(trend_break_exit_rate),
-        "TREND_BREAK_EXIT_COUNT": int(trend_break_exit_count),
-        "mean_break_streak_at_exit": float(mean_break_streak_at_exit),
-        "days_held_median": float(days_held_median),
-        "rank_trigger_days": int(rank_trigger_days),
-        "rank_trigger_rate": (float(rank_trigger_days) / float(trading_days)) if trading_days > 0 else 0.0,
-        "mf_rank_trigger_days": int(mf_rank_trigger_days),
-        "mf_rank_trigger_rate": (float(mf_rank_trigger_days) / float(trading_days)) if trading_days > 0 else 0.0,
-        "mf_rank_applied_days": int(mf_rank_applied_days),
-        "mf_rank_applied_rate": float(mf_rank_applied_rate),
-        "mf_avg_candidates_when_triggered": float(mf_avg_candidates_when_triggered),
-        "mf_topk_reject_count": int(mf_topk_reject_count),
-        "mf_concentrated_buy_rate": float(mf_concentrated_buy_rate),
-        "mf_gate_on_days": int(mf_gate_on_days),
-        "mf_gate_on_rate": float(mf_gate_on_rate),
-        "strong_risk_on_days": int(strong_risk_on_days),
-        "strong_risk_on_rate": float(strong_risk_on_rate),
-        "mf_rank_suppressed_by_strong_gate_days": int(mf_rank_suppressed_by_strong_gate_days),
-        "trend_slope_block_count": int(trend_slope_block_count),
-        "trend_continuity_block_count": int(trend_continuity_block_count),
-        "avg_trend_on_rate": float(avg_trend_on_rate),
-        "avg_quality_trend_on_rate": float(avg_quality_trend_on_rate),
-        "trend_filter_block_rate": (
-            (float(int(blocked_by_trend_count) + trend_slope_block_count + trend_continuity_block_count) / float(total_buy_signals))
-            if total_buy_signals > 0
-            else 0.0
-        ),
-        "strength_rank_enabled": bool(enable_strength_rank),
-        "strength_ma": int(strength_ma),
-        "total_buy_signals": int(total_buy_signals),
-        "blocked_signals": int(blocked_by_trend_count),
-    }
+    return compute_backtest_metrics(
+        daily_df,
+        trades_df,
+        max_positions=max_positions,
+        blocked_by_trend_count=blocked_by_trend_count,
+        total_buy_signals=total_buy_signals,
+        candidates_df=candidates_df,
+        enable_strength_rank=enable_strength_rank,
+        strength_ma=strength_ma,
+    )
+
+
+from backend.core.portfolio.frozen_loop import run_portfolio_backtest

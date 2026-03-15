@@ -5,9 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from backend.api.endpoints import _config_store
-from backend.api.endpoints.backtest_v2 import _extract_reason_code_counts, _normalized_run_meta_counters
-from backend.api.endpoints.backtest_v2_artifacts import stabilize_experiment_result
+from backend.api.backtest_v2 import impl as backtest_impl
+from backend.api.backtest_v2 import configs_impl as _config_store
 from backend.core.tools import saved_config_access
 from backend.core.tools.saved_config_access import create_saved_config_record, load_saved_config_record
 
@@ -37,7 +36,7 @@ def test_canonical_artifact_contract_and_missing_fields(tmp_path: Path) -> None:
         "closed_trades": 0,
     }
 
-    out = stabilize_experiment_result(
+    out = backtest_impl.stabilize_experiment_result(
         bt_root=bt_root,
         result=result,
         base_cfg=base_cfg,
@@ -68,30 +67,30 @@ def test_canonical_artifact_contract_and_missing_fields(tmp_path: Path) -> None:
     assert sp.empty
 
 
-def test_legacy_read_compatibility_reason_file_and_counter_alias(tmp_path: Path) -> None:
+def test_reason_codes_and_counters_are_canonical_only(tmp_path: Path) -> None:
     group_dir = tmp_path / "G1"
     group_dir.mkdir(parents=True, exist_ok=True)
-    (group_dir / "reason_code_counts.csv").write_text(
+    (group_dir / "reason_codes.csv").write_text(
         "code,count\nATR_STOP_LOSS,3\nTIME_EXIT,2\n",
         encoding="utf-8",
     )
 
-    reason_counts = _extract_reason_code_counts(group_dir)
+    reason_counts = backtest_impl._extract_reason_code_counts(group_dir)
     assert reason_counts.get("atr_stop_exit_count") == 3
     assert reason_counts.get("time_exit_count") == 2
 
-    normalized, hits = _normalized_run_meta_counters(
+    normalized, hits = backtest_impl._normalized_run_meta_counters(
         {
             "counters": {
-                "raw_signal_count": 11,
-                "blocked_count": 4,
-                "orders_count": 7,
-                "skipped_count": 2,
-                "closed_trades_count": 5,
+                "raw_signal": 11,
+                "blocked": 4,
+                "orders": 7,
+                "skipped": 2,
+                "closed_trades": 5,
             }
         }
     )
-    assert hits == 5
+    assert hits == 0
     assert normalized.get("raw_signal") == 11
     assert normalized.get("blocked") == 4
     assert normalized.get("orders") == 7
@@ -161,7 +160,7 @@ def test_run_meta_report_consistency_includes_resolved_config_details(tmp_path: 
         "universe_meta": {"universe_mode": "HS300_ZZ500", "raw_count": 812},
     }
 
-    out = stabilize_experiment_result(
+    out = backtest_impl.stabilize_experiment_result(
         bt_root=bt_root,
         result=result,
         base_cfg=base_cfg,
@@ -211,7 +210,7 @@ def test_stage_summary_artifact_is_written_and_indexed(tmp_path: Path) -> None:
         "closed_trades": 1,
         "stage_summary": {
             "schema_version": "stage_pipeline_summary@1",
-            "execution_shell": "stage_pipeline_shell_legacy_adapter",
+            "execution_shell": "stage_pipeline_shell_bridge",
             "daily_loop_mode": "single_day_loop",
             "route_id": "provider_breakout_runtime",
             "stage_order": ["S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"],
@@ -224,7 +223,7 @@ def test_stage_summary_artifact_is_written_and_indexed(tmp_path: Path) -> None:
         },
         "stage_pipeline": {
             "schema_version": "stage_pipeline_summary@1",
-            "execution_shell": "stage_pipeline_shell_legacy_adapter",
+            "execution_shell": "stage_pipeline_shell_bridge",
             "daily_loop_mode": "single_day_loop",
             "route_id": "provider_breakout_runtime",
             "stage_order": ["S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"],
@@ -239,7 +238,7 @@ def test_stage_summary_artifact_is_written_and_indexed(tmp_path: Path) -> None:
         },
     }
 
-    out = stabilize_experiment_result(
+    out = backtest_impl.stabilize_experiment_result(
         bt_root=bt_root,
         result=result,
         base_cfg=base_cfg,
@@ -252,11 +251,11 @@ def test_stage_summary_artifact_is_written_and_indexed(tmp_path: Path) -> None:
     assert artifacts.get("stage_summary") == "stage_summary.json"
 
     stage_summary = json.loads((effective_results_dir / "stage_summary.json").read_text(encoding="utf-8"))
-    assert stage_summary["execution_shell"] == "stage_pipeline_shell_legacy_adapter"
+    assert stage_summary["execution_shell"] == "stage_pipeline_shell_bridge"
     assert stage_summary["route_id"] == "provider_breakout_runtime"
 
     run_meta = json.loads((effective_results_dir / "run_meta.json").read_text(encoding="utf-8"))
-    assert (run_meta.get("stage_pipeline") or {}).get("execution_shell") == "stage_pipeline_shell_legacy_adapter"
+    assert (run_meta.get("stage_pipeline") or {}).get("execution_shell") == "stage_pipeline_shell_bridge"
 
     audit = json.loads((effective_results_dir / "audit.json").read_text(encoding="utf-8"))
     assert audit.get("legacy_kernel") == "strict_core"
@@ -328,7 +327,7 @@ def test_multi_alpha_artifacts_preserve_source_fields_and_audit_summary(tmp_path
         },
     }
 
-    out = stabilize_experiment_result(
+    out = backtest_impl.stabilize_experiment_result(
         bt_root=bt_root,
         result=result,
         base_cfg=base_cfg,
@@ -337,11 +336,14 @@ def test_multi_alpha_artifacts_preserve_source_fields_and_audit_summary(tmp_path
     )
 
     effective_results_dir = Path(out["results_dir"])
-    trades_alias = pd.read_csv(effective_results_dir / "trades.csv")
-    orders_alias = pd.read_csv(effective_results_dir / "orders.csv")
+    trades_frame = pd.read_csv(effective_results_dir / "portfolio_trades.csv")
+    orders_frame = pd.read_csv(effective_results_dir / "orders.csv")
     audit = json.loads((effective_results_dir / "audit.json").read_text(encoding="utf-8"))
 
-    for df in (trades_alias, orders_alias):
+    assert (out.get("artifacts") or {}).get("trades") == "portfolio_trades.csv"
+    assert "trades_alias" not in dict(out.get("artifacts") or {})
+
+    for df in (trades_frame, orders_frame):
         assert "exit_owner" in df.columns
         assert "entry_alpha_id" in df.columns
         assert "entry_sleeve_id" in df.columns

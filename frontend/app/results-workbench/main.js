@@ -3,32 +3,35 @@ import App from './App.vue';
 
 function mountResultsWorkbench() {
   const mountEl = document.getElementById('wbResultsWorkbenchMount');
-  const legacyRoot = document.getElementById('wbResultsLegacyRoot');
+  const fallbackRoot = document.getElementById('wbResultsFallbackRoot');
   const bridge = window.resultsWorkbenchBridge || null;
   if (!mountEl || !bridge) return;
+  if (window.isDesktopFallbackRequested?.()) {
+    mountEl.hidden = true;
+    mountEl.dataset.vueShell = 'skipped';
+    mountEl.dataset.vueReason = 'explicit-debug';
+    window.setDesktopFallbackMode?.(true, 'explicit-debug');
+    if (typeof bridge.setMounted === 'function') bridge.setMounted(false);
+    return;
+  }
   mountEl.dataset.vueShell = 'starting';
   delete mountEl.dataset.vueError;
+  delete mountEl.dataset.vueReason;
 
   try {
     createApp(App).mount(mountEl);
     mountEl.hidden = false;
     mountEl.dataset.vueShell = 'mounted';
-    if (legacyRoot) {
-      legacyRoot.hidden = true;
-      legacyRoot.inert = true;
-      legacyRoot.setAttribute('aria-hidden', 'true');
-    }
+    window.setDesktopFallbackMode?.(false, 'vue-mounted');
+    if (fallbackRoot) delete fallbackRoot.dataset.fallbackReason;
     if (typeof bridge.setMounted === 'function') bridge.setMounted(true);
   } catch (error) {
     console.error('results-workbench-vue-shell mount failed:', error);
     mountEl.hidden = true;
     mountEl.dataset.vueShell = 'failed';
     mountEl.dataset.vueError = String(error?.message || error || 'unknown');
-    if (legacyRoot) {
-      legacyRoot.hidden = false;
-      legacyRoot.inert = false;
-      legacyRoot.removeAttribute('aria-hidden');
-    }
+    mountEl.dataset.vueReason = 'mount-failed';
+    window.setDesktopFallbackMode?.(true, 'vue-mount-failed');
     if (typeof bridge.setMounted === 'function') bridge.setMounted(false);
   }
 }

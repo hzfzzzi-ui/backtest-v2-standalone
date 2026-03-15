@@ -83,7 +83,7 @@ SW_L1_MAP: dict[str, str] = {
 }
 
 # 历史申万前缀元数据。核心目的是保留历史分类语义，并给运行时一个
-# contemporaneous-compatible 的指数代码桥接，而不是把所有历史记录都折算成 SW2021。
+# contemporaneous bridge 的指数代码映射，而不是把所有历史记录都折算成 SW2021。
 SW_PREFIX_META: dict[str, dict[str, str]] = {
     "11": {"standard": "SW2021", "industry_l1": "农林牧渔", "index_code": "801010.SI"},
     "21": {"standard": "SW_LEGACY", "industry_l1": "采掘", "index_code": "801020.SI"},

@@ -7,19 +7,19 @@ from typing import Any, Callable
 
 from fastapi import HTTPException
 
-from backend.api.endpoints._paths import _bt_root
-from backend.api.endpoints._semantic_config_compiler import (
+from backend.api.shared.paths import bt_root as _bt_root
+from backend.api.backtest_v2.semantic_config_compiler import (
     SEMANTIC_CONFIG_SCHEMA_VERSION,
     validate_semantic_config_json,
 )
-from backend.api.endpoints._utils import sanitize_json
+from backend.api.shared.json_utils import sanitize_json
 from backend.core.services.experiment_artifact_service import stabilize_experiment_output
 from backend.core.tools.locked_candidate_presets import is_locked_candidate_preset
 from backend.core.tools.saved_config_access import resolve_runtime_config_source
 
 
 def _api_module():
-    from backend.api.endpoints import _experiment_runner_api as api_module
+    from backend.api.backtest_v2 import impl as api_module
 
     return api_module
 
@@ -90,7 +90,7 @@ def run_experiment_request_body(
     semantic_cfg_input = validate_semantic_config_json(body.config_json) if isinstance(body.config_json, dict) else None
     semantic_compile: dict[str, Any] | None = None
     if isinstance(semantic_cfg_input, dict):
-        legacy_inputs_present = [
+        coexisting_inputs_present = [
             field
             for field, present in (
                 ("config_id", bool(str(body.config_id or "").strip())),
@@ -111,7 +111,7 @@ def run_experiment_request_body(
                 "owner": "manual",
                 "schema_version": SEMANTIC_CONFIG_SCHEMA_VERSION,
                 "config_source": "config_json",
-                "legacy_inputs_present": legacy_inputs_present,
+                "coexisting_inputs_present": coexisting_inputs_present,
             }
         )
         use_script_cfg = False
@@ -215,18 +215,19 @@ def run_experiment_request_body(
         else:
             overrides["workbench_config"] = wb_cfg
             overrides["original_workbench_config"] = semantic_cfg_input if isinstance(semantic_cfg_input, dict) else wb_cfg
+    effective_wb_cfg_dict = effective_wb_cfg if isinstance(effective_wb_cfg, dict) else {}
     if use_script_cfg or runtime_config_supplied:
-        wb_uni = effective_wb_cfg.get("universe") if isinstance(effective_wb_cfg.get("universe"), dict) else {}
-        overrides["universe_mode"] = str(effective_wb_cfg.get("universe_mode") or body.universe_mode or "CUSTOM")
-        overrides["industries"] = list(effective_wb_cfg.get("industries") or [])
+        wb_uni = effective_wb_cfg_dict.get("universe") if isinstance(effective_wb_cfg_dict.get("universe"), dict) else {}
+        overrides["universe_mode"] = str(effective_wb_cfg_dict.get("universe_mode") or body.universe_mode or "CUSTOM")
+        overrides["industries"] = list(effective_wb_cfg_dict.get("industries") or [])
         overrides["price_adj"] = str(wb_uni.get("price_adj") or body.price_adj or "hfq")
     else:
-        wb_uni = effective_wb_cfg.get("universe") if isinstance(effective_wb_cfg.get("universe"), dict) else {}
-        wb_universe_mode = str(effective_wb_cfg.get("universe_mode") or "").strip()
+        wb_uni = effective_wb_cfg_dict.get("universe") if isinstance(effective_wb_cfg_dict.get("universe"), dict) else {}
+        wb_universe_mode = str(effective_wb_cfg_dict.get("universe_mode") or "").strip()
         if wb_universe_mode:
             overrides["universe_mode"] = wb_universe_mode
-        if isinstance(effective_wb_cfg.get("industries"), list):
-            overrides["industries"] = list(effective_wb_cfg.get("industries") or [])
+        if isinstance(effective_wb_cfg_dict.get("industries"), list):
+            overrides["industries"] = list(effective_wb_cfg_dict.get("industries") or [])
         wb_price_adj = str(wb_uni.get("price_adj") or "").strip()
         if wb_price_adj:
             overrides["price_adj"] = wb_price_adj

@@ -9,45 +9,10 @@ function setActiveNav() {
 }
 
 const state = {
-  mode: 'experiment',
-  strategy_pack: 'EMA_CROSS',
-  universe_mode: 'ALL_A',
-  config_id: null,
-  loaded_config_meta: null,
-  loaded_config_json: null,
-  loaded_config_snapshot: '',
-  config_source_mode: 'draft-only',
-  config_dirty: false,
-  selected_locked_candidate_preset: '',
-  config_draft: {},
-  universe_stats: null,
-  active_exp: null,
-  active_result: null,
-  active_artifacts: null,
-  loaded_source_kind: '',
-  loaded_source_id: '',
-  execution_preview: null,
-  execution_api_enabled: true,
-  status_items: [],
-  manual_status_items: [],
-  validation_status_items: [],
-  api_status: {},
-  multi_alpha_module_state: {},
-  multi_alpha_validation_errors: [],
-  status_open: false,
-  drawer_panel: 's1',
-  drawer_pinned: false,
-  main_tab: 'overview',
-  dock_tab: 'explain',
-  chart_show_benchmark: true,
-  chart_range: 'D',
-  chart_mode: 'portfolio',
-  symbol_filter: '',
-  symbol_sort: 'return_desc',
-  selected_symbol: '',
-  symbol_series_cache: {},
-  symbol_series_loading: false,
-  compare_selected_ids: [],
+  ...((window.createWorkbenchConfigDraftState && window.createWorkbenchConfigDraftState()) || {}),
+  ...((window.createRunSessionState && window.createRunSessionState()) || {}),
+  ...((window.createActiveExperimentState && window.createActiveExperimentState()) || {}),
+  ...((window.createViewState && window.createViewState()) || {}),
 };
 
 const DEFAULT_BOOTSTRAP_BASELINE_ID = 'baseline_V10';
@@ -165,7 +130,6 @@ function cloneConfigMeta(record) {
     owner: record.owner || 'manual',
     locked: !!record.locked,
     baseline_of: record.baseline_of || null,
-    legacy_config_id: record.legacy_config_id || null,
     universe_mode: universeMode,
     membership_mode: membershipMode,
   };
@@ -187,11 +151,27 @@ function currentConfigSourceMode() {
 }
 
 function getResultsWorkbenchBridge() {
+  if (typeof window.getDesktopResultsWorkbenchBridge === 'function') {
+    return window.getDesktopResultsWorkbenchBridge();
+  }
   const bridge = window.resultsWorkbenchBridge;
   return bridge && typeof bridge === 'object' ? bridge : null;
 }
 
-function readLegacyOpenPanels() {
+function isResultsFallbackModeEnabled() {
+  if (typeof window.isDesktopFallbackModeEnabled === 'function') {
+    return !!window.isDesktopFallbackModeEnabled();
+  }
+  return !getResultsWorkbenchBridge()?.isMounted?.();
+}
+
+function readFallbackOpenPanels() {
+  if (!isResultsFallbackModeEnabled()) {
+    return {};
+  }
+  if (typeof window.readDesktopFallbackOpenPanels === 'function') {
+    return window.readDesktopFallbackOpenPanels();
+  }
   return {
     symbolPanel: !!byId('wbAccSymbolPanel')?.classList.contains('wb-open'),
     funnelPanel: !!byId('wbAccBuyFunnel')?.classList.contains('wb-open'),
@@ -200,6 +180,21 @@ function readLegacyOpenPanels() {
 }
 
 function buildResultsWorkbenchSnapshot() {
+  if (typeof window.buildDesktopResultsWorkbenchSnapshot === 'function') {
+    const bridge = getResultsWorkbenchBridge();
+    const currentSnapshot = bridge && typeof bridge.getSnapshot === 'function'
+      ? (bridge.getSnapshot() || {})
+      : {};
+    const currentView = currentSnapshot?.view || {};
+    const openPanels = bridge
+      ? { ...(currentView.openPanels || {}) }
+      : readFallbackOpenPanels();
+    return window.buildDesktopResultsWorkbenchSnapshot({
+      state,
+      currentSnapshot,
+      openPanels,
+    });
+  }
   const bridge = getResultsWorkbenchBridge();
   const currentSnapshot = bridge && typeof bridge.getSnapshot === 'function'
     ? (bridge.getSnapshot() || {})
@@ -207,16 +202,19 @@ function buildResultsWorkbenchSnapshot() {
   const currentView = currentSnapshot?.view || {};
   const openPanels = bridge
     ? { ...(currentView.openPanels || {}) }
-    : readLegacyOpenPanels();
-  const sourceKind = String(state.loaded_source_kind || '').trim()
-    || (state.active_result?.exp_id ? 'experiment' : '');
-  const sourceId = String(state.loaded_source_id || '').trim()
-    || String(state.active_result?.exp_id || '');
+    : readFallbackOpenPanels();
+  if (window.buildDesktopResultsWorkbenchSnapshot) {
+    return window.buildDesktopResultsWorkbenchSnapshot({
+      state,
+      currentSnapshot,
+      openPanels,
+    });
+  }
   return {
     active: !!(state.active_result?.exp_id || state.active_artifacts),
     source: {
-      kind: sourceKind,
-      id: sourceId,
+      kind: String(state.loaded_source_kind || '').trim() || (state.active_result?.exp_id ? 'experiment' : ''),
+      id: String(state.loaded_source_id || '').trim() || String(state.active_result?.exp_id || ''),
     },
     result: cloneJson(state.active_result) || null,
     artifacts: cloneJson(state.active_artifacts) || null,
@@ -234,7 +232,16 @@ function buildResultsWorkbenchSnapshot() {
   };
 }
 
-function publishResultsWorkbenchSnapshot() {
+function publishResultsWorkbenchSnapshot(options = {}) {
+  if (typeof window.publishDesktopResultsWorkbenchSnapshot === 'function') {
+    return window.publishDesktopResultsWorkbenchSnapshot({
+      state,
+      lazySections: options.lazySections || [],
+      openPanels: options.openPanels || null,
+      sourceKind: options.sourceKind || '',
+      sourceId: options.sourceId || '',
+    });
+  }
   const bridge = getResultsWorkbenchBridge();
   if (!bridge || typeof bridge.setSnapshot !== 'function') return false;
   bridge.setSnapshot(buildResultsWorkbenchSnapshot());
@@ -248,8 +255,12 @@ function syncResultsWorkbenchSurface(options = {}) {
     explain = true,
     execution = true,
   } = options;
-  publishResultsWorkbenchSnapshot();
+  const lazySections = [];
+  if (perf) lazySections.push('nav');
+  if (explain) lazySections.push('stage_funnel');
+  publishResultsWorkbenchSnapshot({ lazySections });
   if (getResultsWorkbenchBridge()?.isMounted?.()) return;
+  if (!isResultsFallbackModeEnabled()) return;
   if (summary) renderSummaryBar();
   if (perf) renderPerfPanel();
   if (explain) renderExplainPanel();
@@ -257,21 +268,54 @@ function syncResultsWorkbenchSurface(options = {}) {
 }
 
 function syncResultsWorkbenchVisuals() {
-  publishResultsWorkbenchSnapshot();
+  publishResultsWorkbenchSnapshot({ lazySections: ['nav'] });
   if (getResultsWorkbenchBridge()?.isMounted?.()) return;
+  if (!isResultsFallbackModeEnabled()) return;
   renderPerfPanel();
 }
 
 function syncResultsWorkbenchSymbols() {
-  publishResultsWorkbenchSnapshot();
+  publishResultsWorkbenchSnapshot({ lazySections: ['symbol_stats'] });
   if (getResultsWorkbenchBridge()?.isMounted?.()) return;
+  if (!isResultsFallbackModeEnabled()) return;
   renderSymbolPerformancePanel();
 }
 
 function syncResultsWorkbenchExecution() {
   publishResultsWorkbenchSnapshot();
   if (getResultsWorkbenchBridge()?.isMounted?.()) return;
+  if (!isResultsFallbackModeEnabled()) return;
   renderExecutionPanel();
+}
+
+function bindDesktopFallbackAccordions() {
+  if (!isResultsFallbackModeEnabled()) return;
+  document.querySelectorAll('#wbResultsFallbackRoot .wb-result-acc').forEach((acc) => {
+    const summary = acc.querySelector(':scope > .wb-result-acc-toggle');
+    const body = acc.querySelector(':scope > .wb-result-acc-body');
+    if (!summary || !body) return;
+    const syncResultAccordion = () => {
+      const isOpen = acc.classList.contains('wb-open');
+      body.hidden = !isOpen;
+      summary.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    };
+    syncResultAccordion();
+    if (acc.dataset.boundToggle === '1') return;
+    acc.dataset.boundToggle = '1';
+    summary.addEventListener('click', () => {
+      acc.classList.toggle('wb-open');
+      syncResultAccordion();
+    });
+  });
+}
+
+function resetDesktopFallbackAccordions() {
+  if (!isResultsFallbackModeEnabled()) return;
+  document.querySelectorAll('#wbResultsFallbackRoot .wb-result-acc').forEach((acc) => {
+    acc.classList.remove('wb-open');
+    const body = acc.querySelector(':scope > .wb-result-acc-body');
+    if (body) body.hidden = true;
+  });
 }
 
 function syncConfigSourceUI() {
@@ -478,8 +522,6 @@ function currentWorkbenchConfigSourceFromUrl() {
     const loadId = String(params.get('load_id') || '').trim();
     const loadKind = String(params.get('load_kind') || '').trim().toLowerCase();
     if (loadId) return { kind: loadKind === 'experiment' ? 'experiment' : 'baseline', id: loadId };
-    const legacyLoadExpId = String(params.get('load_exp_id') || '').trim();
-    if (legacyLoadExpId) return { kind: 'experiment', id: legacyLoadExpId };
   } catch (_) {
     return null;
   }
@@ -492,7 +534,6 @@ function syncWorkbenchConfigSourceToUrl(kind, sourceId) {
     const normalizedId = String(sourceId || '').trim();
     const normalizedKind = String(kind || '').trim().toLowerCase();
     url.searchParams.delete('exp_id');
-    url.searchParams.delete('load_exp_id');
     if (normalizedId) {
       url.searchParams.set('load_kind', normalizedKind === 'experiment' ? 'experiment' : 'baseline');
       url.searchParams.set('load_id', normalizedId);
@@ -713,187 +754,6 @@ async function enrichLoadItems(items) {
   return rows;
 }
 
-async function openExperimentLoadDropdown(anchorEl = null) {
-  const existing = document.getElementById('wbLoadDropdown');
-  if (existing) {
-    existing.remove();
-    return;
-  }
-  const baselinePayload = await apiRequestJson('baselines', '/api/backtest_v2/baselines');
-  const experimentPayload = await apiRequestJson('experiments', '/api/backtest_v2/experiments');
-  const items = await enrichLoadItems(normalizeLoadItems(baselinePayload?.items || [], experimentPayload));
-  if (!items.length) {
-    addLog('没有可加载的实验');
-    return;
-  }
-  const dd = document.createElement('div');
-  dd.id = 'wbLoadDropdown';
-  dd.className = 'wb-load-dropdown';
-  const activeSourceId = String(state.loaded_source_id || '').trim();
-  const activeSourceKind = String(state.loaded_source_kind || '').trim();
-  items.forEach((item) => {
-    const sourceId = String(item?.id || '').trim();
-    const kindClass = item?.kind === 'baseline' ? 'baseline' : 'experiment';
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = `wb-load-item wb-config-center-item wb-load-item-${kindClass}${sourceId && sourceId === activeSourceId && item.kind === activeSourceKind ? ' active' : ''}`;
-    row.innerHTML = `
-      <div class="wb-load-item-head">
-        <span class="wb-load-kind ${loadItemBadgeClass(item)}">${esc(loadItemBadgeLabel(item))}</span>
-        <span class="wb-config-center-title">${esc(item?.label || sourceId)}</span>
-      </div>
-      <span class="wb-config-center-desc">${esc(experimentLoadSummary(item))}</span>
-    `;
-    row.addEventListener('click', async () => {
-      dd.remove();
-      try {
-        if (item.kind === 'experiment') await loadExperimentBundle(sourceId);
-        else await loadBaselineToWorkbench(sourceId);
-      } catch (e) {
-        addLog(`加载失败: ${e?.message || e}`);
-      }
-    });
-    dd.appendChild(row);
-  });
-  (anchorEl || byId('wbQuickLoad') || byId('wbRunBtn'))?.parentElement?.appendChild(dd);
-  const dismiss = (e) => {
-    const btn = anchorEl || byId('wbQuickLoad');
-    if (!dd.contains(e.target) && e.target !== btn) {
-      dd.remove();
-      document.removeEventListener('click', dismiss);
-    }
-  };
-  setTimeout(() => document.addEventListener('click', dismiss), 0);
-}
-
-function extractWorkbenchConfigFromExperimentPayload(payload) {
-  const cfg = payload && typeof payload === 'object' ? payload : {};
-  return cfg?.overrides?.original_workbench_config
-    || cfg?.overrides?.workbench_config
-    || cfg?.workbench_config
-    || null;
-}
-
-function clearActiveResultContext() {
-  state.active_exp = null;
-  state.active_result = null;
-  state.active_artifacts = null;
-  state.execution_preview = null;
-  state.selected_symbol = '';
-  state.symbol_series_cache = {};
-  state.symbol_series_loading = false;
-  const bridge = getResultsWorkbenchBridge();
-  if (bridge && typeof bridge.clear === 'function') bridge.clear();
-}
-
-function applyLoadedConfigToWorkbench(workbenchConfig, meta) {
-  if (!workbenchConfig || typeof workbenchConfig !== 'object') throw new Error('缺少可回填配置');
-  const applied = applyConfigToUI(workbenchConfig);
-  if (applied?.unsupportedStrategy) {
-    throw new Error(`配置使用已移除策略 ${applied.unsupportedStrategy}`);
-  }
-  setSelectedLockedCandidatePreset('');
-  clearActiveResultContext();
-  state.loaded_config_meta = {
-    config_id: String(meta?.config_id || '').trim() || '-',
-    display_name: String(meta?.display_name || meta?.name || meta?.config_id || '').trim() || '-',
-    name: String(meta?.name || meta?.display_name || meta?.config_id || '').trim() || '-',
-    source_type: String(meta?.source_type || 'derived').trim() || 'derived',
-    owner: String(meta?.owner || 'manual').trim() || 'manual',
-    locked: !!meta?.locked,
-    baseline_of: null,
-    legacy_config_id: null,
-    universe_mode: workbenchConfig?.universe_mode || null,
-    membership_mode: workbenchConfig?.universe?.membership_mode || null,
-  };
-  state.loaded_config_json = cloneJson(workbenchConfig);
-  state.config_id = state.loaded_config_meta.config_id;
-  state.loaded_source_kind = String(meta?.loaded_kind || '').trim() || '';
-  state.loaded_source_id = String(meta?.loaded_id || '').trim() || '';
-  syncWorkbenchConfigSourceToUrl(state.loaded_source_kind, state.loaded_source_id);
-  buildConfigDraft();
-  state.loaded_config_snapshot = stableSerializeConfig(state.config_draft || {});
-  syncConfigSourceUI();
-  renderRunHints();
-  syncExitLinkage();
-  updateAtrNote();
-  syncLoadHint(state.loaded_source_id);
-  renderRightInspector();
-}
-
-async function loadExperimentConfigToWorkbench(expId) {
-  const normalizedExpId = String(expId || '').trim();
-  if (!normalizedExpId) throw new Error('缺少 experiment_id');
-  addLog(`导入实验配置: ${normalizedExpId}`);
-  const manifest = await apiRequestJson(
-    'experiment_manifest',
-    `/api/backtest_v2/experiments/${encodeURIComponent(normalizedExpId)}/manifest`,
-  );
-  const configRel = String(manifest?.artifacts?.config || 'config.json').trim();
-  const configPayload = await apiRequestJson(
-    'artifact_read_config',
-    '/api/backtest_v2/artifacts/read',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ exp_id: normalizedExpId, rel_path: configRel }),
-    },
-  );
-  const workbenchConfig = extractWorkbenchConfigFromExperimentPayload(configPayload?.data);
-  if (!workbenchConfig || typeof workbenchConfig !== 'object') {
-    throw new Error(`实验 ${normalizedExpId} 缺少可回填的 workbench_config`);
-  }
-  applyLoadedConfigToWorkbench(workbenchConfig, {
-    config_id: `expcfg:${normalizedExpId}`,
-    display_name: `实验配置 ${normalizedExpId}`,
-    name: `实验配置 ${normalizedExpId}`,
-    source_type: 'derived',
-    owner: 'manual',
-    locked: false,
-    loaded_kind: 'experiment',
-    loaded_id: normalizedExpId,
-  });
-  addLog(`已导入实验配置: ${normalizedExpId}`);
-}
-
-async function loadBaselineToWorkbench(baselineId) {
-  const normalizedBaselineId = String(baselineId || '').trim();
-  if (!normalizedBaselineId) throw new Error('缺少 baseline_id');
-  addLog(`导入基线：${normalizedBaselineId}`);
-  const payload = await apiRequestJson(
-    `baseline_${normalizedBaselineId}`,
-    `/api/backtest_v2/baselines/${encodeURIComponent(normalizedBaselineId)}`,
-  );
-  const workbenchConfig = payload?.config_json;
-  if (!workbenchConfig || typeof workbenchConfig !== 'object') {
-    throw new Error(`基线 ${normalizedBaselineId} 缺少 config_json`);
-  }
-  applyLoadedConfigToWorkbench(workbenchConfig, {
-    config_id: normalizedBaselineId,
-    display_name: String(payload?.display_name || payload?.name || normalizedBaselineId),
-    name: String(payload?.name || payload?.display_name || normalizedBaselineId),
-    source_type: 'baseline',
-    owner: String(payload?.owner || 'manual'),
-    locked: true,
-    loaded_kind: 'baseline',
-    loaded_id: normalizedBaselineId,
-  });
-  const linkedExpId = String(payload?.linked_exp_id || '').trim();
-  if (linkedExpId && payload?.has_result) {
-    await loadHistoricalExperiment(linkedExpId);
-  } else {
-    clearActiveResultContext();
-    renderRightInspector();
-  }
-  addLog(`已导入基线：${normalizedBaselineId}`);
-}
-
-async function loadExperimentBundle(expId) {
-  const normalizedExpId = String(expId || '').trim();
-  if (!normalizedExpId) throw new Error('缺少 experiment_id');
-  await loadExperimentConfigToWorkbench(normalizedExpId);
-  await loadHistoricalExperiment(normalizedExpId);
-}
 
 function switchMainTab(tab) {
   const next = tab || 'overview';
@@ -907,87 +767,10 @@ function switchMainTab(tab) {
 /* ── Wrapper functions that call into other modules ── */
 
 function renderRightInspector() {
-  // Legacy fallback only: migrated result workbench is owned by the Vue shell.
+// Fallback only: migrated result workbench is owned by the Vue shell.
   syncResultsWorkbenchSurface();
 }
 
-async function saveConfig(kind = 'draft') {
-  const cfg = buildConfigDraft();
-  const body = {
-    config_json: cfg,
-    name: 'workbench',
-    display_name: 'workbench',
-    tags: ['draft'],
-    source_type: 'derived',
-    owner: 'manual',
-    locked: false,
-    baseline_of: null,
-  };
-  if (kind === 'template') {
-    body.name = `template_${Date.now()}`;
-    body.display_name = body.name;
-    body.tags = ['template'];
-    body.source_type = 'template';
-  } else if (kind === 'flow_script') {
-    body.name = `flow_script_${Date.now()}`;
-    body.display_name = body.name;
-    body.tags = ['flow_script'];
-  }
-  const j = await apiRequestJson('configs_save', '/api/backtest_v2/configs', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  rememberLoadedConfig(j, stableSerializeConfig(cfg), cfg);
-  addLog(`配置已保存(${kind}): ${j.config_id}`);
-  await loadConfigList();
-}
-
-async function saveCurrentBaseline() {
-  const currentDraft = buildConfigDraft();
-  const suggestedName = String(
-    state.loaded_source_kind === 'baseline'
-      ? (state.loaded_source_id || DEFAULT_BOOTSTRAP_BASELINE_ID)
-      : (state.loaded_config_meta?.display_name || DEFAULT_BOOTSTRAP_BASELINE_ID)
-  ).trim() || DEFAULT_BOOTSTRAP_BASELINE_ID;
-  const baselineName = String(window.prompt('请输入基线名称', suggestedName) || '').trim();
-  if (!baselineName) return;
-  const linkedExpId = currentConfigSourceMode() === 'loaded-clean' ? String(state.active_result?.exp_id || '').trim() : '';
-  const payload = await apiRequestJson('baseline_save', '/api/backtest_v2/baselines', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      baseline_id: baselineName,
-      name: baselineName,
-      display_name: baselineName,
-      config_json: currentDraft,
-      linked_exp_id: linkedExpId || null,
-      owner: 'manual',
-      locked: true,
-    }),
-  });
-  state.loaded_source_kind = 'baseline';
-  state.loaded_source_id = String(payload?.baseline_id || baselineName).trim();
-  state.loaded_config_meta = {
-    config_id: state.loaded_source_id,
-    display_name: String(payload?.display_name || payload?.name || state.loaded_source_id),
-    name: String(payload?.name || payload?.display_name || state.loaded_source_id),
-    source_type: 'baseline',
-    owner: String(payload?.owner || 'manual'),
-    locked: true,
-    baseline_of: null,
-    legacy_config_id: null,
-    universe_mode: currentDraft?.universe_mode || null,
-    membership_mode: currentDraft?.universe?.membership_mode || null,
-  };
-  state.loaded_config_json = cloneJson(currentDraft);
-  state.loaded_config_snapshot = stableSerializeConfig(state.config_draft || currentDraft || {});
-  state.config_id = state.loaded_source_id;
-  syncWorkbenchConfigSourceToUrl(state.loaded_source_kind, state.loaded_source_id);
-  syncLoadHint(state.loaded_source_id);
-  syncConfigSourceUI();
-  addLog(`基线已保存：${state.loaded_source_id}${linkedExpId ? ` | 关联实验=${linkedExpId}` : ' | 无关联结果'}`);
-}
 
 function bindEvents() {
   document.querySelectorAll('#wbMode button').forEach((btn) => btn.addEventListener('click', () => setMode(btn.getAttribute('data-mode') || 'experiment')));
@@ -1115,23 +898,7 @@ function bindEvents() {
   document.querySelectorAll('.wb-analysis-tabs button[data-dock], .wb-dock-tabs button[data-dock]').forEach((btn) => {
     btn.addEventListener('click', () => switchDockTab(btn.getAttribute('data-dock') || 'explain'));
   });
-  document.querySelectorAll('#wbResultsLegacyRoot .wb-result-acc').forEach((acc) => {
-    const summary = acc.querySelector(':scope > .wb-result-acc-toggle');
-    const body = acc.querySelector(':scope > .wb-result-acc-body');
-    if (!summary || !body) return;
-    const syncResultAccordion = () => {
-      const isOpen = acc.classList.contains('wb-open');
-      body.hidden = !isOpen;
-      summary.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    };
-    syncResultAccordion();
-    if (acc.dataset.boundToggle === '1') return;
-    acc.dataset.boundToggle = '1';
-    summary.addEventListener('click', () => {
-      acc.classList.toggle('wb-open');
-      syncResultAccordion();
-    });
-  });
+  bindDesktopFallbackAccordions();
   byId('wbPreviewExec')?.addEventListener('click', async () => { try { await previewExecution(); } catch (e) { addLog(`execution失败: ${e.message || e}`); } });
   byId('wbCopyExec')?.addEventListener('click', copyExecJson);
   byId('wbChartMode')?.addEventListener('change', (e) => {
@@ -1219,7 +986,7 @@ function bindEvents() {
   byId('wbPriceAdj')?.addEventListener('change', updateAtrNote);
   byId('wbMatchPrice')?.addEventListener('change', updateAtrNote);
 
-  // Public surface only keeps experiment loading; replace any legacy config-load bindings.
+// Public surface only keeps experiment loading; replace any historical config-load bindings.
   const quickLoadBtn = byId('wbQuickLoad');
   if (quickLoadBtn) {
     const cleanQuickLoadBtn = quickLoadBtn.cloneNode(true);
@@ -1248,11 +1015,7 @@ function init() {
   bindEvents();
   setDrawerPanel('s1');
   switchMainTab('overview');
-  document.querySelectorAll('#wbResultsLegacyRoot .wb-result-acc').forEach((acc) => {
-    acc.classList.remove('wb-open');
-    const body = acc.querySelector(':scope > .wb-result-acc-body');
-    if (body) body.hidden = true;
-  });
+  resetDesktopFallbackAccordions();
   updateUniverseInputVisibility();
   renderRunHints();
   buildConfigDraft();
@@ -1267,96 +1030,4 @@ function init() {
 }
 
 // ── 实验历史面板 ──────────────────────────────────────────
-
-async function loadExperimentList() {
-  try {
-    const data = await apiRequestJson('experiments', '/api/backtest_v2/experiments');
-    renderHistoryPanel(data);
-  } catch (e) {
-    addLog(`加载实验列表失败: ${e?.message || e}`);
-    renderHistoryPanel([]);
-  }
-}
-
-function renderHistoryPanel(experiments) {
-  const container = byId('wbHistoryList');
-  if (!container) return;
-  if (!experiments || !experiments.length) {
-    state.compare_selected_ids = [];
-    const countEl = byId('wbHistoryCompareCount');
-    if (countEl) countEl.textContent = '已选 0';
-    container.innerHTML = `<div class="wb-empty" style="padding:24px 0">
-      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      <span>暂无实验记录，运行回测后将自动保存</span>
-    </div>`;
-    return;
-  }
-  const validIds = new Set((experiments || []).map((x) => String(x?.exp_id || '')));
-  state.compare_selected_ids = (state.compare_selected_ids || []).filter((id) => validIds.has(String(id)));
-  container.innerHTML = experiments.map((exp) => {
-    const label = esc(compactExperimentLabel(exp));
-    const expId = esc(exp.exp_id || '');
-    const totalReturn = pct(exp.total_return);
-    const maxDd = pct(exp.max_drawdown);
-    const sharpe = num(exp.sharpe, 2);
-    const trades = fmtInt(exp.trades);
-    const trClass = Number(exp.total_return) >= 0 ? 'wb-green-text' : 'wb-red-text';
-    const ddClass = 'wb-red-text';
-    const created = exp.created_at ? exp.created_at.replace('T', ' ').slice(0, 16) : '-';
-    const checked = (state.compare_selected_ids || []).includes(String(exp.exp_id || '')) ? 'checked' : '';
-    return `<div class="wb-history-card" data-exp-id="${expId}">
-      <div class="wb-hc-label">${label}</div>
-      <div class="wb-mini"><label><input type="checkbox" class="wb-hc-compare" data-exp="${expId}" ${checked}/> 加入对比</label></div>
-      <div class="wb-stat-row">
-        <div class="wb-stat-item"><span class="wb-stat-label">收益</span><span class="wb-stat-value ${trClass}">${totalReturn}</span></div>
-        <div class="wb-stat-item"><span class="wb-stat-label">回撤</span><span class="wb-stat-value ${ddClass}">${maxDd}</span></div>
-        <div class="wb-stat-item"><span class="wb-stat-label">夏普</span><span class="wb-stat-value">${sharpe}</span></div>
-        <div class="wb-stat-item"><span class="wb-stat-label">交易</span><span class="wb-stat-value">${trades}</span></div>
-      </div>
-      <div class="wb-hc-actions">
-        <button class="pill wb-hc-load" data-exp="${expId}">加载结果</button>
-      </div>
-      <div class="wb-hc-time">${created}</div>
-    </div>`;
-  }).join('');
-
-  // Bind load buttons
-  container.querySelectorAll('.wb-hc-load').forEach((btn) => btn.addEventListener('click', async (ev) => {
-    ev.stopPropagation();
-    const expId = btn.getAttribute('data-exp');
-    await loadHistoricalExperiment(expId);
-  }));
-  const syncCompareCount = () => {
-    const count = (state.compare_selected_ids || []).length;
-    const countEl = byId('wbHistoryCompareCount');
-    if (countEl) countEl.textContent = `已选 ${count}`;
-  };
-  container.querySelectorAll('.wb-hc-compare').forEach((cb) => cb.addEventListener('change', () => {
-    const expId = String(cb.getAttribute('data-exp') || '');
-    const selected = new Set(state.compare_selected_ids || []);
-    if (cb.checked) selected.add(expId);
-    else selected.delete(expId);
-    state.compare_selected_ids = Array.from(selected);
-    syncCompareCount();
-  }));
-  syncCompareCount();
-}
-
-async function loadHistoricalExperiment(expId) {
-  addLog(`加载历史实验: ${expId}`);
-  const manifest = await apiRequestJson('experiment_manifest', `/api/backtest_v2/experiments/${encodeURIComponent(expId)}/manifest`);
-  // Build a minimal result object so loadActiveArtifacts can work
-  const fakeResult = {
-    exp_id: expId,
-    experiment_id: expId,
-    status: 'OK',
-    artifacts: manifest?.artifacts || {},
-    manifest,
-  };
-  state.active_exp = fakeResult;
-  state.active_result = fakeResult;
-  await loadActiveArtifacts();
-  renderRightInspector();
-  addLog(`已加载历史实验: ${expId}`);
-}
 

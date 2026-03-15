@@ -1,0 +1,779 @@
+from __future__ import annotations
+
+import time
+from datetime import date
+from types import SimpleNamespace
+
+from pytest import MonkeyPatch
+
+from backend.core.core.types import Side
+from backend.core.engine_vector.signal_provider import DaySignals, ExitCounts
+from backend.core.stage_pipeline.adapters.daily_accounting import apply_daily_decision_diagnostics, prepare_daily_snapshot
+from backend.core.stage_pipeline.adapters.fill_accounting import apply_open_fills
+from backend.core.stage_pipeline.adapters.result_bridge import build_portfolio_backtest_result
+
+
+def test_apply_open_fills_sell_clears_position_and_updates_provider_state() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600000"): 10.0},
+        close_idx={(trading_day, "sh600000"): 10.1},
+        _slip_bps=0.001,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=1000.0,
+        _traded_value_today=0.0,
+        positions={"sh600000": 100},
+        position_avg_cost={"sh600000": 9.5},
+        holding_sources={
+            "sh600000": {
+                "entry_alpha_id": "breakout_55",
+                "entry_sleeve_id": "trend",
+                "entry_reason_code": "BREAKOUT_HIGH",
+                "entry_date": trading_day,
+            }
+        },
+        provider=SimpleNamespace(
+            last_sell_day={},
+            _risk_off_partial_state={"sh600000": True},
+            extra_clear_dicts=[{"sh600000": {"cached": True}}, {"sh600000": True}],
+            entry_day={"sh600000": trading_day},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.SELL,
+        symbol="SH600000",
+        qty=100,
+        reason_code="EXIT",
+        meta={"triggered_rule": "RULE_X", "break_streak": 2},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.positions == {}
+    assert runtime.position_avg_cost == {}
+    assert runtime.holding_sources == {}
+    assert round(runtime.cash, 3) == 1997.001
+    assert round(runtime._traded_value_today, 3) == 999.0
+    assert runtime.provider.last_sell_day["sh600000"] == trading_day
+    assert runtime.provider.extra_clear_dicts[0] == {}
+    assert runtime.provider.extra_clear_dicts[1] == {}
+    assert runtime.provider.entry_day == {}
+    assert runtime.trade_rows[0]["side"] == "SELL"
+    assert runtime.trade_rows[0]["reason_code"] == "EXIT"
+    assert runtime.trade_rows[0]["triggered_rule"] == "RULE_X"
+    assert runtime.trade_rows[0]["exit_owner"] == ""
+    assert runtime.trade_rows[0]["entry_alpha_id"] == "breakout_55"
+
+
+def test_apply_open_fills_buy_updates_avg_cost_and_buy_side_effects() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600001"): 10.0},
+        close_idx={(trading_day, "sh600001"): 10.2},
+        _slip_bps=0.001,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=2000.0,
+        _traded_value_today=0.0,
+        positions={},
+        position_avg_cost={},
+        holding_sources={},
+        provider=SimpleNamespace(
+            entry_day={},
+            entry_day_overwrite=False,
+            peak_state_on_buy={},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.BUY,
+        symbol="SH600001",
+        qty=100,
+        reason_code="ENTRY",
+        meta={"triggered_rule": "RULE_Y", "break_streak": 1},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.positions == {"sh600001": 100}
+    assert round(runtime.position_avg_cost["sh600001"], 2) == 10.01
+    assert round(runtime.cash, 2) == 998.0
+    assert round(runtime._traded_value_today, 2) == 1001.0
+    assert runtime.provider.entry_day["sh600001"] == trading_day
+    assert runtime.provider.peak_state_on_buy["sh600001"] == 10.2
+    assert runtime.holding_sources["sh600001"]["entry_alpha_id"] == ""
+    assert runtime.trade_rows[0]["side"] == "BUY"
+    assert runtime.trade_rows[0]["reason_code"] == "ENTRY"
+    assert runtime.trade_rows[0]["triggered_rule"] == "RULE_Y"
+
+
+def test_apply_open_fills_buy_persists_entry_source_fields() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600002"): 12.0},
+        close_idx={(trading_day, "sh600002"): 12.1},
+        _slip_bps=0.0,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=5000.0,
+        _traded_value_today=0.0,
+        positions={},
+        position_avg_cost={},
+        holding_sources={},
+        provider=SimpleNamespace(
+            entry_day={},
+            entry_day_overwrite=False,
+            peak_state_on_buy={},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.BUY,
+        symbol="SH600002",
+        qty=100,
+        reason_code="ENTRY",
+        meta={
+            "entry_alpha_id": "rsi_reversal",
+            "entry_sleeve_id": "mr",
+            "entry_reason_code": "MR_RSI_OVERSOLD_BUY",
+        },
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.holding_sources["sh600002"]["entry_alpha_id"] == "rsi_reversal"
+    assert runtime.holding_sources["sh600002"]["entry_sleeve_id"] == "mr"
+    assert runtime.trade_rows[0]["entry_alpha_id"] == "rsi_reversal"
+    assert runtime.trade_rows[0]["entry_reason_code"] == "MR_RSI_OVERSOLD_BUY"
+
+
+def test_apply_open_fills_buy_persists_entry_breakout_state_for_provider_exits() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600002"): 12.0},
+        close_idx={(trading_day, "sh600002"): 12.1},
+        _slip_bps=0.0,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=5000.0,
+        _traded_value_today=0.0,
+        positions={},
+        position_avg_cost={},
+        holding_sources={},
+        provider=SimpleNamespace(
+            entry_day={},
+            entry_day_overwrite=False,
+            peak_state_on_buy={},
+            entry_bar_index={},
+            entry_breakout_floor_raw={},
+        ),
+        request=SimpleNamespace(
+            data_bundle=SimpleNamespace(
+                trading_days=[date(2026, 3, 1), trading_day, date(2026, 3, 3)],
+            )
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.BUY,
+        symbol="SH600002",
+        qty=100,
+        reason_code="ENTRY",
+        meta={
+            "entry_breakout_floor_raw": 11.8,
+        },
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.provider.entry_day["sh600002"] == trading_day
+    assert runtime.provider.entry_bar_index["sh600002"] == 1
+    assert runtime.provider.entry_breakout_floor_raw["sh600002"] == 11.8
+
+
+def test_apply_open_fills_sell_preserves_global_risk_override_marker() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600003"): 8.0},
+        close_idx={(trading_day, "sh600003"): 8.1},
+        _slip_bps=0.0,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=1000.0,
+        _traded_value_today=0.0,
+        positions={"sh600003": 100},
+        position_avg_cost={"sh600003": 7.5},
+        holding_sources={
+            "sh600003": {
+                "entry_alpha_id": "breakout_55",
+                "entry_sleeve_id": "trend",
+                "entry_reason_code": "BREAKOUT_HIGH",
+                "entry_date": trading_day,
+            }
+        },
+        provider=SimpleNamespace(
+            last_sell_day={},
+            extra_clear_dicts=[],
+            entry_day={"sh600003": trading_day},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.SELL,
+        symbol="SH600003",
+        qty=100,
+        reason_code="RISK_OFF_EXIT",
+        meta={"exit_owner": "global_risk_override"},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.trade_rows[0]["exit_owner"] == "global_risk_override"
+    assert runtime.trade_rows[0]["entry_alpha_id"] == "breakout_55"
+
+
+def test_apply_open_fills_partial_sell_keeps_residual_position() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600013"): 8.0},
+        close_idx={(trading_day, "sh600013"): 8.1},
+        _slip_bps=0.0,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=1000.0,
+        _traded_value_today=0.0,
+        positions={"sh600013": 1000},
+        position_avg_cost={"sh600013": 7.5},
+        holding_sources={
+            "sh600013": {
+                "entry_alpha_id": "breakout_55",
+                "entry_sleeve_id": "trend",
+                "entry_reason_code": "BREAKOUT_HIGH",
+                "entry_date": trading_day,
+            }
+        },
+        provider=SimpleNamespace(
+            last_sell_day={},
+            _risk_off_partial_state={},
+            extra_clear_dicts=[],
+            entry_day={"sh600013": trading_day},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.SELL,
+        symbol="SH600013",
+        qty=500,
+        reason_code="RISK_OFF_EXIT",
+        meta={"partial_exit": True, "risk_off_exit_partial_pct": 0.5},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.positions["sh600013"] == 500
+    assert runtime.position_avg_cost["sh600013"] == 7.5
+    assert runtime.holding_sources["sh600013"]["entry_alpha_id"] == "breakout_55"
+    assert runtime.provider.last_sell_day == {}
+    assert runtime.provider._risk_off_partial_state == {}
+    assert runtime.provider.entry_day["sh600013"] == trading_day
+    assert runtime.trade_rows[0]["qty"] == 500
+
+
+def test_apply_open_fills_partial_sell_marks_state_after_actual_fill() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600014"): 8.0},
+        close_idx={(trading_day, "sh600014"): 8.1},
+        _slip_bps=0.0,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=1000.0,
+        _traded_value_today=0.0,
+        positions={"sh600014": 1000},
+        position_avg_cost={"sh600014": 7.5},
+        holding_sources={},
+        provider=SimpleNamespace(
+            last_sell_day={},
+            _risk_off_partial_state={},
+            extra_clear_dicts=[],
+            entry_day={"sh600014": trading_day},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.SELL,
+        symbol="SH600014",
+        qty=500,
+        reason_code="RISK_OFF_EXIT",
+        meta={
+            "partial_exit": True,
+            "risk_off_exit_partial_pct": 0.5,
+            "risk_off_partial_mark_on_fill": True,
+        },
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.positions["sh600014"] == 500
+    assert runtime.provider._risk_off_partial_state["sh600014"] is True
+
+
+def test_apply_open_fills_buy_from_flat_clears_stale_partial_state() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600015"): 10.0},
+        close_idx={(trading_day, "sh600015"): 10.2},
+        _slip_bps=0.001,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=2000.0,
+        _traded_value_today=0.0,
+        positions={},
+        position_avg_cost={},
+        holding_sources={},
+        provider=SimpleNamespace(
+            _risk_off_partial_state={"sh600015": True},
+            entry_day={},
+            entry_day_overwrite=False,
+            peak_state_on_buy={},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.BUY,
+        symbol="SH600015",
+        qty=100,
+        reason_code="ENTRY",
+        meta={},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.positions["sh600015"] == 100
+    assert runtime.provider._risk_off_partial_state == {}
+
+
+def test_apply_open_fills_skips_sell_on_suspended_zero_liquidity_bar() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600004"): 8.0},
+        close_idx={(trading_day, "sh600004"): 8.1},
+        volume_idx={(trading_day, "sh600004"): 0.0},
+        amount_idx={(trading_day, "sh600004"): 0.0},
+        suspended_idx={(trading_day, "sh600004"): True},
+        _slip_bps=0.0,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=1000.0,
+        _traded_value_today=0.0,
+        positions={"sh600004": 100},
+        position_avg_cost={"sh600004": 7.5},
+        holding_sources={"sh600004": {"entry_reason_code": "BREAKOUT_HIGH"}},
+        deferred_sell_orders=[],
+        provider=SimpleNamespace(
+            last_sell_day={},
+            extra_clear_dicts=[],
+            entry_day={"sh600004": trading_day},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.SELL,
+        symbol="SH600004",
+        qty=100,
+        reason_code="ATR_TRAIL_EXIT",
+        meta={"triggered_rule": "ATR_TRAIL_EXIT"},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.cash == 1000.0
+    assert runtime._traded_value_today == 0.0
+    assert runtime.positions == {"sh600004": 100}
+    assert runtime.trade_rows == []
+    assert runtime.provider.last_sell_day == {}
+    assert runtime.deferred_sell_orders == [
+        {
+            "side": Side.SELL,
+            "symbol": "sh600004",
+            "qty": 100,
+            "reason_code": "ATR_TRAIL_EXIT",
+            "meta": {
+                "triggered_rule": "ATR_TRAIL_EXIT",
+                "entry_reason_code": "BREAKOUT_HIGH",
+                "deferred_execution": True,
+                "deferred_from_date": "2026-03-02",
+                "last_deferred_date": "2026-03-02",
+            },
+        }
+    ]
+
+
+def test_apply_open_fills_skips_buy_on_zero_turnover_bar() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600005"): 10.0},
+        close_idx={(trading_day, "sh600005"): 10.2},
+        volume_idx={(trading_day, "sh600005"): 1200.0},
+        amount_idx={(trading_day, "sh600005"): 0.0},
+        suspended_idx={(trading_day, "sh600005"): False},
+        _slip_bps=0.001,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=2000.0,
+        _traded_value_today=0.0,
+        positions={},
+        position_avg_cost={},
+        holding_sources={},
+        provider=SimpleNamespace(
+            entry_day={},
+            entry_day_overwrite=False,
+            peak_state_on_buy={},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.BUY,
+        symbol="SH600005",
+        qty=100,
+        reason_code="ENTRY",
+        meta={"triggered_rule": "RULE_Y"},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.cash == 2000.0
+    assert runtime.positions == {}
+    assert runtime.trade_rows == []
+
+
+def test_apply_open_fills_skips_sell_on_limit_down_bar() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600006"): 9.0},
+        close_idx={(trading_day, "sh600006"): 9.1},
+        volume_idx={(trading_day, "sh600006"): 50000.0},
+        amount_idx={(trading_day, "sh600006"): 450000.0},
+        suspended_idx={(trading_day, "sh600006"): False},
+        limit_down_idx={(trading_day, "sh600006"): 9.0},
+        _slip_bps=0.001,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=1000.0,
+        _traded_value_today=0.0,
+        positions={"sh600006": 100},
+        position_avg_cost={"sh600006": 7.0},
+        holding_sources={"sh600006": {"entry_reason_code": "BREAKOUT_HIGH"}},
+        deferred_sell_orders=[],
+        provider=SimpleNamespace(
+            last_sell_day={},
+            extra_clear_dicts=[],
+            entry_day={"sh600006": trading_day},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.SELL,
+        symbol="SH600006",
+        qty=100,
+        reason_code="ATR_TRAIL_EXIT",
+        meta={"triggered_rule": "ATR_TRAIL_EXIT"},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.cash == 1000.0
+    assert runtime.positions == {"sh600006": 100}
+    assert runtime.trade_rows == []
+    assert runtime.deferred_sell_orders[0]["symbol"] == "sh600006"
+    assert runtime.deferred_sell_orders[0]["qty"] == 100
+
+
+def test_apply_open_fills_skips_buy_on_tick_rounded_limit_up_bar() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sz002261"): 26.98},
+        close_idx={(trading_day, "sz002261"): 25.27},
+        volume_idx={(trading_day, "sz002261"): 50000.0},
+        amount_idx={(trading_day, "sz002261"): 450000.0},
+        suspended_idx={(trading_day, "sz002261"): False},
+        limit_up_idx={(trading_day, "sz002261"): 26.983},
+        _slip_bps=0.001,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=200000.0,
+        _traded_value_today=0.0,
+        positions={},
+        position_avg_cost={},
+        holding_sources={},
+        provider=SimpleNamespace(
+            entry_day={},
+            entry_day_overwrite=False,
+            peak_state_on_buy={},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.BUY,
+        symbol="SZ002261",
+        qty=100,
+        reason_code="BREAKOUT_HIGH",
+        meta={"triggered_rule": "BREAKOUT_HIGH"},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.cash == 200000.0
+    assert runtime.positions == {}
+    assert runtime.trade_rows == []
+
+
+def test_apply_open_fills_skips_sell_on_tick_rounded_limit_down_bar() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sz002797"): 6.24},
+        close_idx={(trading_day, "sz002797"): 6.71},
+        volume_idx={(trading_day, "sz002797"): 50000.0},
+        amount_idx={(trading_day, "sz002797"): 450000.0},
+        suspended_idx={(trading_day, "sz002797"): False},
+        limit_down_idx={(trading_day, "sz002797"): 6.237},
+        _slip_bps=0.001,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=1000.0,
+        _traded_value_today=0.0,
+        positions={"sz002797": 100},
+        position_avg_cost={"sz002797": 7.0},
+        holding_sources={"sz002797": {"entry_reason_code": "BREAKOUT_HIGH"}},
+        deferred_sell_orders=[],
+        provider=SimpleNamespace(
+            last_sell_day={},
+            extra_clear_dicts=[],
+            entry_day={"sz002797": trading_day},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.SELL,
+        symbol="SZ002797",
+        qty=100,
+        reason_code="ATR_STOP_LOSS",
+        meta={"triggered_rule": "ATR_STOP_LOSS"},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.cash == 1000.0
+    assert runtime.positions == {"sz002797": 100}
+    assert runtime.trade_rows == []
+    assert runtime.deferred_sell_orders[0]["symbol"] == "sz002797"
+    assert runtime.deferred_sell_orders[0]["qty"] == 100
+
+
+def test_prepare_daily_snapshot_updates_nav_trackers_and_daily_row() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        cash=1000.0,
+        positions={"sh600000": 100},
+        close_idx={(trading_day, "sh600000"): 10.0},
+        peak_nav=900.0,
+        prev_nav=950.0,
+        _traded_value_today=95.0,
+        daily_rows=[],
+        route_id="strict_inline_runtime",
+        _compute_day_controls=lambda *_args: {
+            "effective_max_positions": 5,
+            "dd_state": "NORMAL",
+            "market_state": "",
+            "trade_mode": "",
+            "benchmark_regime_on": True,
+            "risk_on_today": True,
+        },
+    )
+
+    snapshot = prepare_daily_snapshot(runtime, day_index=0, day=trading_day)
+
+    assert snapshot.nav == 2000.0
+    assert snapshot.market_value == 1000.0
+    assert snapshot.controls["effective_max_positions"] == 5
+    assert runtime.prev_nav == 2000.0
+    assert runtime.peak_nav == 2000.0
+    assert runtime.daily_rows[0]["date"] == "2026-03-02"
+    assert runtime.daily_rows[0]["positions_count"] == 1
+    assert round(runtime.daily_rows[0]["turnover_pct"], 2) == 0.10
+
+
+def test_apply_daily_decision_diagnostics_populates_multifactor_sorting_fields() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        daily_rows=[
+            {
+                "date": "2026-03-02",
+                "positions_count": 0,
+                "positions_count_end_of_day": 0,
+                "candidates_count": 0,
+                "selected_count": 0,
+                "buy_slots_before_buy": 0,
+                "buy_slots_after_sell": 0,
+                "buy_candidate_count": 0,
+                "after_held_filter_count": 0,
+                "positions_before_sell": 0,
+                "sells_executed_count": 0,
+                "positions_after_sell": 0,
+                "buy_slots_calculated": 0,
+                "raw_buy_signal_count": 0,
+                "raw_alpha_signal_count": 0,
+                "composed_buy_signal_count": 0,
+                "composed_sell_signal_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "candidates_after_held_filter_count": 0,
+                "sorting_triggered": False,
+                "mf_rank_triggered": 0,
+                "mf_rank_applied": 0,
+                "mf_candidates_when_triggered": 0,
+                "mf_topk_reject_count": 0,
+                "mf_concentrated_selected_count": 0,
+                "mf_gate_on": 0,
+                "strong_risk_on": 0,
+                "mf_rank_suppressed_by_strong_gate": 0,
+                "same_symbol_conflict_count": 0,
+                "sleeve_budget_reject_count": 0,
+                "source_only_exit_count": 0,
+                "global_risk_override_count": 0,
+            }
+        ],
+        _current_day={"controls": {"effective_max_positions": 2}},
+        positions={},
+        composition_audit_rows=[],
+    )
+    buy_signal = SimpleNamespace(symbol="SH600001", meta={"alpha_id": "breakout_55", "compose_score": 0.91})
+    day_signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        raw_alpha_signals=[buy_signal],
+        composed_buy_signals=[buy_signal],
+        composed_sell_signals=[],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={"sh600001": 0.91},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={
+            "raw_buy_signal_count": 1,
+            "raw_alpha_signal_count": 1,
+            "composed_buy_signal_count": 1,
+            "composed_sell_signal_count": 0,
+            "composition_enabled": False,
+            "enable_multifactor_rank": True,
+        },
+    )
+
+    apply_daily_decision_diagnostics(
+        runtime,
+        day_signals=day_signals,
+        debug_plan={
+            "buy_candidates_count": 3,
+            "buy_slots": 1,
+            "selected_symbols": ["sh600001"],
+            "after_sleeve_budget_count": 1,
+            "mf_rank_triggered": True,
+            "mf_rank_applied": True,
+            "mf_candidates_when_triggered": 3,
+            "mf_topk_reject_count": 2,
+            "mf_concentrated_selected_count": 1,
+            "mf_gate_on": False,
+        },
+    )
+
+    daily_row = runtime.daily_rows[-1]
+    assert daily_row["sorting_triggered"] is True
+    assert daily_row["mf_rank_triggered"] == 1
+    assert daily_row["mf_rank_applied"] == 1
+    assert daily_row["mf_candidates_when_triggered"] == 3
+    assert daily_row["mf_topk_reject_count"] == 2
+    assert daily_row["mf_concentrated_selected_count"] == 1
+    assert daily_row["mf_gate_on"] == 0
+    assert daily_row["strong_risk_on"] == 0
+    assert daily_row["mf_rank_suppressed_by_strong_gate"] == 1
+
+
+def test_build_portfolio_backtest_result_preserves_metrics_shape() -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_compute_metrics(*args, **kwargs):
+        captured["daily_df"] = args[0]
+        captured["trades_df"] = args[1]
+        captured["kwargs"] = kwargs
+        return {"audit": {}, "baseline": "ok"}
+
+    monkeypatch = MonkeyPatch()
+    monkeypatch.setattr(
+        "backend.core.stage_pipeline.adapters.result_bridge._compute_metrics",
+        _fake_compute_metrics,
+    )
+    try:
+        runtime = SimpleNamespace(
+            daily_rows=[{"date": "2026-03-02", "nav": 1.0, "drawdown": 0.0}],
+            trade_rows=[{"date": "2026-03-02", "symbol": "sh600000", "side": "BUY"}],
+            candidate_rows=[{"date": "2026-03-02", "symbol": "sh600000"}],
+            request=SimpleNamespace(max_positions=5, enable_strength_rank=False, strength_ma=120),
+            provider=SimpleNamespace(
+                precompute_seconds=1.25,
+                blocked_by_trend_count=3,
+                total_buy_signals=7,
+                diag_reason_counts={"ATR_STOP_LOSS": 2, "TREND_EXIT_MA20": 1},
+            ),
+            route_id="provider_breakout_runtime",
+            _simulation_t0=time.perf_counter() - 2.0,
+            market_filter_bull_days=11,
+            market_filter_bear_days=2,
+            market_state_trans_down_days=3,
+            market_state_trans_up_days=4,
+            trade_mode_main_days=5,
+            trade_mode_light_days=6,
+            trade_mode_notrade_days=7,
+        )
+
+        result = build_portfolio_backtest_result(runtime)
+    finally:
+        monkeypatch.undo()
+
+    assert list(captured["daily_df"]["date"]) == ["2026-03-02"]
+    assert list(captured["trades_df"]["symbol"]) == ["sh600000"]
+    assert result.metrics["baseline"] == "ok"
+    assert result.metrics["notes"] == "stage_pipeline_bridge=true"
+    assert result.metrics["precompute_seconds"] == 1.25
+    assert result.metrics["blocked_by_trend_count"] == 3
+    assert result.metrics["exit_atr_stop_count"] == 2
+    assert result.metrics["exit_ma20_count"] == 1
+    assert result.metrics["trade_mode_notrade_days"] == 7

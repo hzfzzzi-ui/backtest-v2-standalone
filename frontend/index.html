@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <title>A股回测系统</title>
-  <link rel="stylesheet" href="assets/css/workbench.css?v=20260312_funnelfix01" />
+  <link rel="stylesheet" href="assets/css/workbench.css?v=20260315_runtimeboundary01" />
 </head>
 <body>
   <div class="wb-app">
@@ -294,7 +294,7 @@
             <div class="wb-mini wb-gap-top"><span class="wb-badge-unimpl">未实现</span> 主实验执行层当前只消费 `min_price`，`max` 仍仅保留在草稿/报告口径中。</div>
           </div>
 
-          <!-- Hidden compat -->
+          <!-- Hidden carry-over fields -->
           <input id="wbUniverseLimit" type="number" value="1000" hidden />
           <input id="wbAtrRange" value="0,100" hidden />
 
@@ -699,7 +699,14 @@
         <!-- scrollable content area -->
         <div class="wb-main-content wb-scrollbox">
           <section id="wbResultsWorkbenchMount" class="wb-results-workbench-mount" hidden></section>
-          <section id="wbResultsLegacyRoot" class="wb-results-legacy-root">
+          <section
+            id="wbResultsFallbackRoot"
+            class="wb-results-fallback-root"
+            hidden
+            inert
+            aria-hidden="true"
+            data-fallback-mode="disabled"
+          >
           <section id="wbSummaryBar" class="wb-result-overview">
             <article class="wb-overview-card">
               <div class="wb-overview-title">运行概览</div>
@@ -919,15 +926,25 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="assets/js/results-workbench-bridge.js?v=20260312_frontendfix06"></script>
-  <script src="assets/js/backtest_v2.js?v=20260312_frontendfix06"></script>
-  <script src="assets/js/api-client.js?v=20260312_frontendfix06"></script>
-  <script src="assets/js/ui-controls.js?v=20260312_frontendfix06"></script>
-  <script src="assets/js/charts.js?v=20260312_frontendfix08"></script>
-  <script src="assets/js/artifacts.js?v=20260312_frontendfix06"></script>
+  <script src="assets/js/results-workbench-bridge.js?v=20260315_runtimeboundary01"></script>
+  <script src="assets/js/state/workbench-state.js?v=20260315_runtimeboundary01"></script>
+  <script src="assets/js/state/run-session-state.js?v=20260315_runtimeboundary01"></script>
+  <script src="assets/js/state/active-experiment-state.js?v=20260315_runtimeboundary01"></script>
+  <script src="assets/js/state/view-state.js?v=20260315_runtimeboundary01"></script>
+  <script src="assets/js/pages/desktop-research-page.js?v=20260315_runtimeboundary01"></script>
+  <script src="assets/js/backtest_v2.js?v=20260315_runtimeboundary01"></script>
+  <script src="assets/js/api-client.js?v=20260315_runtimeboundary01"></script>
+  <script src="assets/js/pages/desktop-config-controls.js?v=20260315_runtimeboundary02"></script>
+  <script src="assets/js/pages/desktop-history-panel.js?v=20260315_runtimeboundary03"></script>
+  <script src="assets/js/pages/desktop-load-controls.js?v=20260315_runtimeboundary04"></script>
+  <script src="assets/js/pages/desktop-save-controls.js?v=20260315_runtimeboundary05"></script>
+  <script src="assets/js/ui-controls.js?v=20260315_runtimeboundary01"></script>
+  <script src="assets/js/pages/desktop-run-controls.js?v=20260315_runtimeboundary05"></script>
+  <script src="assets/js/charts.js?v=20260315_runtimeboundary01"></script>
+  <script src="assets/js/artifacts.js?v=20260315_runtimeboundary01"></script>
   <script src="assets/js/compare.js?v=20260307_9stage_fix"></script>
   <script src="assets/js/report.js?v=20260309_stageflow59"></script>
-  <script src="assets/dist/results-workbench-vue-shell.js?v=20260312_funnelfix01"></script>
+  <script src="assets/dist/results-workbench-vue-shell.js?v=20260315_runtimeboundary01"></script>
   <script>init();</script>
 </body>
 </html>

@@ -5,7 +5,10 @@ from typing import Any
 
 import pandas as pd
 
-from backend.core.portfolio.portfolio_builder import PortfolioBacktestResult, _compute_metrics
+from backend.core.portfolio.metrics import compute_backtest_metrics
+from backend.core.portfolio.types import PortfolioBacktestResult
+
+_compute_metrics = compute_backtest_metrics
 
 
 def _merge_count_map(target: dict[str, int], source: dict[str, Any] | None) -> dict[str, int]:
@@ -142,7 +145,7 @@ def build_portfolio_backtest_result(runtime: Any) -> PortfolioBacktestResult:
     )
     metrics["simulation_seconds"] = float(time.perf_counter() - runtime._simulation_t0)
     metrics["precompute_seconds"] = float(getattr(runtime.provider, "precompute_seconds", 0.0) or 0.0)
-    metrics["notes"] = "stage_pipeline_legacy_adapter=true"
+    metrics["notes"] = "stage_pipeline_bridge=true"
     augment_metrics(runtime, metrics)
     return PortfolioBacktestResult(
         daily=daily_df,

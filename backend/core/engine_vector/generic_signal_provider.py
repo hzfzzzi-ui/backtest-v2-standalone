@@ -13,13 +13,13 @@ import pandas as pd
 from backend.core.config.models import ExitConfig
 from backend.core.core.models import Position, Signal
 from backend.core.core.types import Side
+from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
 from backend.core.engine_vector.signal_provider import (
     DayContext,
     DaySignals,
     ExitCounts,
     evaluate_engine_exits,
 )
-from backend.core.portfolio.portfolio_builder import resolve_mf_gate_on_today
 
 
 # ---------------------------------------------------------------------------

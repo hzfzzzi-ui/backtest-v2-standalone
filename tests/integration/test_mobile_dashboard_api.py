@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from backend.api.endpoints import mobile_dashboard as mobile_mod
+from backend.api.mobile import impl as mobile_mod
 
 
 def _write_json(path, payload) -> None:

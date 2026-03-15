@@ -61,7 +61,7 @@ def _apply_variant(base_wb: dict[str, Any], variant: str) -> tuple[dict[str, Any
     if variant == "baseline_off":
         mf["enabled"] = False
         params = {"enabled": False}
-    elif variant == "legacy_2state":
+    elif variant == "two_state_v0":
         mf.update({"enabled": True, "bull_multiplier": 1.2, "light_multiplier": 0.6})
         mf.pop("trans_down_multiplier", None)
         mf.pop("trans_up_multiplier", None)
@@ -170,7 +170,7 @@ def main() -> None:
 
     wb_payload = _load_json(ROOT / "outputs" / "configs" / "cfg_da4a2be7f3b7.json")
     wb_cfg = dict(wb_payload.get("config_json") or {})
-    variants = ["baseline_off", "legacy_2state", "segmented_v1", "segmented_v2", "segmented_v3"]
+    variants = ["baseline_off", "two_state_v0", "segmented_v1", "segmented_v2", "segmented_v3"]
     rows: list[dict[str, Any]] = []
 
     for v in variants:

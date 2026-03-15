@@ -2,9 +2,7 @@
 
 ## Purpose
 定义结果工作台成为结果区唯一渲染 owner 后的最终契约。
-
 ## Requirements
-
 ### Requirement: 结果工作台必须成为结果区唯一渲染 owner
 当 Vue 结果工作台挂载成功后，系统 MUST 仅由结果工作台渲染结果概览、KPI、主图、个股排名、9 阶段漏斗、交易明细和 AI Markdown 报告。legacy 脚本 SHALL NOT 继续直接写入可见结果区 DOM。
 
@@ -57,3 +55,17 @@
 - **WHEN** 用户在 100% 缩放下展开个股排名、9 阶段漏斗或交易明细
 - **THEN** 面板内容 SHALL 完整显示
 - **THEN** 下面的结果区块 SHALL 被正常推开而不是覆盖
+
+### Requirement: fallback 结果容器必须降级为显式受控的诊断路径
+系统 MUST 将 fallback 结果容器降级为显式受控的诊断路径。正常生产路径下，Vue results workbench MUST 成为唯一可见结果 owner；fallback 容器默认 MUST 处于 `hidden + inert` 状态。
+
+#### Scenario: Vue workbench 正常挂载
+- **WHEN** 页面成功挂载 Vue results workbench
+- **THEN** fallback 结果容器 MUST 保持隐藏且不可交互
+- **THEN** `backtest_v2.js`、`artifacts.js` 等旧脚本 SHALL NOT 继续向 fallback 容器写入可见结果 DOM
+
+#### Scenario: 显式进入诊断模式
+- **WHEN** 用户或开发者通过显式诊断开关进入 fallback 模式，或 workbench 挂载失败且状态中心已记录失败原因
+- **THEN** 系统 MAY 启用 fallback 容器
+- **THEN** fallback 激活原因 MUST 可被状态中心或诊断输出观察
+

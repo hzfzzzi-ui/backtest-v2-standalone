@@ -6,8 +6,9 @@ from typing import Any
 import numpy as np
 
 from backend.core.core.types import Side
-from backend.core.portfolio.portfolio_builder import build_rebalance_orders, resolve_mf_gate_on_today
-from backend.core.stage_pipeline.contracts import StageOutputs
+from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
+from backend.core.portfolio.portfolio_builder import build_rebalance_orders
+from backend.core.stage_pipeline.contracts import ExecutionIntent, StageOutputs
 
 
 def _normalized_text(value: Any) -> str:
@@ -357,9 +358,9 @@ def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
         debug_plan=debug_plan,
         weight_mode=runtime._weight_mode,
         min_positions=runtime._min_positions_cfg,
-        tilt_strength=runtime._tilt_strength,
-        tilt_top_n=runtime._tilt_top_n,
-        tilt_bottom_n=runtime._tilt_bottom_n,
+        tilt_strength=float(getattr(runtime, "_tilt_strength", 0.0) or 0.0),
+        tilt_top_n=int(getattr(runtime, "_tilt_top_n", 0) or 0),
+        tilt_bottom_n=int(getattr(runtime, "_tilt_bottom_n", 0) or 0),
         atr_close_map=atr_close_map,
         min_trade_price=runtime._min_trade_price,
         decision_close_map={
@@ -421,15 +422,38 @@ def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
         list(getattr(runtime, "deferred_sell_orders", []) or ()),
     )
     setattr(runtime, "deferred_sell_orders", [])
+    execution_intent = ExecutionIntent(
+        as_of_date=day,
+        buy_candidates=tuple(str(sig.symbol).lower() for sig in final_buy_signals),
+        sell_candidates=tuple(str(sig.symbol).lower() for sig in day_signals.sell_signals),
+        hold_overrides=tuple(runtime._current_day["holding_symbols"]),
+        risk_flags=tuple(
+            flag
+            for flag in (
+                "RISK_ON" if bool(controls.get("risk_on_today")) else "RISK_OFF",
+                "MF_GATE_ON" if bool(mf_gate_on_today) else "MF_GATE_OFF",
+                "STRONG_RISK_ON" if bool(day_signals.strong_risk_on) else "",
+            )
+            if flag
+        ),
+        ranking_payload={
+            "selected_symbols": list((debug_plan or {}).get("selected_symbols", []) or []),
+            "reject_reason_counts": dict((debug_plan or {}).get("reject_reason_counts", {}) or {}),
+            "effective_max_positions": int(controls["effective_max_positions"]),
+        },
+    )
     return StageOutputs(
         stage_key="S7",
         holding_symbols=runtime._current_day["holding_symbols"],
         buy_symbols=tuple(od["symbol"] for od in next_day_orders if od["side"] == Side.BUY),
         sell_symbols=tuple(od["symbol"] for od in next_day_orders if od["side"] == Side.SELL),
-        payload={"next_day_orders": tuple(next_day_orders)},
+        payload={
+            "next_day_orders": tuple(next_day_orders),
+            "execution_intent": execution_intent.to_payload(),
+        },
         reason_counts=dict((debug_plan or {}).get("reject_reason_counts", {}) or {}),
         summary_fragment={
-            "mode": "legacy_order_planner",
+            "mode": "bridge_order_planner",
             "portfolio_mode": str(getattr(runtime, "_portfolio_mode", "") or ""),
             "buy_orders_count": sum(1 for od in next_day_orders if od["side"] == Side.BUY),
             "sell_orders_count": sum(1 for od in next_day_orders if od["side"] == Side.SELL),

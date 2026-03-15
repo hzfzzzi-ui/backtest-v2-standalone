@@ -1,13 +1,13 @@
-from .legacy_adapter import (
-    LegacyStagePipelineBacktestResult,
-    LegacyStagePipelineRequest,
-    build_legacy_stage_handlers,
-    run_legacy_stage_pipeline_backtest,
+from .bridge_adapter import (
+    StagePipelineBridgeBacktestResult,
+    StagePipelineBridgeRequest,
+    build_stage_bridge_handlers,
+    run_stage_pipeline_bridge_backtest,
 )
 
 __all__ = [
-    "LegacyStagePipelineBacktestResult",
-    "LegacyStagePipelineRequest",
-    "build_legacy_stage_handlers",
-    "run_legacy_stage_pipeline_backtest",
+    "StagePipelineBridgeBacktestResult",
+    "StagePipelineBridgeRequest",
+    "build_stage_bridge_handlers",
+    "run_stage_pipeline_bridge_backtest",
 ]

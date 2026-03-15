@@ -1,0 +1,77 @@
+study_id: v10/quality_then_residual_s3
+title: V10 质量优先残差 S3
+baseline_id: baseline_V10
+hypothesis: 先用质量门过滤，再用残差排序，可能在 A 股趋势股里减少劣质突破并改善回撤。
+change_scope:
+  modules_modified:
+    - signal_generation.ranking.score_source_mode
+    - signal_generation.ranking.breakout_quality_gate_min_score
+    - signal_generation.ranking.breakout_quality_margin_cap_pct
+    - signal_generation.ranking.breakout_quality_fade_cap_pct
+    - signal_generation.ranking.breakout_quality_open_gap_cap_pct
+variants:
+  - name: B0
+  - name: S3_A_Q55
+    config_patches:
+      - path: signal_generation.ranking.score_source_mode
+        value: QUALITY_THEN_RESIDUAL
+      - path: signal_generation.ranking.breakout_quality_gate_min_score
+        value: 0.55
+      - path: signal_generation.ranking.breakout_quality_margin_cap_pct
+        value: 0.08
+      - path: signal_generation.ranking.breakout_quality_fade_cap_pct
+        value: 0.035
+      - path: signal_generation.ranking.breakout_quality_open_gap_cap_pct
+        value: 0.04
+  - name: S3_B_Q65
+    config_patches:
+      - path: signal_generation.ranking.score_source_mode
+        value: QUALITY_THEN_RESIDUAL
+      - path: signal_generation.ranking.breakout_quality_gate_min_score
+        value: 0.65
+      - path: signal_generation.ranking.breakout_quality_margin_cap_pct
+        value: 0.08
+      - path: signal_generation.ranking.breakout_quality_fade_cap_pct
+        value: 0.035
+      - path: signal_generation.ranking.breakout_quality_open_gap_cap_pct
+        value: 0.04
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-03-01"
+    end: "2026-03-01"
+    periods:
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2019_2021_bull: ["2019-01-02", "2021-02-18"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+  - key: "0717"
+    role: hard_gate
+    start: "2007-01-15"
+    end: "2017-01-15"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2010_2013_range: ["2010-01-04", "2013-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2015_2017_post_crash: ["2015-06-15", "2017-01-13"]
+  - key: "0726"
+    role: audit
+    start: "2007-01-15"
+    end: "2026-03-01"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+hard_gates:
+  min_cagr: 0.1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: outputs/baselines/baseline_V10/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

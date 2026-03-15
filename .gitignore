@@ -34,7 +34,12 @@ pgdata/
 # Claude / Codex agent state
 .claude/
 .codex/
+.cursor/
 
 # Temp files
 .tmp_*
+.tmp-edge-profile/
+test-results/
+tmp-*
+tmp_*
 data_cache/

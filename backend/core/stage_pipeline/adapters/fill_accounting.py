@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from backend.core.core.types import Side
 from backend.core.data.price_limits import round_price_to_tick
+from backend.core.stage_pipeline.contracts import AccountingSnapshot
 
 
 def normalize_order_payload(raw_order: Any) -> dict[str, Any]:
@@ -68,7 +69,24 @@ def _defer_sell_order(runtime: Any, day: date, order: dict[str, Any], qty: int) 
     )
 
 
+def capture_accounting_snapshot(
+    runtime: Any,
+    *,
+    filled_orders: Sequence[Mapping[str, Any]] | None = None,
+    daily_marks: Mapping[str, Any] | None = None,
+) -> AccountingSnapshot:
+    return AccountingSnapshot(
+        cash=float(getattr(runtime, "cash", 0.0) or 0.0),
+        positions={str(symbol).lower(): int(qty or 0) for symbol, qty in dict(getattr(runtime, "positions", {}) or {}).items()},
+        filled_orders=tuple(dict(item) for item in list(filled_orders or ())),
+        trade_rows=tuple(dict(item) for item in list(getattr(runtime, "trade_rows", []) or ())),
+        daily_marks=dict(daily_marks or {}),
+        counters=dict(getattr(runtime, "order_reject_reason_counts", {}) or {}),
+    )
+
+
 def apply_open_fills(runtime: Any, day: date, fills_today: Sequence[Any]) -> None:
+    filled_orders_payload: list[dict[str, Any]] = []
     for raw_order in list(fills_today or ()):
         order = normalize_order_payload(raw_order)
         symbol = str(order["symbol"]).lower()
@@ -139,6 +157,14 @@ def apply_open_fills(runtime: Any, day: date, fills_today: Sequence[Any]) -> Non
                     "entry_reason_code": str(holding_source.get("entry_reason_code", "") or ""),
                     "entry_date": holding_source.get("entry_date"),
                     "meta_json": json.dumps(order["meta"] or {}, ensure_ascii=False),
+                }
+            )
+            filled_orders_payload.append(
+                {
+                    "side": "SELL",
+                    "symbol": symbol,
+                    "qty": int(qty),
+                    "reason_code": str(order["reason_code"]),
                 }
             )
             continue
@@ -216,3 +242,15 @@ def apply_open_fills(runtime: Any, day: date, fills_today: Sequence[Any]) -> Non
                 "meta_json": json.dumps(order["meta"] or {}, ensure_ascii=False),
             }
         )
+        filled_orders_payload.append(
+            {
+                "side": "BUY",
+                "symbol": symbol,
+                "qty": int(qty),
+                "reason_code": str(order["reason_code"]),
+            }
+        )
+    runtime._last_accounting_snapshot = capture_accounting_snapshot(
+        runtime,
+        filled_orders=filled_orders_payload,
+    )

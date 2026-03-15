@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import pandas as pd
 
-from backend.api.endpoints import _experiment_runner_api
+from backend.api.backtest_v2 import runner_impl
 from backend.api.endpoints._paths import _bt_root
 from backend.core.tools.experiment_runner import _project_trade_csv_schema
 
@@ -113,9 +113,9 @@ def _breakout_config() -> dict:
 
 
 def test_compile_semantic_bundle_preserves_multi_alpha_runtime_payload() -> None:
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=_multi_alpha_config(),
         config_source="config_json",
         use_body_universe_fields=False,
@@ -130,9 +130,9 @@ def test_compile_semantic_bundle_preserves_multi_alpha_runtime_payload() -> None
 
 
 def test_compile_semantic_bundle_injects_breakout_entry_filters() -> None:
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=_breakout_config(),
         config_source="config_json",
         use_body_universe_fields=False,
@@ -150,9 +150,9 @@ def test_compile_semantic_bundle_preserves_turnover_rate_filter_fields() -> None
     payload = _breakout_config()
     payload["universe"]["filters"]["min_avg_turnover_rate_20d"] = 1.1
     payload["universe"]["filters"]["turnover_rate_field"] = "turnover_rate_f"
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -175,9 +175,9 @@ def test_compile_semantic_bundle_emits_ranking_execution_overrides() -> None:
         "mf_concentrate_scale": 1.25,
         "mf_rank_gate_mode": "BULL_ONLY",
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -202,9 +202,9 @@ def test_compile_semantic_bundle_maps_provider_final_score_source_mode() -> None
         "score_source_mode": "provider_final",
         "momentum_top_pct": 0.1,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -230,9 +230,9 @@ def test_compile_semantic_bundle_injects_conditional_tiebreak_refine_mode() -> N
         "residual_refine_mode": "conditional_tiebreak",
         "residual_refine_weight": 0.2,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -252,9 +252,9 @@ def test_compile_semantic_bundle_injects_industry_second_stage_refine_mode() -> 
         "residual_refine_weight": 0.15,
         "industry_second_stage_min_industry_score": 0.85,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -274,9 +274,9 @@ def test_compile_semantic_bundle_injects_leadership_then_residual_mode() -> None
         "residual_window": 40,
         "leadership_route_bucket_count": 3,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -297,9 +297,9 @@ def test_compile_semantic_bundle_injects_source_aware_residual_mode() -> None:
         "source_aware_residual_mode": "pullback_only",
     }
     payload["signal_generation"]["breakout"]["enable_pullback_candidates"] = True
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -324,9 +324,9 @@ def test_compile_semantic_bundle_injects_residual_split_weights() -> None:
         "residual_benchmark_weight_fallback": 0.5,
         "residual_industry_weight_fallback": 0.5,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -361,9 +361,9 @@ def test_compile_semantic_bundle_maps_residual_quality_score_source_mode() -> No
         "quality_weight": 0.2,
         "momentum_top_pct": 0.1,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -397,9 +397,9 @@ def test_compile_semantic_bundle_injects_gated_dual_breakout_fields() -> None:
             "dual_breakout_gate_slope_lookback": 10,
         }
     )
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -429,9 +429,9 @@ def test_compile_semantic_bundle_injects_pullback_candidate_fields() -> None:
             "pullback_box_range_pct_max": 0.07,
         }
     )
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -461,9 +461,9 @@ def test_compile_semantic_bundle_injects_segmented_market_filter_fields() -> Non
         "ema_light_fast": 5,
         "ema_light_slow": 20,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -488,9 +488,9 @@ def test_compile_semantic_bundle_injects_breadth_fields() -> None:
         "gate_quantile_window": 252,
         "gate_quantile_pct": 0.2,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -517,9 +517,9 @@ def test_compile_semantic_bundle_injects_mf_rank_tilt_sizing_fields() -> None:
         "tilt_top_n": 3,
         "tilt_bottom_n": 2,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -546,9 +546,9 @@ def test_compile_semantic_bundle_injects_score_weighted_sizing_fields() -> None:
         "score_weight_min_scale": 0.75,
         "score_weight_max_scale": 1.25,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -571,9 +571,9 @@ def test_compile_semantic_bundle_injects_cash_aware_candidate_planner_fields() -
         "candidate_plan_mode": "cash_aware",
         "cash_aware_search_top_n": 12,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -596,9 +596,9 @@ def test_compile_semantic_bundle_injects_risk_off_exit_flag() -> None:
         "partial_mode": "first_trans_down_then_full",
         "partial_only_if_profitable": True,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -623,9 +623,9 @@ def test_compile_semantic_bundle_injects_chandelier_segmented_trailing_fields() 
         "segmented_high_profit_pct": 0.25,
         "segmented_high_trail_k": 2.0,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -649,9 +649,9 @@ def test_compile_semantic_bundle_injects_trans_down_freeze_bear_exit_mode() -> N
         "enabled": True,
         "mode": "trans_down_freeze_bear_exit",
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -669,9 +669,9 @@ def test_compile_semantic_bundle_injects_trans_down_topk_bear_exit_mode() -> Non
         "mode": "trans_down_topk_bear_exit",
         "trans_down_max_positions": 4,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -690,9 +690,9 @@ def test_compile_semantic_bundle_injects_trans_down_residual_floor_bear_exit_mod
         "mode": "trans_down_residual_floor_bear_exit",
         "trans_down_min_residual_score": 0.85,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -711,9 +711,9 @@ def test_compile_semantic_bundle_injects_trans_down_residual_profit_floor_bear_e
         "mode": "trans_down_residual_profit_floor_bear_exit",
         "trans_down_min_residual_score": 0.85,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -732,9 +732,9 @@ def test_compile_semantic_bundle_injects_trans_down_residual_ma20_floor_bear_exi
         "mode": "trans_down_residual_ma20_floor_bear_exit",
         "trans_down_min_residual_score": 0.85,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -753,9 +753,9 @@ def test_compile_semantic_bundle_injects_trailing_activate_profit_pct() -> None:
         "k": 3.0,
         "activate_profit_pct": 0.08,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -778,9 +778,9 @@ def test_compile_semantic_bundle_injects_pre_profit_breakout_failure_fields() ->
         "pre_profit_breakout_failure_max_bars": 10,
         "pre_profit_breakout_failure_atr_buffer_k": 0.5,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -807,9 +807,9 @@ def test_compile_semantic_bundle_injects_profit_decay_exit_fields() -> None:
         "profit_decay_exit_min_hold_bars": 8,
         "profit_decay_exit_residual_score_threshold": 0.35,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -831,9 +831,9 @@ def test_compile_semantic_bundle_injects_entry_gap_guard_fields() -> None:
     payload = _breakout_config()
     payload["signal_generation"]["breakout"]["entry_gap_guard_enabled"] = True
     payload["signal_generation"]["breakout"]["entry_gap_guard_pct"] = 0.04
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -855,9 +855,9 @@ def test_compile_semantic_bundle_injects_segmented_trend_exit_fields() -> None:
         "segmented_high_profit_pct": 0.15,
         "segmented_high_trail_k": 2.5,
     }
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(),
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
         semantic_cfg=payload,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -876,9 +876,9 @@ def test_compile_semantic_bundle_injects_segmented_trend_exit_fields() -> None:
 
 
 def test_compile_semantic_bundle_merges_request_level_blocks() -> None:
-    compiled = _experiment_runner_api._compile_semantic_config_bundle(
-        base_cfg=_experiment_runner_api._load_base_config(_bt_root()),
-        body=_experiment_runner_api.BacktestV2ExperimentRequest(
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(_bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(
             signal_generation={"modules": [{"name": "breakout_55", "alpha_id": "breakout_55"}]},
             signal_composition={"compose_mode": "REGIME_ROUTE"},
         ),
@@ -930,3 +930,4 @@ def test_project_trade_csv_schema_keeps_source_and_exit_fields() -> None:
     assert "entry_sleeve_id" in projected.columns
     assert projected.loc[0, "exit_owner"] == "global_risk_override"
     assert projected.loc[0, "entry_alpha_id"] == "breakout_55"
+

@@ -97,7 +97,9 @@ export function reasonByPrefix(rows) {
 }
 
 export function buildStageRows(artifacts, counters) {
-  const buyStageRows = Array.isArray(counters?.buy_stage_funnel) ? counters.buy_stage_funnel : [];
+  const buyStageRows = Array.isArray(artifacts?.funnelRows) && artifacts.funnelRows.length
+    ? artifacts.funnelRows
+    : (Array.isArray(counters?.buy_stage_funnel) ? counters.buy_stage_funnel : []);
   const dailyRows = Array.isArray(artifacts?.dailyRows) ? artifacts.dailyRows : [];
   const rawSignals = sumDailyInt(dailyRows, 'raw_buy_signal_count');
   const buyCandidates = sumDailyInt(dailyRows, 'buy_candidate_count');

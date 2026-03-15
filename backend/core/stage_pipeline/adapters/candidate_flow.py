@@ -44,7 +44,7 @@ def build_candidate_stage_output(
             sell_symbols=stage_inputs.sell_symbols,
             payload=stage_inputs.payload,
             summary_fragment={
-                "mode": "legacy_embedded",
+                "mode": "inline_stage_flow",
                 "buy_signal_count": len(candidate_symbols),
             },
         )
@@ -56,7 +56,7 @@ def build_candidate_stage_output(
             sell_symbols=stage_inputs.sell_symbols,
             payload=stage_inputs.payload,
             summary_fragment={
-                "mode": "legacy_embedded",
+                "mode": "inline_stage_flow",
                 "risk_on_today": bool(controls["risk_on_today"]),
                 "benchmark_regime_on": bool(controls["benchmark_regime_on"]),
                 "market_state": str(controls["market_state"]),
@@ -70,7 +70,7 @@ def build_candidate_stage_output(
             sell_symbols=stage_inputs.sell_symbols,
             payload=stage_inputs.payload,
             summary_fragment={
-                "mode": "legacy_embedded",
+                "mode": "inline_stage_flow",
                 "sector_gate_enabled": True,
             },
         )
@@ -81,7 +81,7 @@ def build_candidate_stage_output(
         sell_symbols=stage_inputs.sell_symbols,
         payload=stage_inputs.payload,
         summary_fragment={
-            "mode": "legacy_embedded",
+            "mode": "inline_stage_flow",
             "candidate_count": len(stage_inputs.candidate_symbols or candidate_symbols),
         },
     )

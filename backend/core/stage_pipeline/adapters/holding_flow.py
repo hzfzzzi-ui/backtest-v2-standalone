@@ -41,7 +41,7 @@ def build_holding_stage_output(
             sell_symbols=sell_symbols,
             payload=stage_inputs.payload,
             summary_fragment={
-                "mode": "legacy_embedded",
+                "mode": "inline_stage_flow",
                 "sell_signal_count": len(sell_symbols),
             },
         )
@@ -51,7 +51,7 @@ def build_holding_stage_output(
         sell_symbols=stage_inputs.sell_symbols or sell_symbols,
         payload=stage_inputs.payload,
         summary_fragment={
-            "mode": "legacy_embedded",
+            "mode": "inline_stage_flow",
             "effective_max_positions": int(current_day["controls"]["effective_max_positions"]),
         },
     )

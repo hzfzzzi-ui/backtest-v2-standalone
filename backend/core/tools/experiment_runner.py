@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import json
@@ -12,17 +12,17 @@ from uuid import uuid4
 import pandas as pd
 
 from backend.core.config.loader import load_config
-from backend.core.engine_compat.foundation_shell import (
-    FoundationCompatibilityRequest,
-    build_foundation_compiled_plan,
-    run_foundation_compatibility_shell,
+from backend.core.engine_runtime.foundation_shell import (
+    FoundationExecutionRequest,
+    build_foundation_runtime_plan,
+    run_foundation_execution_shell,
 )
 from backend.core.strategies.registry import build_strategy
 from backend.core.tools.data_bundle_builder import build_data_bundle
 
 
 DEFAULT_EXPERIMENT_SYMBOLS = ["600000.SH", "000001.SZ", "600519.SH"]
-LEGACY_DAILY_COLUMNS = [
+STANDARD_DAILY_COLUMNS = [
     "date",
     "nav",
     "cash",
@@ -78,7 +78,7 @@ LEGACY_DAILY_COLUMNS = [
     "trade_mode",
     "benchmark_regime_on",
 ]
-LEGACY_TRADE_COLUMNS = [
+STANDARD_TRADE_COLUMNS = [
     "date",
     "symbol",
     "side",
@@ -374,24 +374,24 @@ def _recompute_perf_from_daily(
 
 def _project_trade_csv_schema(trades: pd.DataFrame) -> pd.DataFrame:
     if trades is None or trades.empty:
-        return pd.DataFrame(columns=LEGACY_TRADE_COLUMNS)
-    available = [column for column in LEGACY_TRADE_COLUMNS if column in trades.columns]
+        return pd.DataFrame(columns=STANDARD_TRADE_COLUMNS)
+    available = [column for column in STANDARD_TRADE_COLUMNS if column in trades.columns]
     projected = trades.loc[:, available].copy()
-    for column in LEGACY_TRADE_COLUMNS:
+    for column in STANDARD_TRADE_COLUMNS:
         if column not in projected.columns:
             projected[column] = ""
-    return projected.loc[:, LEGACY_TRADE_COLUMNS]
+    return projected.loc[:, STANDARD_TRADE_COLUMNS]
 
 
 def _project_daily_csv_schema(daily: pd.DataFrame) -> pd.DataFrame:
     if daily is None or daily.empty:
-        return pd.DataFrame(columns=LEGACY_DAILY_COLUMNS)
-    available = [column for column in LEGACY_DAILY_COLUMNS if column in daily.columns]
+        return pd.DataFrame(columns=STANDARD_DAILY_COLUMNS)
+    available = [column for column in STANDARD_DAILY_COLUMNS if column in daily.columns]
     projected = daily.loc[:, available].copy()
-    for column in LEGACY_DAILY_COLUMNS:
+    for column in STANDARD_DAILY_COLUMNS:
         if column not in projected.columns:
             projected[column] = ""
-    return projected.loc[:, LEGACY_DAILY_COLUMNS]
+    return projected.loc[:, STANDARD_DAILY_COLUMNS]
 
 
 def _inject_db_credentials_from_env(cfg: dict[str, Any]) -> None:
@@ -506,12 +506,12 @@ def run_experiment(
         "dynamic_all_a_entry": bool(bundle.dynamic_all_a_entry),
     }
     strategy.state["membership_history"] = bundle.membership_history
-    foundation_plan = build_foundation_compiled_plan(
+    foundation_plan = build_foundation_runtime_plan(
         runtime_config=cfg_merged,
         overrides=ov,
     )
-    bt_result = run_foundation_compatibility_shell(
-        FoundationCompatibilityRequest(
+    bt_result = run_foundation_execution_shell(
+        FoundationExecutionRequest(
             compiled_plan=foundation_plan,
             data_bundle=bundle,
             cfg_obj=cfg_obj,

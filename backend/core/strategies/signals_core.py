@@ -118,6 +118,6 @@ def buy_raw_ok_vectorized(
     return out
 
 
-# Backward compatibility aliases.
+# Convenience aliases.
 buy_raw_ok = buy_raw_ok_scalar
 buy_raw_ok_vec = buy_raw_ok_vectorized

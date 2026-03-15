@@ -235,12 +235,12 @@ def test_evaluate_timing_alignment_derives_pass_from_price_only_next_day_artifac
 
     gate = evaluate_timing_alignment(
         stage_summary={
-            "execution_shell": "stage_pipeline_shell_legacy_adapter",
+            "execution_shell": "stage_pipeline_shell_bridge",
             "daily_loop_mode": "single_day_loop",
             "route_id": "provider_breakout_runtime",
         },
         stage_pipeline={
-            "execution_shell": "stage_pipeline_shell_legacy_adapter",
+            "execution_shell": "stage_pipeline_shell_bridge",
             "daily_loop_mode": "single_day_loop",
             "route_id": "provider_breakout_runtime",
         },
@@ -283,12 +283,12 @@ def test_evaluate_timing_alignment_keeps_unknown_when_membership_signal_is_enabl
 
     gate = evaluate_timing_alignment(
         stage_summary={
-            "execution_shell": "stage_pipeline_shell_legacy_adapter",
+            "execution_shell": "stage_pipeline_shell_bridge",
             "daily_loop_mode": "single_day_loop",
             "route_id": "provider_breakout_runtime",
         },
         stage_pipeline={
-            "execution_shell": "stage_pipeline_shell_legacy_adapter",
+            "execution_shell": "stage_pipeline_shell_bridge",
             "daily_loop_mode": "single_day_loop",
             "route_id": "provider_breakout_runtime",
         },
@@ -328,7 +328,7 @@ def test_build_research_audit_reuses_evidence_refs_instead_of_embedding_payload(
                 "counters": {"closed_trades": 30},
                 "stage_pipeline": {
                     "schema_version": "stage_pipeline_summary@1",
-                    "execution_shell": "stage_pipeline_shell_legacy_adapter",
+                    "execution_shell": "stage_pipeline_shell_bridge",
                     "daily_loop_mode": "single_day_loop",
                     "route_id": "provider_breakout_runtime",
                     "trading_days": 300,
@@ -367,7 +367,7 @@ def test_build_research_audit_reuses_evidence_refs_instead_of_embedding_payload(
         json.dumps(
             {
                 "schema_version": "stage_pipeline_summary@1",
-                "execution_shell": "stage_pipeline_shell_legacy_adapter",
+                "execution_shell": "stage_pipeline_shell_bridge",
                 "daily_loop_mode": "single_day_loop",
                 "route_id": "provider_breakout_runtime",
             },

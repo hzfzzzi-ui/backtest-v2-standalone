@@ -81,7 +81,7 @@ STRATEGY_SUPPORT_MATRIX: dict[str, StrategySurface] = {
         api_compile_supported=False,
         runtime_execution_supported=True,
         script_only_reachable=True,
-        notes="Legacy script strategy; not exposed in the main workbench.",
+        notes="Script-only strategy; not exposed in the main workbench.",
     ),
     "ma_trend_filter": StrategySurface(
         name="ma_trend_filter",

@@ -4,7 +4,8 @@ from datetime import date
 
 import pandas as pd
 
-from backend.core.portfolio.portfolio_builder import build_backtest_price_indices, compute_nav_snapshot
+from backend.core.portfolio.nav_snapshot import compute_nav_snapshot
+from backend.core.portfolio.price_index import build_backtest_price_indices
 
 
 def test_build_backtest_price_indices_ffill_gaps_but_not_after_last_bar() -> None:

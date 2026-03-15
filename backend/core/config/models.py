@@ -66,7 +66,7 @@ class SizingConfig:
     order_value: float = 10000.0
     reserve_cash_ratio: float = 0.02
     lot_size: int = 100
-    # "OFF" keeps legacy sizing behavior.
+    # "OFF" keeps the historical sizing behavior.
     # "LOT100_MIN1LOT": dynamic order_value ensures at least 1 lot purchasable when cash allows.
     # "ODDLOT_1": research-only odd-lot mode.
     univote_lot_mode: str = "OFF"
@@ -173,7 +173,7 @@ class MarketFilterConfig:
     slope_ma_period: int = 50
     bull_multiplier: float = 1.5
     light_multiplier: float = 0.6
-    # Optional per-state multipliers. When None, fallback to legacy behavior.
+    # Optional per-state multipliers. When None, fallback to the historical behavior.
     trans_down_multiplier: float | None = None
     trans_up_multiplier: float | None = None
     bear_multiplier: float | None = None

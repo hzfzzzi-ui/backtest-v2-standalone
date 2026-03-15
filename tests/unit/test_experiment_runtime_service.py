@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from backend.api.endpoints import _experiment_runner_api
+from backend.api.backtest_v2 import runner_impl
 from backend.core.services import experiment_runtime_service as service
 from backend.core.tools import experiment_runner as runner
 
@@ -65,11 +65,11 @@ def test_config_json_position_risk_max_positions_becomes_execution_override(monk
         }
 
     monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
-    monkeypatch.setattr(_experiment_runner_api, "_attach_run_profile_summary", lambda result: None)
-    monkeypatch.setattr(_experiment_runner_api, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
     monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
 
-    body = _experiment_runner_api.BacktestV2ExperimentRequest(
+    body = runner_impl.BacktestV2ExperimentRequest(
         config_json=_breakout_config(),
         fast_mode=True,
     )
@@ -96,8 +96,8 @@ def test_config_json_ranking_fields_become_execution_overrides(monkeypatch) -> N
         }
 
     monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
-    monkeypatch.setattr(_experiment_runner_api, "_attach_run_profile_summary", lambda result: None)
-    monkeypatch.setattr(_experiment_runner_api, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
     monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
 
     payload = _breakout_config()
@@ -111,7 +111,7 @@ def test_config_json_ranking_fields_become_execution_overrides(monkeypatch) -> N
         "mf_concentrate_scale": 1.25,
         "mf_rank_gate_mode": "TRANS_UP_OR_BULL",
     }
-    body = _experiment_runner_api.BacktestV2ExperimentRequest(
+    body = runner_impl.BacktestV2ExperimentRequest(
         config_json=payload,
         fast_mode=True,
     )
@@ -145,8 +145,8 @@ def test_config_json_provider_final_score_source_mode_enables_multifactor_rank(m
         }
 
     monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
-    monkeypatch.setattr(_experiment_runner_api, "_attach_run_profile_summary", lambda result: None)
-    monkeypatch.setattr(_experiment_runner_api, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
     monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
 
     payload = _breakout_config()
@@ -154,7 +154,7 @@ def test_config_json_provider_final_score_source_mode_enables_multifactor_rank(m
         "score_source_mode": "provider_final",
         "momentum_top_pct": 0.1,
     }
-    body = _experiment_runner_api.BacktestV2ExperimentRequest(
+    body = runner_impl.BacktestV2ExperimentRequest(
         config_json=payload,
         fast_mode=True,
     )
@@ -183,8 +183,8 @@ def test_config_json_residual_quality_score_source_mode_carries_weight_overrides
         }
 
     monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
-    monkeypatch.setattr(_experiment_runner_api, "_attach_run_profile_summary", lambda result: None)
-    monkeypatch.setattr(_experiment_runner_api, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
     monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
 
     payload = _breakout_config()
@@ -195,7 +195,7 @@ def test_config_json_residual_quality_score_source_mode_carries_weight_overrides
         "quality_weight": 0.3,
         "momentum_top_pct": 0.1,
     }
-    body = _experiment_runner_api.BacktestV2ExperimentRequest(
+    body = runner_impl.BacktestV2ExperimentRequest(
         config_json=payload,
         fast_mode=True,
     )
@@ -226,8 +226,8 @@ def test_config_json_residual_split_weights_become_execution_overrides(monkeypat
         }
 
     monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
-    monkeypatch.setattr(_experiment_runner_api, "_attach_run_profile_summary", lambda result: None)
-    monkeypatch.setattr(_experiment_runner_api, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
     monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
 
     payload = _breakout_config()
@@ -237,7 +237,7 @@ def test_config_json_residual_split_weights_become_execution_overrides(monkeypat
         "residual_benchmark_weight": 0.3,
         "residual_industry_weight": 0.7,
     }
-    body = _experiment_runner_api.BacktestV2ExperimentRequest(
+    body = runner_impl.BacktestV2ExperimentRequest(
         config_json=payload,
         fast_mode=True,
     )
@@ -266,8 +266,8 @@ def test_config_json_mf_rank_tilt_sizing_fields_become_execution_overrides(monke
         }
 
     monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
-    monkeypatch.setattr(_experiment_runner_api, "_attach_run_profile_summary", lambda result: None)
-    monkeypatch.setattr(_experiment_runner_api, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
     monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
 
     payload = _breakout_config()
@@ -278,7 +278,7 @@ def test_config_json_mf_rank_tilt_sizing_fields_become_execution_overrides(monke
         "tilt_top_n": 3,
         "tilt_bottom_n": 2,
     }
-    body = _experiment_runner_api.BacktestV2ExperimentRequest(
+    body = runner_impl.BacktestV2ExperimentRequest(
         config_json=payload,
         fast_mode=True,
     )
@@ -293,3 +293,4 @@ def test_config_json_mf_rank_tilt_sizing_fields_become_execution_overrides(monke
     assert overrides["fast_mode"] is True
     assert result["exp_id"] == "exp_test_mf_rank_tilt"
     assert result["experiment_id"] == "exp_test_mf_rank_tilt"
+

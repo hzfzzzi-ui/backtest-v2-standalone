@@ -7,7 +7,10 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from backend.api.endpoints import _experiment_history, _experiment_runner_api, _public_contracts, backtest_v2
+from backend.api.backtest_v2 import data_impl, impl, runner_impl
+from backend.api.backtest_v2.contracts.requests import PublicExperimentRunRequest
+from backend.api.backtest_v2.router import router as backtest_v2_router
+from backend.api.backtest_v2 import history_impl
 
 
 def _minimal_manifest(*, exp_id: str, include_nav: bool = True) -> dict[str, object]:
@@ -63,12 +66,12 @@ def _write_minimal_experiment(
 
 def test_public_run_requires_config_json_unless_locked_candidate() -> None:
     with pytest.raises(HTTPException) as exc:
-        _experiment_runner_api._validate_public_run_request(_experiment_runner_api.BacktestV2ExperimentRequest())
+        runner_impl._validate_public_run_request(runner_impl.BacktestV2ExperimentRequest())
     assert exc.value.status_code == 400
     assert exc.value.detail["reason"] == "config_json_required"
 
-    _experiment_runner_api._validate_public_run_request(
-        _experiment_runner_api.BacktestV2ExperimentRequest(
+    runner_impl._validate_public_run_request(
+        runner_impl.BacktestV2ExperimentRequest(
             preset="v2-breakout-atr-stop-k10-candidate",
         )
     )
@@ -76,8 +79,8 @@ def test_public_run_requires_config_json_unless_locked_candidate() -> None:
 
 def test_public_run_rejects_legacy_config_fields() -> None:
     with pytest.raises(HTTPException) as exc:
-        _experiment_runner_api._validate_public_run_request(
-            _experiment_runner_api.BacktestV2ExperimentRequest(
+        runner_impl._validate_public_run_request(
+            runner_impl.BacktestV2ExperimentRequest(
                 config_json={"schema_version": "frontend_semantic_config@1"},
                 config_id="cfg_legacy",
                 runtime_config_json={"runtime": True},
@@ -86,7 +89,7 @@ def test_public_run_rejects_legacy_config_fields() -> None:
             )
         )
     assert exc.value.status_code == 400
-    assert exc.value.detail["reason"] == "legacy_config_fields_not_allowed"
+    assert exc.value.detail["reason"] == "unsupported_config_fields"
     assert set(exc.value.detail["rejected_fields"]) >= {
         "config_id",
         "runtime_config_json",
@@ -96,7 +99,7 @@ def test_public_run_rejects_legacy_config_fields() -> None:
 
 
 def test_internal_request_accepts_multi_alpha_blocks() -> None:
-    req = _experiment_runner_api.BacktestV2ExperimentRequest(
+    req = runner_impl.BacktestV2ExperimentRequest(
         signal_generation={
             "modules": [
                 {"name": "breakout_55", "alpha_id": "breakout_55"},
@@ -115,7 +118,7 @@ def test_internal_request_accepts_multi_alpha_blocks() -> None:
 
 def test_public_run_response_is_experiment_id_first(monkeypatch) -> None:
     monkeypatch.setattr(
-        _experiment_runner_api,
+        runner_impl,
         "_run_backtest_v2_experiment_sync",
         lambda body: {
             "exp_id": "exp_sync",
@@ -123,8 +126,8 @@ def test_public_run_response_is_experiment_id_first(monkeypatch) -> None:
             "manifest": {"baseline_compare_status": "PASS"},
         },
     )
-    payload = _experiment_runner_api.run_backtest_v2_experiment(
-        _experiment_runner_api.BacktestV2ExperimentRequest(config_json={"schema_version": "frontend_semantic_config@1"})
+    payload = runner_impl.run_backtest_v2_experiment(
+        runner_impl.BacktestV2ExperimentRequest(config_json={"schema_version": "frontend_semantic_config@1"})
     )
     assert payload == {
         "experiment_id": "exp_sync",
@@ -139,7 +142,7 @@ def test_public_run_response_is_experiment_id_first(monkeypatch) -> None:
 
 def test_execution_preview_contract_forbids_legacy_fields() -> None:
     with pytest.raises(ValidationError):
-        backtest_v2.BacktestV2ExecutionPreviewRequest(
+        impl.BacktestV2ExecutionPreviewRequest(
             config_json={"schema_version": "frontend_semantic_config@1"},
             exp_id="exp_preview",
             results_dir="outputs/experiments/exp_preview",
@@ -148,7 +151,7 @@ def test_execution_preview_contract_forbids_legacy_fields() -> None:
 
 def test_public_run_contract_forbids_legacy_surface_fields() -> None:
     with pytest.raises(ValidationError):
-        _public_contracts.PublicBacktestV2ExperimentRequest(
+        PublicExperimentRunRequest(
             config_json={"schema_version": "frontend_semantic_config@1"},
             workbench_mode="draft",
         )
@@ -156,7 +159,7 @@ def test_public_run_contract_forbids_legacy_surface_fields() -> None:
 
 def test_artifact_read_contract_requires_exp_id_only() -> None:
     with pytest.raises(ValidationError):
-        backtest_v2.BacktestV2ArtifactReadRequest(
+        impl.BacktestV2ArtifactReadRequest(
             exp_id="exp_artifact",
             results_dir="outputs/experiments/exp_artifact",
             rel_path="perf.json",
@@ -164,12 +167,12 @@ def test_artifact_read_contract_requires_exp_id_only() -> None:
 
 
 def test_legacy_public_result_route_is_retired() -> None:
-    paths = {route.path for route in backtest_v2.router.routes}
+    paths = {route.path for route in backtest_v2_router.routes}
     assert "/api/backtest_v2/results/{run_id}" not in paths
 
 
 def test_public_report_route_is_retired() -> None:
-    paths = {route.path for route in backtest_v2.router.routes}
+    paths = {route.path for route in backtest_v2_router.routes}
     assert "/api/backtest_v2/experiments/{exp_id}/report" not in paths
 
 
@@ -180,7 +183,7 @@ def test_wave1_legacy_helpers_are_removed() -> None:
         "_preview_rejected_fields",
         "_load_runtime_cfg_obj",
     ):
-        assert not hasattr(backtest_v2, name)
+        assert not hasattr(impl, name)
 
 
 def test_artifact_read_requires_manifest_declared_path(tmp_path: Path, monkeypatch) -> None:
@@ -188,17 +191,17 @@ def test_artifact_read_requires_manifest_declared_path(tmp_path: Path, monkeypat
     manifest = json.loads((exp_dir / "manifest.json").read_text(encoding="utf-8"))
     (exp_dir / "secret.txt").write_text("hidden", encoding="utf-8")
 
-    monkeypatch.setattr(backtest_v2, "_load_manifest_or_404", lambda exp_id: (exp_dir, manifest))
+    monkeypatch.setattr(data_impl, "_load_manifest_or_404", lambda exp_id: (exp_dir, manifest))
 
-    ok_payload = backtest_v2.read_backtest_v2_artifact(
-        backtest_v2.BacktestV2ArtifactReadRequest(exp_id="exp_artifact", rel_path="perf.json")
+    ok_payload = impl.read_backtest_v2_artifact(
+        impl.BacktestV2ArtifactReadRequest(exp_id="exp_artifact", rel_path="perf.json")
     )
     assert ok_payload["kind"] == "json"
     assert ok_payload["data"]["cagr"] == 0.1
 
     with pytest.raises(HTTPException) as exc:
-        backtest_v2.read_backtest_v2_artifact(
-            backtest_v2.BacktestV2ArtifactReadRequest(exp_id="exp_artifact", rel_path="secret.txt")
+        impl.read_backtest_v2_artifact(
+            impl.BacktestV2ArtifactReadRequest(exp_id="exp_artifact", rel_path="secret.txt")
         )
     assert exc.value.status_code == 400
     assert "not declared by manifest" in str(exc.value.detail)
@@ -221,9 +224,9 @@ def test_history_list_prunes_entries_without_manifest(tmp_path: Path, monkeypatc
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(_experiment_history, "_experiments_root", lambda: exp_root)
+    monkeypatch.setattr(history_impl, "_experiments_root", lambda: exp_root)
 
-    items = _experiment_history.list_experiments()
+    items = history_impl.list_experiments()
     assert [item["exp_id"] for item in items] == ["exp_ok"]
     assert items[0]["has_manifest"] is True
 
@@ -249,8 +252,8 @@ def test_compare_experiments_uses_manifest_and_skips_incomplete(tmp_path: Path, 
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(_experiment_history, "_experiments_root", lambda: exp_root)
+    monkeypatch.setattr(history_impl, "_experiments_root", lambda: exp_root)
 
-    payload = _experiment_history.compare_experiments({"exp_ids": ["exp_a", "exp_b", "exp_c"]})
+    payload = history_impl.compare_experiments({"exp_ids": ["exp_a", "exp_b", "exp_c"]})
     assert [item["exp_id"] for item in payload["items"]] == ["exp_a", "exp_b"]
     assert payload["skipped"] == [{"exp_id": "exp_c", "reason": "missing_manifest_core_artifacts"}]

@@ -1,0 +1,71 @@
+study_id: v10/onset_ingress_minimal_s2
+title: V10 入场结构 S2
+baseline_id: baseline_V10
+hypothesis: 双突破窗口的最小改动组合，可能提升突破入场确认质量并减少假突破。
+change_scope:
+  modules_modified:
+    - signal_generation.breakout.enable_dual_breakout
+    - signal_generation.breakout.breakout_window_short
+    - signal_generation.breakout.breakout_window_long
+variants:
+  - name: B0
+  - name: S2_A_30_45
+    config_patches:
+      - path: signal_generation.breakout.enable_dual_breakout
+        value: true
+      - path: signal_generation.breakout.dual_breakout_mode
+        value: or
+      - path: signal_generation.breakout.breakout_window_short
+        value: 30
+      - path: signal_generation.breakout.breakout_window_long
+        value: 45
+  - name: S2_B_20_45
+    config_patches:
+      - path: signal_generation.breakout.enable_dual_breakout
+        value: true
+      - path: signal_generation.breakout.dual_breakout_mode
+        value: or
+      - path: signal_generation.breakout.breakout_window_short
+        value: 20
+      - path: signal_generation.breakout.breakout_window_long
+        value: 45
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-03-01"
+    end: "2026-03-01"
+    periods:
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2019_2021_bull: ["2019-01-02", "2021-02-18"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+  - key: "0717"
+    role: hard_gate
+    start: "2007-01-15"
+    end: "2017-01-15"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2010_2013_range: ["2010-01-04", "2013-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2015_2017_post_crash: ["2015-06-15", "2017-01-13"]
+  - key: "0726"
+    role: audit
+    start: "2007-01-15"
+    end: "2026-03-01"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+hard_gates:
+  min_cagr: 0.1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: outputs/baselines/baseline_V10/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

@@ -17,6 +17,7 @@ from backend.core.core.types import Side
 from backend.core.engine_vector.candidate_index import build_daily_candidate_index
 from backend.core.engine_vector.data_matrix import build_ohlc_matrices_from_history
 from backend.core.engine_vector.features import compute_feature_matrices
+from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
 from backend.core.engine_vector.regime_filter import RegimeFilter, RegimeFilterConfig
 from backend.core.engine_vector.signal_provider import (
     DayContext,
@@ -24,7 +25,6 @@ from backend.core.engine_vector.signal_provider import (
     ExitCounts,
     evaluate_engine_exits,
 )
-from backend.core.portfolio.portfolio_builder import resolve_mf_gate_on_today
 
 
 class RegimeRouterSignalProvider:

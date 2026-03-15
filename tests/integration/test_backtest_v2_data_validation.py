@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from backend.api.endpoints.backtest_v2 import BacktestV2RunRequest, _write_data_validation_section
+from backend.api.backtest_v2.impl import BacktestV2RunRequest, write_data_validation_section
 
 
 def test_run_report_includes_data_validation(tmp_path: Path) -> None:
@@ -23,7 +23,7 @@ def test_run_report_includes_data_validation(tmp_path: Path) -> None:
         validation_warnings=["LIMIT_FIELD_INCONSISTENCY: high>limit_up count=1"],
     )
 
-    _write_data_validation_section(run_dir, req, bt_root)
+    write_data_validation_section(run_dir, req, bt_root)
     out = json.loads(report_path.read_text(encoding="utf-8"))
     assert "data_validation" in out
     assert out["data_validation"]["request_id"] == "val_abc"

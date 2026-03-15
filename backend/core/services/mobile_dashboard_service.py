@@ -11,6 +11,7 @@ from backend.core.services.mobile_ops_service import (
     load_mobile_control_state,
     signal_staleness_threshold_days,
 )
+from backend.core.services.experiment_query_service import build_mobile_experiment_summary
 
 PreviewLoader = Callable[[dict[str, Any], str, str | None], dict[str, Any]]
 
@@ -369,6 +370,15 @@ def _load_latest_experiment(results_root: Path) -> tuple[dict[str, Any] | None, 
         "trade_mode": str(latest_daily.get("trade_mode") or ""),
         "benchmark_regime_on": str(latest_daily.get("benchmark_regime_on") or ""),
     }
+    try:
+        surface_summary = build_mobile_experiment_summary(exp_id)
+    except Exception:
+        surface_summary = {}
+    if isinstance(surface_summary, dict) and surface_summary:
+        for key in ("status", "cagr", "sharpe", "max_drawdown", "total_return", "trades"):
+            if surface_summary.get(key) is not None:
+                experiment_summary[key] = surface_summary.get(key)
+        experiment_summary["surface_summary"] = surface_summary
 
     return (
         {

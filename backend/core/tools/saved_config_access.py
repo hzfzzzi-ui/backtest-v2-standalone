@@ -89,21 +89,8 @@ def _tag_set(value: Any) -> set[str]:
     return {str(item).strip().lower() for item in _as_str_list(value) if str(item).strip()}
 
 
-def _legacy_hash_config_id(config_hash: str) -> str | None:
-    text = str(config_hash or "").strip()
-    if not text:
-        return None
-    return f"cfg_{text[:12]}"
-
-
 def _new_saved_config_id() -> str:
     return f"cfg_{uuid4().hex[:12]}"
-
-
-def _looks_like_hash_config_id(value: Any) -> bool:
-    text = str(value or "").strip().lower()
-    suffix = text[4:] if text.startswith("cfg_") else ""
-    return len(suffix) == 12 and all(ch in "0123456789abcdef" for ch in suffix)
 
 
 def _coerce_source_type(value: Any, *, tags: list[str], config_id: str) -> str:
@@ -162,7 +149,6 @@ def _config_meta_view(record: dict[str, Any] | None) -> dict[str, Any] | None:
         "owner": str(record.get("owner") or "manual"),
         "locked": bool(record.get("locked")),
         "baseline_of": record.get("baseline_of"),
-        "legacy_config_id": record.get("legacy_config_id"),
         "universe_mode": str(config_json.get("universe_mode") or ""),
     }
 
@@ -172,18 +158,13 @@ def normalize_saved_config_record(obj: dict[str, Any] | None, *, config_id_hint:
     cfg_json_raw = raw.get("config_json")
     cfg_json = sanitize_json(dict(cfg_json_raw)) if isinstance(cfg_json_raw, dict) else {}
     cfg_hash = _hash_json(cfg_json)
-    config_id = str(raw.get("config_id") or config_id_hint or _legacy_hash_config_id(cfg_hash) or _new_saved_config_id()).strip()
+    config_id = str(raw.get("config_id") or config_id_hint or _new_saved_config_id()).strip()
     tags = _normalized_tags(raw.get("tags"))
     source_type = _coerce_source_type(raw.get("source_type"), tags=tags, config_id=config_id)
     owner = _coerce_owner(raw.get("owner"), tags=tags, source_type=source_type)
     locked = _coerce_locked(raw.get("locked"), owner=owner, source_type=source_type)
     display_name = str(raw.get("display_name") or raw.get("name") or "").strip()
     baseline_of = str(raw.get("baseline_of") or "").strip() or None
-    legacy_config_id = str(raw.get("legacy_config_id") or "").strip() or None
-    if legacy_config_id is None and _looks_like_hash_config_id(config_id):
-        legacy_config_id = config_id
-    if legacy_config_id is None:
-        legacy_config_id = _legacy_hash_config_id(cfg_hash)
     saved_at = str(raw.get("saved_at") or "").strip() or datetime.now().isoformat()
 
     passthrough = {
@@ -201,7 +182,6 @@ def normalize_saved_config_record(obj: dict[str, Any] | None, *, config_id_hint:
             "owner",
             "locked",
             "baseline_of",
-            "legacy_config_id",
             "config_json",
         }
     }
@@ -218,7 +198,6 @@ def normalize_saved_config_record(obj: dict[str, Any] | None, *, config_id_hint:
         "owner": owner,
         "locked": locked,
         "baseline_of": baseline_of,
-        "legacy_config_id": legacy_config_id,
         "config_json": cfg_json,
     }
     return normalized
@@ -235,7 +214,6 @@ def create_saved_config_record(
     owner: str | None = None,
     locked: bool | None = None,
     baseline_of: str | None = None,
-    legacy_config_id: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cfg_obj = sanitize_json(dict(config_json or {}))
@@ -252,7 +230,6 @@ def create_saved_config_record(
         "owner": owner,
         "locked": locked,
         "baseline_of": str(baseline_of or "").strip() or None,
-        "legacy_config_id": str(legacy_config_id or _legacy_hash_config_id(cfg_hash) or "").strip() or None,
         "config_json": cfg_obj,
     }
     return normalize_saved_config_record(record)

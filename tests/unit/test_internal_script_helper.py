@@ -61,12 +61,15 @@ def test_script_sources_use_internal_helper_boundary() -> None:
     assert "locked_candidate_presets" in helper_source
     assert "backend.core.report.report_generator" not in helper_source
 
-    baseline_source = (repo_root / "backend" / "scripts" / "baseline_regression_check.py").read_text(encoding="utf-8")
-    assert "backend.scripts._internal_helper" in baseline_source
+    baseline_wrapper = (repo_root / "backend" / "scripts" / "baseline_regression_check.py").read_text(encoding="utf-8")
+    baseline_source = (repo_root / "backend" / "cli" / "managed" / "baseline_regression_check.py").read_text(encoding="utf-8")
+    assert "backend.cli.managed.baseline_regression_check" in baseline_wrapper
     assert "backend.api.endpoints._config_governance" not in baseline_source
     assert "backend.api.endpoints._experiment_runner_api" not in baseline_source
 
-    report_source = (repo_root / "backend" / "scripts" / "report_consistency_check.py").read_text(encoding="utf-8")
+    report_wrapper = (repo_root / "backend" / "scripts" / "report_consistency_check.py").read_text(encoding="utf-8")
+    report_source = (repo_root / "backend" / "cli" / "managed" / "report_consistency_check.py").read_text(encoding="utf-8")
+    assert "backend.cli.managed.report_consistency_check" in report_wrapper
     assert "backend.scripts._internal_helper" in report_source
     assert "backend.core.report.report_generator" not in report_source
 

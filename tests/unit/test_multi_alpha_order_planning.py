@@ -5,9 +5,10 @@ from types import SimpleNamespace
 
 from backend.core.core.models import Signal
 from backend.core.core.types import Side
+from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
 from backend.core.engine_vector.signal_provider import DaySignals, ExitCounts
 from backend.core.stage_pipeline.adapters.fill_accounting import apply_open_fills
-from backend.core.portfolio.portfolio_builder import build_rebalance_orders, resolve_mf_gate_on_today
+from backend.core.portfolio.portfolio_builder import build_rebalance_orders
 from backend.core.stage_pipeline.adapters.order_planning import build_s7_order_stage_output
 
 

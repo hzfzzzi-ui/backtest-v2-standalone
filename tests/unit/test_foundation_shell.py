@@ -5,20 +5,20 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from backend.core.engine_compat import foundation_shell as mod
+from backend.core.engine_runtime import foundation_shell as mod
 from backend.core.portfolio.portfolio_builder import PortfolioBacktestResult
-from backend.core.stage_pipeline.adapters import LegacyStagePipelineBacktestResult
+from backend.core.stage_pipeline.adapters import StagePipelineBridgeBacktestResult
 from backend.core.stage_pipeline.context import DayContext, PortfolioState
 from backend.core.stage_pipeline.shell import StageDayResult, StagePipelineResult
 
 
-def test_run_foundation_compatibility_shell_delegates_to_stage_pipeline_adapter(monkeypatch) -> None:
+def test_run_foundation_execution_shell_delegates_to_stage_pipeline_adapter(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _fake_run_legacy_stage_pipeline_backtest(request):
+    def _fake_run_stage_pipeline_bridge_backtest(request):
         captured["request"] = request
         pipeline_result = StagePipelineResult(
-            execution_shell="stage_pipeline_shell_legacy_adapter",
+            execution_shell="stage_pipeline_shell_bridge",
             daily_loop_mode="single_day_loop",
             daily_results=(
                 StageDayResult(
@@ -34,7 +34,7 @@ def test_run_foundation_compatibility_shell_delegates_to_stage_pipeline_adapter(
                     scheduled_for_next_day=({"symbol": "sh600000"},),
                     stage_order=("S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"),
                     enabled_stages=("S1", "S2", "S4", "S5", "S6", "S9", "S8", "S7"),
-                    stage_fragments={"S7": {"mode": "legacy_order_planner"}},
+                    stage_fragments={"S7": {"mode": "bridge_order_planner"}},
                     warnings=(),
                 ),
                 StageDayResult(
@@ -50,13 +50,13 @@ def test_run_foundation_compatibility_shell_delegates_to_stage_pipeline_adapter(
                     scheduled_for_next_day=(),
                     stage_order=("S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"),
                     enabled_stages=("S1", "S2", "S4", "S5", "S6", "S9", "S8", "S7"),
-                    stage_fragments={"S2": {"mode": "legacy_embedded"}},
+                    stage_fragments={"S2": {"mode": "inline_stage_flow"}},
                     warnings=("market_filter_warn",),
                 ),
             ),
             summary={
                 "schema_version": "stage_pipeline_summary@1",
-                "execution_shell": "stage_pipeline_shell_legacy_adapter",
+                "execution_shell": "stage_pipeline_shell_bridge",
                 "daily_loop_mode": "single_day_loop",
                 "stage_order": ["S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"],
                 "enabled_stages": ["S1", "S2", "S4", "S5", "S6", "S9", "S8", "S7"],
@@ -65,7 +65,7 @@ def test_run_foundation_compatibility_shell_delegates_to_stage_pipeline_adapter(
             },
             final_state=PortfolioState.empty(cash=100000.0),
         )
-        return LegacyStagePipelineBacktestResult(
+        return StagePipelineBridgeBacktestResult(
             portfolio_result=PortfolioBacktestResult(
                 daily=pd.DataFrame([{"date": "2026-03-02", "nav": 1.0}]),
                 trades=pd.DataFrame(columns=["date", "symbol", "side"]),
@@ -76,9 +76,9 @@ def test_run_foundation_compatibility_shell_delegates_to_stage_pipeline_adapter(
             route_id="provider_breakout_runtime",
         )
 
-    monkeypatch.setattr(mod, "run_legacy_stage_pipeline_backtest", _fake_run_legacy_stage_pipeline_backtest)
+    monkeypatch.setattr(mod, "run_stage_pipeline_bridge_backtest", _fake_run_stage_pipeline_bridge_backtest)
 
-    request = mod.FoundationCompatibilityRequest(
+    request = mod.FoundationExecutionRequest(
         compiled_plan={
             "runtime_config": {
                 "initial_capital": 200000.0,
@@ -116,7 +116,7 @@ def test_run_foundation_compatibility_shell_delegates_to_stage_pipeline_adapter(
         strategy=SimpleNamespace(),
     )
 
-    result = mod.run_foundation_compatibility_shell(request)
+    result = mod.run_foundation_execution_shell(request)
 
     adapter_request = captured["request"]
     assert adapter_request.max_positions == 7
@@ -136,6 +136,6 @@ def test_run_foundation_compatibility_shell_delegates_to_stage_pipeline_adapter(
     assert stage_summary["warnings"] == ["market_filter_warn"]
 
     stage_pipeline = result.metrics["stage_pipeline"]
-    assert stage_pipeline["execution_shell"] == "stage_pipeline_shell_legacy_adapter"
+    assert stage_pipeline["execution_shell"] == "stage_pipeline_shell_bridge"
     assert stage_pipeline["enabled_stages"] == ["S1", "S2", "S4", "S5", "S6", "S9", "S8", "S7"]
     assert result.metrics["audit"]["stage_pipeline"]["route_id"] == "provider_breakout_runtime"
