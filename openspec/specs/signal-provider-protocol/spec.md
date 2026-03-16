@@ -2,7 +2,6 @@
 
 ## Purpose
 定义统一信号提供者协议、日度上下文与信号快照的数据契约，并约束其对多 alpha 组合运行时的兼容行为。
-
 ## Requirements
 ### Requirement: SignalProvider 协议
 引擎 SHALL 定义 `SignalProvider` 协议（Protocol），包含以下方法：
@@ -78,3 +77,38 @@
 - **WHEN** `run_vector_portfolio_backtest_strict()` 路由到启用组合配置的策略路径
 - **THEN** 统一循环 SHALL 记录组合层诊断并将最终信号交给订单规划
 - **THEN** 组合层 SHALL 不改变 `t` 日信号、`t+1` 执行的交易时钟
+
+### Requirement: 热点 provider facade 必须允许外部 state、precompute 和 route 模块
+系统 MUST 允许热点 signal provider 通过 facade 调度外部 state owner、precompute 模块和 day route 模块，只要对外仍保持既有 `SignalProvider` 协议不变。provider facade SHALL NOT 重新退化为同时承载全部状态、预计算和 route 行为的单文件 owner。
+
+#### Scenario: Provider facade 调度预计算
+- **WHEN** 热点 provider 执行 `precompute()`
+- **THEN** facade MAY 调度外部 precompute 模块完成重型矩阵与诊断准备
+- **THEN** 对外 `SignalProvider.precompute()` 合同 MUST 保持不变
+
+#### Scenario: Provider facade 调度逐日路由
+- **WHEN** 热点 provider 执行 `day_signals()`
+- **THEN** facade MAY 调度外部 route 模块生成当日信号
+- **THEN** 对外 `DaySignals` 语义 MUST 保持不变
+
+### Requirement: SignalProvider 和 route registry 必须显式消费 asset profile
+系统 MUST 要求 signal provider façade、route registry 和 runtime route 选择显式消费 canonical `asset_profile` 或 `market_profile`。这些模块 SHALL NOT 再把 A 股作为隐式全局前提。
+
+#### Scenario: 运行当前 A 股 provider
+- **WHEN** runtime route 选择当前 A 股 provider
+- **THEN** route 选择 MUST 基于 canonical A 股 asset profile
+- **THEN** 选择结果 MUST 保持当前 `V10.1` provider 行为不变
+
+#### Scenario: 运行未支持资产
+- **WHEN** route registry 收到尚未实现的 asset profile
+- **THEN** 系统 MUST 明确返回 unsupported error
+- **THEN** 系统 SHALL NOT 静默复用 A 股 provider
+
+### Requirement: Provider façade 不得继续内嵌资产 family 的隐式默认
+系统 MUST 要求 provider façade 的 `precompute()` 和 `day_signals()` 入口显式可见资产上下文。与资产 family 强绑定的约束和 helper MUST 通过 profile/adapter 注入，而不是硬编码为默认全局行为。
+
+#### Scenario: A 股特有约束被隔离
+- **WHEN** provider 需要使用 A 股特有的 lot、停牌或 benchmark 规则
+- **THEN** 这些规则 MUST 通过 asset/market profile 或对应 helper 提供
+- **THEN** façade 文件 SHALL NOT 继续把这些规则写成无条件全局逻辑
+

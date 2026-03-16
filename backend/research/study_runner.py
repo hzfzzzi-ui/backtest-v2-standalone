@@ -12,9 +12,9 @@ from backend.core.services import (
     experiment_query_service,
     experiment_summary_service,
 )
+from backend.core.tools import experiment_runtime_access
 from backend.research import study_gates
 from backend.research.study_definition import StudyDefinition, StudyPatch, StudyVariant, StudyWindow
-from backend.scripts import _internal_helper
 
 
 def _repo_root() -> Path:
@@ -86,6 +86,7 @@ def _requires_materialized_config_json(study: StudyDefinition) -> bool:
 def build_request_payload(study: StudyDefinition, window: StudyWindow, variant: StudyVariant) -> dict[str, Any]:
     payload = deepcopy(study.request_template)
     payload.setdefault("preset", "single")
+    payload["asset_scope"] = study.asset_scope
     _merge_request_overrides(payload, window.request_overrides)
     _merge_request_overrides(payload, variant.request_overrides)
     if _requires_materialized_config_json(study):
@@ -106,6 +107,7 @@ def build_request_payload(study: StudyDefinition, window: StudyWindow, variant: 
             "study_id": study.study_id,
             "title": study.title,
             "baseline_id": study.baseline_id,
+            "asset_scope": study.asset_scope,
             "window_key": window.key,
             "variant_name": variant.name,
             "required_outputs": list(study.required_outputs),
@@ -146,7 +148,7 @@ def build_execution_plan(
 
 
 def _load_run_meta(exp_id: str, results_dir: str | Path | None) -> dict[str, Any]:
-    return _internal_helper.read_json_artifact(
+    return experiment_runtime_access.read_json_artifact(
         exp_id=exp_id,
         results_dir=results_dir,
         artifact_key="run_meta",
@@ -155,7 +157,7 @@ def _load_run_meta(exp_id: str, results_dir: str | Path | None) -> dict[str, Any
 
 
 def _load_config_snapshot(exp_id: str, results_dir: str | Path | None) -> dict[str, Any]:
-    resolved = _internal_helper.read_json_artifact(
+    resolved = experiment_runtime_access.read_json_artifact(
         exp_id=exp_id,
         results_dir=results_dir,
         artifact_key="resolved_config",
@@ -163,7 +165,7 @@ def _load_config_snapshot(exp_id: str, results_dir: str | Path | None) -> dict[s
     )
     if resolved:
         return resolved
-    return _internal_helper.read_json_artifact(
+    return experiment_runtime_access.read_json_artifact(
         exp_id=exp_id,
         results_dir=results_dir,
         artifact_key="config",
@@ -187,9 +189,9 @@ def run_study(
     runs: list[dict[str, Any]] = []
     for item in plan:
         payload = dict(item.get("request_payload") or {})
-        runtime_result = _internal_helper.run_internal_experiment_sync(payload)
+        runtime_result = experiment_runtime_access.run_experiment_sync(payload)
         exp_id = str(runtime_result.get("exp_id") or runtime_result.get("experiment_id") or "").strip()
-        results_dir = _internal_helper.resolve_internal_results_dir(
+        results_dir = experiment_runtime_access.resolve_results_dir(
             exp_id=exp_id or None,
             results_dir=runtime_result.get("results_dir"),
         )

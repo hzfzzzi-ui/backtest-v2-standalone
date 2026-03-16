@@ -13,6 +13,9 @@ import pandas as pd
 from backend.core.config.models import ExitConfig
 from backend.core.core.models import Position, Signal
 from backend.core.core.types import Side
+from backend.core.engine_vector.multifactor_fast_gate import (
+    build_multifactor_fast_gate as _build_multifactor_and_fast_gate,
+)
 from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
 from backend.core.engine_vector.signal_provider import (
     DayContext,
@@ -20,106 +23,6 @@ from backend.core.engine_vector.signal_provider import (
     ExitCounts,
     evaluate_engine_exits,
 )
-
-
-# ---------------------------------------------------------------------------
-# 多因子快速门控
-# ---------------------------------------------------------------------------
-
-def _build_multifactor_and_fast_gate(
-    strategy: Any,
-    hist: pd.DataFrame,
-    trading_days: list[date],
-) -> dict[str, Any] | None:
-    try:
-        enabled = bool((getattr(strategy, "state", {}) or {}).get("enable_multifactor_fast_gate", False))
-    except Exception:
-        enabled = False
-    if not enabled:
-        return None
-    try:
-        from backend.core.strategies.composite_strategy import CompositeStrategy
-        from backend.core.strategies.sma_cross_regime_atr import SMACrossRegimeATRStrategy
-        from backend.core.strategies.volume_breakout import VolumeBreakoutStrategy
-        from backend.core.strategies.momentum_roc import MomentumROCStrategy
-        from backend.core.strategies.relative_strength import RelativeStrengthStrategy
-        from backend.core.strategies.bollinger_breakout import BollingerBreakoutStrategy
-    except Exception:
-        return None
-
-    if not isinstance(strategy, CompositeStrategy):
-        return None
-    if str(getattr(strategy, "combine_mode", "")).upper() != "AND":
-        return None
-    sub = list(getattr(strategy, "strategies", []) or [])
-    if len(sub) < 2:
-        return None
-    base = sub[0]
-    if not isinstance(base, SMACrossRegimeATRStrategy):
-        return None
-    extra = sub[1:]
-    for s in extra:
-        if isinstance(s, MomentumROCStrategy) and bool(getattr(s, "enable_roc_exit", False)):
-            return None
-        if isinstance(s, BollingerBreakoutStrategy) and bool(getattr(s, "enable_bb_mid_exit", False)):
-            return None
-        if not isinstance(s, (VolumeBreakoutStrategy, MomentumROCStrategy, RelativeStrengthStrategy, BollingerBreakoutStrategy)):
-            return None
-
-    data = hist[["date", "symbol", "close", "volume"]].copy()
-    data["date"] = pd.to_datetime(data["date"])
-    data["symbol"] = data["symbol"].astype(str).str.lower()
-    data = data.sort_values(["symbol", "date"]).reset_index(drop=True)
-    data["n"] = data.groupby("symbol").cumcount() + 1
-    day_set = {pd.Timestamp(d).normalize() for d in trading_days}
-
-    factor_sets: list[dict[pd.Timestamp, set[str]]] = []
-    for s in extra:
-        fdf = data.copy()
-        cond = pd.Series(False, index=fdf.index)
-        if isinstance(s, VolumeBreakoutStrategy):
-            p = int(getattr(s, "vol_ma_period", 20))
-            m = float(getattr(s, "vol_mult", 1.5))
-            md = int(getattr(s, "min_data_days", 30))
-            fdf["vol_ma"] = fdf.groupby("symbol")["volume"].transform(lambda x: x.rolling(p, min_periods=p).mean())
-            cond = (fdf["n"] >= md) & (fdf["volume"] > (fdf["vol_ma"] * m))
-        elif isinstance(s, MomentumROCStrategy):
-            p = int(getattr(s, "roc_period", 20))
-            th = float(getattr(s, "roc_threshold", 0.0))
-            md = int(getattr(s, "min_data_days", 30))
-            prev = fdf.groupby("symbol")["close"].shift(p)
-            roc = (fdf["close"] - prev) / prev
-            cond = (fdf["n"] >= md) & roc.notna() & (roc >= th)
-        elif isinstance(s, RelativeStrengthStrategy):
-            p = int(getattr(s, "rs_period", 60))
-            th = float(getattr(s, "rs_threshold", 0.7))
-            md = int(getattr(s, "min_data_days", 70))
-            prev = fdf.groupby("symbol")["close"].shift(p)
-            ret = (fdf["close"] - prev) / prev
-            fdf["ret"] = ret
-            valid = (fdf["n"] >= md) & fdf["ret"].notna()
-            rank = fdf[valid].groupby("date")["ret"].rank(method="average", pct=True)
-            cond = pd.Series(False, index=fdf.index)
-            cond.loc[valid[valid].index] = (rank >= th).values
-        elif isinstance(s, BollingerBreakoutStrategy):
-            p = int(getattr(s, "bb_period", 20))
-            k = float(getattr(s, "bb_std_mult", 2.0))
-            md = int(getattr(s, "min_data_days", 30))
-            mid = fdf.groupby("symbol")["close"].transform(lambda x: x.rolling(p, min_periods=p).mean())
-            std = fdf.groupby("symbol")["close"].transform(lambda x: x.rolling(p, min_periods=p).std())
-            upper = mid + k * std
-            cond = (fdf["n"] >= md) & upper.notna() & (fdf["close"] > upper)
-
-        pass_df = fdf.loc[cond, ["date", "symbol"]].copy()
-        pass_df["date"] = pd.to_datetime(pass_df["date"]).dt.normalize()
-        pass_df = pass_df[pass_df["date"].isin(day_set)]
-        by_day: dict[pd.Timestamp, set[str]] = {}
-        if not pass_df.empty:
-            for d, g in pass_df.groupby("date", sort=False):
-                by_day[pd.Timestamp(d)] = set(g["symbol"].astype(str).tolist())
-        factor_sets.append(by_day)
-
-    return {"base": base, "factor_sets": factor_sets}
 
 
 # ---------------------------------------------------------------------------
@@ -401,7 +304,7 @@ class GenericSignalProvider:
         diagnostics: dict[str, Any] = {
             "positions_before_sell": positions_before_sell,
             "raw_buy_signal_count": day_raw_buy_signal_count,
-            "buy_candidate_count": len(buy_sigs),
+            "buy_candidate_count": day_raw_buy_signal_count,
             "after_held_filter_count": len(buy_sigs),
         }
 

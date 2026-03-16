@@ -13,6 +13,9 @@ class HistoryListItem(BaseModel):
     created_at: str | None = None
     has_manifest: bool = False
     has_core_artifacts: bool = False
+    asset_scope: str | None = None
+    asset_profile_id: str | None = None
+    market_profile_id: str | None = None
     perf: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -1,20 +1,14 @@
-"""Frozen bridge adapter that routes the preserved execution flow into stage_pipeline.
+"""Stage-pipeline bridge for the current execution path.
 
-New execution logic must not be introduced here. New provider logic belongs in
-`backend/core/engine_vector/*_signal_provider.py`; new bus logic belongs in
-`backend/core/stage_pipeline/builtins/*` and related adapters.
-
-Execution bridge cleanup order stays fixed:
-1. strict main-flow route branches
-2. `bridge_adapter.py` and `frozen_loop.py`
-3. old route-specific special cases
-
-Deletion is allowed only after the minimum golden set passes without drift.
+Provider logic belongs in `backend/core/engine_vector/*_signal_provider.py`.
+Bus logic belongs in `backend/core/stage_pipeline/builtins/*` and related
+adapters. This module should stay focused on adapting runtime state into the
+stage pipeline contract.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Mapping, Sequence
 
@@ -83,6 +77,7 @@ class StagePipelineBridgeRequest:
     market_filter_cfg: MarketFilterConfig | None = None
     benchmark_regime_cfg: BenchmarkRegimeConfig | None = None
     breadth_cfg: BreadthConfig | None = None
+    asset_context: Mapping[str, Any] = field(default_factory=dict)
     disabled_stages: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -100,6 +95,7 @@ class StagePipelineBridgeRequest:
             "disabled_stages",
             tuple(sorted({str(stage).upper() for stage in self.disabled_stages})),
         )
+        object.__setattr__(self, "asset_context", dict(self.asset_context or {}))
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +111,7 @@ class StagePipelineBridgeRuntime:
 
     def __init__(self, request: StagePipelineBridgeRequest) -> None:
         self.request = request
-        self.route_id, self.provider = build_signal_provider(request.strategy)
+        self.route_id, self.provider = build_signal_provider(request.strategy, asset_context=dict(request.asset_context or {}))
         self._market_filter_cfg = coerce_market_filter_cfg(request.market_filter_cfg)
         self._benchmark_regime_cfg = coerce_benchmark_regime_cfg(request.benchmark_regime_cfg)
         bootstrap = build_runtime_bootstrap(
@@ -251,6 +247,7 @@ class StagePipelineBridgeRuntime:
                 open_idx=self.open_idx,
                 next_day=day_context.next_trading_day,
                 holding_sources=self.holding_sources,
+                asset_context=self.request.asset_context,
                 risk_on=bool(controls["risk_on_today"]),
                 market_state=str(controls.get("market_state", "") or ""),
             )

@@ -1,389 +1,276 @@
 {
-  "generated_at": "2026-03-15T00:00:00+08:00",
-  "migration_batches": [
-    {
-      "batch_id": "2026-03-15-v10-study-first-batch",
-      "status": "completed",
-      "target_surface": "generated-study-entry",
-      "studies": [
-        {
-          "study_id": "v10/residual_structure_s1",
-          "generated_script": "backend/scripts/generated/run_v10_residual_structure_s1.py",
-          "legacy_wrapper": "backend/scripts/run_v10_residual_structure_s1_research.py"
-        },
-        {
-          "study_id": "v10/onset_ingress_minimal_s2",
-          "generated_script": "backend/scripts/generated/run_v10_onset_ingress_minimal_s2.py",
-          "legacy_wrapper": "backend/scripts/run_v10_onset_ingress_minimal_s2_research.py"
-        },
-        {
-          "study_id": "v10/quality_then_residual_s3",
-          "generated_script": "backend/scripts/generated/run_v10_quality_then_residual_s3.py",
-          "legacy_wrapper": "backend/scripts/run_v10_quality_then_residual_s3_research.py"
-        }
-      ]
-    }
-  ],
-  "rows": [
-    {
-      "path": "backend/scripts/__init__.py",
-      "tag": "internal-helper",
-      "target": "package-marker"
-    },
-    {
-      "path": "backend/scripts/_internal_helper.py",
-      "tag": "internal-helper",
-      "target": "backend.scripts._internal_helper"
-    },
-    {
-      "path": "backend/scripts/apply_proven_price_gap_rows.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/audit_price_gap_anomalies.py",
-      "tag": "official-audit",
-      "target": "backend.cli audit"
-    },
-    {
-      "path": "backend/scripts/backfill_csi800_ohlcv_baostock.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/backfill_csi800_st_baostock.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/backfill_csi800_st_history_baostock.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/baseline_regression_check.py",
-      "tag": "official-audit",
-      "target": "backend.cli audit --target baseline_regression"
-    },
-    {
-      "path": "backend/scripts/build_candidates.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/build_csi1000_pit_from_manual_snapshots.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/build_market_snapshot.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/clear_ohlcv_cache.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/csi1000_rebalance_calendar.py",
-      "tag": "one-off-delete",
-      "target": "review-and-retire"
-    },
-    {
-      "path": "backend/scripts/fetch_csi1000_pit.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/fetch_csi1000_pit_by_calendar.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/fetch_csi1000_pit_monthly.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/fetch_csi800_pit.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/import_cn_daily_basic_liquidity.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/import_csi1000_pit.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/import_csi800_pit.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/prove_price_gap_suspensions.py",
-      "tag": "official-audit",
-      "target": "backend.cli audit"
-    },
-    {
-      "path": "backend/scripts/rebuild_pams_limit_prices_baostock.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/refresh_csi1000_pit.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh --target csi1000_pit"
-    },
-    {
-      "path": "backend/scripts/refresh_security_master.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh --target security_master"
-    },
-    {
-      "path": "backend/scripts/register_recent_backtest_configs.py",
-      "tag": "one-off-delete",
-      "target": "review-and-retire"
-    },
-    {
-      "path": "backend/scripts/repair_price_gap_suspensions.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/report_consistency_check.py",
-      "tag": "official-audit",
-      "target": "backend.cli audit --target report_consistency"
-    },
-    {
-      "path": "backend/scripts/rewrite_effective_start_artifacts.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    },
-    {
-      "path": "backend/scripts/run_ab_compare.py",
-      "tag": "official-command",
-      "target": "backend.cli experiment_compare or study_run"
-    },
-    {
-      "path": "backend/scripts/run_breakout_atr_stop_candidate.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_breakout_buffer_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_breakout_diagnostic.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_breakout_fix_sweep.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_breakout_multi_alpha_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_breakout_next_stage_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_breakout_regime_ma_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_breakout_sweep.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_breakout_tight_pullback_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_breakout_window40_robustness.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_breakout_window_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_clean_data_standard_reruns.py",
-      "tag": "archived-study",
-      "target": "archive after study migration"
-    },
-    {
-      "path": "backend/scripts/run_combo_backtest.py",
-      "tag": "official-command",
-      "target": "backend.cli experiment_compare or study_run"
-    },
-    {
-      "path": "backend/scripts/run_dd_breaker_sweep.py",
-      "tag": "archived-study",
-      "target": "archive after study migration"
-    },
-    {
-      "path": "backend/scripts/run_dynamic_sizing_experiments.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_funnel_diagnostic.py",
-      "tag": "archived-study",
-      "target": "archive after study migration"
-    },
-    {
-      "path": "backend/scripts/run_market_state_segmentation_experiments.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_residual_alpha_refinement_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_residual_window_stability_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_buy_tag_diagnostic.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_conditional_tiebreak_s4_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_industry_excess_median_s6_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_industry_second_stage_s7_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_industry_second_stage_tiebreak_s8_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_leadership_route_l1_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_onset_ingress_minimal_s2_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/v10/onset_ingress_minimal_s2.study.yaml + backend.cli study_run v10/onset_ingress_minimal_s2"
-    },
-    {
-      "path": "backend/scripts/run_v10_quality_then_residual_s3_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/v10/quality_then_residual_s3.study.yaml + backend.cli study_run v10/quality_then_residual_s3"
-    },
-    {
-      "path": "backend/scripts/run_v10_regime_source_minimal_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_residual_structure_s1_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/v10/residual_structure_s1.study.yaml + backend.cli study_run v10/residual_structure_s1"
-    },
-    {
-      "path": "backend/scripts/run_v10_rotation_replace_minimal_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_state_conditional_residual_r2_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_state_conditional_window_r3_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_strict_industry_relative_s5_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v10_upstream_pullback_minimal_research.py",
-      "tag": "study-definition",
-      "target": "research/studies/*.study.yaml + backend.cli study_run"
-    },
-    {
-      "path": "backend/scripts/run_v2_full_backtest.py",
-      "tag": "official-command",
-      "target": "backend.cli experiment_compare or study_run"
-    },
-    {
-      "path": "backend/scripts/run_v9_3_conditional_regime_ma_validation.py",
-      "tag": "archived-study",
-      "target": "archive after study migration"
-    },
-    {
-      "path": "backend/scripts/run_v9_3_conditional_regime_validation.py",
-      "tag": "archived-study",
-      "target": "archive after study migration"
-    },
-    {
-      "path": "backend/scripts/run_v9_3_conditional_short_cycle_validation.py",
-      "tag": "archived-study",
-      "target": "archive after study migration"
-    },
-    {
-      "path": "backend/scripts/run_v9_3_short_cycle_validation.py",
-      "tag": "archived-study",
-      "target": "archive after study migration"
-    },
-    {
-      "path": "backend/scripts/run_v9_3_v9_4_combo_buffer_validation.py",
-      "tag": "archived-study",
-      "target": "archive after study migration"
-    },
-    {
-      "path": "backend/scripts/run_v9_3_v9_4_combo_validation.py",
-      "tag": "archived-study",
-      "target": "archive after study migration"
-    },
-    {
-      "path": "backend/scripts/update_pams_ohlcv_daily.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh --target pams_ohlcv_daily"
-    },
-    {
-      "path": "backend/scripts/update_pit_index_daily.py",
-      "tag": "official-command",
-      "target": "backend.cli data_refresh"
-    }
-  ]
+    "generated_at":  "2026-03-15T12:00:00+08:00",
+    "migration_batches":  [
+                              {
+                                  "batch_id":  "2026-03-15-v10-study-first-batch",
+                                  "status":  "completed",
+                                  "target_surface":  "generated-study-entry",
+                                  "studies":  [
+                                                  {
+                                                      "study_id":  "v10/residual_structure_s1",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_residual_structure_s1.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  },
+                                                  {
+                                                      "study_id":  "v10/onset_ingress_minimal_s2",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_onset_ingress_minimal_s2.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  },
+                                                  {
+                                                      "study_id":  "v10/quality_then_residual_s3",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_quality_then_residual_s3.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  }
+                                              ]
+                              },
+                              {
+                                  "batch_id":  "2026-03-15-v10-study-second-batch",
+                                  "status":  "completed",
+                                  "target_surface":  "generated-study-entry",
+                                  "studies":  [
+                                                  {
+                                                      "study_id":  "v10/regime_source_minimal_r1",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_regime_source_minimal_r1.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  },
+                                                  {
+                                                      "study_id":  "v10/rotation_replace_minimal_r1",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_rotation_replace_minimal_r1.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  },
+                                                  {
+                                                      "study_id":  "v10/upstream_pullback_minimal_p1",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_upstream_pullback_minimal_p1.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  }
+                                              ]
+                              },
+                              {
+                                  "batch_id":  "2026-03-15-v10-study-third-batch",
+                                  "status":  "completed",
+                                  "target_surface":  "generated-study-entry",
+                                  "studies":  [
+                                                  {
+                                                      "study_id":  "v10/conditional_tiebreak_s4",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_conditional_tiebreak_s4.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  },
+                                                  {
+                                                      "study_id":  "v10/strict_industry_relative_s5",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_strict_industry_relative_s5.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  },
+                                                  {
+                                                      "study_id":  "v10/industry_excess_median_s6",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_industry_excess_median_s6.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  }
+                                              ]
+                              },
+                              {
+                                  "batch_id":  "2026-03-15-v10-study-fourth-batch",
+                                  "status":  "completed",
+                                  "target_surface":  "generated-study-entry",
+                                  "studies":  [
+                                                  {
+                                                      "study_id":  "v10/industry_second_stage_s7",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_industry_second_stage_s7.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  },
+                                                  {
+                                                      "study_id":  "v10/industry_second_stage_tiebreak_s8",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_industry_second_stage_tiebreak_s8.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  },
+                                                  {
+                                                      "study_id":  "v10/leadership_route_l1",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_leadership_route_l1.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  }
+                                              ]
+                              },
+                              {
+                                  "batch_id":  "2026-03-15-v10-study-fifth-batch",
+                                  "status":  "completed",
+                                  "target_surface":  "generated-study-entry",
+                                  "studies":  [
+                                                  {
+                                                      "study_id":  "v10/state_conditional_residual_r2",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_state_conditional_residual_r2.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  },
+                                                  {
+                                                      "study_id":  "v10/state_conditional_window_r3",
+                                                      "generated_script":  "backend/scripts/generated/run_v10_state_conditional_window_r3.py",
+                                                      "legacy_wrapper":  null,
+                                                      "entry_mode":  "generated-only"
+                                                  }
+                                              ]
+                              }
+                          ],
+    "rows":  [
+                 {
+                     "path":  "backend/scripts/__init__.py",
+                     "tag":  "internal-helper",
+                     "target":  "package-marker"
+                 },
+                 {
+                     "path":  "backend/scripts/apply_proven_price_gap_rows.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/audit_price_gap_anomalies.py",
+                     "tag":  "official-audit",
+                     "target":  "backend.cli audit"
+                 },
+                 {
+                     "path":  "backend/scripts/backfill_csi800_ohlcv_baostock.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/backfill_csi800_st_baostock.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/backfill_csi800_st_history_baostock.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/baseline_regression_check.py",
+                     "tag":  "official-audit",
+                     "target":  "backend.cli audit --target baseline_regression"
+                 },
+                 {
+                     "path":  "backend/scripts/build_candidates.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/build_csi1000_pit_from_manual_snapshots.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/build_market_snapshot.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/clear_ohlcv_cache.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/fetch_csi1000_pit.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/fetch_csi1000_pit_by_calendar.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/fetch_csi1000_pit_monthly.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/fetch_csi800_pit.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/import_cn_daily_basic_liquidity.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/import_csi1000_pit.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/import_csi800_pit.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/prove_price_gap_suspensions.py",
+                     "tag":  "official-audit",
+                     "target":  "backend.cli audit"
+                 },
+                 {
+                     "path":  "backend/scripts/rebuild_pams_limit_prices_baostock.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/refresh_csi1000_pit.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh --target csi1000_pit"
+                 },
+                 {
+                     "path":  "backend/scripts/refresh_security_master.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh --target security_master"
+                 },
+                 {
+                     "path":  "backend/scripts/repair_price_gap_suspensions.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/report_consistency_check.py",
+                     "tag":  "official-audit",
+                     "target":  "backend.cli audit --target report_consistency"
+                 },
+                 {
+                     "path":  "backend/scripts/rewrite_effective_start_artifacts.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/run_ab_compare.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli experiment_compare or study_run"
+                 },
+                 {
+                     "path":  "backend/scripts/run_combo_backtest.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli experiment_compare or study_run"
+                 },
+                 {
+                     "path":  "backend/scripts/run_v2_full_backtest.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli experiment_compare or study_run"
+                 },
+                 {
+                     "path":  "backend/scripts/update_pams_ohlcv_daily.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh --target pams_ohlcv_daily"
+                 },
+                 {
+                     "path":  "backend/scripts/update_pit_index_daily.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 }
+             ]
 }

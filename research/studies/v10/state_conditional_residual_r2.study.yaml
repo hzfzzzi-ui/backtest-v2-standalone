@@ -1,0 +1,78 @@
+study_id: v10/state_conditional_residual_r2
+title: V10 State Conditional Residual R2
+asset_scope: cn_a_equity
+baseline_id: baseline_V10
+hypothesis: Increase industry-relative residual weight only in strong risk-on states to reduce benchmark-anchor drag without changing the breakout execution path.
+change_scope:
+  modules_modified:
+    - signal_generation.ranking.residual_benchmark_weight
+    - signal_generation.ranking.residual_industry_weight
+    - signal_generation.ranking.residual_weight_regime_mode
+    - signal_generation.ranking.residual_benchmark_weight_fallback
+    - signal_generation.ranking.residual_industry_weight_fallback
+variants:
+  - name: B0
+  - name: R2_A_STRONG_IND_ONLY
+    config_patches:
+      - path: signal_generation.ranking.residual_benchmark_weight
+        value: 0.0
+      - path: signal_generation.ranking.residual_industry_weight
+        value: 1.0
+      - path: signal_generation.ranking.residual_weight_regime_mode
+        value: STRONG_RISK_ON
+      - path: signal_generation.ranking.residual_benchmark_weight_fallback
+        value: 0.5
+      - path: signal_generation.ranking.residual_industry_weight_fallback
+        value: 0.5
+  - name: R2_B_STRONG_B30_I70
+    config_patches:
+      - path: signal_generation.ranking.residual_benchmark_weight
+        value: 0.3
+      - path: signal_generation.ranking.residual_industry_weight
+        value: 0.7
+      - path: signal_generation.ranking.residual_weight_regime_mode
+        value: STRONG_RISK_ON
+      - path: signal_generation.ranking.residual_benchmark_weight_fallback
+        value: 0.5
+      - path: signal_generation.ranking.residual_industry_weight_fallback
+        value: 0.5
+windows:
+  - key: "0717"
+    role: hard_gate
+    start: "2007-01-15"
+    end: "2017-01-15"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2010_2013_range: ["2010-01-04", "2013-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2015_2017_post_crash: ["2015-06-15", "2017-01-13"]
+  - key: "1626"
+    role: main
+    start: "2016-03-01"
+    end: "2026-03-01"
+    periods:
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2019_2021_bull: ["2019-01-02", "2021-02-18"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+  - key: "0726"
+    role: audit
+    start: "2007-01-15"
+    end: "2026-03-01"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+hard_gates:
+  min_cagr: 0.1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: outputs/baselines/baseline_V10/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

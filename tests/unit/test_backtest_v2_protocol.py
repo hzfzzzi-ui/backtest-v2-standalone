@@ -1,17 +1,13 @@
 from backend.api.backtest_v2.protocol import (
     ARTIFACT_FILENAMES,
-    ARTIFACT_HISTORICAL_ALIASES,
-    candidate_artifact_names,
     normalize_counters,
 )
 
 
-def test_protocol_constants_and_aliases() -> None:
+def test_protocol_constants_use_canonical_names_only() -> None:
     assert ARTIFACT_FILENAMES["reason_codes"] == "reason_codes.csv"
     assert ARTIFACT_FILENAMES["trades"] == "portfolio_trades.csv"
-    assert ARTIFACT_HISTORICAL_ALIASES == {}
-    names = candidate_artifact_names("reason_codes")
-    assert names == ["reason_codes.csv"]
+    assert ARTIFACT_FILENAMES["cash_blocked_buys_recent"] == "cash_blocked_buys_recent.csv"
 
 
 def test_normalize_counters_keeps_canonical_fields_only() -> None:

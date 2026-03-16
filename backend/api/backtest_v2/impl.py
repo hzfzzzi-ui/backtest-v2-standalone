@@ -6,20 +6,17 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from backend.api.backtest_v2.data_impl import (
-    BacktestV2ArtifactReadRequest,
     BacktestV2ExecutionPreviewRequest,
     _extract_reason_code_counts,
     _load_manifest_or_404,
     _normalized_run_meta_counters,
-    _read_declared_artifact_payload,
-    get_backtest_v2_artifact,
     get_backtest_v2_manifest,
     get_benchmark_series,
     get_industries,
+    get_market_data_sync_status,
     get_stock_names,
     get_symbol_series,
     preview_backtest_v2_execution,
-    read_backtest_v2_artifact,
     validate_backtest_v2_data,
 )
 from backend.api.backtest_v2.runner_impl import (
@@ -89,7 +86,6 @@ def write_data_validation_section(run_dir: Path, req: BacktestV2RunRequest, bt_r
 
 __all__ = [
     "BacktestV2ExperimentRequest",
-    "BacktestV2ArtifactReadRequest",
     "BacktestV2ExecutionPreviewRequest",
     "BacktestV2RunRequest",
     "_bt_root",
@@ -103,7 +99,6 @@ __all__ = [
     "_load_manifest_or_404",
     "_looks_like_backend_runtime_config",
     "_normalized_run_meta_counters",
-    "_read_declared_artifact_payload",
     "_request_semantic_blocks",
     "_resolve_runtime_path",
     "_run_backtest_v2_experiment_sync",
@@ -114,15 +109,14 @@ __all__ = [
     "_to_rel",
     "_write_config_snapshots",
     "cancel_backtest_v2_job",
-    "get_backtest_v2_artifact",
     "get_backtest_v2_job",
     "get_backtest_v2_manifest",
     "get_benchmark_series",
     "get_industries",
+    "get_market_data_sync_status",
     "get_stock_names",
     "get_symbol_series",
     "preview_backtest_v2_execution",
-    "read_backtest_v2_artifact",
     "run_backtest_v2_experiment",
     "run_backtest_v2_experiment_async",
     "stabilize_experiment_result",

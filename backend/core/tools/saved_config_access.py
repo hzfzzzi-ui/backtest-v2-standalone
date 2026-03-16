@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from backend.core.config.asset_profiles import build_asset_context, canonical_asset_scope
+
 try:
     import numpy as _np  # type: ignore
 except Exception:  # pragma: no cover
@@ -138,6 +140,7 @@ def _config_meta_view(record: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(record, dict):
         return None
     config_json = dict(record.get("config_json") or {})
+    asset_context = build_asset_context(config_json=config_json)
     return {
         "config_id": str(record.get("config_id") or ""),
         "config_hash": str(record.get("config_hash") or ""),
@@ -150,6 +153,9 @@ def _config_meta_view(record: dict[str, Any] | None) -> dict[str, Any] | None:
         "locked": bool(record.get("locked")),
         "baseline_of": record.get("baseline_of"),
         "universe_mode": str(config_json.get("universe_mode") or ""),
+        "asset_scope": canonical_asset_scope(asset_context.get("asset_scope")),
+        "asset_profile_id": str(asset_context.get("asset_profile_id") or ""),
+        "market_profile_id": str(asset_context.get("market_profile_id") or ""),
     }
 
 
@@ -217,6 +223,7 @@ def create_saved_config_record(
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cfg_obj = sanitize_json(dict(config_json or {}))
+    cfg_obj.setdefault("asset_scope", "cn_a_equity")
     cfg_hash = _hash_json(cfg_obj)
     record = {
         **dict(extra or {}),

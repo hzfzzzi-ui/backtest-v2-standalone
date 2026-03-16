@@ -1,9 +1,10 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const BACKTEST_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'backtest_v2.js');
+const CONFIG_DRAFT_CORE_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'state', 'config-draft-core.js');
 const UI_CONTROLS_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'ui-controls.js');
 const ACCEPTANCE_REQUEST = path.join(PROJECT_ROOT, 'backend', 'scripts', 'ops', 'multi_alpha_phase1_acceptance.request.json');
 
@@ -337,7 +338,7 @@ function patchWorkbench(context) {
   context.refreshConfigPanels = () => {
     context.state.multi_alpha_validation_errors = context.validateConfigDraft(context.state.config_draft || {});
   };
-  context.syncConfigSourceUI = () => 'draft-only';
+  context.syncLoadedSourceUI = () => 'draft-only';
   context.syncResultsWorkbenchSurface = () => {};
   context.renderSummaryBar = () => {};
   context.renderConfigDiff = () => {};
@@ -392,12 +393,14 @@ function createWorkbenchHarness() {
   context.window.cancelAnimationFrame = context.cancelAnimationFrame;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(BACKTEST_SCRIPT, 'utf8'), context, { filename: 'backtest_v2.js' });
+  vm.runInContext(fs.readFileSync(CONFIG_DRAFT_CORE_SCRIPT, 'utf8'), context, { filename: 'config-draft-core.js' });
   vm.runInContext(fs.readFileSync(UI_CONTROLS_SCRIPT, 'utf8'), context, { filename: 'ui-controls.js' });
-  vm.runInContext("this.__codexExports = { state, byId, buildConfigDraft, validateConfigDraft, applyConfigToUI, runExperiment, defaultComposeRows, defaultRegimeMatrix };", context);
+  vm.runInContext("this.__codexExports = { state, byId, buildConfigDraft, validateConfigDraft, applyConfigToUI, defaultComposeRows, defaultRegimeMatrix };", context);
   Object.assign(context, context.__codexExports || {});
   defaultElementMap(elements);
   patchWorkbench(context);
-  context.state.loaded_config_json = null;
+  context.state.mode = 'experiment';
+  context.state.loaded_source_config = null;
   context.state.config_draft = {};
   context.buildConfigDraft();
   return { context, elements };

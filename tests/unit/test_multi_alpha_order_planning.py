@@ -8,7 +8,7 @@ from backend.core.core.types import Side
 from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
 from backend.core.engine_vector.signal_provider import DaySignals, ExitCounts
 from backend.core.stage_pipeline.adapters.fill_accounting import apply_open_fills
-from backend.core.portfolio.portfolio_builder import build_rebalance_orders
+from backend.core.portfolio.portfolio_runtime import build_rebalance_orders
 from backend.core.stage_pipeline.adapters.order_planning import build_s7_order_stage_output
 
 
@@ -490,6 +490,38 @@ def test_build_rebalance_orders_skips_buy_when_entry_gap_exceeds_threshold() -> 
     assert candidate_audit[0]["symbol"] == "sh600601"
     assert candidate_audit[0]["reject_reason"] == "SKIP_ENTRY_GAP_GUARD"
     assert debug_plan["reject_reason_counts"] == {"SKIP_ENTRY_GAP_GUARD": 1}
+
+
+def test_build_rebalance_orders_records_cash_blocked_candidate_details() -> None:
+    buy_signal = _signal("sh600611", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.82)
+    candidate_audit: list[dict] = []
+    debug_plan: dict[str, object] = {}
+
+    orders = build_rebalance_orders(
+        positions={},
+        cash_available=5000.0,
+        nav_close=100000.0,
+        max_positions=5,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        next_open={"sh600611": 100.0},
+        decision_date=date(2026, 3, 2),
+        candidate_audit=candidate_audit,
+        debug_plan=debug_plan,
+        base_order_value=10000.0,
+    )
+
+    assert orders == []
+    cash_blocked_row = next(row for row in candidate_audit if row["symbol"] == "sh600611")
+    assert cash_blocked_row["reject_reason"] == "SKIP_NO_CASH"
+    assert cash_blocked_row["cash_blocked_flag"] is True
+    assert cash_blocked_row["cash_blocked_reason"] == "SKIP_NO_CASH"
+    assert cash_blocked_row["cash_available"] == 5000.0
+    assert cash_blocked_row["estimated_qty"] == 100
+    assert cash_blocked_row["estimated_amount"] == 10000.0
+    assert cash_blocked_row["estimated_price"] == 100.0
+    assert debug_plan["reject_reason_counts"] == {"SKIP_NO_CASH": 1}
 
 
 def test_build_rebalance_orders_cash_aware_candidate_planner_prefers_feasible_subset() -> None:

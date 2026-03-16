@@ -13,6 +13,11 @@ class ExperimentManifest(BaseModel):
     status: str | None = None
     schema_version: str | None = None
     baseline_compare_status: str | None = None
+    asset_scope: str | None = None
+    asset_profile_id: str | None = None
+    market_profile_id: str | None = None
+    execution_profile_id: str | None = None
+    asset_context: dict[str, Any] = Field(default_factory=dict)
     artifacts: dict[str, str] = Field(default_factory=dict)
     config_snapshots: dict[str, str] = Field(default_factory=dict)
     core_artifacts: dict[str, str] = Field(default_factory=dict)

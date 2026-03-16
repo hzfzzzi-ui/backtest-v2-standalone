@@ -3,27 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from backend.api.backtest_v2 import impl
-from backend.api.backtest_v2.contracts.requests import ArtifactReadRequest
 from backend.core.services import experiment_query_service
 
 router = APIRouter(tags=["backtest_v2"])
-
-BacktestV2ArtifactReadRequest = ArtifactReadRequest
 
 
 @router.get("/api/backtest_v2/experiments/{exp_id}/manifest")
 def get_backtest_v2_manifest(exp_id: str):
     return impl.get_backtest_v2_manifest(exp_id)
-
-
-@router.get("/api/backtest_v2/experiments/{exp_id}/artifacts/{rel_path:path}")
-def get_backtest_v2_artifact(exp_id: str, rel_path: str):
-    return impl.get_backtest_v2_artifact(exp_id, rel_path)
-
-
-@router.post("/api/backtest_v2/artifacts/read")
-def read_backtest_v2_artifact(body: BacktestV2ArtifactReadRequest):
-    return impl.read_backtest_v2_artifact(body)
 
 
 @router.get("/api/backtest_v2/experiments/{exp_id}/surface")

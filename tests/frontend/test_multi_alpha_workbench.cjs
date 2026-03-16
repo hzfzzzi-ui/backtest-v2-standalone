@@ -1,4 +1,4 @@
-﻿const test = require('node:test');
+const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -66,7 +66,7 @@ test('applyConfigToUI round-trips the phase1 acceptance config semantics', () =>
   const request = loadAcceptanceRequest();
   const expected = normalizeDraftForAcceptance(request.config_json);
   const { context } = createWorkbenchHarness();
-  context.state.loaded_config_json = clone(request.config_json);
+  context.state.loaded_source_config = clone(request.config_json);
 
   context.applyConfigToUI(clone(request.config_json));
   const actual = normalizeDraftForAcceptance(context.state.config_draft);
@@ -82,7 +82,7 @@ test('applyConfigToUI round-trips the phase1 acceptance config semantics', () =>
 test('applyConfigToUI normalizes legacy unsupported combo values into phase1 multi-alpha defaults', () => {
   const request = loadAcceptanceRequest();
   const { context } = createWorkbenchHarness();
-  context.state.loaded_config_json = clone(request.config_json);
+  context.state.loaded_source_config = clone(request.config_json);
   const invalidConfig = clone(request.config_json);
   invalidConfig.signal_composition.compose_mode = 'WEIGHTED_SCORE';
   invalidConfig.signal_composition.same_symbol_policy = 'AND';
@@ -116,7 +116,7 @@ test('baseline_V10 semantic config round-trips without dropping ranking or pre-p
   const baselineV10 = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
   const { context } = createWorkbenchHarness();
 
-  context.state.loaded_config_json = clone(baselineV10);
+  context.state.loaded_source_config = clone(baselineV10);
   context.applyConfigToUI(clone(baselineV10));
 
   assert.deepEqual(clone(context.state.config_draft), clone(baselineV10));
@@ -133,7 +133,7 @@ test('applyConfigToUI populates explicit S5 and S9 controls for baseline_V10', (
   const baselineV10 = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
   const { context } = createWorkbenchHarness();
 
-  context.state.loaded_config_json = clone(baselineV10);
+  context.state.loaded_source_config = clone(baselineV10);
   context.applyConfigToUI(clone(baselineV10));
 
   assert.equal(context.byId('wbScoreSourceMode').value, 'residual_only');
@@ -149,7 +149,7 @@ test('explicit S5 and S9 controls write back into semantic config', () => {
   const baselineV10 = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
   const { context } = createWorkbenchHarness();
 
-  context.state.loaded_config_json = clone(baselineV10);
+  context.state.loaded_source_config = clone(baselineV10);
   context.applyConfigToUI(clone(baselineV10));
 
   context.byId('wbResidualWindow').value = '55';
@@ -172,7 +172,7 @@ test('baseline_V9_1 round-trips without injecting V10-only overrides', () => {
   const baselineV91 = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
   const { context } = createWorkbenchHarness();
 
-  context.state.loaded_config_json = clone(baselineV91);
+  context.state.loaded_source_config = clone(baselineV91);
   context.applyConfigToUI(clone(baselineV91));
 
   assert.deepEqual(clone(context.state.config_draft), clone(baselineV91));
@@ -217,7 +217,7 @@ test('applyConfigToUI preserves legacy start-snapshot semantics when membership_
       },
     },
   };
-  context.state.loaded_config_json = clone(legacyConfig);
+  context.state.loaded_source_config = clone(legacyConfig);
 
   context.applyConfigToUI(clone(legacyConfig));
 
@@ -228,21 +228,21 @@ test('applyConfigToUI preserves legacy start-snapshot semantics when membership_
 test('default PIT membership is hidden in config meta display', () => {
   const { context } = createWorkbenchHarness();
 
-  const meta = context.cloneConfigMeta({
+  const meta = context.cloneLoadedSourceMeta({
     config_id: 'baseline_V1',
     display_name: 'baseline_V1',
     universe_mode: 'HS300_ZZ500',
     membership_mode: 'PIT_DYNAMIC',
   });
 
-  assert.equal(meta.display_name.includes('成分='), false);
-  assert.equal(meta.display_name.includes('池=HS300_ZZ500'), true);
+  assert.equal(meta.display_name.includes('Membership='), false);
+  assert.equal(meta.display_name.includes('Universe=HS300_ZZ500'), true);
 });
 
 test('non-default membership mode is shown in config meta and load summary', () => {
   const { context } = createWorkbenchHarness();
 
-  const meta = context.cloneConfigMeta({
+  const meta = context.cloneLoadedSourceMeta({
     config_id: 'legacy_baseline',
     display_name: 'legacy_baseline',
     universe_mode: 'HS300_ZZ500',
@@ -254,6 +254,6 @@ test('non-default membership mode is shown in config meta and load summary', () 
     membership_mode: 'START_SNAPSHOT',
   });
 
-  assert.equal(meta.display_name.includes('成分=START_SNAPSHOT'), true);
-  assert.equal(summary.includes('成分=START_SNAPSHOT'), true);
+  assert.equal(meta.display_name.includes('Membership=START_SNAPSHOT'), true);
+  assert.equal(summary.includes('Membership=START_SNAPSHOT'), true);
 });

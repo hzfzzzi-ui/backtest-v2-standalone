@@ -17,10 +17,7 @@ def test_locked_candidate_static_t1_guard_confirms_price_signal_contract() -> No
 
     assert guard["audit_mode"] == "static_code_contract"
     assert guard["t1_execution_confirmed"] is True
-    assert (
-        "portfolio_simulator_strict.py" in guard["provider_signal_ref"]
-        or "strict_runtime_impl.py" in guard["provider_signal_ref"]
-    )
+    assert "strict_runtime_breakout.py" in guard["provider_signal_ref"]
     assert "breakout_signal_provider.py" in guard["provider_regime_ref"]
 
 
@@ -71,17 +68,24 @@ def test_evaluate_timing_alignment_marks_fundamental_inputs_as_not_pit_safe(tmp_
 def test_static_time_audits_cover_rank_market_state_and_industry_history_paths() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     generic_text = (repo_root / "backend/core/engine_vector/generic_signal_provider.py").read_text(encoding="utf-8")
+    multifactor_gate_text = (repo_root / "backend/core/engine_vector/multifactor_fast_gate.py").read_text(encoding="utf-8")
     route_runtime_text = (repo_root / "backend/core/stage_pipeline/adapters/route_runtime.py").read_text(encoding="utf-8")
     breakout_text = (repo_root / "backend/core/engine_vector/breakout_signal_provider.py").read_text(encoding="utf-8")
+    breakout_precompute_text = (
+        repo_root / "backend/core/engine_vector/breakout_provider_precompute.py"
+    ).read_text(encoding="utf-8")
 
-    assert 'prev = fdf.groupby("symbol")["close"].shift(p)' in generic_text
-    assert 'groupby("date")["ret"].rank(method="average", pct=True)' in generic_text
+    assert "build_multifactor_fast_gate" in generic_text
+    assert 'prev = factor_frame.groupby("symbol")["close"].shift(period)' in multifactor_gate_text
+    assert 'rank = factor_frame[valid].groupby("date")["ret"].rank(method="average", pct=True)' in multifactor_gate_text
     assert ".shift(-" not in generic_text
+    assert ".shift(-" not in multifactor_gate_text
 
     assert "bench_close.rolling(200, min_periods=200).mean()" in route_runtime_text
     assert "ma_fast = bench_close.rolling(fast, min_periods=fast).mean()" in route_runtime_text
     assert ".shift(-" not in route_runtime_text
 
-    assert "_build_industry_assignment_matrices" in breakout_text
-    assert "industry_history=industry_history if isinstance(industry_history, pd.DataFrame) else None" in breakout_text
+    assert "_build_industry_assignment_matrices" in breakout_precompute_text
+    assert "industry_history=industry_history if isinstance(industry_history, pd.DataFrame) else None" in breakout_precompute_text
     assert ".bfill(" not in breakout_text
+    assert ".bfill(" not in breakout_precompute_text

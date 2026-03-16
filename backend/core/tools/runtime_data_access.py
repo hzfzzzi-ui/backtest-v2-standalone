@@ -9,6 +9,7 @@ from typing import Any
 
 import pandas as pd
 
+from backend.core.config.asset_profiles import canonical_asset_scope
 from backend.core.config.loader import load_config
 from backend.core.config.models import BacktestConfig
 from backend.core.data.pg_provider import PostgresDataProvider
@@ -173,6 +174,7 @@ def list_runtime_industries(
 def resolve_validation_universe(
     *,
     bt_root: str | Path | None,
+    asset_scope: str = "cn_a_equity",
     universe_mode: str,
     symbols: list[str],
     industries: list[str],
@@ -200,6 +202,7 @@ def resolve_validation_universe(
         as_of=resolve_asof,
         db=access.cfg_obj.db,
         runtime=access.cfg_obj.db_runtime,
+        asset_scope=canonical_asset_scope(asset_scope),
         industries=industries,
         symbols=symbols,
         universe_limit=universe_limit,
@@ -210,6 +213,7 @@ def resolve_validation_universe(
         start=start,
         end=end,
     )
+    resolved_meta["asset_scope"] = canonical_asset_scope(asset_scope)
     resolved_meta.setdefault("tradable_symbols", int(len(resolved_symbols)))
     resolved_meta.setdefault("after_filters_symbols", int(len(resolved_symbols)))
     universe_filters_raw = {

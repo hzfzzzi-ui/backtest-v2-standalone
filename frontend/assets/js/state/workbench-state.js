@@ -1,12 +1,12 @@
 (function initWorkbenchStateSlice(globalScope) {
   globalScope.createWorkbenchConfigDraftState = function createWorkbenchConfigDraftState() {
     return {
-      config_id: null,
-      loaded_config_meta: null,
-      loaded_config_json: null,
-      loaded_config_snapshot: '',
-      config_source_mode: 'draft-only',
-      config_dirty: false,
+      loaded_source_meta: null,
+      loaded_source_asset_context: null,
+      loaded_source_config: null,
+      loaded_source_snapshot: '',
+      loaded_source_sync_mode: 'draft-only',
+      loaded_source_dirty: false,
       selected_locked_candidate_preset: '',
       config_draft: {},
       universe_stats: null,

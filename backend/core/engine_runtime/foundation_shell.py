@@ -96,6 +96,7 @@ def run_foundation_execution_shell(request: FoundationExecutionRequest):
             market_filter_cfg=request.cfg_obj.market_filter,
             benchmark_regime_cfg=request.cfg_obj.benchmark_regime,
             breadth_cfg=request.cfg_obj.breadth,
+            asset_context=runtime_config.get("asset_context") if isinstance(runtime_config.get("asset_context"), dict) else {},
         )
     )
     base_result = adapter_result.portfolio_result

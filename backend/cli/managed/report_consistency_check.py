@@ -5,19 +5,19 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from backend.core.tools import experiment_runtime_access
+
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.scripts._internal_helper import open_experiment_handle, read_json_artifact
-
 
 def _check_exp(rd: Path) -> dict[str, Any]:
-    resolved_dir, manifest = open_experiment_handle(results_dir=rd)
+    resolved_dir, manifest = experiment_runtime_access.open_experiment_handle(results_dir=rd)
     exp_id = resolved_dir.name
-    run_config = read_json_artifact(results_dir=resolved_dir, rel_path="run_config.json", fallback_rel_path="run_config.json")
-    run_meta = read_json_artifact(results_dir=resolved_dir, artifact_key="run_meta", fallback_rel_path="run_meta.json")
-    perf = read_json_artifact(results_dir=resolved_dir, artifact_key="perf", fallback_rel_path="perf.json")
+    run_config = experiment_runtime_access.read_json_artifact(results_dir=resolved_dir, rel_path="run_config.json", fallback_rel_path="run_config.json")
+    run_meta = experiment_runtime_access.read_json_artifact(results_dir=resolved_dir, artifact_key="run_meta", fallback_rel_path="run_meta.json")
+    perf = experiment_runtime_access.read_json_artifact(results_dir=resolved_dir, artifact_key="perf", fallback_rel_path="perf.json")
 
     uni = run_config.get("universe") if isinstance(run_config.get("universe"), dict) else {}
     data = run_meta.get("data") if isinstance(run_meta.get("data"), dict) else {}

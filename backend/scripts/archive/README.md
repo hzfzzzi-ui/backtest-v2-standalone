@@ -1,6 +1,7 @@
-Archive area for retired or frozen historical scripts.
+Archive area for historical notes only.
 
 Rules:
 - New active experiment entrypoints must not be added here.
 - Migrate reusable flows into `backend/cli/*` or `research/studies/*.study.yaml`.
-- Keep archived scripts only for reproducibility and historical traceability.
+- Keep this directory documentation-only.
+- Archived executable scripts have been removed from the active tree.

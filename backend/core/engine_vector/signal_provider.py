@@ -88,6 +88,7 @@ class DayContext:
     open_idx: dict[tuple[date, str], float]
     next_day: date | None
     holding_sources: Mapping[str, HoldingSourceSnapshot] = field(default_factory=dict)
+    asset_context: Mapping[str, Any] = field(default_factory=dict)
     risk_on: bool = True
     market_state: str = ""
 
@@ -96,6 +97,7 @@ class DayContext:
         for symbol, source in dict(self.holding_sources or {}).items():
             frozen_sources[str(symbol).lower()] = HoldingSourceSnapshot.from_value(source)
         object.__setattr__(self, "holding_sources", MappingProxyType(frozen_sources))
+        object.__setattr__(self, "asset_context", MappingProxyType(dict(self.asset_context or {})))
 
 
 @dataclass(slots=True)

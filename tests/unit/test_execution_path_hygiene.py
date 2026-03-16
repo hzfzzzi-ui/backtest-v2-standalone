@@ -4,82 +4,75 @@ import ast
 from pathlib import Path
 
 
-STRICT_PATH = Path("backend/core/engine_vector/portfolio_simulator_strict.py")
-STRICT_IMPL_PATH = Path("backend/core/engine_vector/strict_runtime_impl.py")
+STRICT_RUNTIME_PATH = Path("backend/core/engine_vector/strict_runtime.py")
 BRIDGE_ADAPTER_PATH = Path("backend/core/stage_pipeline/adapters/bridge_adapter.py")
-PORTFOLIO_BUILDER_PATH = Path("backend/core/portfolio/portfolio_builder.py")
-FROZEN_LOOP_PATH = Path("backend/core/portfolio/frozen_loop.py")
+PORTFOLIO_RUNTIME_PATH = Path("backend/core/portfolio/portfolio_runtime.py")
+PORTFOLIO_LOOP_PATH = Path("backend/core/portfolio/portfolio_loop.py")
 
-FROZEN_PATHS = (
-    STRICT_PATH,
-    BRIDGE_ADAPTER_PATH,
-    PORTFOLIO_BUILDER_PATH,
+RETIRED_PATHS = (
+    Path("backend/core/engine_vector/portfolio_simulator_strict.py"),
+    Path("backend/core/engine_vector/strict_runtime_impl.py"),
+    Path("backend/core/portfolio/portfolio_builder.py"),
+    Path("backend/core/portfolio/frozen_loop.py"),
 )
 
 
 def _parse_module(path: Path) -> ast.AST:
-    return ast.parse(path.read_text(encoding="utf-8"))
+    return ast.parse(path.read_text(encoding="utf-8-sig"))
 
 
 def _import_targets(path: Path) -> set[str]:
-    tree = _parse_module(path)
     targets: set[str] = set()
-    for node in ast.walk(tree):
+    for node in ast.walk(_parse_module(path)):
         if isinstance(node, ast.ImportFrom) and node.module:
             targets.add(node.module)
     return targets
 
 
-def test_strict_shim_only_dispatches_known_compat_routes() -> None:
-    imports = _import_targets(STRICT_PATH)
-    assert "backend.core.engine_vector.strict_runtime_impl" in imports
-
-    tree = _parse_module(STRICT_PATH)
-    compat_routes: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Compare):
-            continue
-        if not isinstance(node.left, ast.Name) or node.left.id != "route_id":
-            continue
-        if len(node.ops) != 1 or not isinstance(node.ops[0], ast.Eq):
-            continue
-        if len(node.comparators) != 1:
-            continue
-        comparator = node.comparators[0]
-        if isinstance(comparator, ast.Constant) and isinstance(comparator.value, str):
-            compat_routes.add(comparator.value)
-    assert compat_routes == set()
+def test_retired_execution_paths_are_removed() -> None:
+    for rel_path in RETIRED_PATHS:
+        assert not rel_path.exists(), rel_path.as_posix()
 
 
-def test_portfolio_builder_exports_frozen_loop_entrypoint() -> None:
-    imports = _import_targets(PORTFOLIO_BUILDER_PATH)
-    assert "backend.core.portfolio.frozen_loop" in imports
+def test_runtime_modules_point_at_final_execution_paths() -> None:
+    runtime_imports = _import_targets(PORTFOLIO_RUNTIME_PATH)
+    loop_imports = _import_targets(PORTFOLIO_LOOP_PATH)
+
+    assert "backend.core.portfolio.portfolio_loop" in runtime_imports
+    assert "backend.core.engine_vector.strict_runtime" in loop_imports
+    assert "backend.core.portfolio.portfolio_runtime" in loop_imports
 
 
-def test_frozen_paths_do_not_register_new_extension_points() -> None:
-    forbidden_prefixes = (
-        "backend.core.stage_pipeline.builtins",
-        "backend.core.stage_pipeline.registry",
-        "backend.core.stage_pipeline.resolver",
+def test_active_backend_core_sources_no_longer_reference_retired_execution_paths() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    core_root = repo_root / "backend" / "core"
+    retired_tokens = (
+        "portfolio_simulator_strict.py",
+        "strict_runtime_impl.py",
+        "backend.core.portfolio.portfolio_builder",
+        "backend.core.portfolio.frozen_loop",
     )
-    for rel_path in FROZEN_PATHS:
-        imports = _import_targets(rel_path)
-        assert not any(
-            target == prefix or target.startswith(f"{prefix}.")
-            for prefix in forbidden_prefixes
-            for target in imports
-        ), rel_path.as_posix()
+    matches: list[str] = []
+    for path in core_root.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if any(token in text for token in retired_tokens):
+            matches.append(str(path.relative_to(repo_root)).replace("\\", "/"))
+    assert matches == []
 
 
-def test_frozen_paths_declare_freeze_or_deletion_intent() -> None:
-    expected_phrases = {
-        STRICT_PATH: ("dispatch shim", "minimum golden set"),
-        STRICT_IMPL_PATH: ("dispatch shim", "minimum golden set"),
-        BRIDGE_ADAPTER_PATH: ("Frozen bridge adapter", "Deletion is allowed only"),
-        PORTFOLIO_BUILDER_PATH: ("Frozen portfolio loop facade", "frozen_loop.py"),
-        FROZEN_LOOP_PATH: ("Frozen portfolio loop implementation", "New execution"),
+def test_final_execution_modules_drop_transitional_docstrings() -> None:
+    expected = {
+        STRICT_RUNTIME_PATH: ("Vector runtime entrypoint",),
+        BRIDGE_ADAPTER_PATH: ("Stage-pipeline bridge",),
+        PORTFOLIO_RUNTIME_PATH: ("Portfolio runtime helpers",),
+        PORTFOLIO_LOOP_PATH: ("Portfolio loop implementation",),
     }
-    for rel_path, phrases in expected_phrases.items():
+    forbidden = ("Frozen", "Transitional", "deletion is allowed only")
+    for rel_path, required_phrases in expected.items():
         docstring = ast.get_docstring(_parse_module(rel_path)) or ""
-        for phrase in phrases:
+        for phrase in required_phrases:
             assert phrase in docstring, rel_path.as_posix()
+        lowered = docstring.lower()
+        assert all(token.lower() not in lowered for token in forbidden), rel_path.as_posix()

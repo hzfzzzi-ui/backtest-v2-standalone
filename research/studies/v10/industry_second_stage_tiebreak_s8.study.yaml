@@ -1,0 +1,60 @@
+study_id: v10/industry_second_stage_tiebreak_s8
+title: V10 Industry Second Stage Tiebreak S8
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: Use an industry second-stage tiebreak to resolve same-tier residual scores while keeping the main execution shell unchanged.
+change_scope:
+  modules_modified:
+    - signal_generation.ranking.residual_refine_mode
+    - signal_generation.ranking.industry_second_stage_min_industry_score
+variants:
+  - name: B0
+  - name: S8_A_TB85
+    config_patches:
+      - path: signal_generation.ranking.residual_refine_mode
+        value: industry_second_stage_tiebreak
+      - path: signal_generation.ranking.industry_second_stage_min_industry_score
+        value: 0.85
+  - name: S8_B_TB90
+    config_patches:
+      - path: signal_generation.ranking.residual_refine_mode
+        value: industry_second_stage_tiebreak
+      - path: signal_generation.ranking.industry_second_stage_min_industry_score
+        value: 0.9
+windows:
+  - key: "0717"
+    role: hard_gate
+    start: "2007-01-15"
+    end: "2017-01-15"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2010_2013_range: ["2010-01-04", "2013-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2015_2017_post_crash: ["2015-06-15", "2017-01-13"]
+  - key: "1626"
+    role: main
+    start: "2016-03-01"
+    end: "2026-03-01"
+    periods:
+      phase_2019_2021_bull: ["2019-01-02", "2021-02-18"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+  - key: "0726"
+    role: audit
+    start: "2007-01-15"
+    end: "2026-03-01"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2019_2021_bull: ["2019-01-02", "2021-02-18"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+hard_gates:
+  min_cagr: 0.1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: outputs/baselines/baseline_V10_1/config.json
+metadata:
+  materialize_config_json: true

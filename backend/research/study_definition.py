@@ -60,6 +60,7 @@ class StudyDefinition:
     study_id: str
     title: str
     baseline_id: str
+    asset_scope: str
     hypothesis: str
     change_scope: dict[str, Any]
     variants: tuple[StudyVariant, ...]
@@ -74,6 +75,7 @@ class StudyDefinition:
             "study_id": self.study_id,
             "title": self.title,
             "baseline_id": self.baseline_id,
+            "asset_scope": self.asset_scope,
             "hypothesis": self.hypothesis,
             "change_scope": dict(self.change_scope),
             "variants": [variant.as_dict() for variant in self.variants],
@@ -161,6 +163,7 @@ def validate_study_payload(payload: dict[str, Any]) -> StudyDefinition:
     study_id = _require_text(payload, "study_id")
     title = _require_text(payload, "title")
     baseline_id = _require_text(payload, "baseline_id")
+    asset_scope = _require_text(payload, "asset_scope")
     hypothesis = _require_text(payload, "hypothesis")
 
     change_scope = payload.get("change_scope")
@@ -206,6 +209,7 @@ def validate_study_payload(payload: dict[str, Any]) -> StudyDefinition:
         study_id=study_id,
         title=title,
         baseline_id=baseline_id,
+        asset_scope=asset_scope,
         hypothesis=hypothesis,
         change_scope=dict(change_scope),
         variants=variants,

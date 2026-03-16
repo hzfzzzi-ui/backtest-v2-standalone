@@ -1,0 +1,53 @@
+study_id: v10/conditional_tiebreak_s4
+title: V10 Conditional Tiebreak S4
+asset_scope: cn_a_equity
+baseline_id: baseline_V10
+hypothesis: 在不改动 baseline V10 主排序骨架的前提下，仅用条件式 residual tiebreak 作为次级排序补充，有机会改善同分候选的择时质量，同时保持主执行节奏不变。
+change_scope:
+  modules_modified:
+    - signal_generation.ranking.residual_refine_mode
+    - signal_generation.ranking.residual_refine_weight
+variants:
+  - name: B0
+  - name: S4_A_TB10
+    config_patches:
+      - path: signal_generation.ranking.residual_refine_mode
+        value: conditional_tiebreak
+      - path: signal_generation.ranking.residual_refine_weight
+        value: 0.1
+  - name: S4_B_TB20
+    config_patches:
+      - path: signal_generation.ranking.residual_refine_mode
+        value: conditional_tiebreak
+      - path: signal_generation.ranking.residual_refine_weight
+        value: 0.2
+windows:
+  - key: "0717"
+    role: hard_gate
+    start: "2007-01-15"
+    end: "2017-01-15"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2010_2013_range: ["2010-01-04", "2013-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2015_2017_post_crash: ["2015-06-15", "2017-01-13"]
+  - key: "1626"
+    role: main
+    start: "2016-03-01"
+    end: "2026-03-01"
+    periods:
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2019_2021_bull: ["2019-01-02", "2021-02-18"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+hard_gates:
+  min_cagr: 0.1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: outputs/baselines/baseline_V10/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

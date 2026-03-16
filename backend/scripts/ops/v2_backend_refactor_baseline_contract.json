@@ -1,13 +1,35 @@
 {
   "contract_name": "v2_backend_refactor_foundation",
-  "version": "1.0",
-  "baseline_exp_id": "exp_20260308_021045840_cde0",
+  "version": "1.1",
+  "baseline_exp_id": "exp_20260314_144548534_7db9",
   "protected_artifacts": {
     "exact_file_hash": [
-      "portfolio_daily.csv",
       "portfolio_trades.csv",
       "portfolio_candidates.csv"
     ],
+    "semantic_csv": {
+      "portfolio_daily.csv": {
+        "stable_fields": [
+          "date",
+          "nav",
+          "cash",
+          "positions_count",
+          "positions_count_end_of_day",
+          "daily_return",
+          "drawdown",
+          "gross_exposure",
+          "turnover_pct",
+          "market_state",
+          "trade_mode"
+        ],
+        "aggregate_sum_fields": [
+          "positions_count",
+          "positions_count_end_of_day",
+          "gross_exposure",
+          "turnover_pct"
+        ]
+      }
+    },
     "summary_json": {
       "perf.json": [
         "total_return",
@@ -40,6 +62,7 @@
     "run_meta.json": [
       "exp_id",
       "created_at",
+      "data.asset_scope",
       "report_consistency.sources",
       "report_consistency.fallbacks",
       "report_consistency.resolved_config_meta.saved_at",
@@ -67,9 +90,10 @@
       "baseline_compare_status"
     ],
     "config_truth": [
-      "saved_config_meta.saved_at"
+      "saved_config_meta.saved_at",
+      "run_config_hash"
     ]
   },
   "non_blocking_categories": [],
-  "verification_command": "python backend/scripts/baseline_regression_check.py --rerun --write-to-candidate"
+  "verification_command": "python -m backend.cli.managed.baseline_regression_check --rerun --write-to-candidate"
 }

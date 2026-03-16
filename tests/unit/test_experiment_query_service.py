@@ -91,6 +91,12 @@ def test_get_experiment_surface_and_sections(tmp_path: Path, monkeypatch) -> Non
                 "nav": "nav.csv",
                 "run_meta": "run_meta.json",
                 "symbol_performance": "symbol_performance.csv",
+                "config": "config.json",
+                "trades": "portfolio_trades.csv",
+                "daily": "portfolio_daily.csv",
+                "reason_codes": "reason_codes.csv",
+                "cash_blocked_buys_recent": "cash_blocked_buys_recent.csv",
+                "stock_names": "stock_names.json",
             },
             "stage_pipeline": {
                 "route_id": "provider_breakout_runtime",
@@ -115,15 +121,45 @@ def test_get_experiment_surface_and_sections(tmp_path: Path, monkeypatch) -> Non
         {
             "counters": {
                 "buy_stage_funnel": [
-                    {"stage_key": "s4", "output_count": 10},
-                    {"stage_key": "s8", "output_count": 3},
+                    {"stage_key": "s4", "available": True, "output_count": 10},
+                    {"stage_key": "s8", "available": False, "input_count": None, "output_count": None},
                 ]
             }
         },
     )
+    _write_json(
+        exp_dir / "config.json",
+        {
+            "universe_mode": "HS300_ZZ500",
+            "overrides": {
+                "original_workbench_config": {
+                    "strategy_pack": "BREAKOUT_TREND",
+                    "position_risk": {"max_positions": 10},
+                }
+            },
+        },
+    )
+    _write_json(exp_dir / "stock_names.json", {"sh600519": "贵州茅台"})
     (exp_dir / "nav.csv").write_text("date,nav\n2024-01-03,1.0\n2024-01-04,1.1\n", encoding="utf-8")
     (exp_dir / "symbol_performance.csv").write_text(
         "symbol,return_pct,max_drawdown,trades,net_pnl\nsh600519,0.2,-0.1,3,10000\n",
+        encoding="utf-8",
+    )
+    (exp_dir / "portfolio_trades.csv").write_text(
+        "trade_date,symbol,side,qty\n2024-01-03,sh600519,buy,100\n2024-01-04,sh600519,sell,100\n",
+        encoding="utf-8",
+    )
+    (exp_dir / "portfolio_daily.csv").write_text(
+        "date,nav,market_state,raw_buy_signal_count,buy_candidate_count\n2024-01-03,1.0,bull,8,3\n2024-01-04,1.1,bull,5,2\n",
+        encoding="utf-8",
+    )
+    (exp_dir / "reason_codes.csv").write_text(
+        "reason_code,count\nENTRY_BREAKOUT,2\nEXIT_TRAIL,1\n",
+        encoding="utf-8",
+    )
+    (exp_dir / "cash_blocked_buys_recent.csv").write_text(
+        "date,symbol,reject_reason,cash_available,estimated_qty,estimated_amount,estimated_price\n"
+        "2024-01-04,sh600519,SKIP_NO_CASH,8800.0,100,9300.0,93.0\n",
         encoding="utf-8",
     )
 
@@ -136,6 +172,13 @@ def test_get_experiment_surface_and_sections(tmp_path: Path, monkeypatch) -> Non
     assert surface["audit"]["status"] == "pass"
     assert surface["lazy_sections"]["nav"]["available"] is True
     assert surface["lazy_sections"]["stage_funnel"]["available"] is True
+    assert surface["lazy_sections"]["run_meta"]["available"] is True
+    assert surface["lazy_sections"]["config"]["available"] is True
+    assert surface["lazy_sections"]["trades"]["available"] is True
+    assert surface["lazy_sections"]["daily"]["available"] is True
+    assert surface["lazy_sections"]["reason_codes"]["available"] is True
+    assert surface["lazy_sections"]["cash_blocked_buys_recent"]["available"] is True
+    assert surface["lazy_sections"]["stock_names"]["available"] is True
 
     nav_section = experiment_query_service.get_experiment_surface_section("exp_surface", "nav")
     assert nav_section["section"] == "nav"
@@ -147,6 +190,29 @@ def test_get_experiment_surface_and_sections(tmp_path: Path, monkeypatch) -> Non
 
     funnel_section = experiment_query_service.get_experiment_surface_section("exp_surface", "stage_funnel")
     assert funnel_section["data"][0]["stage_key"] == "s4"
+    assert funnel_section["data"][1]["available"] is False
+    assert funnel_section["data"][1]["output_count"] is None
+
+    run_meta_section = experiment_query_service.get_experiment_surface_section("exp_surface", "run_meta")
+    assert run_meta_section["data"]["counters"]["buy_stage_funnel"][1]["output_count"] is None
+
+    config_section = experiment_query_service.get_experiment_surface_section("exp_surface", "config")
+    assert config_section["data"]["overrides"]["original_workbench_config"]["strategy_pack"] == "BREAKOUT_TREND"
+
+    trades_section = experiment_query_service.get_experiment_surface_section("exp_surface", "trades")
+    assert trades_section["data"][0]["symbol"] == "sh600519"
+
+    daily_section = experiment_query_service.get_experiment_surface_section("exp_surface", "daily")
+    assert daily_section["data"][0]["market_state"] == "bull"
+
+    reason_codes_section = experiment_query_service.get_experiment_surface_section("exp_surface", "reason_codes")
+    assert reason_codes_section["data"][0]["reason_code"] == "ENTRY_BREAKOUT"
+    cash_blocked_section = experiment_query_service.get_experiment_surface_section("exp_surface", "cash_blocked_buys_recent")
+    assert cash_blocked_section["data"][0]["symbol"] == "sh600519"
+    assert cash_blocked_section["data"][0]["reject_reason"] == "SKIP_NO_CASH"
+
+    stock_names_section = experiment_query_service.get_experiment_surface_section("exp_surface", "stock_names")
+    assert stock_names_section["data"]["sh600519"] == "贵州茅台"
 
 
 def test_list_experiments_wraps_manifest_and_perf_summary(monkeypatch) -> None:

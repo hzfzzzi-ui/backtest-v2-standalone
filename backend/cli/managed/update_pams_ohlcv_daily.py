@@ -26,6 +26,7 @@ from backend.core.data.price_limits import (
     compute_limit_prices as _shared_compute_limit_prices,
     limit_pct_for_symbol as _shared_limit_pct_for_symbol,
 )
+from backend.core.data.mapping import normalize_index_symbol
 
 DEFAULT_OUTPUT_ROOT = ROOT / "outputs" / "ops"
 DEFAULT_CONFIG_PATH = ROOT / "backend" / "configs" / "pams_cn_pg.json"
@@ -191,6 +192,18 @@ def _load_akshare():
     import akshare as ak
 
     return ak
+
+
+def _load_cn_index_daily_tushare(pro: Any, symbol: str, *, start: date, end: date) -> pd.DataFrame:
+    raw = pro.index_daily(
+        ts_code=normalize_index_symbol(symbol),
+        start_date=start.strftime("%Y%m%d"),
+        end_date=end.strftime("%Y%m%d"),
+        fields="ts_code,trade_date,open,high,low,close,vol,amount",
+    )
+    if raw is None or raw.empty:
+        return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+    return raw.rename(columns={"trade_date": "date", "vol": "volume"}).copy()
 
 
 def _normalize_daily_basic_frame(raw: pd.DataFrame) -> pd.DataFrame:
@@ -718,7 +731,7 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
         "index_symbol_stats": [],
         "notes": [
             "CN_A uses Tushare daily + adj_factor and optionally daily_basic, executed per trade_date to avoid range row caps.",
-            "CN_INDEX preserves existing table convention: turnover=0, adj_factor/limit_up/limit_down are null.",
+            "CN_INDEX uses Tushare index_daily and preserves existing table convention: turnover=0, adj_factor/limit_up/limit_down are null.",
             "limit_up/limit_down are computed from previous close only; if previous close is unavailable they remain null.",
         ],
     }
@@ -729,7 +742,6 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
 
     token = str(args.token or os.environ.get("TUSHARE_TOKEN") or "").strip()
     pro = _load_tushare_client(token)
-    ak = _load_akshare()
     prev_close_map = _load_existing_prev_close_map(str(args.table), start)
     st_periods = _load_st_periods(start, end)
     daily_basic_enabled = True
@@ -772,12 +784,16 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
 
     index_frames: list[pd.DataFrame] = []
     for symbol in _load_index_symbols(str(args.table)):
-        raw = ak.stock_zh_index_daily_em(symbol=symbol)
-        normalized, per_symbol = _normalize_cn_index_rows(symbol, raw, start=start, end=end)
-        if not normalized.empty:
-            index_frames.append(normalized)
-            summary["cn_index_rows"] += int(len(normalized))
-        summary["index_symbol_stats"].append(per_symbol)
+        try:
+            raw = _load_cn_index_daily_tushare(pro, symbol, start=start, end=end)
+            normalized, per_symbol = _normalize_cn_index_rows(symbol, raw, start=start, end=end)
+            if not normalized.empty:
+                index_frames.append(normalized)
+                summary["cn_index_rows"] += int(len(normalized))
+            summary["index_symbol_stats"].append(per_symbol)
+        except Exception as exc:
+            summary["index_symbol_stats"].append({"symbol": str(symbol).lower(), "rows": 0, "error": str(exc)})
+            summary["notes"].append(f"CN_INDEX fetch failed for {symbol}; skipped index backfill for this run.")
 
     combined = pd.concat([*(stock_frames or []), *(index_frames or [])], ignore_index=True) if (stock_frames or index_frames) else pd.DataFrame(columns=UPSERT_COLUMNS)
     combined = combined.drop_duplicates(subset=["symbol", "market", "trade_date"], keep="last").sort_values(["trade_date", "market", "symbol"]).reset_index(drop=True)
@@ -819,6 +835,50 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
         else latest_cn_index.isoformat() if latest_cn_index else None
     )
     return summary
+
+
+def build_update_args(
+    *,
+    end: str,
+    start: str = "",
+    token: str = "",
+    table: str = DEFAULT_TABLE,
+    batch_size: int = 5000,
+    output_dir: str = "",
+    apply: bool = True,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        start=str(start or ""),
+        end=str(end or "").strip(),
+        token=str(token or os.environ.get("TUSHARE_TOKEN", "")),
+        table=str(table or DEFAULT_TABLE),
+        batch_size=int(batch_size),
+        output_dir=str(output_dir or ""),
+        apply=bool(apply),
+    )
+
+
+def run_update_to_target(
+    *,
+    end: str,
+    start: str = "",
+    token: str = "",
+    table: str = DEFAULT_TABLE,
+    batch_size: int = 5000,
+    output_dir: str = "",
+    apply: bool = True,
+) -> dict[str, Any]:
+    return run_update(
+        build_update_args(
+            start=start,
+            end=end,
+            token=token,
+            table=table,
+            batch_size=batch_size,
+            output_dir=output_dir,
+            apply=apply,
+        )
+    )
 
 
 def main() -> None:

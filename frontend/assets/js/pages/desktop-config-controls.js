@@ -1,36 +1,36 @@
 (function initDesktopConfigControls(globalScope) {
   async function loadConfig(configId) {
-    const j = await apiRequestJson('configs_get', `/api/backtest_v2/configs/${encodeURIComponent(configId)}`);
-    state.loaded_config_json = cloneJson(j.config_json || {});
-    const applied = applyConfigToUI(j.config_json || {});
+    const payload = await apiRequestJson('configs_get', `/api/backtest_v2/configs/${encodeURIComponent(configId)}`);
+    state.loaded_source_config = cloneJson(payload.config_json || {});
+    const applied = applyConfigToUI(payload.config_json || {});
     if (applied?.unsupportedStrategy) {
-      clearLoadedConfig(`配置 ${j.config_id} 使用已移除策略 ${applied.unsupportedStrategy}；请改用 REGIME_ROUTER 重新配置`);
-      byId('wbRunStatus').textContent = `配置 ${j.config_id} 使用已移除策略 ${applied.unsupportedStrategy}`;
+      clearLoadedSource(`配置 ${payload.config_id} 使用了已移除策略 ${applied.unsupportedStrategy}，请改用 REGIME_ROUTER 重新配置`);
+      byId('wbRunStatus').textContent = `配置 ${payload.config_id} 使用了已移除策略 ${applied.unsupportedStrategy}`;
       return;
     }
     setSelectedLockedCandidatePreset('');
-    rememberLoadedConfig(j, stableSerializeConfig(state.config_draft || {}), j.config_json || {});
-    addLog(`已加载配置: ${j.config_id}`);
+    rememberLoadedSource(payload, stableSerializeConfig(state.config_draft || {}), payload.config_json || {});
+    addLog(`已加载配置 ${payload.config_id}`);
   }
 
   async function loadConfigList() {
-    const j = await apiRequestJson('configs_list', '/api/backtest_v2/configs?latest=50');
-    const items = Array.isArray(j.items) ? j.items : [];
-    const sel = byId('wbConfigList');
-    if (!sel) return items;
-    sel.innerHTML = '<option value="">选择配置...</option>' + items.map((x) => {
-      const label = `${configMetaLabel(x)} ${configDisplayName(x) || x.config_id}`;
-      return `<option value="${esc(x.config_id)}">${esc(label)} | ${esc(x.saved_at || '')}</option>`;
+    const payload = await apiRequestJson('configs_list', '/api/backtest_v2/configs?latest=50');
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const select = byId('wbConfigList');
+    if (!select) return items;
+    select.innerHTML = '<option value="">选择配置...</option>' + items.map((item) => {
+    const label = `${loadedSourceMetaLabel(item)} ${configDisplayName(item) || item.config_id}`;
+      return `<option value="${esc(item.config_id)}">${esc(label)} | ${esc(item.saved_at || '')}</option>`;
     }).join('');
     return items;
   }
 
   function configCenterBadgeText(item) {
-    const sourceMap = { baseline: '基线', search: '搜索', template: '内置', derived: '保存' };
-    const ownerMap = { manual: '手工', claude: 'Codex', script: '脚本', builtin: '内置' };
+    const sourceMap = { baseline: '基线', search: '搜索', template: '模板', derived: '保存' };
+    const ownerMap = { manual: '人工', claude: 'Codex', script: '脚本', builtin: '内置' };
     const parts = [];
     const source = sourceMap[String(item?.source_type || '').trim()] || String(item?.source_type || '').trim() || '保存';
-    const owner = ownerMap[String(item?.owner || '').trim()] || String(item?.owner || '').trim() || '手工';
+    const owner = ownerMap[String(item?.owner || '').trim()] || String(item?.owner || '').trim() || '人工';
     parts.push(source, owner);
     if (item?.locked) parts.push('锁定');
     return parts.join(' / ');
@@ -41,7 +41,11 @@
     const saved = [];
     (Array.isArray(items) ? items : []).forEach((item) => {
       const tags = new Set((Array.isArray(item?.tags) ? item.tags : []).map((tag) => String(tag || '').trim().toLowerCase()));
-      if (String(item?.owner || '').trim().toLowerCase() === 'builtin' || tags.has('builtin') || String(item?.source_type || '').trim().toLowerCase() === 'template') {
+      if (
+        String(item?.owner || '').trim().toLowerCase() === 'builtin'
+        || tags.has('builtin')
+        || String(item?.source_type || '').trim().toLowerCase() === 'template'
+      ) {
         builtin.push(item);
         return;
       }
@@ -52,11 +56,14 @@
         {
           key: 'draft',
           title: '当前草稿',
-          desc: state.loaded_config_meta?.config_id ? '脱离已加载配置 provenance，后续运行只认当前页面草稿' : '直接使用当前页面草稿作为运行真相',
-          active: !String(state.selected_locked_candidate_preset || '').trim() && (!state.loaded_config_meta || currentConfigSourceMode() === 'loaded-dirty'),
+          desc: String(state.loaded_source_id || '').trim()
+            ? '脱离已加载来源，后续运行只认当前页面草稿'
+            : '直接使用当前页面草稿作为运行真相',
+          active: !String(state.selected_locked_candidate_preset || '').trim()
+            && (!state.loaded_source_meta || currentLoadedSourceMode() === 'loaded-dirty'),
           onClick: () => {
             setSelectedLockedCandidatePreset('');
-            clearLoadedConfig('已切换到当前草稿');
+            clearLoadedSource('已切换到当前草稿');
           },
         },
       ],
@@ -67,14 +74,17 @@
         active: String(state.selected_locked_candidate_preset || '').trim() === preset,
         onClick: () => {
           setSelectedLockedCandidatePreset(preset);
-          addLog(`已选择锁定候选: ${preset}`);
+          addLog(`已选择锁定候选 ${preset}`);
         },
       })),
       builtin: builtin.map((item) => ({
         key: `config:${item.config_id}`,
         title: configDisplayName(item) || item.config_id,
         desc: `${configCenterBadgeText(item)} | ${item.saved_at || ''}`,
-        active: !String(state.selected_locked_candidate_preset || '').trim() && currentConfigSourceMode() === 'loaded-clean' && String(state.loaded_config_meta?.config_id || '') === String(item.config_id || ''),
+        active: !String(state.selected_locked_candidate_preset || '').trim()
+          && currentLoadedSourceMode() === 'loaded-clean'
+          && String(state.loaded_source_kind || '').trim() === 'config'
+          && String(state.loaded_source_id || '') === String(item.config_id || ''),
         onClick: async () => {
           await loadConfig(item.config_id);
         },
@@ -83,7 +93,10 @@
         key: `config:${item.config_id}`,
         title: configDisplayName(item) || item.config_id,
         desc: `${configCenterBadgeText(item)} | ${item.saved_at || ''}`,
-        active: !String(state.selected_locked_candidate_preset || '').trim() && currentConfigSourceMode() === 'loaded-clean' && String(state.loaded_config_meta?.config_id || '') === String(item.config_id || ''),
+        active: !String(state.selected_locked_candidate_preset || '').trim()
+          && currentLoadedSourceMode() === 'loaded-clean'
+          && String(state.loaded_source_kind || '').trim() === 'config'
+          && String(state.loaded_source_id || '') === String(item.config_id || ''),
         onClick: async () => {
           await loadConfig(item.config_id);
         },
@@ -99,9 +112,9 @@
     }
     const items = await loadConfigList();
     const groups = buildConfigCenterGroups(items);
-    const dd = document.createElement('div');
-    dd.id = 'wbConfigCenterDropdown';
-    dd.className = 'wb-load-dropdown wb-config-center-dropdown';
+    const dropdown = document.createElement('div');
+    dropdown.id = 'wbConfigCenterDropdown';
+    dropdown.className = 'wb-load-dropdown wb-config-center-dropdown';
     const sections = [
       ['当前草稿', groups.draft],
       ['锁定 Candidate', groups.candidate],
@@ -113,28 +126,28 @@
       const head = document.createElement('div');
       head.className = 'wb-config-center-section';
       head.textContent = label;
-      dd.appendChild(head);
+      dropdown.appendChild(head);
       rows.forEach((row) => {
         const item = document.createElement('button');
         item.type = 'button';
         item.className = `wb-load-item wb-config-center-item${row.active ? ' active' : ''}`;
         item.innerHTML = `<span class="wb-config-center-title">${esc(row.title)}</span><span class="wb-config-center-desc">${esc(row.desc)}</span>`;
         item.addEventListener('click', async () => {
-          dd.remove();
+          dropdown.remove();
           try {
             await row.onClick();
-          } catch (e) {
-            addLog(`配置中心操作失败: ${e?.message || e}`);
+          } catch (error) {
+            addLog(`配置中心操作失败: ${error?.message || error}`);
           }
         });
-        dd.appendChild(item);
+        dropdown.appendChild(item);
       });
     });
-    (anchorEl || byId('wbConfigCenterBtn') || byId('wbQuickLoad') || byId('wbRunBtn'))?.parentElement?.appendChild(dd);
-    const dismiss = (e) => {
-      const btn = anchorEl || byId('wbConfigCenterBtn') || byId('wbQuickLoad');
-      if (!dd.contains(e.target) && e.target !== btn) {
-        dd.remove();
+    (anchorEl || byId('wbConfigCenterBtn') || byId('wbQuickLoad') || byId('wbRunBtn'))?.parentElement?.appendChild(dropdown);
+    const dismiss = (event) => {
+      const trigger = anchorEl || byId('wbConfigCenterBtn') || byId('wbQuickLoad');
+      if (!dropdown.contains(event.target) && event.target !== trigger) {
+        dropdown.remove();
         document.removeEventListener('click', dismiss);
       }
     };
@@ -149,12 +162,12 @@
   async function pasteConfigJson() {
     try {
       const text = await navigator.clipboard.readText();
-      const obj = JSON.parse(text);
-      applyConfigToUI(obj || {});
-      clearLoadedConfig();
+      const payload = JSON.parse(text);
+      applyConfigToUI(payload || {});
+      clearLoadedSource();
       addLog('已从剪贴板粘贴配置 JSON');
-    } catch (e) {
-      addLog(`粘贴 JSON 失败: ${e.message || e}`);
+    } catch (error) {
+      addLog(`粘贴 JSON 失败: ${error?.message || error}`);
     }
   }
 

@@ -18,6 +18,65 @@ function _mergeStatusItems() {
   return [...validation, ...manual, ..._apiFailureItems()];
 }
 
+function _marketDataSyncHeadline(syncStatus) {
+  const status = String(syncStatus?.status || '').trim().toLowerCase();
+  const displayDate = String(syncStatus?.latest_display_trade_date || '').trim();
+  if (status === 'fresh' && displayDate) return `数据同步：${displayDate}`;
+  if (status === 'running') {
+    return `数据同步中：${String(syncStatus?.target_trade_date || displayDate || '-').trim() || '-'}`;
+  }
+  if (status === 'stale') {
+    return displayDate ? `数据滞后：${displayDate}` : '数据滞后';
+  }
+  if (status === 'failed') return '数据同步失败';
+  if (status === 'disabled') {
+    return displayDate ? `定时同步关闭：${displayDate}` : '定时同步关闭';
+  }
+  if (status === 'never_synced') {
+    return displayDate ? `未建档：${displayDate}` : '未建档';
+  }
+  return displayDate ? `数据同步：${displayDate}` : '数据同步：未知';
+}
+
+function _marketDataSyncDetail(syncStatus) {
+  const message = String(syncStatus?.message || '').trim();
+  const target = String(syncStatus?.target_trade_date || '').trim();
+  const latest = String(syncStatus?.latest_display_trade_date || '').trim();
+  const lagDays = Number(syncStatus?.lag_days);
+  const parts = [];
+  if (message) parts.push(message);
+  if (target) parts.push(`目标交易日 ${target}`);
+  if (latest) parts.push(`当前可见日期 ${latest}`);
+  if (Number.isFinite(lagDays) && lagDays > 0) parts.push(`落后 ${lagDays} 天`);
+  return parts.join(' | ');
+}
+
+function renderMarketDataSyncStatus(syncStatus) {
+  state.market_data_sync_status = syncStatus && typeof syncStatus === 'object' ? { ...syncStatus } : null;
+  const hintEl = byId('wbDataSyncHint');
+  if (hintEl) {
+    const headline = _marketDataSyncHeadline(state.market_data_sync_status);
+    hintEl.textContent = headline;
+    hintEl.title = _marketDataSyncDetail(state.market_data_sync_status) || '市场数据同步状态';
+    hintEl.classList.toggle('wb-ok', String(state.market_data_sync_status?.status || '').trim().toLowerCase() === 'fresh');
+  }
+
+  const panelEl = byId('wbMarketDataSyncStatus');
+  if (panelEl) {
+    const status = String(state.market_data_sync_status?.status || 'unknown').trim().toLowerCase() || 'unknown';
+    const headline = _marketDataSyncHeadline(state.market_data_sync_status);
+    const detail = _marketDataSyncDetail(state.market_data_sync_status);
+    panelEl.innerHTML = [
+      '<div class="wb-status-item">',
+      `<div><strong>市场数据</strong></div>`,
+      `<div class="wb-mini">${esc(headline)}</div>`,
+      `<div class="wb-code wb-mini">${esc(status)}</div>`,
+      detail ? `<div class="wb-mini">${esc(detail)}</div>` : '',
+      '</div>',
+    ].join('');
+  }
+}
+
 function _refreshStatusCenter() {
   state.status_items = _mergeStatusItems();
   const count = state.status_items.length;
@@ -190,4 +249,21 @@ function toggleStatusPanel(force = null) {
   if (!panel) return;
   state.status_open = force == null ? !state.status_open : !!force;
   panel.hidden = !state.status_open;
+}
+
+async function refreshMarketDataSyncStatus() {
+  try {
+    const payload = await apiRequestJson('market_data_sync_status', '/api/backtest_v2/market_data/sync_status');
+    renderMarketDataSyncStatus(payload);
+    return payload;
+  } catch (error) {
+    renderMarketDataSyncStatus({
+      status: 'failed',
+      message: String(error?.message || error || 'unknown error'),
+      latest_display_trade_date: '',
+      target_trade_date: '',
+      lag_days: null,
+    });
+    return null;
+  }
 }

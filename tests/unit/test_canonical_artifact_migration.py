@@ -94,6 +94,12 @@ def test_migrate_experiment_tree_writes_audit_report(tmp_path: Path) -> None:
         },
     )
     _write_json(exp_dir / "run_meta.json", {"counters": {"raw_signal_count": 1}})
+    _write_json(
+        exp_dir / "run_config.json",
+        {
+            "universe": {"benchmark": "000300.SH", "start": "2024-01-01", "end": "2024-12-31"},
+        },
+    )
     (exp_dir / "trades.csv").write_text("trade_date,symbol,side\n2024-01-03,sh600000,buy\n", encoding="utf-8")
 
     report_path = tmp_path / "migration_report.json"
@@ -104,8 +110,46 @@ def test_migrate_experiment_tree_writes_audit_report(tmp_path: Path) -> None:
     )
 
     assert report["summary"]["experiments_scanned"] == 1
+    assert report["summary"]["manifest_backfills"] == 1
     assert report["summary"]["trade_migrations"] == 1
     assert report["summary"]["counter_migrations"] == 1
     assert report_path.exists()
     persisted = json.loads(report_path.read_text(encoding="utf-8"))
-    assert persisted["schema_version"] == "canonical_artifact_migration_report@1"
+    assert persisted["schema_version"] == "canonical_artifact_migration_report@2"
+
+
+def test_migrate_experiment_dir_backfills_manifest_asset_context(tmp_path: Path) -> None:
+    exp_dir = tmp_path / "exp_manifest_case"
+    exp_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(
+        exp_dir / "manifest.json",
+        {
+            "exp_id": "exp_manifest_case",
+            "artifacts": {
+                "run_meta": "run_meta.json",
+            },
+        },
+    )
+    _write_json(exp_dir / "run_meta.json", {"counters": {"raw_signal": 1}})
+    _write_json(
+        exp_dir / "run_config.json",
+        {
+            "universe": {"benchmark": "000300.SH", "start": "2024-01-01", "end": "2024-12-31"},
+            "execution": {"lot_size": 100},
+        },
+    )
+
+    dry_run = canonical_artifact_migration.migrate_experiment_dir(exp_dir, dry_run=True)
+    assert dry_run["needs_manifest_asset_backfill"] is True
+    assert "asset_scope" in dry_run["manifest_missing_fields"]
+
+    applied = canonical_artifact_migration.migrate_experiment_dir(exp_dir, dry_run=False)
+    assert applied["changed"] is True
+    assert "backfilled_manifest_asset_context" in applied["changes"]
+
+    manifest = json.loads((exp_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["asset_scope"] == "cn_a_equity"
+    assert manifest["asset_profile_id"] == "cn_a_equity_mainline"
+    assert manifest["market_profile_id"] == "cn_a_mainland_equity_market"
+    assert manifest["execution_profile_id"] == "cn_a_tplus1_next_open"
+    assert manifest["asset_context"]["asset_scope"] == "cn_a_equity"

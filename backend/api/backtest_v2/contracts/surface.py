@@ -16,6 +16,11 @@ class ExperimentSurfaceSummary(BaseModel):
     runtime_route: str | None = None
     execution_shell: str | None = None
     effective_execution_start_date: str | None = None
+    asset_scope: str | None = None
+    asset_profile_id: str | None = None
+    market_profile_id: str | None = None
+    execution_profile_id: str | None = None
+    asset_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExperimentLazySurfaceSection(BaseModel):
@@ -34,6 +39,7 @@ class ExperimentSurface(BaseModel):
     summary: ExperimentSurfaceSummary
     perf: dict[str, Any] = Field(default_factory=dict)
     audit: dict[str, Any] = Field(default_factory=dict)
+    asset_context: dict[str, Any] = Field(default_factory=dict)
     machine_outputs: dict[str, str] = Field(default_factory=dict)
     human_outputs: dict[str, str] = Field(default_factory=dict)
     lazy_sections: dict[str, ExperimentLazySurfaceSection] = Field(default_factory=dict)

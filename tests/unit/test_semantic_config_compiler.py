@@ -800,6 +800,13 @@ def test_validate_semantic_config_json_rejects_unknown_nested_field() -> None:
         raise AssertionError("expected HTTPException for unknown nested field")
 
 
+def test_validate_semantic_config_json_accepts_and_canonicalizes_asset_scope() -> None:
+    payload = _valid_config()
+    payload["asset_scope"] = "cn_a"
+    normalized = validate_semantic_config_json(payload)
+    assert normalized["asset_scope"] == "cn_a_equity"
+
+
 def test_validate_semantic_config_json_rejects_missing_strategy_block() -> None:
     payload = _valid_config()
     payload["signal_generation"].pop("breakout", None)

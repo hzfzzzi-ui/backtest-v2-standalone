@@ -261,6 +261,119 @@ def test_order_planning_module_preserves_s7_shape(monkeypatch) -> None:
     assert len(diag_calls) == 1
 
 
+def test_order_planning_module_keeps_cash_blocked_rows_in_fast_mode(monkeypatch) -> None:
+    current_day = {
+        "day": date(2026, 3, 2),
+        "controls": {"effective_max_positions": 5, "risk_on_today": True},
+        "day_signals": DaySignals(
+            sell_signals=[],
+            buy_signals=[SimpleNamespace(symbol="SH600000")],
+            exit_syms=set(),
+            strength_map={"sh600000": 1.0},
+            mf_score_map={"sh600000": 2.0},
+            mf_gate_on_today=True,
+            strong_risk_on=False,
+            exit_counts=ExitCounts(),
+            diagnostics={},
+        ),
+        "next_open": {"sh600000": 10.0},
+        "nav": 100000.0,
+        "holding_symbols": tuple(),
+    }
+
+    def _fake_gate(**_kwargs):
+        return True
+
+    def _fake_build_rebalance_orders(**kwargs):
+        kwargs["candidate_audit"].extend(
+            [
+                {
+                    "date": "2026-03-02",
+                    "symbol": "sh600000",
+                    "selected": False,
+                    "reject_reason": "SKIP_NO_CASH",
+                    "cash_blocked_flag": True,
+                    "cash_available": 5000.0,
+                    "estimated_qty": 100,
+                    "estimated_amount": 10000.0,
+                    "estimated_price": 100.0,
+                },
+                {
+                    "date": "2026-03-02",
+                    "symbol": "sh600001",
+                    "selected": False,
+                    "reject_reason": "NOT_IN_TOPK",
+                    "cash_blocked_flag": False,
+                },
+            ]
+        )
+        kwargs["debug_plan"]["reject_reason_counts"] = {"SKIP_NO_CASH": 1, "NOT_IN_TOPK": 1}
+        return []
+
+    monkeypatch.setattr(
+        "backend.core.stage_pipeline.adapters.order_planning.resolve_mf_gate_on_today",
+        _fake_gate,
+    )
+    monkeypatch.setattr(
+        "backend.core.stage_pipeline.adapters.order_planning.build_rebalance_orders",
+        _fake_build_rebalance_orders,
+    )
+
+    diag_calls: list[dict[str, object]] = []
+    runtime = SimpleNamespace(
+        _current_day=current_day,
+        request=SimpleNamespace(
+            enable_multifactor_rank=True,
+            mf_rank_gate_mode="ALWAYS_ON",
+            fast_mode=True,
+            lot_size=100,
+            enable_strength_rank=False,
+            strength_ma=120,
+            strength_top_k_mode="FILL_TO_MAX",
+            mf_topk=10,
+            mf_concentrate_topn=3,
+            mf_concentrate_scale=1.5,
+            momentum_top_pct=0.0,
+            strategy=SimpleNamespace(enable_entry_gap_guard=False, entry_gap_guard_pct=0.0, min_hold_days=0),
+        ),
+        positions={},
+        cash=5000.0,
+        provider=SimpleNamespace(_feats=None, _mx=None, _sym_to_col={}),
+        _weight_mode="equal",
+        _min_positions_cfg=0,
+        _min_trade_price=5.0,
+        candidate_rows=[],
+        _prepared_day_index=0,
+        _apply_daily_decision_diagnostics=lambda **kwargs: diag_calls.append(kwargs),
+        deferred_sell_orders=[],
+        holding_sources={},
+        close_idx={},
+        order_reject_reason_counts={},
+        _tilt_strength=0.0,
+        _tilt_top_n=0,
+        _tilt_bottom_n=0,
+        _sizing_cfg=None,
+    )
+
+    output = build_s7_order_stage_output(runtime)
+
+    assert output.reason_counts["SKIP_NO_CASH"] == 1
+    assert runtime.candidate_rows == [
+        {
+            "date": "2026-03-02",
+            "symbol": "sh600000",
+            "selected": False,
+            "reject_reason": "SKIP_NO_CASH",
+            "cash_blocked_flag": True,
+            "cash_available": 5000.0,
+            "estimated_qty": 100,
+            "estimated_amount": 10000.0,
+            "estimated_price": 100.0,
+        }
+    ]
+    assert len(diag_calls) == 1
+
+
 def test_order_planning_module_merges_deferred_sell_orders(monkeypatch) -> None:
     current_day = {
         "day": date(2026, 3, 2),

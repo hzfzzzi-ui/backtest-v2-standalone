@@ -282,8 +282,8 @@ def _build_position_analysis(counters: dict) -> str:
     </table>
     <h4>约束触发统计</h4>
     <table>
-      <tr><td>个股上限触发</td><td style="color:#999">未实现</td></tr>
-      <tr><td>行业上限触发</td><td style="color:#999">未实现</td></tr>
+      <tr><td>个股上限触发</td><td>{_inum(counters.get('cap_hit_single', 0))}</td></tr>
+      <tr><td>行业上限触发</td><td>{_inum(counters.get('cap_hit_industry', 0))}</td></tr>
       <tr><td>资金不足跳过</td><td>{_inum(counters.get('cash_skip_count', 0))}</td></tr>
       <tr><td>最小手数跳过</td><td>{_inum(counters.get('lot_skip_count', 0))}</td></tr>
     </table>"""

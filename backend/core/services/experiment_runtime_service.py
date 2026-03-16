@@ -13,6 +13,7 @@ from backend.api.backtest_v2.semantic_config_compiler import (
     validate_semantic_config_json,
 )
 from backend.api.shared.json_utils import sanitize_json
+from backend.core.config.asset_profiles import build_asset_context, canonical_asset_scope
 from backend.core.services.experiment_artifact_service import stabilize_experiment_output
 from backend.core.tools.locked_candidate_presets import is_locked_candidate_preset
 from backend.core.tools.saved_config_access import resolve_runtime_config_source
@@ -141,6 +142,8 @@ def run_experiment_request_body(
                 effective_wb_cfg = request_semantic_blocks
 
     overrides: dict[str, Any] = {}
+    canonical_scope = canonical_asset_scope(getattr(body, "asset_scope", "cn_a_equity"))
+    overrides["asset_scope"] = canonical_scope
     if not use_script_cfg and not runtime_config_supplied and not isinstance(semantic_cfg_input, dict):
         if body.symbols:
             overrides["symbols"] = list(body.symbols)
@@ -216,6 +219,13 @@ def run_experiment_request_body(
             overrides["workbench_config"] = wb_cfg
             overrides["original_workbench_config"] = semantic_cfg_input if isinstance(semantic_cfg_input, dict) else wb_cfg
     effective_wb_cfg_dict = effective_wb_cfg if isinstance(effective_wb_cfg, dict) else {}
+    overrides["asset_context"] = sanitize_json(
+        build_asset_context(
+            canonical_scope,
+            config_json=effective_wb_cfg_dict if effective_wb_cfg_dict else base_cfg,
+            metadata_scope=(effective_wb_cfg_dict.get("asset_context") or {}).get("asset_scope") if isinstance(effective_wb_cfg_dict.get("asset_context"), dict) else None,
+        )
+    )
     if use_script_cfg or runtime_config_supplied:
         wb_uni = effective_wb_cfg_dict.get("universe") if isinstance(effective_wb_cfg_dict.get("universe"), dict) else {}
         overrides["universe_mode"] = str(effective_wb_cfg_dict.get("universe_mode") or body.universe_mode or "CUSTOM")
@@ -254,6 +264,7 @@ def run_experiment_request_body(
             {
                 **dict(semantic_compile.get("compiled_plan") or {}),
                 "execution_overrides": api_module._execution_override_snapshot(overrides),
+                "asset_context": sanitize_json(dict(overrides.get("asset_context") or {})),
             }
         )
 

@@ -47,6 +47,7 @@ STANDARD_DAILY_COLUMNS = [
     "after_held_filter_count",
     "after_slot_filter_count",
     "after_cash_lot_count",
+    "diagnostics_input_json",
     "positions_before_sell",
     "sells_executed_count",
     "positions_after_sell",

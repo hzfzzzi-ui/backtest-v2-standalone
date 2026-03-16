@@ -8,7 +8,7 @@ from typing import Any, Mapping
 from backend.core.engine_vector.signal_provider import DaySignals
 from backend.core.portfolio.nav_snapshot import compute_nav_snapshot
 from backend.core.portfolio.sizing import calc_buy_slots
-from backend.core.stage_pipeline.contracts import AccountingSnapshot
+from backend.core.stage_pipeline.contracts import AccountingSnapshot, RuntimeDiagnosticsInput
 from backend.core.stage_pipeline.adapters.fill_accounting import capture_accounting_snapshot
 
 
@@ -57,6 +57,7 @@ def build_daily_row(
         "after_held_filter_count": 0,
         "after_slot_filter_count": 0,
         "after_cash_lot_count": 0,
+        "diagnostics_input_json": "",
         "positions_before_sell": 0,
         "sells_executed_count": 0,
         "positions_after_sell": 0,
@@ -87,7 +88,7 @@ def build_daily_row(
         "breadth_max_positions": int(controls.get("breadth_max_positions", controls["effective_max_positions"])),
         "dd_state": str(controls["dd_state"]),
     }
-    if runtime.route_id == "provider_breakout_runtime":
+    if getattr(runtime, "route_id", "") == "provider_breakout_runtime":
         row["market_state"] = str(controls["market_state"])
         row["trade_mode"] = str(controls["trade_mode"])
         row["benchmark_regime_on"] = bool(controls["benchmark_regime_on"])
@@ -157,6 +158,37 @@ def _safe_float(value: Any, *, fallback: float = 0.0) -> float:
     return float(out)
 
 
+def _safe_int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        out = int(value)
+    except Exception:
+        try:
+            out = int(float(value))
+        except Exception:
+            return None
+    return int(out)
+
+
+def _jsonable(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        if value != value:
+            return None
+        return float(value)
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(raw) for key, raw in dict(value).items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(item) for item in list(value)]
+    return str(value)
+
+
 def _signal_snapshot(signal: Any) -> dict[str, Any]:
     meta = dict(getattr(signal, "meta", {}) or {})
     return {
@@ -187,63 +219,145 @@ def _merge_count_maps(target: dict[str, int], source: Mapping[str, Any] | None) 
     return target
 
 
+def _build_runtime_diagnostics_input(
+    runtime: Any,
+    *,
+    day_signals: DaySignals,
+    debug_plan: Mapping[str, Any],
+    diagnostics: Mapping[str, Any],
+    positions_before_sell: int,
+    positions_after_sell: int,
+    buy_slots: int,
+    candidates_count: int,
+    selected_count: int,
+    raw_buy_candidate_count: int,
+    raw_after_held_filter_count: int,
+    raw_after_slot_filter_count: int | None,
+    raw_after_cash_lot_count: int | None,
+) -> RuntimeDiagnosticsInput:
+    return RuntimeDiagnosticsInput(
+        route_id=str(getattr(runtime, "route_id", "") or ""),
+        candidates_count=int(candidates_count),
+        selected_count=int(selected_count),
+        positions_before_sell=int(positions_before_sell),
+        positions_after_sell=int(positions_after_sell),
+        buy_slots=int(buy_slots),
+        raw_buy_signal_count=int(diagnostics.get("raw_buy_signal_count", 0) or 0),
+        raw_alpha_signal_count=int(diagnostics.get("raw_alpha_signal_count", len(day_signals.raw_alpha_signals)) or 0),
+        composed_buy_signal_count=int(diagnostics.get("composed_buy_signal_count", len(day_signals.composed_buy_signals)) or 0),
+        composed_sell_signal_count=int(diagnostics.get("composed_sell_signal_count", len(day_signals.composed_sell_signals)) or 0),
+        raw_buy_candidate_count=int(raw_buy_candidate_count),
+        raw_after_held_filter_count=int(raw_after_held_filter_count),
+        raw_after_slot_filter_count=raw_after_slot_filter_count,
+        raw_after_cash_lot_count=raw_after_cash_lot_count,
+        benchmark_regime_on=bool(runtime.daily_rows[-1].get("benchmark_regime_on")),
+        strong_risk_on=bool(getattr(day_signals, "strong_risk_on", False)),
+        diagnostics=_jsonable(diagnostics),
+        debug_plan=_jsonable(debug_plan),
+    )
+
+
 def apply_daily_decision_diagnostics(runtime: Any, *, day_signals: DaySignals, debug_plan: Mapping[str, Any]) -> None:
     if not runtime.daily_rows or runtime._current_day is None:
         return
     daily_row = runtime.daily_rows[-1]
     sell_symbols = {str(sig.symbol).lower() for sig in day_signals.sell_signals}
+    positions_before_sell = int(sum(1 for qty in runtime.positions.values() if int(qty) > 0))
     positions_after_sell = int(
         sum(1 for symbol, qty in runtime.positions.items() if int(qty) > 0 and str(symbol).lower() not in sell_symbols)
     )
     buy_slots = int(calc_buy_slots(int(runtime._current_day["controls"]["effective_max_positions"]), int(positions_after_sell)))
-    daily_row["positions_before_sell"] = int(sum(1 for qty in runtime.positions.values() if int(qty) > 0))
+    daily_row["positions_before_sell"] = int(positions_before_sell)
     daily_row["positions_after_sell"] = int(positions_after_sell)
     daily_row["buy_slots_before_buy"] = int(buy_slots)
     daily_row["buy_slots_after_sell"] = int(buy_slots)
     daily_row["buy_slots_calculated"] = int(buy_slots)
+    diagnostics = dict(getattr(day_signals, "diagnostics", {}) or {})
+    plan = dict(debug_plan or {})
+    selected_symbols = list(plan.get("selected_symbols", []) or [])
+
+    selected_count = _safe_int_or_none(plan.get("selected_count"))
+    if selected_count is None:
+        selected_count = int(len(selected_symbols))
+
+    after_slot_filter_count = _safe_int_or_none(plan.get("after_slot_filter_count"))
+    if after_slot_filter_count is None:
+        after_slot_filter_count = _safe_int_or_none(plan.get("after_sleeve_budget_count"))
+
+    after_cash_lot_count = _safe_int_or_none(plan.get("after_cash_lot_count"))
+
+    raw_buy_candidate_count = _safe_int_or_none(diagnostics.get("buy_candidate_count"))
+    raw_after_held_filter_count = _safe_int_or_none(diagnostics.get("after_held_filter_count"))
+    if raw_buy_candidate_count is None:
+        raw_buy_candidate_count = int(raw_after_held_filter_count or 0)
+    if raw_after_held_filter_count is None:
+        raw_after_held_filter_count = int(raw_buy_candidate_count or 0)
+    candidates_count = int(plan.get("buy_candidates_count", 0) or 0)
+    raw_after_slot_filter_count = after_slot_filter_count
+    raw_after_cash_lot_count = after_cash_lot_count
+    buy_candidate_count = int(raw_buy_candidate_count or 0)
+    after_held_filter_count = int(raw_after_held_filter_count or 0)
+    after_slot_filter_count = int(raw_after_slot_filter_count or 0)
+    after_cash_lot_count = int(selected_count if raw_after_cash_lot_count is None else raw_after_cash_lot_count)
+
     daily_row["sells_executed_count"] = int(len(day_signals.sell_signals))
-    daily_row["candidates_count"] = int((debug_plan or {}).get("buy_candidates_count", 0) or 0)
-    daily_row["selected_count"] = int(len((debug_plan or {}).get("selected_symbols", []) or []))
-    daily_row["buy_candidate_count"] = int(len(day_signals.buy_signals))
-    daily_row["after_held_filter_count"] = int(len(day_signals.buy_signals))
-    daily_row["raw_buy_signal_count"] = int(day_signals.diagnostics.get("raw_buy_signal_count", len(day_signals.buy_signals)) or 0)
-    daily_row["raw_alpha_signal_count"] = int(day_signals.diagnostics.get("raw_alpha_signal_count", len(day_signals.raw_alpha_signals)) or 0)
-    daily_row["composed_buy_signal_count"] = int(day_signals.diagnostics.get("composed_buy_signal_count", len(day_signals.composed_buy_signals)) or 0)
-    daily_row["composed_sell_signal_count"] = int(day_signals.diagnostics.get("composed_sell_signal_count", len(day_signals.composed_sell_signals)) or 0)
-    daily_row["after_slot_filter_count"] = int((debug_plan or {}).get("after_sleeve_budget_count", len(day_signals.buy_signals)) or 0)
-    daily_row["after_cash_lot_count"] = int(len((debug_plan or {}).get("selected_symbols", []) or []))
-    daily_row["candidates_after_held_filter_count"] = int(daily_row["after_held_filter_count"])
+    daily_row["candidates_count"] = int(candidates_count)
+    daily_row["selected_count"] = int(selected_count)
+    daily_row["buy_candidate_count"] = int(buy_candidate_count)
+    daily_row["after_held_filter_count"] = int(after_held_filter_count)
+    daily_row["raw_buy_signal_count"] = int(diagnostics.get("raw_buy_signal_count", 0) or 0)
+    daily_row["raw_alpha_signal_count"] = int(diagnostics.get("raw_alpha_signal_count", len(day_signals.raw_alpha_signals)) or 0)
+    daily_row["composed_buy_signal_count"] = int(diagnostics.get("composed_buy_signal_count", len(day_signals.composed_buy_signals)) or 0)
+    daily_row["composed_sell_signal_count"] = int(diagnostics.get("composed_sell_signal_count", len(day_signals.composed_sell_signals)) or 0)
+    daily_row["after_slot_filter_count"] = int(after_slot_filter_count)
+    daily_row["after_cash_lot_count"] = int(after_cash_lot_count)
+    daily_row["candidates_after_held_filter_count"] = int(after_held_filter_count)
     daily_row["sorting_triggered"] = bool(
-        int((debug_plan or {}).get("buy_candidates_count", 0) or 0)
-        > int((debug_plan or {}).get("buy_slots", 0) or 0)
+        int(plan.get("buy_candidates_count", 0) or 0)
+        > int(plan.get("buy_slots", 0) or 0)
     )
-    daily_row["mf_rank_triggered"] = 1 if bool((debug_plan or {}).get("mf_rank_triggered", False)) else 0
-    daily_row["mf_rank_applied"] = 1 if bool((debug_plan or {}).get("mf_rank_applied", False)) else 0
-    daily_row["mf_candidates_when_triggered"] = int((debug_plan or {}).get("mf_candidates_when_triggered", 0) or 0)
-    daily_row["mf_topk_reject_count"] = int((debug_plan or {}).get("mf_topk_reject_count", 0) or 0)
-    daily_row["mf_concentrated_selected_count"] = int((debug_plan or {}).get("mf_concentrated_selected_count", 0) or 0)
-    daily_row["mf_gate_on"] = 1 if bool((debug_plan or {}).get("mf_gate_on", False)) else 0
+    daily_row["mf_rank_triggered"] = 1 if bool(plan.get("mf_rank_triggered", False)) else 0
+    daily_row["mf_rank_applied"] = 1 if bool(plan.get("mf_rank_applied", False)) else 0
+    daily_row["mf_candidates_when_triggered"] = int(plan.get("mf_candidates_when_triggered", 0) or 0)
+    daily_row["mf_topk_reject_count"] = int(plan.get("mf_topk_reject_count", 0) or 0)
+    daily_row["mf_concentrated_selected_count"] = int(plan.get("mf_concentrated_selected_count", 0) or 0)
+    daily_row["mf_gate_on"] = 1 if bool(plan.get("mf_gate_on", False)) else 0
     daily_row["strong_risk_on"] = 1 if bool(getattr(day_signals, "strong_risk_on", False)) else 0
-    cands_now = int((debug_plan or {}).get("buy_candidates_count", 0) or 0)
-    slots_now = int((debug_plan or {}).get("buy_slots", 0) or 0)
+    cands_now = int(plan.get("buy_candidates_count", 0) or 0)
+    slots_now = int(plan.get("buy_slots", 0) or 0)
     enable_multifactor_rank = bool(
-        getattr(getattr(runtime, "request", None), "enable_multifactor_rank", day_signals.diagnostics.get("enable_multifactor_rank", False))
+        getattr(getattr(runtime, "request", None), "enable_multifactor_rank", diagnostics.get("enable_multifactor_rank", False))
     )
     daily_row["mf_rank_suppressed_by_strong_gate"] = (
         1
         if bool(cands_now > slots_now)
         and bool(enable_multifactor_rank)
-        and not bool((debug_plan or {}).get("mf_gate_on", False))
+        and not bool(plan.get("mf_gate_on", False))
         else 0
     )
-    daily_row["same_symbol_conflict_count"] = int(day_signals.diagnostics.get("conflict_resolution_count", 0) or 0)
-    daily_row["sleeve_budget_reject_count"] = int((debug_plan or {}).get("sleeve_budget_reject_count", 0) or 0)
+    daily_row["same_symbol_conflict_count"] = int(diagnostics.get("conflict_resolution_count", 0) or 0)
+    daily_row["sleeve_budget_reject_count"] = int(plan.get("sleeve_budget_reject_count", 0) or 0)
     daily_row["source_only_exit_count"] = int(
         sum(1 for signal in day_signals.sell_signals if str((getattr(signal, "meta", {}) or {}).get("exit_owner", "") or "") == "source_only")
     )
     daily_row["global_risk_override_count"] = int(
         sum(1 for signal in day_signals.sell_signals if str((getattr(signal, "meta", {}) or {}).get("exit_owner", "") or "") == "global_risk_override")
     )
+    daily_row["diagnostics_input_json"] = _build_runtime_diagnostics_input(
+        runtime,
+        day_signals=day_signals,
+        debug_plan=plan,
+        diagnostics=diagnostics,
+        positions_before_sell=positions_before_sell,
+        positions_after_sell=positions_after_sell,
+        buy_slots=buy_slots,
+        candidates_count=candidates_count,
+        selected_count=int(selected_count),
+        raw_buy_candidate_count=int(raw_buy_candidate_count or 0),
+        raw_after_held_filter_count=int(raw_after_held_filter_count or 0),
+        raw_after_slot_filter_count=raw_after_slot_filter_count,
+        raw_after_cash_lot_count=raw_after_cash_lot_count,
+    ).to_json()
     if not bool(day_signals.diagnostics.get("composition_enabled", False)):
         return
 

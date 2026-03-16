@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from datetime import date
 from types import SimpleNamespace
@@ -671,6 +672,7 @@ def test_apply_daily_decision_diagnostics_populates_multifactor_sorting_fields()
                 "global_risk_override_count": 0,
             }
         ],
+        route_id="strict_inline_runtime",
         _current_day={"controls": {"effective_max_positions": 2}},
         positions={},
         composition_audit_rows=[],
@@ -693,6 +695,8 @@ def test_apply_daily_decision_diagnostics_populates_multifactor_sorting_fields()
             "raw_alpha_signal_count": 1,
             "composed_buy_signal_count": 1,
             "composed_sell_signal_count": 0,
+            "buy_candidate_count": 3,
+            "after_held_filter_count": 2,
             "composition_enabled": False,
             "enable_multifactor_rank": True,
         },
@@ -705,7 +709,9 @@ def test_apply_daily_decision_diagnostics_populates_multifactor_sorting_fields()
             "buy_candidates_count": 3,
             "buy_slots": 1,
             "selected_symbols": ["sh600001"],
-            "after_sleeve_budget_count": 1,
+            "selected_count": 1,
+            "after_slot_filter_count": 1,
+            "after_cash_lot_count": 1,
             "mf_rank_triggered": True,
             "mf_rank_applied": True,
             "mf_candidates_when_triggered": 3,
@@ -716,6 +722,10 @@ def test_apply_daily_decision_diagnostics_populates_multifactor_sorting_fields()
     )
 
     daily_row = runtime.daily_rows[-1]
+    assert daily_row["buy_candidate_count"] == 3
+    assert daily_row["after_held_filter_count"] == 2
+    assert daily_row["after_slot_filter_count"] == 1
+    assert daily_row["after_cash_lot_count"] == 1
     assert daily_row["sorting_triggered"] is True
     assert daily_row["mf_rank_triggered"] == 1
     assert daily_row["mf_rank_applied"] == 1
@@ -725,6 +735,187 @@ def test_apply_daily_decision_diagnostics_populates_multifactor_sorting_fields()
     assert daily_row["mf_gate_on"] == 0
     assert daily_row["strong_risk_on"] == 0
     assert daily_row["mf_rank_suppressed_by_strong_gate"] == 1
+    diagnostics_input = json.loads(daily_row["diagnostics_input_json"])
+    assert diagnostics_input["route_id"] == "strict_inline_runtime"
+    assert diagnostics_input["raw_buy_candidate_count"] == 3
+    assert diagnostics_input["raw_after_held_filter_count"] == 2
+    assert diagnostics_input["raw_after_slot_filter_count"] == 1
+    assert diagnostics_input["raw_after_cash_lot_count"] == 1
+
+
+def test_apply_daily_decision_diagnostics_preserves_unavailable_stage_counts() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        daily_rows=[
+            {
+                "date": "2026-03-02",
+                "positions_count": 0,
+                "positions_count_end_of_day": 0,
+                "candidates_count": 0,
+                "selected_count": 0,
+                "buy_slots_before_buy": 0,
+                "buy_slots_after_sell": 0,
+                "buy_candidate_count": 0,
+                "after_held_filter_count": 0,
+                "positions_before_sell": 0,
+                "sells_executed_count": 0,
+                "positions_after_sell": 0,
+                "buy_slots_calculated": 0,
+                "raw_buy_signal_count": 0,
+                "raw_alpha_signal_count": 0,
+                "composed_buy_signal_count": 0,
+                "composed_sell_signal_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "candidates_after_held_filter_count": 0,
+                "sorting_triggered": False,
+                "mf_rank_triggered": 0,
+                "mf_rank_applied": 0,
+                "mf_candidates_when_triggered": 0,
+                "mf_topk_reject_count": 0,
+                "mf_concentrated_selected_count": 0,
+                "mf_gate_on": 0,
+                "strong_risk_on": 0,
+                "mf_rank_suppressed_by_strong_gate": 0,
+                "same_symbol_conflict_count": 0,
+                "sleeve_budget_reject_count": 0,
+                "source_only_exit_count": 0,
+                "global_risk_override_count": 0,
+            }
+        ],
+        route_id="strict_inline_runtime",
+        _current_day={"controls": {"effective_max_positions": 2}},
+        positions={},
+        composition_audit_rows=[],
+    )
+    buy_signal = SimpleNamespace(symbol="SH600001", meta={})
+    day_signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        raw_alpha_signals=[],
+        composed_buy_signals=[],
+        composed_sell_signals=[],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={
+            "raw_buy_signal_count": 1,
+            "composition_enabled": False,
+        },
+    )
+
+    apply_daily_decision_diagnostics(
+        runtime,
+        day_signals=day_signals,
+        debug_plan={
+            "buy_candidates_count": 1,
+            "buy_slots": 1,
+            "selected_symbols": [],
+        },
+    )
+
+    daily_row = runtime.daily_rows[-1]
+    assert daily_row["buy_candidate_count"] == 0
+    assert daily_row["after_held_filter_count"] == 0
+    assert daily_row["after_slot_filter_count"] == 0
+    assert daily_row["after_cash_lot_count"] == 0
+    assert daily_row["candidates_after_held_filter_count"] == 0
+    diagnostics_input = json.loads(daily_row["diagnostics_input_json"])
+    assert diagnostics_input["raw_after_slot_filter_count"] is None
+    assert diagnostics_input["raw_after_cash_lot_count"] is None
+
+
+def test_apply_daily_decision_diagnostics_keeps_breakout_counts_raw_for_artifact_builder() -> None:
+    runtime = SimpleNamespace(
+        daily_rows=[
+            {
+                "date": "2026-03-02",
+                "positions_count": 0,
+                "positions_count_end_of_day": 0,
+                "candidates_count": 0,
+                "selected_count": 0,
+                "buy_slots_before_buy": 0,
+                "buy_slots_after_sell": 0,
+                "buy_candidate_count": 0,
+                "after_held_filter_count": 0,
+                "positions_before_sell": 0,
+                "sells_executed_count": 0,
+                "positions_after_sell": 0,
+                "buy_slots_calculated": 0,
+                "raw_buy_signal_count": 0,
+                "raw_alpha_signal_count": 0,
+                "composed_buy_signal_count": 0,
+                "composed_sell_signal_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "candidates_after_held_filter_count": 0,
+                "sorting_triggered": False,
+                "mf_rank_triggered": 0,
+                "mf_rank_applied": 0,
+                "mf_candidates_when_triggered": 0,
+                "mf_topk_reject_count": 0,
+                "mf_concentrated_selected_count": 0,
+                "mf_gate_on": 0,
+                "strong_risk_on": 0,
+                "mf_rank_suppressed_by_strong_gate": 0,
+                "same_symbol_conflict_count": 0,
+                "sleeve_budget_reject_count": 0,
+                "source_only_exit_count": 0,
+                "global_risk_override_count": 0,
+                "benchmark_regime_on": True,
+            }
+        ],
+        route_id="provider_breakout_runtime",
+        _current_day={"controls": {"effective_max_positions": 2}},
+        positions={},
+        composition_audit_rows=[],
+    )
+    buy_signal = SimpleNamespace(symbol="SH600001", meta={})
+    day_signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        raw_alpha_signals=[],
+        composed_buy_signals=[],
+        composed_sell_signals=[],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={
+            "raw_buy_signal_count": 5,
+            "buy_candidate_count": 5,
+            "after_held_filter_count": 3,
+            "composition_enabled": False,
+        },
+    )
+
+    apply_daily_decision_diagnostics(
+        runtime,
+        day_signals=day_signals,
+        debug_plan={
+            "buy_candidates_count": 0,
+            "buy_slots": 2,
+            "selected_symbols": ["sh600001"],
+            "selected_count": 1,
+        },
+    )
+
+    daily_row = runtime.daily_rows[-1]
+    assert daily_row["buy_candidate_count"] == 5
+    assert daily_row["after_held_filter_count"] == 3
+    assert daily_row["after_slot_filter_count"] == 0
+    assert daily_row["after_cash_lot_count"] == 1
+    diagnostics_input = json.loads(daily_row["diagnostics_input_json"])
+    assert diagnostics_input["route_id"] == "provider_breakout_runtime"
+    assert diagnostics_input["benchmark_regime_on"] is True
+    assert diagnostics_input["raw_buy_candidate_count"] == 5
+    assert diagnostics_input["raw_after_held_filter_count"] == 3
+    assert diagnostics_input["raw_after_slot_filter_count"] is None
 
 
 def test_build_portfolio_backtest_result_preserves_metrics_shape() -> None:

@@ -1,5 +1,6 @@
 study_id: v10/quality_then_residual_s3
 title: V10 质量优先残差 S3
+asset_scope: cn_a_equity
 baseline_id: baseline_V10
 hypothesis: 先用质量门过滤，再用残差排序，可能在 A 股趋势股里减少劣质突破并改善回撤。
 change_scope:

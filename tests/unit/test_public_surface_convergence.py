@@ -156,16 +156,6 @@ def test_public_run_contract_forbids_legacy_surface_fields() -> None:
             workbench_mode="draft",
         )
 
-
-def test_artifact_read_contract_requires_exp_id_only() -> None:
-    with pytest.raises(ValidationError):
-        impl.BacktestV2ArtifactReadRequest(
-            exp_id="exp_artifact",
-            results_dir="outputs/experiments/exp_artifact",
-            rel_path="perf.json",
-        )
-
-
 def test_legacy_public_result_route_is_retired() -> None:
     paths = {route.path for route in backtest_v2_router.routes}
     assert "/api/backtest_v2/results/{run_id}" not in paths
@@ -176,6 +166,12 @@ def test_public_report_route_is_retired() -> None:
     assert "/api/backtest_v2/experiments/{exp_id}/report" not in paths
 
 
+def test_generic_artifact_routes_are_retired() -> None:
+    paths = {route.path for route in backtest_v2_router.routes}
+    assert "/api/backtest_v2/experiments/{exp_id}/artifacts/{rel_path:path}" not in paths
+    assert "/api/backtest_v2/artifacts/read" not in paths
+
+
 def test_wave1_legacy_helpers_are_removed() -> None:
     for name in (
         "_read_result",
@@ -184,27 +180,6 @@ def test_wave1_legacy_helpers_are_removed() -> None:
         "_load_runtime_cfg_obj",
     ):
         assert not hasattr(impl, name)
-
-
-def test_artifact_read_requires_manifest_declared_path(tmp_path: Path, monkeypatch) -> None:
-    exp_dir = _write_minimal_experiment(tmp_path, "exp_artifact")
-    manifest = json.loads((exp_dir / "manifest.json").read_text(encoding="utf-8"))
-    (exp_dir / "secret.txt").write_text("hidden", encoding="utf-8")
-
-    monkeypatch.setattr(data_impl, "_load_manifest_or_404", lambda exp_id: (exp_dir, manifest))
-
-    ok_payload = impl.read_backtest_v2_artifact(
-        impl.BacktestV2ArtifactReadRequest(exp_id="exp_artifact", rel_path="perf.json")
-    )
-    assert ok_payload["kind"] == "json"
-    assert ok_payload["data"]["cagr"] == 0.1
-
-    with pytest.raises(HTTPException) as exc:
-        impl.read_backtest_v2_artifact(
-            impl.BacktestV2ArtifactReadRequest(exp_id="exp_artifact", rel_path="secret.txt")
-        )
-    assert exc.value.status_code == 400
-    assert "not declared by manifest" in str(exc.value.detail)
 
 
 def test_history_list_prunes_entries_without_manifest(tmp_path: Path, monkeypatch) -> None:

@@ -33,3 +33,8 @@ def get_symbol_series(
 @router.post("/api/backtest_v2/stock_names")
 def get_stock_names(body: dict):
     return impl.get_stock_names(body)
+
+
+@router.get("/api/backtest_v2/market_data/sync_status")
+def get_market_data_sync_status():
+    return impl.get_market_data_sync_status()

@@ -4,6 +4,7 @@ function emptySnapshot() {
   return {
     active: false,
     source: { kind: '', id: '' },
+    assetContext: {},
     result: null,
     artifacts: null,
     view: {
@@ -37,6 +38,10 @@ export function useResultsWorkbenchBridge() {
   });
 
   const patchViewState = (patch) => {
+    if (typeof window.patchDesktopResultsWorkbenchViewState === 'function') {
+      window.patchDesktopResultsWorkbenchViewState(patch || {});
+      return;
+    }
     if (bridge && typeof bridge.patchViewState === 'function') bridge.patchViewState(patch || {});
   };
 

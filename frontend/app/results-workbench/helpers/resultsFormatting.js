@@ -1,24 +1,31 @@
 import { buildAgentMarkdownFromSnapshot } from './agentReportFormatting.js';
 import { buildUnifiedStageFunnelFromSnapshot } from './stageFunnelFormatting.js';
 
-export function fmtNum(value, digits = 2) {
+function toFiniteNumber(value) {
+  if (value == null) return null;
+  if (typeof value === 'string' && !value.trim()) return null;
   const num = Number(value);
-  return Number.isFinite(num) ? num.toFixed(digits) : '-';
+  return Number.isFinite(num) ? num : null;
+}
+
+export function fmtNum(value, digits = 2) {
+  const num = toFiniteNumber(value);
+  return num != null ? num.toFixed(digits) : '-';
 }
 
 export function fmtPct(value, digits = 2) {
-  const num = Number(value);
-  return Number.isFinite(num) ? `${(num * 100).toFixed(digits)}%` : '-';
+  const num = toFiniteNumber(value);
+  return num != null ? `${(num * 100).toFixed(digits)}%` : '-';
 }
 
 export function fmtInt(value) {
-  const num = Number(value);
-  return Number.isFinite(num) ? Math.round(num).toLocaleString('en-US') : '-';
+  const num = toFiniteNumber(value);
+  return num != null ? Math.round(num).toLocaleString('en-US') : '-';
 }
 
 export function fmtMoney(value) {
-  const num = Number(value);
-  return Number.isFinite(num)
+  const num = toFiniteNumber(value);
+  return num != null
     ? num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     : '-';
 }
@@ -26,8 +33,8 @@ export function fmtMoney(value) {
 export function fmtRatio(value, digits = 2) {
   if (value === Infinity) return '∞';
   if (value === -Infinity) return '-∞';
-  const num = Number(value);
-  return Number.isFinite(num) ? num.toFixed(digits) : '-';
+  const num = toFiniteNumber(value);
+  return num != null ? num.toFixed(digits) : '-';
 }
 
 export function firstDefined(...values) {
@@ -491,13 +498,19 @@ export function summarizeSnapshot(snapshot) {
   );
   const totalReturnValue = firstDefined(perf.total_return, result.total_return);
   const initialCapitalValue = firstDefined(
+    perf.initial_capital,
     workbenchConfig?.initial_capital,
     artifacts?.config?.overrides?.initial_capital,
     artifacts?.config?.base_config?.initial_capital,
   );
-  const finalCapitalValue = Number.isFinite(Number(initialCapitalValue)) && Number.isFinite(Number(totalReturnValue))
-    ? Number(initialCapitalValue) * (1 + Number(totalReturnValue))
-    : null;
+  const initialCapitalNumber = toFiniteNumber(initialCapitalValue);
+  const totalReturnNumber = toFiniteNumber(totalReturnValue);
+  const finalCapitalValue = firstDefined(
+    perf.final_capital,
+    initialCapitalNumber != null && totalReturnNumber != null
+      ? initialCapitalNumber * (1 + totalReturnNumber)
+      : null,
+  );
   const rawCount = firstDefined(
     meta.universe?.raw_count,
     meta.universe?.union_symbol_count,
@@ -508,15 +521,15 @@ export function summarizeSnapshot(snapshot) {
     meta.universe?.tradable_symbols,
     meta.data_bundle?.symbols_count,
   );
-  const rawCountNum = Number(rawCount);
-  const filteredCountNum = Number(filteredCount);
-  const universeCount = Number.isFinite(rawCountNum)
+  const rawCountNum = toFiniteNumber(rawCount);
+  const filteredCountNum = toFiniteNumber(filteredCount);
+  const universeCount = rawCountNum != null
     ? (
-      Number.isFinite(filteredCountNum) && filteredCountNum !== rawCountNum
+      filteredCountNum != null && filteredCountNum !== rawCountNum
         ? `${fmtInt(rawCountNum)} -> ${fmtInt(filteredCountNum)}`
         : fmtInt(firstDefined(filteredCountNum, rawCountNum))
     )
-    : (Number.isFinite(filteredCountNum) ? fmtInt(filteredCountNum) : '-');
+    : (filteredCountNum != null ? fmtInt(filteredCountNum) : '-');
   const strategy = strategyFields(snapshot);
   const auditSummary = artifacts.audit?.summary || {};
   const dailyReturns = buildDatedReturns(navSeries).map((item) => item.value);
@@ -543,23 +556,23 @@ export function summarizeSnapshot(snapshot) {
     strategyCore: strategy.strategyCore,
     portfolioMode: strategy.portfolioMode,
     strategySummary: strategy.strategySummary,
-    initialCapital: Number.isFinite(Number(initialCapitalValue)) ? fmtMoney(initialCapitalValue) : '-',
-    finalCapital: Number.isFinite(Number(finalCapitalValue)) ? fmtMoney(finalCapitalValue) : '-',
+    initialCapital: initialCapitalNumber != null ? fmtMoney(initialCapitalNumber) : '-',
+    finalCapital: toFiniteNumber(finalCapitalValue) != null ? fmtMoney(finalCapitalValue) : '-',
     cagr: fmtPct(firstDefined(perf.cagr, result.cagr)),
     totalReturn: fmtPct(totalReturnValue),
     maxDrawdown: fmtPct(firstDefined(perf.max_drawdown, result.max_drawdown)),
-    maxDrawdownDuration: Number.isFinite(Number(drawdownDurationDays))
+    maxDrawdownDuration: toFiniteNumber(drawdownDurationDays) != null
       ? `${fmtInt(drawdownDurationDays)}天`
       : '-',
     sharpe: fmtNum(firstDefined(perf.sharpe, result.sharpe), 2),
     calmar: fmtNum(firstDefined(perf.calmar, result.calmar), 2),
     rollingSharpe: fmtRatio(rollingSharpe, 2),
-    expectancyPerTrade: Number.isFinite(Number(realizedPnl.expectancy))
-      ? fmtMoney(realizedPnl.expectancy)
+    expectancyPerTrade: toFiniteNumber(firstDefined(perf.expectancy_per_trade, realizedPnl.expectancy)) != null
+      ? fmtMoney(firstDefined(perf.expectancy_per_trade, realizedPnl.expectancy))
       : '-',
     sortino: fmtRatio(sortino, 2),
-    profitFactor: fmtRatio(realizedPnl.profitFactor, 2),
-    winRate: fmtPct(realizedPnl.winRate),
+    profitFactor: fmtRatio(firstDefined(perf.profit_factor, realizedPnl.profitFactor), 2),
+    winRate: fmtPct(firstDefined(perf.win_rate, realizedPnl.winRate)),
     alpha: fmtPct(alpha),
     beta: fmtRatio(beta, 2),
     trades: fmtInt(firstDefined(perf.trades, result.trades)),

@@ -1,4 +1,9 @@
 (function initDesktopRunControls(globalScope) {
+  function setRunStatusText(text) {
+    const statusEl = byId('wbRunStatus');
+    if (statusEl) statusEl.textContent = text;
+  }
+
   async function pollJob(jobId) {
     const btn = byId('wbRunBtn');
     const originalText = btn ? btn.textContent : '';
@@ -34,7 +39,7 @@
     try {
       for (;;) {
         if (canceled) {
-          byId('wbRunStatus').textContent = '已取消';
+          setRunStatusText('已取消');
           return null;
         }
         const j = await apiRequestJson('job_poll', `/api/backtest_v2/jobs/${encodeURIComponent(jobId)}`);
@@ -45,11 +50,11 @@
           deadlineTs = Math.min(deadlineTs + extendStepMs, hardDeadline);
         }
         const remainSec = Math.max(0, Math.floor((deadlineTs - Date.now()) / 1000));
-        byId('wbRunStatus').textContent = `${j.status} ${j.progress_pct ?? 0}% ${j.message || ''} | 剩余${remainSec}s`;
+        setRunStatusText(`${j.status} ${j.progress_pct ?? 0}% ${j.message || ''} | 剩余${remainSec}s`);
         if (j.status === 'success') return j.result || null;
         if (j.status === 'failed') throw new Error(j.error || 'job failed');
         if (j.status === 'canceled') {
-          byId('wbRunStatus').textContent = '已取消';
+          setRunStatusText('已取消');
           return null;
         }
         if (Date.now() >= deadlineTs) {
@@ -64,10 +69,12 @@
 
   function resolveRuntimeConfigHandoff(preset) {
     const requestedPreset = selectedExperimentPreset(preset);
+    const assetScope = String((state.config_draft && state.config_draft.asset_scope) || 'cn_a_equity').trim() || 'cn_a_equity';
     if (isLockedCandidatePreset(requestedPreset)) {
       return {
         preset: requestedPreset,
         fast_mode: true,
+        asset_scope: assetScope,
       };
     }
     const d = buildConfigDraft();
@@ -75,6 +82,7 @@
       preset: requestedPreset,
       config_json: d,
       fast_mode: true,
+      asset_scope: String(d?.asset_scope || assetScope).trim() || 'cn_a_equity',
     };
   }
 
@@ -112,7 +120,8 @@
   }
 
   function renderExperimentResult(result) {
-    byId('wbDims').textContent = `exp_id=${result?.exp_id || '-'} | status=${result?.status || '-'}`;
+    const dimsEl = byId('wbDims');
+    if (dimsEl) dimsEl.textContent = `exp_id=${result?.exp_id || '-'} | status=${result?.status || '-'}`;
   }
 
   async function previewExecution() {
@@ -122,6 +131,7 @@
     }
     const body = {
       config_json: state.config_draft,
+      asset_scope: String(state.config_draft?.asset_scope || 'cn_a_equity').trim() || 'cn_a_equity',
       exp_id: state.active_exp?.exp_id || null,
       as_of_date: byId('wbExecDate')?.value || null,
       top_n: Number(state.config_draft?.position_risk?.max_positions || 10),

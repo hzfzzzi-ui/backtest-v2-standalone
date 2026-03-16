@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from backend.core.portfolio.portfolio_builder import build_rebalance_orders
+from backend.core.portfolio.portfolio_runtime import build_rebalance_orders
 from backend.core.strategies.sma_cross_regime_atr import SMACrossRegimeATRStrategy
 
 

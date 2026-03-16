@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from backend.core.config.asset_profiles import canonical_asset_scope
 from backend.core.config.models import BacktestConfig
 from backend.core.data.pg_provider import PostgresDataProvider
 from backend.core.data.price_adjust import apply_price_adjustment
@@ -273,6 +274,7 @@ def build_data_bundle(
     )
 
     universe_limit = int(overrides.get("universe_limit") or 0) or None
+    asset_scope = canonical_asset_scope(overrides.get("asset_scope") or cfg_merged.get("asset_scope") or "cn_a_equity")
     membership_history = pd.DataFrame(columns=["index_code", "symbol", "start_date", "end_date"])
     dynamic_membership_entry = membership_mode == "PIT_DYNAMIC"
 
@@ -291,6 +293,7 @@ def build_data_bundle(
             as_of=resolve_asof,
             db=cfg_obj.db,
             runtime=cfg_obj.db_runtime,
+            asset_scope=asset_scope,
             industries=universe_industries,
             symbols=user_symbols,
             universe_limit=universe_limit,
@@ -301,6 +304,7 @@ def build_data_bundle(
         start=cfg_obj.universe.start,
         end=cfg_obj.universe.end,
     )
+    universe_meta["asset_scope"] = asset_scope
     if dynamic_membership_entry:
         universe_meta["membership_mode"] = "PIT_DYNAMIC"
         universe_meta["membership_history_mode"] = "PIT_DYNAMIC"

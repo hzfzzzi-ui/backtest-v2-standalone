@@ -1,0 +1,63 @@
+study_id: v10/leadership_route_l1
+title: V10 Leadership Route L1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10
+hypothesis: Route the ranking stage through leadership-first buckets before residual ordering, without changing execution timing or trade rules.
+change_scope:
+  modules_modified:
+    - signal_generation.ranking.score_source_mode
+    - signal_generation.ranking.leadership_route_bucket_count
+variants:
+  - name: B0
+  - name: L1_A_BUCKET2
+    config_patches:
+      - path: signal_generation.ranking.score_source_mode
+        value: LEADERSHIP_THEN_RESIDUAL
+      - path: signal_generation.ranking.leadership_route_bucket_count
+        value: 2
+  - name: L1_B_BUCKET3
+    config_patches:
+      - path: signal_generation.ranking.score_source_mode
+        value: LEADERSHIP_THEN_RESIDUAL
+      - path: signal_generation.ranking.leadership_route_bucket_count
+        value: 3
+windows:
+  - key: "0717"
+    role: hard_gate
+    start: "2007-01-15"
+    end: "2017-01-15"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2010_2013_range: ["2010-01-04", "2013-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2015_2017_post_crash: ["2015-06-15", "2017-01-13"]
+  - key: "1626"
+    role: main
+    start: "2016-03-01"
+    end: "2026-03-01"
+    periods:
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2019_2021_bull: ["2019-01-02", "2021-02-18"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+  - key: "0726"
+    role: audit
+    start: "2007-01-15"
+    end: "2026-03-01"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+hard_gates:
+  min_cagr: 0.1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: outputs/baselines/baseline_V10/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

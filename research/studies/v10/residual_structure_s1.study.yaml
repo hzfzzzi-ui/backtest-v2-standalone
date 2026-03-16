@@ -1,5 +1,6 @@
 study_id: v10/residual_structure_s1
 title: V10 残差结构 S1
+asset_scope: cn_a_equity
 baseline_id: baseline_V10
 hypothesis: 残差打分的基准权重与行业权重重分配，可能改善 A 股趋势股的排序稳定性与回撤质量。
 change_scope:

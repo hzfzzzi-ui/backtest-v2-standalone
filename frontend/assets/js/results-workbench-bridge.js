@@ -1,13 +1,10 @@
 (function initResultsWorkbenchBridge(globalScope) {
   const listeners = new Set();
 
-  function cloneJson(value) {
-    if (value == null) return value;
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch (_) {
-      return value;
-    }
+  function shallowClone(value) {
+    if (Array.isArray(value)) return value.slice();
+    if (value && typeof value === 'object') return { ...value };
+    return value;
   }
 
   function createEmptySnapshot() {
@@ -39,7 +36,7 @@
       if (typeof listener !== 'function') return function noop() {};
       listeners.add(listener);
       try {
-        listener(cloneJson(bridge.snapshot));
+        listener(bridge.snapshot);
       } catch (_) {
         // subscriber failure should not break bridge setup
       }
@@ -48,23 +45,23 @@
       };
     },
     getSnapshot() {
-      return cloneJson(bridge.snapshot);
+      return bridge.snapshot;
     },
     setSnapshot(nextSnapshot) {
       const base = createEmptySnapshot();
       bridge.snapshot = {
         ...base,
-        ...cloneJson(nextSnapshot || {}),
+        ...(nextSnapshot || {}),
         source: {
           ...base.source,
-          ...(cloneJson(nextSnapshot?.source || {}) || {}),
+          ...(shallowClone(nextSnapshot?.source || {}) || {}),
         },
         view: {
           ...base.view,
-          ...(cloneJson(nextSnapshot?.view || {}) || {}),
+          ...(shallowClone(nextSnapshot?.view || {}) || {}),
           openPanels: {
             ...base.view.openPanels,
-            ...(cloneJson(nextSnapshot?.view?.openPanels || {}) || {}),
+            ...(shallowClone(nextSnapshot?.view?.openPanels || {}) || {}),
           },
         },
         updatedAt: new Date().toISOString(),
@@ -76,10 +73,10 @@
         ...bridge.snapshot,
         view: {
           ...bridge.snapshot.view,
-          ...(cloneJson(patch || {}) || {}),
+          ...(shallowClone(patch || {}) || {}),
           openPanels: {
             ...(bridge.snapshot.view?.openPanels || {}),
-            ...(cloneJson(patch?.openPanels || {}) || {}),
+            ...(shallowClone(patch?.openPanels || {}) || {}),
           },
         },
         updatedAt: new Date().toISOString(),
@@ -99,7 +96,7 @@
       return !!bridge.mounted;
     },
     emit() {
-      const payload = cloneJson(bridge.snapshot);
+      const payload = bridge.snapshot;
       listeners.forEach((listener) => {
         try {
           listener(payload, { mounted: !!bridge.mounted });

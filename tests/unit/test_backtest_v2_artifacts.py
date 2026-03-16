@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from backend.api.backtest_v2.artifacts_diagnostics import _build_buy_stage_funnel, _build_recent_cash_blocked_buys
 from backend.api.backtest_v2.impl import (
     _build_counters,
     _sanitize_historical_stock_names,
+    stabilize_experiment_result,
     write_manifest,
 )
 
@@ -193,3 +195,303 @@ def test_build_counters_maps_order_reject_aliases_to_cash_and_lot_counts(tmp_pat
 
     assert counters["cash_skip_count"] == 5
     assert counters["lot_skip_count"] == 5
+
+
+def test_build_buy_stage_funnel_preserves_unavailable_stage_counts(tmp_path: Path) -> None:
+    results_dir = tmp_path / "exp_stage_unavailable"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "raw_buy_signal_count": 8,
+                "buy_candidate_count": 5,
+                "after_held_filter_count": 3,
+                "after_slot_filter_count": None,
+                "after_cash_lot_count": None,
+                "diagnostics_input_json": json.dumps(
+                    {
+                        "route_id": "strict_inline_runtime",
+                        "raw_buy_signal_count": 8,
+                        "raw_buy_candidate_count": 5,
+                        "raw_after_held_filter_count": 3,
+                        "raw_after_slot_filter_count": None,
+                        "raw_after_cash_lot_count": None,
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        ]
+    ).to_csv(results_dir / "portfolio_daily.csv", index=False)
+
+    rows, _ = _build_buy_stage_funnel(
+        {"universe_meta": {"tradable_symbols": 12}},
+        results_dir,
+        buy_orders_count=2,
+    )
+
+    s7 = next(row for row in rows if row["stage_key"] == "s7")
+    s8 = next(row for row in rows if row["stage_key"] == "s8")
+    assert s7["available"] is True
+    assert s7["input_count"] == 3
+    assert s7["output_count"] == 2
+    assert s8["available"] is False
+    assert s8["input_count"] is None
+    assert s8["output_count"] is None
+
+
+def test_build_buy_stage_funnel_keeps_true_zero_counts_measured(tmp_path: Path) -> None:
+    results_dir = tmp_path / "exp_stage_zero"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "raw_buy_signal_count": 6,
+                "buy_candidate_count": 6,
+                "after_held_filter_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "diagnostics_input_json": json.dumps(
+                    {
+                        "route_id": "strict_inline_runtime",
+                        "raw_buy_signal_count": 6,
+                        "raw_buy_candidate_count": 6,
+                        "raw_after_held_filter_count": 0,
+                        "raw_after_slot_filter_count": 0,
+                        "raw_after_cash_lot_count": 0,
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        ]
+    ).to_csv(results_dir / "portfolio_daily.csv", index=False)
+
+    rows, _ = _build_buy_stage_funnel(
+        {"universe_meta": {"tradable_symbols": 12}},
+        results_dir,
+        buy_orders_count=0,
+    )
+
+    s6 = next(row for row in rows if row["stage_key"] == "s6")
+    s7 = next(row for row in rows if row["stage_key"] == "s7")
+    s8 = next(row for row in rows if row["stage_key"] == "s8")
+    assert s6["available"] is True
+    assert s6["output_count"] == 0
+    assert s7["available"] is True
+    assert s7["output_count"] == 0
+    assert s8["available"] is True
+    assert s8["output_count"] == 0
+
+
+def test_build_buy_stage_funnel_centralizes_breakout_route_normalization(tmp_path: Path) -> None:
+    results_dir = tmp_path / "exp_stage_breakout"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "raw_buy_signal_count": 7,
+                "buy_candidate_count": 5,
+                "after_held_filter_count": 3,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 1,
+                "diagnostics_input_json": json.dumps(
+                    {
+                        "route_id": "provider_breakout_runtime",
+                        "candidates_count": 0,
+                        "selected_count": 1,
+                        "benchmark_regime_on": True,
+                        "raw_buy_signal_count": 7,
+                        "raw_buy_candidate_count": 5,
+                        "raw_after_held_filter_count": 3,
+                        "raw_after_slot_filter_count": None,
+                        "raw_after_cash_lot_count": None,
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        ]
+    ).to_csv(results_dir / "portfolio_daily.csv", index=False)
+
+    rows, _ = _build_buy_stage_funnel(
+        {"universe_meta": {"tradable_symbols": 12}},
+        results_dir,
+        buy_orders_count=1,
+    )
+
+    s5 = next(row for row in rows if row["stage_key"] == "s5")
+    s6 = next(row for row in rows if row["stage_key"] == "s6")
+    s7 = next(row for row in rows if row["stage_key"] == "s7")
+    s8 = next(row for row in rows if row["stage_key"] == "s8")
+    assert s5["output_count"] == 3
+    assert s6["output_count"] == 3
+    assert s7["output_count"] == 3
+    assert s8["output_count"] == 1
+
+
+def test_stabilize_experiment_result_writes_canonical_candidate_diagnostics(tmp_path: Path) -> None:
+    bt_root = tmp_path / "backtest_v2"
+    bt_root.mkdir(parents=True, exist_ok=True)
+    results_dir = tmp_path / "exp_diag"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        [
+            {
+                "date": "2026-03-01",
+                "symbol": "sh600000",
+                "alpha_source": "breakout_55",
+                "residual_strength_score": 0.8,
+                "sector_strength_score": 0.7,
+                "volume_price_quality_score": 0.6,
+                "mf_score": 0.9,
+                "selected": 1,
+            },
+            {
+                "date": "2026-03-01",
+                "symbol": "sh600519",
+                "alpha_source": "breakout_20",
+                "residual_strength_score": 0.4,
+                "sector_strength_score": 0.3,
+                "volume_price_quality_score": 0.2,
+                "mf_score": 0.5,
+                "selected": 0,
+            },
+        ]
+    ).to_csv(results_dir / "portfolio_candidates.csv", index=False)
+
+    out = stabilize_experiment_result(
+        bt_root=bt_root,
+        result={
+            "exp_id": "exp_diag",
+            "results_dir": str(results_dir),
+            "status": "OK",
+            "total_return": 0.01,
+            "max_drawdown": -0.01,
+            "cagr": 0.01,
+            "sharpe": 0.5,
+            "trades": 0,
+            "raw_signal": 2,
+            "blocked": 0,
+            "orders": 0,
+            "skipped": 0,
+            "closed_trades": 0,
+        },
+        base_cfg={
+            "universe": {"start": "2026-03-01", "end": "2026-03-31", "benchmark": "000300.SH"},
+            "signal": {"strategy": "EMA_CROSS"},
+        },
+        overrides={},
+        run_profile_summary=None,
+    )
+
+    artifacts = dict(out.get("artifacts") or {})
+    assert artifacts["candidate_signals"] == "candidate_signals.csv"
+    assert artifacts["cash_blocked_buys_recent"] == "cash_blocked_buys_recent.csv"
+    assert artifacts["alpha_funnel"] == "alpha_funnel.csv"
+    assert artifacts["score_diagnostics"] == "score_diagnostics.csv"
+
+    candidate_df = pd.read_csv(results_dir / "candidate_signals.csv")
+    alpha_funnel_df = pd.read_csv(results_dir / "alpha_funnel.csv")
+    diagnostics_df = pd.read_csv(results_dir / "score_diagnostics.csv")
+
+    assert list(candidate_df["selected_flag"].astype(bool)) == [True, False]
+    assert int(alpha_funnel_df["candidate_count"].sum()) == 2
+    assert int(alpha_funnel_df["selected_count"].sum()) == 1
+    assert list(diagnostics_df["candidate_rank"]) == [1, 2]
+
+
+def test_build_recent_cash_blocked_buys_keeps_only_last_five_trading_days(tmp_path: Path) -> None:
+    results_dir = tmp_path / "exp_cash_blocked"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [{"date": f"2026-03-{day:02d}", "nav": 1.0} for day in range(1, 8)]
+    ).to_csv(results_dir / "portfolio_daily.csv", index=False)
+    candidate_df = pd.DataFrame(
+        [
+            {
+                "date": "2026-03-01",
+                "symbol": "sh600001",
+                "reject_reason": "SKIP_NO_CASH",
+                "cash_available": 8000.0,
+                "estimated_qty": 100,
+                "estimated_amount": 10000.0,
+                "estimated_price": 100.0,
+                "alpha_source": "breakout_55",
+                "cash_blocked_reason": "SKIP_NO_CASH",
+            },
+            {
+                "date": "2026-03-03",
+                "symbol": "sh600002",
+                "reject_reason": "SKIP_NO_CASH",
+                "cash_available": 7000.0,
+                "estimated_qty": 100,
+                "estimated_amount": 12000.0,
+                "estimated_price": 120.0,
+                "alpha_source": "breakout_55",
+                "cash_blocked_reason": "SKIP_NO_CASH",
+            },
+            {
+                "date": "2026-03-06",
+                "symbol": "sh600003",
+                "reject_reason": "SKIP_NO_CASH",
+                "cash_available": 9000.0,
+                "estimated_qty": 100,
+                "estimated_amount": 13000.0,
+                "estimated_price": 130.0,
+                "alpha_source": "breakout_20",
+                "cash_blocked_reason": "SKIP_NO_CASH",
+            },
+            {
+                "date": "2026-03-07",
+                "symbol": "sh600004",
+                "reject_reason": "NOT_SELECTED_CASH_AWARE",
+                "cash_available": 9000.0,
+                "estimated_qty": 100,
+                "estimated_amount": 15000.0,
+                "estimated_price": 150.0,
+                "alpha_source": "breakout_20",
+                "cash_blocked_reason": "",
+            },
+        ]
+    )
+
+    out_path = _build_recent_cash_blocked_buys(results_dir, candidate_df)
+    out_df = pd.read_csv(out_path)
+
+    assert list(out_df["symbol"]) == ["sh600003", "sh600002"]
+    assert list(out_df["date"]) == ["2026-03-06", "2026-03-03"]
+    assert float(out_df.iloc[0]["cash_available"]) == 9000.0
+    assert int(out_df.iloc[0]["estimated_qty"]) == 100
+    assert float(out_df.iloc[0]["estimated_amount"]) == 13000.0
+
+
+def test_build_recent_cash_blocked_buys_writes_empty_csv_when_no_recent_cash_reject(tmp_path: Path) -> None:
+    results_dir = tmp_path / "exp_cash_blocked_empty"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"date": "2026-03-07", "nav": 1.0}]).to_csv(results_dir / "portfolio_daily.csv", index=False)
+
+    out_path = _build_recent_cash_blocked_buys(
+        results_dir,
+        pd.DataFrame(
+            [
+                {
+                    "date": "2026-03-07",
+                    "symbol": "sh600005",
+                    "reject_reason": "NOT_SELECTED_CASH_AWARE",
+                }
+            ]
+        ),
+    )
+    out_df = pd.read_csv(out_path)
+
+    assert list(out_df.columns) == [
+        "date",
+        "symbol",
+        "reject_reason",
+        "cash_available",
+        "estimated_qty",
+        "estimated_amount",
+        "estimated_price",
+        "alpha_source",
+        "cash_blocked_reason",
+    ]
+    assert out_df.empty

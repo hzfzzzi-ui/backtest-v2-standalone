@@ -17,6 +17,7 @@ from backend.core.engine_vector.candidate_index import build_daily_candidate_ind
 from backend.core.engine_vector.data_matrix import build_ohlc_matrices_from_history
 from backend.core.engine_vector.features import compute_feature_matrices
 from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
+from backend.core.engine_vector.multifactor_rank import build_daily_multifactor_scores
 from backend.core.engine_vector.signal_matrix import build_signal_matrices
 from backend.core.engine_vector.signal_provider import (
     DayContext,
@@ -24,94 +25,6 @@ from backend.core.engine_vector.signal_provider import (
     ExitCounts,
 )
 from backend.core.portfolio.sizing import calc_buy_slots
-
-
-# ---------------------------------------------------------------------------
-# 多因子排名辅助函数
-# ---------------------------------------------------------------------------
-
-def _cross_rank_pct(values: dict[str, float | None]) -> dict[str, float]:
-    valid = [(k, float(v)) for k, v in values.items() if v is not None and not np.isnan(float(v))]
-    out: dict[str, float] = {str(k): 0.0 for k in values.keys()}
-    if len(valid) <= 1:
-        for k, _ in valid:
-            out[str(k)] = 0.5
-        return out
-    valid_sorted = sorted(valid, key=lambda kv: kv[1])
-    denom = max(len(valid_sorted) - 1, 1)
-    for idx, (k, _v) in enumerate(valid_sorted):
-        out[str(k)] = float(idx) / float(denom)
-    return out
-
-
-def _build_daily_multifactor_scores(
-    *,
-    i: int,
-    day_cands: np.ndarray,
-    symbols: list[str],
-    close: np.ndarray,
-    amt_matrix: np.ndarray,
-    bench_close: np.ndarray,
-) -> dict[str, float]:
-    if int(len(day_cands)) < 5:
-        return {str(symbols[int(c)]): 0.5 for c in day_cands}
-    vol_raw: dict[str, float | None] = {}
-    roc20_raw: dict[str, float | None] = {}
-    rs60_raw: dict[str, float | None] = {}
-    bb_raw: dict[str, float | None] = {}
-    bench_now = float(bench_close[i]) if i < len(bench_close) and not np.isnan(bench_close[i]) else np.nan
-    bench_60 = float(bench_close[i - 60]) if i - 60 >= 0 and not np.isnan(bench_close[i - 60]) else np.nan
-    bench_roc60 = None
-    if not np.isnan(bench_now) and not np.isnan(bench_60) and bench_60 > 0:
-        bench_roc60 = float(bench_now / bench_60 - 1.0)
-    for c in day_cands:
-        col = int(c)
-        sym = str(symbols[col])
-        amt = amt_matrix[:, col]
-        if i >= 19:
-            w = amt[i - 19 : i + 1]
-            w = w[~np.isnan(w)]
-            if len(w) >= 20:
-                mu = float(np.mean(w))
-                sd = float(np.std(w))
-                v = float(amt[i]) if not np.isnan(amt[i]) else np.nan
-                vol_raw[sym] = ((v - mu) / sd) if (sd > 0 and not np.isnan(v)) else None
-            else:
-                vol_raw[sym] = None
-        else:
-            vol_raw[sym] = None
-        c_now = float(close[i, col]) if not np.isnan(close[i, col]) else np.nan
-        c_20 = float(close[i - 20, col]) if i - 20 >= 0 and not np.isnan(close[i - 20, col]) else np.nan
-        roc20_raw[sym] = (c_now / c_20 - 1.0) if (not np.isnan(c_now) and not np.isnan(c_20) and c_20 > 0) else None
-        c_60 = float(close[i - 60, col]) if i - 60 >= 0 and not np.isnan(close[i - 60, col]) else np.nan
-        if not np.isnan(c_now) and not np.isnan(c_60) and c_60 > 0 and bench_roc60 is not None:
-            rs60_raw[sym] = float(c_now / c_60 - 1.0) - float(bench_roc60)
-        else:
-            rs60_raw[sym] = None
-        if i >= 19:
-            cw = close[i - 19 : i + 1, col]
-            cw = cw[~np.isnan(cw)]
-            if len(cw) >= 20:
-                mid = float(np.mean(cw))
-                sd = float(np.std(cw))
-                up = mid + 2.0 * sd
-                dn = mid - 2.0 * sd
-                span = float(up - dn)
-                bb_raw[sym] = float((c_now - mid) / span) if (span > 0 and not np.isnan(c_now)) else None
-            else:
-                bb_raw[sym] = None
-        else:
-            bb_raw[sym] = None
-    r_vol = _cross_rank_pct(vol_raw)
-    r_roc = _cross_rank_pct(roc20_raw)
-    r_rs = _cross_rank_pct(rs60_raw)
-    r_bb = _cross_rank_pct(bb_raw)
-    scores: dict[str, float] = {}
-    for c in day_cands:
-        sym = str(symbols[int(c)])
-        scores[sym] = float(0.25 * r_vol.get(sym, 0.0) + 0.25 * r_roc.get(sym, 0.0) + 0.25 * r_rs.get(sym, 0.0) + 0.25 * r_bb.get(sym, 0.0))
-    return scores
-
 
 # ---------------------------------------------------------------------------
 # SMASignalProvider
@@ -627,7 +540,7 @@ class SMASignalProvider:
 
         # ── strength / mf scores ──
         strength_map: dict[str, float] = {mx.symbols[c]: (None if np.isnan(_strength_row[c]) else float(_strength_row[c])) for c in day_cands}
-        mf_score_map = _build_daily_multifactor_scores(
+        mf_score_map = build_daily_multifactor_scores(
             i=i, day_cands=day_cands, symbols=mx.symbols,
             close=mx.close, amt_matrix=self._amt_matrix, bench_close=self._bench_close,
         ) if self._enable_multifactor_rank else {}

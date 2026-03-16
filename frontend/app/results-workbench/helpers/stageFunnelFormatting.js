@@ -1,11 +1,17 @@
-function fmtInt(value) {
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
   const num = Number(value);
-  return Number.isFinite(num) ? Math.round(num).toLocaleString('en-US') : '-';
+  return Number.isFinite(num) ? num : null;
+}
+
+function fmtInt(value) {
+  const num = toFiniteNumber(value);
+  return num === null ? '-' : Math.round(num).toLocaleString('en-US');
 }
 
 function fmtPct(value) {
-  const num = Number(value);
-  return Number.isFinite(num) ? `${(num * 100).toFixed(2)}%` : '-';
+  const num = toFiniteNumber(value);
+  return num === null ? '-' : `${(num * 100).toFixed(2)}%`;
 }
 
 function esc(value) {
@@ -39,8 +45,8 @@ const REASON_LABELS = {
 
 function sumDailyInt(rows, key) {
   return (Array.isArray(rows) ? rows : []).reduce((sum, row) => {
-    const value = Number(row?.[key]);
-    return sum + (Number.isFinite(value) ? value : 0);
+    const value = toFiniteNumber(row?.[key]);
+    return sum + (value === null ? 0 : value);
   }, 0);
 }
 
@@ -55,8 +61,8 @@ function stageClass(stageKey) {
 function renderStageCountPills(items, emptyText = '暂无额外原始计数') {
   const normalized = (items || []).filter((item) => {
     const label = String(item?.label || '').trim();
-    const value = Number(item?.value);
-    return !!label && Number.isFinite(value);
+    const value = toFiniteNumber(item?.value);
+    return !!label && value !== null;
   });
   if (!normalized.length) {
     return `<div class="wb-funnel-row-stats"><span>${esc(emptyText)}</span></div>`;
@@ -64,6 +70,14 @@ function renderStageCountPills(items, emptyText = '暂无额外原始计数') {
   return `<div class="wb-funnel-row-stats">${normalized.map((item) => (
     `<span>${esc(String(item.label))}=${fmtInt(item.value)}</span>`
   )).join('')}</div>`;
+}
+
+function buildBaseRawItems(row) {
+  return [
+    { label: 'INPUT_CNT', value: toFiniteNumber(row?.input_count) },
+    { label: 'KEEP_CNT', value: toFiniteNumber(row?.output_count) },
+    { label: 'FILTERED_CNT', value: toFiniteNumber(row?.filtered_count) },
+  ].filter((item) => item.value !== null);
 }
 
 function renderStageTrackCard(title, items, emptyText) {
@@ -103,103 +117,70 @@ export function buildStageRows(artifacts, counters) {
   const dailyRows = Array.isArray(artifacts?.dailyRows) ? artifacts.dailyRows : [];
   const rawSignals = sumDailyInt(dailyRows, 'raw_buy_signal_count');
   const buyCandidates = sumDailyInt(dailyRows, 'buy_candidate_count');
-  const buyOrders = Number(counters?.buy_orders_count ?? 0);
-  const minHoldBlockCount = Number(counters?.min_hold_block_count ?? 0);
-  const cooldownBlockCount = Number(counters?.cooldown_block_count ?? 0);
+  const buyOrders = toFiniteNumber(counters?.buy_orders_count) ?? 0;
+  const minHoldBlockCount = toFiniteNumber(counters?.min_hold_block_count) ?? 0;
+  const cooldownBlockCount = toFiniteNumber(counters?.cooldown_block_count) ?? 0;
   const heldDupBlockCount = Math.max(rawSignals - buyCandidates - minHoldBlockCount - cooldownBlockCount, 0);
-  const mfRankAppliedDays = Number(counters?.mf_rank_applied_days ?? 0);
-  const mfTopkRejectCount = Number(counters?.mf_topk_reject_count ?? 0);
+  const mfRankAppliedDays = toFiniteNumber(counters?.mf_rank_applied_days) ?? 0;
+  const mfTopkRejectCount = toFiniteNumber(counters?.mf_topk_reject_count) ?? 0;
   const rankActuallyApplied = mfRankAppliedDays > 0 || mfTopkRejectCount > 0;
 
   return buyStageRows.map((rowDef) => {
     const key = String(rowDef?.stage_key || '').toLowerCase();
+    const inputCount = toFiniteNumber(rowDef?.input_count);
+    const outputCount = toFiniteNumber(rowDef?.output_count);
+    const filteredCount = toFiniteNumber(rowDef?.filtered_count);
+    let note = String(rowDef?.note || '');
+    let rawItems = buildBaseRawItems({
+      input_count: inputCount,
+      output_count: outputCount,
+      filtered_count: filteredCount,
+    });
     if (key === 's4') {
-      const inputCount = Number(rowDef?.input_count ?? 0);
-      const outputCount = buyCandidates > 0 ? buyCandidates : Number(rowDef?.output_count ?? 0);
-      const noRawSignalCount = Math.max(inputCount - rawSignals, 0);
-      return {
-        ...rowDef,
-        input_count: inputCount,
-        output_count: outputCount,
-        filtered_count: Math.max(inputCount - outputCount, 0),
-        note: `全回测期可交易 stock-day 事件压缩为候选买入；未触发原始买点=${fmtInt(noRawSignalCount)}，持仓去重/再入场阻塞=${fmtInt(heldDupBlockCount + minHoldBlockCount + cooldownBlockCount)}`,
-        raw_items: [
-          { label: 'INPUT_CNT', value: inputCount },
-          { label: 'KEEP_CNT', value: outputCount },
-          { label: 'FILTERED_CNT', value: Math.max(inputCount - outputCount, 0) },
-          { label: 'RAW_SIGNAL_CNT', value: rawSignals },
-          { label: 'NO_RAW_SIGNAL', value: noRawSignalCount },
-          { label: 'HELD_DUP_BLOCK', value: heldDupBlockCount },
-          { label: 'MIN_HOLD_BLOCK', value: minHoldBlockCount },
-          { label: 'COOLDOWN_BLOCK', value: cooldownBlockCount },
-        ],
-      };
+      const noRawSignalCount = inputCount === null ? null : Math.max(inputCount - rawSignals, 0);
+      if (!note) {
+        note = `Tradable stock-day events compressed into raw buy signals; no raw trigger=${fmtInt(noRawSignalCount)}, held/cooldown blocks=${fmtInt(heldDupBlockCount + minHoldBlockCount + cooldownBlockCount)}`;
+      }
+      rawItems = rawItems.concat([
+        { label: 'RAW_SIGNAL_CNT', value: rawSignals },
+        { label: 'NO_RAW_SIGNAL', value: noRawSignalCount },
+        { label: 'HELD_DUP_BLOCK', value: heldDupBlockCount },
+        { label: 'MIN_HOLD_BLOCK', value: minHoldBlockCount },
+        { label: 'COOLDOWN_BLOCK', value: cooldownBlockCount },
+      ].filter((item) => toFiniteNumber(item.value) !== null));
     }
     if (key === 's5') {
-      const inputCount = buyCandidates > 0 ? buyCandidates : Number(rowDef?.input_count ?? 0);
-      const outputCount = rankActuallyApplied ? Math.max(inputCount - mfTopkRejectCount, 0) : inputCount;
-      return {
-        ...rowDef,
-        input_count: inputCount,
-        output_count: outputCount,
-        filtered_count: Math.max(inputCount - outputCount, 0),
-        note: rankActuallyApplied
-          ? `排序层实际生效；TopK/多因子截断过滤=${fmtInt(mfTopkRejectCount)}`
-          : '当前基线未启用独立排序截断，排序层按实际显示为 0 过滤。',
-        raw_items: [
-          { label: 'INPUT_CNT', value: inputCount },
-          { label: 'KEEP_CNT', value: outputCount },
-          { label: 'FILTERED_CNT', value: Math.max(inputCount - outputCount, 0) },
-          { label: 'MF_RANK_APPLIED_DAYS', value: mfRankAppliedDays },
-          { label: 'MF_TOPK_REJECT_CNT', value: mfTopkRejectCount },
-        ],
-      };
+      if (!note) {
+        note = rankActuallyApplied
+          ? `Ranking actually applied; top-k truncation=${fmtInt(mfTopkRejectCount)}`
+          : 'No independent rank truncation was applied on this baseline.';
+      }
+      rawItems = rawItems.concat([
+        { label: 'MF_RANK_APPLIED_DAYS', value: mfRankAppliedDays },
+        { label: 'MF_TOPK_REJECT_CNT', value: mfTopkRejectCount },
+      ].filter((item) => toFiniteNumber(item.value) !== null));
     }
     if (key === 's6') {
-      const inputCount = rankActuallyApplied
-        ? Math.max((buyCandidates > 0 ? buyCandidates : Number(rowDef?.input_count ?? 0)) - mfTopkRejectCount, 0)
-        : (buyCandidates > 0 ? buyCandidates : Number(rowDef?.input_count ?? 0));
-      return {
-        ...rowDef,
-        input_count: inputCount,
-        output_count: buyOrders,
-        filtered_count: Math.max(inputCount - buyOrders, 0),
-        note: '入场信号在本层收口为最终实际开仓次数。',
-        raw_items: [
-          { label: 'INPUT_CNT', value: inputCount },
-          { label: 'KEEP_CNT', value: buyOrders },
-          { label: 'FILTERED_CNT', value: Math.max(inputCount - buyOrders, 0) },
-          { label: 'BUY_ORDER_CNT', value: buyOrders },
-          { label: 'ABOVE_SLOW_MA_BLOCK', value: Number(counters?.entry_above_slow_ma_block_count ?? 0) },
-          { label: 'SLOPE_BLOCK', value: Number(counters?.entry_slope_block_count ?? 0) },
-        ],
-      };
+      rawItems = rawItems.concat([
+        { label: 'BUY_ORDER_CNT', value: buyOrders },
+        { label: 'ABOVE_SLOW_MA_BLOCK', value: toFiniteNumber(counters?.entry_above_slow_ma_block_count) },
+        { label: 'SLOPE_BLOCK', value: toFiniteNumber(counters?.entry_slope_block_count) },
+      ].filter((item) => toFiniteNumber(item.value) !== null));
     }
     if (key === 's7') {
-      return {
-        ...rowDef,
-        stage_label: 'S7 仓位控制',
-        input_count: buyOrders,
-        output_count: buyOrders,
-        filtered_count: 0,
-        note: '仓位控制层；当前基线未输出独立 slot 收缩计数，沿用最终开仓数展示。',
-        raw_items: [
-          { label: 'INPUT_CNT', value: buyOrders },
-          { label: 'KEEP_CNT', value: buyOrders },
-          { label: 'FILTERED_CNT', value: 0 },
-          { label: 'BUY_ORDER_CNT', value: buyOrders },
-          { label: 'AVG_POSITIONS', value: Number(counters?.avg_positions ?? 0) },
-          { label: 'MAX_POSITIONS', value: Number(counters?.max_positions ?? 0) },
-        ],
-      };
+      rawItems = rawItems.concat([
+        { label: 'BUY_ORDER_CNT', value: buyOrders },
+        { label: 'AVG_POSITIONS', value: toFiniteNumber(counters?.avg_positions) },
+        { label: 'MAX_POSITIONS', value: toFiniteNumber(counters?.max_positions) },
+      ].filter((item) => toFiniteNumber(item.value) !== null));
     }
     return {
       ...rowDef,
-      raw_items: [
-        { label: 'INPUT_CNT', value: Number(rowDef?.input_count ?? 0) },
-        { label: 'KEEP_CNT', value: Number(rowDef?.output_count ?? 0) },
-        { label: 'FILTERED_CNT', value: Number(rowDef?.filtered_count ?? 0) },
-      ],
+      input_count: inputCount,
+      output_count: outputCount,
+      filtered_count: filteredCount,
+      note,
+      raw_items: rawItems,
     };
   });
 }
@@ -207,83 +188,77 @@ export function buildStageRows(artifacts, counters) {
 export function renderUnifiedStageFunnel(stageRows, counters, exitRows) {
   const rows = Array.isArray(stageRows) ? stageRows.map((row) => ({ ...row })) : [];
   if (!rows.length) {
-    return '<div class="wb-mini">当前结果尚未提供 stage counters，无法生成统一 9-stage 漏斗。</div>';
+    return '<div class="wb-mini">No stage counters are available for this experiment.</div>';
   }
 
-  const maxValue = Math.max(1, ...rows.map((row) => Number(row.output_count ?? row.input_count ?? row.filtered_count ?? 0) || 0));
+  const maxValue = Math.max(1, ...rows.map((row) => (
+    toFiniteNumber(row.output_count)
+    ?? toFiniteNumber(row.input_count)
+    ?? toFiniteNumber(row.filtered_count)
+    ?? 0
+  )));
   const ratioText = (numerator, denominator) => {
-    const n = Number(numerator);
-    const d = Number(denominator);
-    return Number.isFinite(n) && Number.isFinite(d) && d > 0 ? fmtPct(n / d) : '-';
+    const n = toFiniteNumber(numerator);
+    const d = toFiniteNumber(denominator);
+    return n !== null && d !== null && d > 0 ? fmtPct(n / d) : '-';
   };
 
   const body = rows.map((row) => {
     const key = String(row.stage_key || '').toLowerCase();
-    let available = row.available !== false;
-    let note = String(row.note || (available ? '已接入后端真实计数。' : '当前无独立计数。'));
-    let inputCount = Number(row.input_count);
-    let outputCount = Number(row.output_count);
-    let filteredCount = Number(row.filtered_count);
+    const available = row.available !== false;
+    const note = String(row.note || (available ? 'Counted by backend.' : 'Unavailable in current runtime.'));
+    const inputCount = toFiniteNumber(row.input_count);
+    const outputCount = toFiniteNumber(row.output_count);
+    const filteredCount = toFiniteNumber(row.filtered_count);
     let extraHtml = '';
     let rawItems = Array.isArray(row.raw_items) ? row.raw_items : [];
 
     if (key === 's8') {
-      available = true;
-      note = '唯一同时涉及买入和卖出的阶段；左侧看建仓约束，右侧看风险侧卖出统计。';
-      inputCount = Number.NaN;
-      outputCount = Number.NaN;
-      filteredCount = Number.NaN;
-      rawItems = [];
-      extraHtml = `<div class="wb-stage-track-grid">${renderStageTrackCard('S8 买入侧', [
-        { label: 'CASH_SKIP', value: Number(counters?.cash_skip_count ?? 0) },
-        { label: 'LOT_SKIP', value: Number(counters?.lot_skip_count ?? 0) },
-        { label: 'SINGLE_CAP', value: Number(counters?.cap_hit_single ?? 0) },
-        { label: 'INDUSTRY_CAP', value: Number(counters?.cap_hit_industry ?? 0) },
-      ], '当前无独立买入约束计数')}${renderStageTrackCard('S8 卖出侧', [
-        { label: 'DD_REDUCED', value: Number(counters?.dd_reduced_count ?? 0) },
-        { label: 'DD_SCALE_08', value: Number(counters?.dd_scale_08_count ?? 0) },
-        { label: 'DD_SCALE_06', value: Number(counters?.dd_scale_06_count ?? 0) },
-        { label: 'DD_FIXED_03', value: Number(counters?.dd_fixed_03_count ?? 0) },
-        { label: 'DD_STOP', value: Number(counters?.dd_stop_count ?? 0) },
-      ], '当前无独立卖出风险计数')}</div>`;
+      extraHtml = `<div class="wb-stage-track-grid">${renderStageTrackCard('S8 Buy Side', [
+        { label: 'CASH_SKIP', value: toFiniteNumber(counters?.cash_skip_count) },
+        { label: 'LOT_SKIP', value: toFiniteNumber(counters?.lot_skip_count) },
+        { label: 'SINGLE_CAP', value: toFiniteNumber(counters?.cap_hit_single) },
+        { label: 'INDUSTRY_CAP', value: toFiniteNumber(counters?.cap_hit_industry) },
+      ], 'No separate buy-side counts')}${renderStageTrackCard('S8 Sell Side', [
+        { label: 'DD_REDUCED', value: toFiniteNumber(counters?.dd_reduced_count) },
+        { label: 'DD_SCALE_08', value: toFiniteNumber(counters?.dd_scale_08_count) },
+        { label: 'DD_SCALE_06', value: toFiniteNumber(counters?.dd_scale_06_count) },
+        { label: 'DD_FIXED_03', value: toFiniteNumber(counters?.dd_fixed_03_count) },
+        { label: 'DD_STOP', value: toFiniteNumber(counters?.dd_stop_count) },
+      ], 'No separate sell-side counts')}</div>`;
     } else if (key === 's9') {
-      available = true;
-      note = '退出阶段只看卖出链路；按退出原因展示原始计数与占比。';
-      inputCount = Number.NaN;
-      outputCount = Number.NaN;
-      filteredCount = Number.NaN;
       rawItems = [
-        { label: 'SELL_ORDER_CNT', value: Number(counters?.sell_orders_count ?? 0) },
-        { label: 'CLOSED_TRADE_CNT', value: Number(counters?.closed_trades ?? 0) },
-      ];
+        { label: 'SELL_ORDER_CNT', value: toFiniteNumber(counters?.sell_orders_count) },
+        { label: 'CLOSED_TRADE_CNT', value: toFiniteNumber(counters?.closed_trades) },
+      ].filter((item) => item.value !== null);
       const normalizedExitRows = (Array.isArray(exitRows) ? exitRows : [])
-        .map((row) => ({
-          code: reasonCodeOf(row),
-          value: Number(row?.count ?? 0),
+        .map((item) => ({
+          code: reasonCodeOf(item),
+          value: toFiniteNumber(item?.count) ?? 0,
         }))
-        .filter((row) => row.code && row.value > 0)
+        .filter((item) => item.code && item.value > 0)
         .sort((a, b) => b.value - a.value);
-      const exitTotal = normalizedExitRows.reduce((sum, row) => sum + row.value, 0);
+      const exitTotal = normalizedExitRows.reduce((sum, item) => sum + item.value, 0);
       extraHtml = normalizedExitRows.length
-        ? `<div class="wb-stage-exit-stack"><div class="wb-stage-exit-head">S9 退出原因分布 | 总退出=${fmtInt(exitTotal)}</div>${normalizedExitRows.map((row) => {
-            const ratio = exitTotal > 0 ? row.value / exitTotal : 0;
-            return `<div class="wb-stage-exit-row"><div class="wb-stage-exit-meta"><span class="wb-stage-exit-name">${esc(reasonZh(row.code))} <span class="wb-stage-exit-code">${esc(row.code)}</span></span><span class="wb-stage-exit-count">${fmtInt(row.value)} | ${fmtPct(ratio)}</span></div><div class="wb-stage-exit-bar"><span style="width:${Math.max(6, ratio * 100)}%"></span></div></div>`;
+        ? `<div class="wb-stage-exit-stack"><div class="wb-stage-exit-head">S9 Exit Reasons | Total ${fmtInt(exitTotal)}</div>${normalizedExitRows.map((item) => {
+            const ratio = exitTotal > 0 ? item.value / exitTotal : 0;
+            return `<div class="wb-stage-exit-row"><div class="wb-stage-exit-meta"><span class="wb-stage-exit-name">${esc(reasonZh(item.code))} <span class="wb-stage-exit-code">${esc(item.code)}</span></span><span class="wb-stage-exit-count">${fmtInt(item.value)} | ${fmtPct(ratio)}</span></div><div class="wb-stage-exit-bar"><span style="width:${Math.max(6, ratio * 100)}%"></span></div></div>`;
           }).join('')}</div>`
         : '';
     }
 
-    const inputText = Number.isFinite(inputCount) ? fmtInt(inputCount) : '-';
-    const outputText = Number.isFinite(outputCount) ? fmtInt(outputCount) : '-';
-    const filteredText = Number.isFinite(filteredCount) ? fmtInt(filteredCount) : '-';
-    const width = Number.isFinite(outputCount) ? Math.max(6, (outputCount / maxValue) * 100) : 0;
+    const inputText = inputCount !== null ? fmtInt(inputCount) : '-';
+    const outputText = outputCount !== null ? fmtInt(outputCount) : '-';
+    const filteredText = filteredCount !== null ? fmtInt(filteredCount) : '-';
+    const width = outputCount !== null ? Math.max(6, (outputCount / maxValue) * 100) : 0;
 
-    return `<div class="wb-funnel-row ${stageClass(key)}${available ? '' : ' wb-funnel-unavailable'}"><div class="wb-funnel-row-head"><div class="wb-funnel-row-title">${esc(row.stage_label || row.title || row.stage_key || '阶段')}</div><div class="wb-funnel-row-note">${esc(note)}</div></div><div class="wb-bar"><span style="width:${width}%"></span></div><div class="wb-funnel-row-meta"><div><span>输入</span><strong>${inputText}</strong></div><div><span>保留</span><strong>${outputText}</strong></div><div><span>过滤</span><strong>${filteredText}</strong></div></div>${renderStageCountPills(rawItems, available ? '暂无额外原始计数' : '当前无独立原始计数')}${Number.isFinite(inputCount) ? `<div class="wb-funnel-row-stats"><span>保留率=${ratioText(outputCount, inputCount)}</span><span>过滤率=${ratioText(filteredCount, inputCount)}</span></div>` : ''}${extraHtml}</div>`;
+    return `<div class="wb-funnel-row ${stageClass(key)}${available ? '' : ' wb-funnel-unavailable'}"><div class="wb-funnel-row-head"><div class="wb-funnel-row-title">${esc(row.stage_label || row.title || row.stage_key || 'Stage')}</div><div class="wb-funnel-row-note">${esc(note)}</div></div><div class="wb-bar"><span style="width:${width}%"></span></div><div class="wb-funnel-row-meta"><div><span>Input</span><strong>${inputText}</strong></div><div><span>Keep</span><strong>${outputText}</strong></div><div><span>Filtered</span><strong>${filteredText}</strong></div></div>${renderStageCountPills(rawItems, available ? 'No extra counters' : 'No separate counters')}${inputCount !== null ? `<div class="wb-funnel-row-stats"><span>Keep rate ${ratioText(outputCount, inputCount)}</span><span>Filter rate ${ratioText(filteredCount, inputCount)}</span></div>` : ''}${extraHtml}</div>`;
   }).join('');
 
   const totals = rows.reduce((acc, row) => {
-    acc.input += Number(row.input_count || 0);
-    acc.output += Number(row.output_count || 0);
-    acc.filtered += Number(row.filtered_count || 0);
+    acc.input += toFiniteNumber(row.input_count) ?? 0;
+    acc.output += toFiniteNumber(row.output_count) ?? 0;
+    acc.filtered += toFiniteNumber(row.filtered_count) ?? 0;
     return acc;
   }, { input: 0, output: 0, filtered: 0 });
 
@@ -297,7 +272,7 @@ export function buildUnifiedStageFunnelFromSnapshot(snapshot) {
   const exitRows = reasonByPrefix(artifacts.reasonRows || []).exit || [];
   return {
     html: renderUnifiedStageFunnel(stageRows, counters, exitRows),
-    meta: `买入 ${fmtInt(counters?.buy_orders_count ?? 0)} 笔 | 卖出 ${fmtInt(counters?.sell_orders_count ?? 0)} 笔 | stage=${fmtInt(stageRows.length)}`,
+    meta: `Buy ${fmtInt(counters?.buy_orders_count ?? 0)} | Sell ${fmtInt(counters?.sell_orders_count ?? 0)} | Stage=${fmtInt(stageRows.length)}`,
     stageRows,
     exitRows,
   };
@@ -306,8 +281,8 @@ function normalizeMetricItems(items = [], formatter = fmtInt) {
   return (Array.isArray(items) ? items : [])
     .map((item) => {
       const label = String(item?.label || '').trim();
-      const value = Number(item?.value);
-      if (!label || !Number.isFinite(value)) return null;
+      const value = toFiniteNumber(item?.value);
+      if (!label || value === null) return null;
       return {
         label,
         value,
@@ -319,20 +294,20 @@ function normalizeMetricItems(items = [], formatter = fmtInt) {
 
 function stageStatus(row) {
   const key = String(row?.stage_key || '').toLowerCase();
-  if (key === 's1') return { label: '汇总口径', tone: 'derived' };
-  if (row?.available === false) return { label: '未单独计数', tone: 'missing' };
-  return { label: '真实计数', tone: 'ok' };
+  if (key === 's1') return { label: 'Derived', tone: 'derived' };
+  if (row?.available === false) return { label: 'Unavailable', tone: 'missing' };
+  return { label: 'Counted', tone: 'ok' };
 }
 
 function stageMetrics(row, counters) {
   const key = String(row?.stage_key || '').toLowerCase();
   const items = [];
-  const inputCount = Number(row?.input_count);
-  const outputCount = Number(row?.output_count);
-  const filteredCount = Number(row?.filtered_count);
-  if (Number.isFinite(inputCount)) items.push({ label: '输入', text: fmtInt(inputCount) });
-  if (Number.isFinite(outputCount)) items.push({ label: '保留', text: fmtInt(outputCount) });
-  if (Number.isFinite(filteredCount)) items.push({ label: '过滤', text: fmtInt(filteredCount) });
+  const inputCount = toFiniteNumber(row?.input_count);
+  const outputCount = toFiniteNumber(row?.output_count);
+  const filteredCount = toFiniteNumber(row?.filtered_count);
+  if (inputCount !== null) items.push({ label: 'Input', text: fmtInt(inputCount) });
+  if (outputCount !== null) items.push({ label: 'Keep', text: fmtInt(outputCount) });
+  if (filteredCount !== null) items.push({ label: 'Filtered', text: fmtInt(filteredCount) });
   if (key === 's2') {
     items.push(
       { label: 'MAIN_DAYS', text: fmtInt(counters?.trade_mode_main_days ?? 0) },
@@ -340,7 +315,7 @@ function stageMetrics(row, counters) {
       { label: 'NO_TRADE_DAYS', text: fmtInt(counters?.trade_mode_notrade_days ?? 0) },
     );
   }
-  if (key === 's3' && !items.length) items.push({ label: '状态', text: '未启用/未单独计数' });
+  if (key === 's3' && !items.length) items.push({ label: 'State', text: 'Unavailable' });
   return items;
 }
 
@@ -382,7 +357,7 @@ function exitReasonItems(exitRows) {
     .map((row) => ({
       code: reasonCodeOf(row),
       label: reasonZh(reasonCodeOf(row)),
-      value: Number(row?.count ?? 0),
+      value: toFiniteNumber(row?.count) ?? 0,
     }))
     .filter((row) => row.code && row.value > 0)
     .sort((a, b) => b.value - a.value);
@@ -401,10 +376,10 @@ function completenessNotes(stageRows, counters) {
     .map((row) => String(row?.stage_label || row?.stage_key || '').trim())
     .filter(Boolean);
   const notes = [];
-  if (missingStages.length) notes.push(`当前仍缺少候选级单独计数的阶段: ${missingStages.join(' / ')}`);
-  if (Number(counters?.cash_skip_count ?? 0) > 0) notes.push('S8 买入侧主要损耗来自现金约束；这里已直接展示原始阻塞计数。');
-  if (Number(counters?.mf_topk_reject_count ?? 0) > 0) notes.push('S5 已补入多因子/TopK 截断计数，不再只看 buy_stage_funnel 原值。');
-  if (Number(counters?.sell_orders_count ?? 0) > 0) notes.push('S9 退出分布独立来自 reason_codes，和买入主链拆开展示。');
+  if (missingStages.length) notes.push(`Missing separate counts: ${missingStages.join(' / ')}`);
+  if (Number(counters?.cash_skip_count ?? 0) > 0) notes.push('S8 buy-side losses are dominated by cash or lot constraints.');
+  if (Number(counters?.mf_topk_reject_count ?? 0) > 0) notes.push('S5 includes rank/top-k truncation diagnostics.');
+  if (Number(counters?.sell_orders_count ?? 0) > 0) notes.push('S9 is sourced from exit reason counts, not the buy funnel.');
   return notes;
 }
 
@@ -415,7 +390,7 @@ export function buildUnifiedStageFunnelModel(snapshot) {
   const exitRows = reasonByPrefix(artifacts.reasonRows || []).exit || [];
   const rowMap = new Map(stageRows.map((row) => [String(row?.stage_key || '').toLowerCase(), row]));
   const rawSignalCount = (Array.isArray(artifacts?.dailyRows) ? artifacts.dailyRows : []).reduce(
-    (sum, row) => sum + (Number(row?.raw_buy_signal_count) || 0),
+    (sum, row) => sum + (toFiniteNumber(row?.raw_buy_signal_count) ?? 0),
     0,
   );
   const stageOrder = ['s1', 's2', 's3', 's4', 's5', 's6', 's7'];
@@ -424,7 +399,7 @@ export function buildUnifiedStageFunnelModel(snapshot) {
       stage_key: key,
       stage_label: key.toUpperCase(),
       available: false,
-      note: '当前无该阶段数据',
+      note: 'No data for this stage.',
     };
     return {
       key,
@@ -436,13 +411,13 @@ export function buildUnifiedStageFunnelModel(snapshot) {
     };
   });
   return {
-    meta: `买入 ${fmtInt(counters?.buy_orders_count ?? 0)} 笔 | 卖出 ${fmtInt(counters?.sell_orders_count ?? 0)} 笔 | 主链=${fmtInt(chainStages.length)} 阶段`,
+    meta: `Buy ${fmtInt(counters?.buy_orders_count ?? 0)} | Sell ${fmtInt(counters?.sell_orders_count ?? 0)} | Stages=${fmtInt(chainStages.length)}`,
     summaryCards: [
-      { label: '股票池', value: fmtInt(rowMap.get('s1')?.output_count ?? artifacts?.run_meta?.universe?.after_filters_symbols ?? 0) },
-      { label: '原始买点', value: fmtInt(rawSignalCount) },
-      { label: '排序后候选', value: fmtInt(rowMap.get('s5')?.output_count ?? 0) },
-      { label: '实际买入', value: fmtInt(counters?.buy_orders_count ?? 0) },
-      { label: '实际卖出', value: fmtInt(counters?.sell_orders_count ?? 0) },
+      { label: 'Universe', value: fmtInt(toFiniteNumber(rowMap.get('s1')?.output_count) ?? toFiniteNumber(artifacts?.run_meta?.universe?.after_filters_symbols) ?? 0) },
+      { label: 'Raw Buys', value: fmtInt(rawSignalCount) },
+      { label: 'Post Rank', value: fmtInt(rowMap.get('s5')?.output_count) },
+      { label: 'Buy Orders', value: fmtInt(counters?.buy_orders_count ?? 0) },
+      { label: 'Sell Orders', value: fmtInt(counters?.sell_orders_count ?? 0) },
     ],
     chainStages,
     execution: executionBuckets(counters),
@@ -453,17 +428,17 @@ export function buildUnifiedStageFunnelModel(snapshot) {
 
 function buildReadableStageMetrics(row, counters) {
   const metrics = [];
-  const inputCount = Number(row?.input_count);
-  const outputCount = Number(row?.output_count);
-  const filteredCount = Number(row?.filtered_count);
-  if (Number.isFinite(inputCount)) metrics.push({ label: '输入', text: fmtInt(inputCount) });
-  if (Number.isFinite(outputCount)) metrics.push({ label: '保留', text: fmtInt(outputCount) });
-  if (Number.isFinite(filteredCount)) metrics.push({ label: '过滤', text: fmtInt(filteredCount) });
+  const inputCount = toFiniteNumber(row?.input_count);
+  const outputCount = toFiniteNumber(row?.output_count);
+  const filteredCount = toFiniteNumber(row?.filtered_count);
+  if (inputCount !== null) metrics.push({ label: 'Input', text: fmtInt(inputCount) });
+  if (outputCount !== null) metrics.push({ label: 'Keep', text: fmtInt(outputCount) });
+  if (filteredCount !== null) metrics.push({ label: 'Filtered', text: fmtInt(filteredCount) });
   if (String(row?.stage_key || '').toLowerCase() === 's2') {
     metrics.push(
-      { label: '主模式天数', text: fmtInt(counters?.trade_mode_main_days ?? 0) },
-      { label: '轻仓天数', text: fmtInt(counters?.trade_mode_light_days ?? 0) },
-      { label: '空仓天数', text: fmtInt(counters?.trade_mode_notrade_days ?? 0) },
+      { label: 'Main Days', text: fmtInt(counters?.trade_mode_main_days ?? 0) },
+      { label: 'Light Days', text: fmtInt(counters?.trade_mode_light_days ?? 0) },
+      { label: 'No Trade Days', text: fmtInt(counters?.trade_mode_notrade_days ?? 0) },
     );
   }
   return metrics;
@@ -487,11 +462,11 @@ function buildReadableCompletenessNotes(stageRows, counters) {
     .map((row) => String(row?.stage_label || row?.stage_key || '').trim())
     .filter(Boolean);
   const notes = [];
-  if (missingStages.length) notes.push(`当前仍缺少独立计数的阶段：${missingStages.join(' / ')}`);
-  if (Number(counters?.cash_skip_count ?? 0) > 0) notes.push('S8 买入侧直接展示现金和整手约束，不再和主链保留数混在一起。');
-  if (Number(counters?.mf_topk_reject_count ?? 0) > 0) notes.push('S5 已补充排序截断信息，避免只看到阶段保留数却不知道候选是怎么被砍掉的。');
-  if (Number(counters?.sell_orders_count ?? 0) > 0) notes.push('S9 退出分布独立来自 reason_codes，只解释卖出链路，不再冒充买入漏斗的一部分。');
-  if (!notes.length) notes.push('当前实验没有额外的漏斗口径告警。');
+  if (missingStages.length) notes.push(`Missing separate counts: ${missingStages.join(' / ')}`);
+  if (Number(counters?.cash_skip_count ?? 0) > 0) notes.push('S8 directly shows cash and lot constraints.');
+  if (Number(counters?.mf_topk_reject_count ?? 0) > 0) notes.push('S5 includes rank truncation diagnostics.');
+  if (Number(counters?.sell_orders_count ?? 0) > 0) notes.push('S9 is sourced from exit reasons only.');
+  if (!notes.length) notes.push('No additional funnel warnings.');
   return notes;
 }
 
@@ -502,7 +477,7 @@ export function buildReadableStageFunnelModel(snapshot) {
   const exitRows = reasonByPrefix(artifacts.reasonRows || []).exit || [];
   const rowMap = new Map(stageRows.map((row) => [String(row?.stage_key || '').toLowerCase(), row]));
   const rawSignalCount = (Array.isArray(artifacts?.dailyRows) ? artifacts.dailyRows : []).reduce(
-    (sum, row) => sum + (Number(row?.raw_buy_signal_count) || 0),
+    (sum, row) => sum + (toFiniteNumber(row?.raw_buy_signal_count) ?? 0),
     0,
   );
   const chainStages = ['s1', 's2', 's3', 's4', 's5', 's6', 's7'].map((key) => {
@@ -510,54 +485,54 @@ export function buildReadableStageFunnelModel(snapshot) {
       stage_key: key,
       stage_label: key.toUpperCase(),
       available: false,
-      note: '当前没有该阶段数据',
+      note: 'No data for this stage.',
     };
     const tone = key === 's1' ? 'derived' : row.available === false ? 'missing' : 'ok';
-    const label = tone === 'derived' ? '汇总口径' : tone === 'missing' ? '未单独计数' : '真实计数';
+    const label = tone === 'derived' ? 'Derived' : tone === 'missing' ? 'Unavailable' : 'Counted';
     return {
       key,
       title: row.stage_label || key.toUpperCase(),
-      note: String(row.note || '当前没有额外说明。'),
+      note: String(row.note || 'No additional note.'),
       status: { tone, label },
       metrics: buildReadableStageMetrics(row, counters),
       pills: buildReadableStagePills(row, counters),
     };
   });
-  const exitReasonItems = (Array.isArray(exitRows) ? exitRows : [])
+  const normalizedExitReasons = (Array.isArray(exitRows) ? exitRows : [])
     .map((row) => ({
       code: reasonCodeOf(row),
       label: reasonZh(reasonCodeOf(row)),
-      value: Number(row?.count ?? 0),
+      value: toFiniteNumber(row?.count) ?? 0,
     }))
     .filter((row) => row.code && row.value > 0)
     .sort((a, b) => b.value - a.value);
-  const exitTotal = exitReasonItems.reduce((sum, row) => sum + row.value, 0);
+  const exitTotal = normalizedExitReasons.reduce((sum, row) => sum + row.value, 0);
   return {
-    meta: `买入 ${fmtInt(counters?.buy_orders_count ?? 0)} 笔 | 卖出 ${fmtInt(counters?.sell_orders_count ?? 0)} 笔 | 主链 ${fmtInt(chainStages.length)} 阶段`,
+    meta: `Buy ${fmtInt(counters?.buy_orders_count ?? 0)} | Sell ${fmtInt(counters?.sell_orders_count ?? 0)} | Main chain ${fmtInt(chainStages.length)} stages`,
     summaryCards: [
-      { label: '股票池', value: fmtInt(rowMap.get('s1')?.output_count ?? artifacts?.run_meta?.universe?.after_filters_symbols ?? 0) },
-      { label: '原始买点', value: fmtInt(rawSignalCount) },
-      { label: '排序后候选', value: fmtInt(rowMap.get('s5')?.output_count ?? 0) },
-      { label: '实际买入', value: fmtInt(counters?.buy_orders_count ?? 0) },
-      { label: '实际卖出', value: fmtInt(counters?.sell_orders_count ?? 0) },
+      { label: 'Universe', value: fmtInt(toFiniteNumber(rowMap.get('s1')?.output_count) ?? toFiniteNumber(artifacts?.run_meta?.universe?.after_filters_symbols) ?? 0) },
+      { label: 'Raw Buys', value: fmtInt(rawSignalCount) },
+      { label: 'Post Rank', value: fmtInt(rowMap.get('s5')?.output_count) },
+      { label: 'Buy Orders', value: fmtInt(counters?.buy_orders_count ?? 0) },
+      { label: 'Sell Orders', value: fmtInt(counters?.sell_orders_count ?? 0) },
     ],
     chainStages,
     execution: {
       buySide: normalizeMetricItems([
-        { label: '现金不足', value: counters?.cash_skip_count ?? 0 },
-        { label: '整手不足', value: counters?.lot_skip_count ?? 0 },
-        { label: '单票上限', value: counters?.cap_hit_single ?? 0 },
-        { label: '行业上限', value: counters?.cap_hit_industry ?? 0 },
+        { label: 'Cash Skip', value: counters?.cash_skip_count ?? 0 },
+        { label: 'Lot Skip', value: counters?.lot_skip_count ?? 0 },
+        { label: 'Single Cap', value: counters?.cap_hit_single ?? 0 },
+        { label: 'Industry Cap', value: counters?.cap_hit_industry ?? 0 },
       ]),
       sellSide: normalizeMetricItems([
-        { label: '轻度缩仓', value: counters?.dd_reduced_count ?? 0 },
-        { label: '0.8 缩放', value: counters?.dd_scale_08_count ?? 0 },
-        { label: '0.6 缩放', value: counters?.dd_scale_06_count ?? 0 },
-        { label: '固定 0.3', value: counters?.dd_fixed_03_count ?? 0 },
-        { label: '停止开仓', value: counters?.dd_stop_count ?? 0 },
+        { label: 'DD Reduced', value: counters?.dd_reduced_count ?? 0 },
+        { label: 'DD Scale 0.8', value: counters?.dd_scale_08_count ?? 0 },
+        { label: 'DD Scale 0.6', value: counters?.dd_scale_06_count ?? 0 },
+        { label: 'DD Fixed 0.3', value: counters?.dd_fixed_03_count ?? 0 },
+        { label: 'DD Stop', value: counters?.dd_stop_count ?? 0 },
       ]),
     },
-    exitReasons: exitReasonItems.map((row) => ({
+    exitReasons: normalizedExitReasons.map((row) => ({
       ...row,
       ratio: exitTotal > 0 ? row.value / exitTotal : 0,
       ratioText: exitTotal > 0 ? fmtPct(row.value / exitTotal) : '-',

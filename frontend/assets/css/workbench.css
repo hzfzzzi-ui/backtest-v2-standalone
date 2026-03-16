@@ -1895,10 +1895,6 @@ input[type="checkbox"] {
   display: none !important;
 }
 
-.wb-results-fallback-root[hidden] {
-  display: none !important;
-}
-
 /* Result workbench polish */
 .wb-command {
   min-height: 52px;

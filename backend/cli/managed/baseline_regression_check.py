@@ -17,9 +17,18 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from backend.core.tools import experiment_runtime_access
+
 
 DEFAULT_CONTRACT_PATH = Path("backend/scripts/ops/v2_backend_refactor_baseline_contract.json")
 DEFAULT_RUNTIME_CONTAINER = "backtest-v2-standalone"
+APPROVED_ASSET_BOUNDARY_KEYS = {
+    "asset_scope",
+    "asset_context",
+    "asset_profile_id",
+    "market_profile_id",
+    "execution_profile_id",
+}
 
 
 def _repo_root() -> Path:
@@ -64,6 +73,18 @@ def _file_hash(path: Path) -> str:
 def _json_hash(obj: Any) -> str:
     payload = json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return _sha256_bytes(payload)
+
+
+def _strip_keys_recursive(obj: Any, forbidden_keys: set[str]) -> Any:
+    if isinstance(obj, dict):
+        return {
+            key: _strip_keys_recursive(value, forbidden_keys)
+            for key, value in obj.items()
+            if key not in forbidden_keys
+        }
+    if isinstance(obj, list):
+        return [_strip_keys_recursive(item, forbidden_keys) for item in obj]
+    return obj
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -181,10 +202,7 @@ def _saved_config_record(config_id: str | None) -> dict[str, Any] | None:
     text = str(config_id or "").strip()
     if not text:
         return None
-    _ensure_repo_on_path()
-    from backend.scripts._internal_helper import load_saved_config_record_internal  # type: ignore
-
-    return load_saved_config_record_internal(text)
+    return experiment_runtime_access.load_saved_config_record(text)
 
 
 def _extract_runtime_draft(config: dict[str, Any]) -> dict[str, Any] | None:
@@ -262,6 +280,10 @@ def _summarize_manifest(manifest: dict[str, Any], ignore_paths: list[str]) -> di
     return {
         "status": cleaned.get("status"),
         "schema_version": cleaned.get("schema_version"),
+        "asset_scope": cleaned.get("asset_scope"),
+        "asset_profile_id": cleaned.get("asset_profile_id"),
+        "market_profile_id": cleaned.get("market_profile_id"),
+        "execution_profile_id": cleaned.get("execution_profile_id"),
         "artifacts": artifacts,
         "config_snapshots": cleaned.get("config_snapshots") if isinstance(cleaned.get("config_snapshots"), dict) else {},
         "baseline_compare_status": cleaned.get("baseline_compare_status"),
@@ -325,8 +347,51 @@ def _summarize_config_truth(
         },
         "draft_hash": _json_hash(draft) if isinstance(draft, dict) else None,
         "run_config_hash": _json_hash(run_config),
+        "run_config_behavior_hash": _json_hash(_strip_keys_recursive(run_config, APPROVED_ASSET_BOUNDARY_KEYS)),
     }
     return _strip_paths(summary, ignore_paths)
+
+
+def _summarize_portfolio_daily(
+    daily_rows: list[dict[str, Any]],
+    daily_path: Path,
+    contract: dict[str, Any],
+) -> dict[str, Any]:
+    semantic_csv = ((contract.get("protected_artifacts") or {}).get("semantic_csv") or {}).get("portfolio_daily.csv") or {}
+    stable_fields = [
+        str(field)
+        for field in semantic_csv.get("stable_fields") or []
+        if str(field).strip()
+    ]
+    aggregate_sum_fields = [
+        str(field)
+        for field in semantic_csv.get("aggregate_sum_fields") or []
+        if str(field).strip()
+    ]
+    first = daily_rows[0] if daily_rows else {}
+    last = daily_rows[-1] if daily_rows else {}
+    present_fields = [field for field in stable_fields if daily_rows and field in first]
+    summary: dict[str, Any] = {
+        "rows": len(daily_rows),
+        "first_date": first.get("date"),
+        "last_date": last.get("date"),
+        "first_nav": _coerce_float(first.get("nav")),
+        "terminal_nav": _coerce_float(last.get("nav")),
+        "stable_fields": present_fields,
+    }
+    for field in aggregate_sum_fields:
+        if not daily_rows or field not in first:
+            continue
+        summary[f"{field}_sum"] = sum(_coerce_float(row.get(field)) or 0.0 for row in daily_rows)
+    if present_fields:
+        semantic_rows = [
+            {field: str(row.get(field) or "") for field in present_fields}
+            for row in daily_rows
+        ]
+        summary["semantic_hash"] = _json_hash(semantic_rows)
+    else:
+        summary["semantic_hash"] = _file_hash(daily_path)
+    return summary
 
 
 def _bundle_from_dir(exp_dir: Path, contract: dict[str, Any]) -> dict[str, Any]:
@@ -336,6 +401,7 @@ def _bundle_from_dir(exp_dir: Path, contract: dict[str, Any]) -> dict[str, Any]:
     manifest = _load_json(exp_dir / "manifest.json")
     perf = _load_json(exp_dir / "perf.json")
     nav_rows = _load_csv_rows(exp_dir / "nav.csv")
+    daily_rows = _load_csv_rows(exp_dir / "portfolio_daily.csv")
     trade_rows = _load_csv_rows(exp_dir / "portfolio_trades.csv")
     candidates_rows = _load_csv_rows(exp_dir / "portfolio_candidates.csv")
     daily_path = exp_dir / "portfolio_daily.csv"
@@ -357,7 +423,7 @@ def _bundle_from_dir(exp_dir: Path, contract: dict[str, Any]) -> dict[str, Any]:
             list((((contract.get("protected_artifacts") or {}).get("summary_json") or {}).get("perf.json") or [])),
         ),
         "nav": _summarize_nav(nav_rows, exp_dir / "nav.csv"),
-        "portfolio_daily": {"file_hash": _file_hash(daily_path)},
+        "portfolio_daily": _summarize_portfolio_daily(daily_rows, daily_path, contract),
         "portfolio_trades": _summarize_trades(trade_rows, trades_path),
         "portfolio_candidates": {
             "rows": len(candidates_rows),
@@ -613,14 +679,11 @@ def _ensure_rerun_saved_config(exp_dir: Path) -> Path | None:
 
 
 def rerun_baseline(baseline_exp_id: str) -> str:
-    _ensure_repo_on_path()
-    from backend.scripts._internal_helper import run_internal_experiment_sync  # type: ignore
-
     exp_dir = _exp_dir(baseline_exp_id)
     temp_saved_config = _ensure_rerun_saved_config(exp_dir)
     try:
         request_payload = _build_baseline_request(exp_dir)
-        result = run_internal_experiment_sync(request_payload)
+        result = experiment_runtime_access.run_experiment_sync(request_payload)
     finally:
         if temp_saved_config is not None:
             temp_saved_config.unlink(missing_ok=True)

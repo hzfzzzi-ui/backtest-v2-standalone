@@ -70,6 +70,11 @@ def test_removed_backtest_v2_protocol_compat_module_stays_deleted() -> None:
     assert not repo_root.joinpath("backend", "api", "endpoints", "backtest_v2_protocol.py").exists()
 
 
+def test_removed_transactions_compat_module_stays_deleted() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    assert not repo_root.joinpath("backend", "api", "endpoints", "transactions.py").exists()
+
+
 def test_removed_endpoints_helper_modules_stay_deleted() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     for filename in ["_paths.py", "_utils.py", "_job_store.py", "_mobile_access.py"]:
@@ -127,6 +132,12 @@ def test_shared_helper_surface_exists() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     for filename in ["__init__.py", "paths.py", "json_utils.py", "job_store.py", "mobile_access.py"]:
         assert repo_root.joinpath("backend", "api", "shared", filename).exists()
+
+
+def test_main_mounts_transactions_from_new_surface_only() -> None:
+    source = _read_repo_file("backend", "main.py")
+    assert "from backend.api.transactions import router as transactions_router" in source
+    assert "backend.api.endpoints.transactions" not in source
 
 
 def test_experiment_history_services_depend_on_new_history_impl_only() -> None:

@@ -1,0 +1,51 @@
+study_id: v10/upstream_pullback_minimal_p1
+title: V10 Upstream Pullback Minimal P1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10
+hypothesis: 在 baseline V10 上仅打开最小 upstream pullback 候选入口，有机会改善趋势中继阶段的入场质量，同时不改动 baseline 的主排序与执行节奏。
+change_scope:
+  modules_modified:
+    - signal_generation.breakout.enable_pullback_candidates
+    - signal_generation.breakout.pullback_variant_mode
+variants:
+  - name: B0
+  - name: P1
+    config_patches:
+      - path: signal_generation.breakout.enable_pullback_candidates
+        value: true
+      - path: signal_generation.breakout.pullback_variant_mode
+        value: pb_tight_combo
+  - name: P1b
+    config_patches:
+      - path: signal_generation.breakout.enable_pullback_candidates
+        value: true
+      - path: signal_generation.breakout.pullback_variant_mode
+        value: pb_reclaim_ma20
+windows:
+  - key: "0717"
+    role: hard_gate
+    start: "2007-01-15"
+    end: "2017-01-15"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2015_2017_post_crash: ["2015-06-15", "2017-01-13"]
+  - key: "1626"
+    role: main
+    start: "2016-03-01"
+    end: "2026-03-01"
+    periods:
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+hard_gates:
+  min_cagr: 0.1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: outputs/baselines/baseline_V10/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

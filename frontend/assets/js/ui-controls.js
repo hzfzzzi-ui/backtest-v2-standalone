@@ -1,4 +1,4 @@
-/* ── ui-controls.js ── UI interactions, config building, drawer, dock tabs ── */
+/* ui-controls.js: UI interactions, config building, drawer, dock tabs */
 /* Globals used: state, byId, esc, num, pct, fmtInt, fmtMoney, setTextById, setHtmlById,
    getStrategySelector, getStrategyPackValue, COMPOSE_MODULES, reasonZh, addLog,
    apiRequestJson, setStatusItems, _apiTag,
@@ -7,12 +7,12 @@
 
 const LOCKED_CANDIDATE_PRESETS = {
   'v2-breakout-atr-stop-k10-candidate': {
-    hint: '候选：锁定 baseline，仅覆盖 atr_stop_k=1.0',
-    title: '显式 candidate preset；忽略当前草稿参数，仍保持 locked baseline 成本、股票池、成交与评价口径',
+    hint: 'Locked candidate from baseline ATR stop 1.0 preset',
+    title: 'This candidate reuses the baseline ATR stop 1.0 runtime config snapshot for preview and run.',
   },
   'v2-breakout-br35-atr10-candidate': {
-    hint: '候选：锁定 ATR1.0 底座，仅覆盖 breakout_window=35',
-    title: '显式 candidate preset；忽略当前草稿参数，保持 ATR1.0 底座、股票池、成本、成交与评价口径不变',
+    hint: 'Locked candidate from ATR1.0 + breakout_window=35 preset',
+    title: 'This candidate reuses the ATR1.0 + breakout_window=35 runtime config snapshot for preview and run.',
   },
 };
 
@@ -30,43 +30,88 @@ function selectedExperimentPreset(defaultPreset = 'single') {
   return selected || defaultPreset || 'single';
 }
 
+function resolveMultiAlphaUiHelper(name) {
+  const globalHelper = globalThis?.[name];
+  if (typeof globalHelper === 'function') return globalHelper;
+  const namespaceHelper = globalThis?.multiAlphaUi?.[name];
+  if (typeof namespaceHelper === 'function') return namespaceHelper;
+  return null;
+}
+
+function cleanupUnsupportedOptionsCompat(selectEl) {
+  const helper = resolveMultiAlphaUiHelper('cleanupUnsupportedOptions');
+  if (helper) {
+    helper(selectEl);
+    return;
+  }
+  if (!selectEl) return;
+  Array.from(selectEl.querySelectorAll('option[data-unsupported="1"]')).forEach((option) => option.remove());
+}
+
+function setSelectValuePreserveUnsupportedCompat(id, value, fallback = '') {
+  const helper = resolveMultiAlphaUiHelper('setSelectValuePreserveUnsupported');
+  if (helper) {
+    helper(id, value, fallback);
+    return;
+  }
+  const selectEl = byId(id);
+  if (!selectEl) return;
+  cleanupUnsupportedOptionsCompat(selectEl);
+  const normalized = value == null ? '' : String(value);
+  if (normalized && !Array.from(selectEl.options).some((option) => option.value === normalized)) {
+    const option = document.createElement('option');
+    option.value = normalized;
+    option.textContent = 'UNSUPPORTED: ' + normalized;
+    option.dataset.unsupported = '1';
+    selectEl.appendChild(option);
+  }
+  const target = normalized || fallback || selectEl.value;
+  if (target) selectEl.value = target;
+}
+
 function syncPresetHint() {
   const hint = byId('wbPresetHint');
   if (!hint) return;
   const executionMode = state.mode === 'execution';
   const preset = String(state.selected_locked_candidate_preset || '').trim();
   if (executionMode) {
-    hint.textContent = preset ? '执行预览不消费锁定候选；将使用当前草稿 / 已加载配置' : '当前：草稿 / 已加载配置';
-    hint.title = preset ? 'execution mode 只生成执行预览；locked candidate 仅用于回测运行' : '执行预览与回测运行共用同一 runtime config handoff';
+    hint.textContent = preset
+      ? 'Execution preview uses the locked candidate runtime snapshot'
+      : 'Execution preview and run share the same runtime entry';
+    hint.title = preset
+      ? 'The locked candidate only affects the runtime snapshot used by preview and run.'
+      : 'Execution preview and run share the same runtime entry';
     return;
   }
   const candidateMeta = lockedCandidatePresetMeta(preset);
   if (candidateMeta) {
-    hint.textContent = `当前：${candidateMeta.hint}`;
+    hint.textContent = `Preset: ${candidateMeta.hint}`;
     hint.title = candidateMeta.title;
     return;
   }
-  const meta = state.loaded_config_meta;
-  const mode = currentConfigSourceMode();
-  if (meta?.config_id && mode === 'loaded-clean') {
-    const display = meta.display_name || meta.name || meta.config_id;
-    hint.textContent = `当前：${display}`;
-    hint.title = `当前已加载 ${display}；运行与预览共用同一 runtime config json`;
+  const meta = state.loaded_source_meta;
+  const sourceKind = String(state.loaded_source_kind || '').trim().toLowerCase();
+  const sourceId = String(state.loaded_source_id || '').trim();
+  const sourceLabel = meta?.display_name || meta?.name || compactLoadedSourceLabel(sourceKind, sourceId);
+  const mode = currentLoadedSourceMode();
+  if (sourceId && mode === 'source-clean') {
+    hint.textContent = `Source: ${sourceLabel}`;
+    hint.title = `Loaded source ${sourceLabel}; preview and run share the same runtime snapshot.`;
     return;
   }
-  if (meta?.config_id && mode === 'loaded-dirty') {
-    hint.textContent = `当前：草稿（偏离 ${meta.config_id}）`;
-    hint.title = '已加载配置仅保留 provenance；运行与预览将基于当前草稿 runtime config json';
+  if (sourceId && mode === 'source-dirty') {
+    hint.textContent = `Draft diverged from ${sourceLabel}`;
+    hint.title = 'The source marker is kept, but preview and run now use the current draft snapshot.';
     return;
   }
-  hint.textContent = '当前：草稿';
-  hint.title = '默认入口按当前草稿运行 / 预览';
+  hint.textContent = 'Current draft';
+  hint.title = 'Preview and run use the current draft by default.';
 }
 
 function setSelectedLockedCandidatePreset(preset) {
   state.selected_locked_candidate_preset = String(preset || '').trim();
   syncPresetHint();
-  syncConfigSourceUI();
+  syncLoadedSourceUI();
 }
 
 const MEMBERSHIP_MODE_SUPPORTED_UNIVERSES = new Set(['HS300_ZZ500', 'CSI1000']);
@@ -117,11 +162,12 @@ async function loadIndustryPicker() {
   const container = byId('wbIndustryPicker');
   if (!container) return;
   try {
-    const resp = await fetch('/api/backtest_v2/industries');
-    const data = await resp.json();
+    const data = await apiRequestJson('industries', '/api/backtest_v2/industries', {
+      retryCount: 0,
+    });
     const industries = Array.isArray(data.industries) ? data.industries : [];
     if (!industries.length) {
-      container.innerHTML = '<span style="color:#888">暂无行业数据，请先运行导入脚本</span>';
+      container.innerHTML = '<span style="color:#888">Industry list is empty. Refresh industry data and retry.</span>';
       return;
     }
     container.innerHTML = '';
@@ -138,7 +184,7 @@ async function loadIndustryPicker() {
     }
     _industryPickerLoaded = true;
   } catch (e) {
-    container.innerHTML = '<span style="color:#c33">加载行业列表失败</span>';
+    container.innerHTML = '<span style="color:#c33">Failed to load industry list</span>';
   }
 }
 
@@ -155,17 +201,17 @@ function setDrawerPanel(panel) {
   const titleEl = byId('wbDrawerTitle');
   if (titleEl) {
     const titles = {
-      s1: 'S1 股票池',
-      s2: 'S2 大盘环境',
-      s3: 'S3 行业趋势',
-      s4: 'S4 个股趋势',
-      s5: 'S5 个股排序',
-      s6: 'S6 入场信号',
-      s7: 'S7 仓位控制',
-      s8: 'S8 风险控制',
-      s9: 'S9 退出',
+      s1: 'S1 Universe',
+      s2: 'S2 Market Regime',
+      s3: 'S3 Signal Generation',
+      s4: 'S4 Composite Signal',
+      s5: 'S5 Ranking Score',
+      s6: 'S6 Portfolio Build',
+      s7: 'S7 Risk Budget',
+      s8: 'S8 Market Filter',
+      s9: 'S9 Exit Rules',
       json: 'JSON',
-      history: '实验历史',
+      history: 'Experiment History',
     };
     titleEl.textContent = titles[state.drawer_panel] || state.drawer_panel;
   }
@@ -217,402 +263,15 @@ function switchDockTab(tab) {
     }
     return;
   }
-  if (typeof window.isDesktopFallbackModeEnabled === 'function' && !window.isDesktopFallbackModeEnabled()) {
-    return;
-  }
-  const accordionMap = {
-    buy_funnel: 'wbAccBuyFunnel',
-    execution: 'wbAccTrades',
-    logs: 'wbAccLogs',
-  };
-  const accId = accordionMap[next];
-  const details = accId ? byId(accId) : null;
-  if (details) {
-    document.querySelectorAll('.wb-result-acc').forEach((node) => {
-      const body = node.querySelector(':scope > .wb-result-acc-body');
-      node.classList.toggle('wb-open', node === details);
-      if (body) body.hidden = node !== details;
-    });
-    requestAnimationFrame(() => {
-      details.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    return;
-  }
-  const capFirst = next.charAt(0).toUpperCase() + next.slice(1);
-  const panel = byId(`wbDock${capFirst}`);
-  if (panel) panel.classList.add('active');
-}
-
-const MULTI_ALPHA_MODULE_DESCRIPTORS = (Array.isArray(COMPOSE_MODULES) ? COMPOSE_MODULES : [])
-  .map((module) => ({
-    name: String((module && module.name) || '').trim().toLowerCase(),
-    label: String((module && (module.label || module.name)) || '').trim(),
-    alpha_id: String((module && (module.alpha_id || module.name)) || '').trim().toLowerCase(),
-    family: String((module && module.family) || '').trim(),
-    role: String((module && module.role) || '').trim(),
-    weight: Number(module && module.weight != null ? module.weight : 0),
-    priority: Number(module && module.priority != null ? module.priority : 0),
-  }))
-  .filter((module) => module.name);
-const MULTI_ALPHA_MODULE_MAP = new Map(MULTI_ALPHA_MODULE_DESCRIPTORS.map((module) => [module.name, module]));
-
-function normalizeMultiAlphaName(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-function normalizeMultiAlphaOption(value, fallback = '') {
-  const text = String(value || '').trim();
-  return text || fallback;
-}
-
-function coercePhase1MultiAlphaOption(value, supportedValue) {
-  const normalized = normalizeMultiAlphaOption(value, supportedValue).toUpperCase();
-  return normalized === String(supportedValue || '').toUpperCase() ? supportedValue : supportedValue;
-}
-
-function supportedMultiAlphaDescriptor(name) {
-  return MULTI_ALPHA_MODULE_MAP.get(normalizeMultiAlphaName(name)) || null;
-}
-
-function defaultRegimeMatrix() {
-  return {
-    TREND_UP: ['breakout_55'],
-    RANGE: ['breakout_55', 'rsi_reversal'],
-    WEAK_DOWN: ['rsi_reversal'],
-  };
-}
-
-function defaultComposeRows() {
-  const rows = MULTI_ALPHA_MODULE_DESCRIPTORS.map((module) => ({
-    name: module.name,
-    label: module.label,
-    enabled: true,
-    role: module.role,
-    weight: module.weight,
-    priority: module.priority,
-    alpha_id: module.alpha_id,
-    family: module.family,
-    params: {},
-    supported: true,
-  }));
-  state.multi_alpha_module_state = Object.fromEntries(rows.map((row) => [row.name, {
-    alpha_id: row.alpha_id,
-    family: row.family,
-    params: cloneJson(row.params) || {},
-  }]));
-  return rows;
-}
-
-function composeRowNames(rows) {
-  return (Array.isArray(rows) ? rows : [])
-    .map((row) => normalizeMultiAlphaName(row && row.name))
-    .filter(Boolean);
-}
-
-function normalizePhase1MultiAlphaRegimeMatrix(matrix, rows = []) {
-  const normalizedRows = Array.isArray(rows) ? rows : [];
-  const declaredNames = composeRowNames(normalizedRows);
-  const declaredSet = new Set(declaredNames);
-  const fallback = defaultRegimeMatrix();
-  const resolved = matrix && typeof matrix === 'object' ? matrix : {};
-  const next = {};
-  MULTI_ALPHA_REGIMES.forEach((regime) => {
-    const rawValues = Array.isArray(resolved[regime]) ? resolved[regime] : [];
-    const values = rawValues
-      .map((value) => normalizeMultiAlphaName(value))
-      .filter((name, idx, arr) => name && declaredSet.has(name) && arr.indexOf(name) === idx);
-    if (values.length) {
-      next[regime] = values;
-      return;
-    }
-    const fallbackValues = (fallback[regime] || [])
-      .map((value) => normalizeMultiAlphaName(value))
-      .filter((name, idx, arr) => name && declaredSet.has(name) && arr.indexOf(name) === idx);
-    next[regime] = fallbackValues;
-  });
-  return next;
-}
-
-function hasPhase1MultiAlphaIntent(cfg) {
-  const draft = cfg && typeof cfg === 'object' ? cfg : {};
-  const signalGeneration = draft.signal_generation && typeof draft.signal_generation === 'object'
-    ? draft.signal_generation
-    : {};
-  const signalComposition = draft.signal_composition && typeof draft.signal_composition === 'object'
-    ? draft.signal_composition
-    : {};
-  const strategyName = String(
-    draft.strategy_pack
-      || signalGeneration.strategy
-      || (draft.strategy && draft.strategy.name)
-      || ''
-  ).trim().toUpperCase();
-  const signalModules = Array.isArray(signalGeneration.modules) ? signalGeneration.modules : [];
-  if (signalModules.length) return true;
-  if (strategyName === 'COMPOSITE') return true;
-
-  const compositionModules = Array.isArray(signalComposition.modules) ? signalComposition.modules : [];
-  const hasSupportedCompositionModule = compositionModules.some((module) => !!supportedMultiAlphaDescriptor(module && module.name));
-  const regimeMatrix = signalComposition.regime_matrix && typeof signalComposition.regime_matrix === 'object'
-    ? signalComposition.regime_matrix
-    : {};
-  const hasSupportedRegimeModule = Object.values(regimeMatrix).some((values) =>
-    Array.isArray(values) && values.some((value) => !!supportedMultiAlphaDescriptor(value))
-  );
-  const composeMode = normalizeMultiAlphaOption(signalComposition.compose_mode, '').toUpperCase();
-  const sameSymbolPolicy = normalizeMultiAlphaOption(signalComposition.same_symbol_policy, '').toUpperCase();
-  const holdingOwnership = normalizeMultiAlphaOption(signalComposition.holding_ownership, '').toUpperCase();
-  const portfolioMode = String((draft.position_risk && draft.position_risk.portfolio_mode) || '').trim();
-
-  return hasSupportedCompositionModule
-    || hasSupportedRegimeModule
-    || composeMode === MULTI_ALPHA_COMPOSE_MODE
-    || sameSymbolPolicy === MULTI_ALPHA_SAME_SYMBOL_POLICY
-    || holdingOwnership === MULTI_ALPHA_HOLDING_OWNERSHIP
-    || portfolioMode === MULTI_ALPHA_PORTFOLIO_MODE;
-}
-
-function ensurePhase1ComposeRows(rows = []) {
-  const current = Array.isArray(rows) ? rows.filter((row) => row && normalizeMultiAlphaName(row.name)) : [];
-  if (current.length) return current;
-  const fallbackRows = defaultComposeRows();
-  hydrateComposeRows(fallbackRows, { useDefault: true });
-  return fallbackRows;
-}
-
-function currentComposeRows() {
-  const moduleState = state.multi_alpha_module_state && typeof state.multi_alpha_module_state === 'object'
-    ? state.multi_alpha_module_state
-    : {};
-  return Array.from(document.querySelectorAll('#wbComposeRows tr[data-name]')).map((tr) => {
-    const name = normalizeMultiAlphaName(tr.getAttribute('data-name'));
-    const desc = supportedMultiAlphaDescriptor(name);
-    const preserved = moduleState[name] || {};
-    return {
-      name,
-      label: tr.getAttribute('data-label') || (desc && desc.label) || name,
-      enabled: !!tr.querySelector('[data-k="enabled"]')?.checked,
-      role: normalizeMultiAlphaOption(tr.querySelector('[data-k="role"]')?.value, (desc && desc.role) || 'trend'),
-      weight: Number(tr.querySelector('[data-k="weight"]')?.value || ((desc && desc.weight) || 0)),
-      priority: Number(tr.querySelector('[data-k="priority"]')?.value || ((desc && desc.priority) || 0)),
-      alpha_id: normalizeMultiAlphaOption(preserved.alpha_id, (desc && desc.alpha_id) || name),
-      family: normalizeMultiAlphaOption(preserved.family, (desc && desc.family) || ''),
-      params: cloneJson(preserved.params) || {},
-      supported: !!desc,
-    };
-  });
-}
-
-function bindDraftListeners(root) {
-  if (!root || typeof root.querySelectorAll !== 'function') return;
-  root.querySelectorAll('input,select,textarea').forEach((el) => {
-    if (el.dataset.wbDraftBound === '1') return;
-    el.dataset.wbDraftBound = '1';
-    el.addEventListener('input', () => buildConfigDraft());
-    el.addEventListener('change', () => buildConfigDraft());
-  });
-}
-
-function cleanupUnsupportedOptions(selectEl) {
-  if (!selectEl) return;
-  Array.from(selectEl.querySelectorAll('option[data-unsupported="1"]')).forEach((option) => option.remove());
-}
-
-function setSelectValuePreserveUnsupported(id, value, fallback = '') {
-  const selectEl = byId(id);
-  if (!selectEl) return;
-  cleanupUnsupportedOptions(selectEl);
-  const normalized = value == null ? '' : String(value);
-  if (normalized && !Array.from(selectEl.options).some((option) => option.value === normalized)) {
-    const option = document.createElement('option');
-    option.value = normalized;
-    option.textContent = 'UNSUPPORTED: ' + normalized;
-    option.dataset.unsupported = '1';
-    selectEl.appendChild(option);
-  }
-  const target = normalized || fallback || selectEl.value;
-  if (target) selectEl.value = target;
-}
-
-function hasOwnConfigKey(obj, key) {
-  return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
-}
-
-function readOptionalInputValue(id) {
-  const el = byId(id);
-  if (!el) return null;
-  const raw = String(el.value ?? '').trim();
-  return raw ? raw : null;
-}
-
-function readOptionalNumberInput(id) {
-  const raw = readOptionalInputValue(id);
-  if (raw == null) return null;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function mergeComposeRowsFromConfig(cfg) {
-  const signalModules = Array.isArray(cfg && cfg.signal_generation && cfg.signal_generation.modules)
-    ? cfg.signal_generation.modules
-    : [];
-  const compositionModules = Array.isArray(cfg && cfg.signal_composition && cfg.signal_composition.modules)
-    ? cfg.signal_composition.modules
-    : [];
-  const regimeMatrix = cfg && cfg.signal_composition && typeof cfg.signal_composition.regime_matrix === 'object'
-    ? cfg.signal_composition.regime_matrix
-    : {};
-  const orderedNames = [];
-  const addName = (value) => {
-    const name = normalizeMultiAlphaName(value);
-    if (!name || orderedNames.includes(name)) return;
-    orderedNames.push(name);
-  };
-  MULTI_ALPHA_MODULE_DESCRIPTORS.forEach((module) => addName(module.name));
-  signalModules.forEach((module) => addName(module && module.name));
-  compositionModules.forEach((module) => addName(module && module.name));
-  Object.values(regimeMatrix).forEach((values) => {
-    if (!Array.isArray(values)) return;
-    values.forEach((value) => addName(value));
-  });
-  const rows = orderedNames.map((name) => {
-    const signalModule = signalModules.find((module) => normalizeMultiAlphaName(module && module.name) === name) || {};
-    const compositionModule = compositionModules.find((module) => normalizeMultiAlphaName(module && module.name) === name) || {};
-    const desc = supportedMultiAlphaDescriptor(name);
-    return {
-      name,
-      label: (desc && desc.label) || name,
-      enabled: signalModule.enabled != null ? signalModule.enabled : (compositionModule.enabled != null ? compositionModule.enabled : true),
-      role: normalizeMultiAlphaOption(compositionModule.role, (desc && desc.role) || 'trend'),
-      weight: Number(compositionModule.weight != null ? compositionModule.weight : ((desc && desc.weight) || 0)),
-      priority: Number(compositionModule.priority != null ? compositionModule.priority : ((desc && desc.priority) || 0)),
-      alpha_id: normalizeMultiAlphaOption(signalModule.alpha_id, (desc && desc.alpha_id) || name),
-      family: normalizeMultiAlphaOption(signalModule.family, (desc && desc.family) || ''),
-      params: cloneJson(signalModule.params) || {},
-      supported: !!desc,
-    };
-  });
-  state.multi_alpha_module_state = Object.fromEntries(rows.map((row) => [row.name, {
-    alpha_id: row.alpha_id,
-    family: row.family,
-    params: cloneJson(row.params) || {},
-  }]));
-  return rows;
-}
-
-function buildKnownModuleParams(name, previousParams = {}) {
-  const base = cloneJson(previousParams) || {};
-  const normalized = normalizeMultiAlphaName(name);
-  if (normalized === 'breakout_55') {
-    return {
-      ...base,
-      breakout_window: Number(byId('wbBreakoutWindow')?.value || base.breakout_window || 55),
-      enable_dual_breakout: !!byId('wbDualBreakout')?.checked,
-      breakout_window_short: Number(byId('wbBreakoutWindowShort')?.value || base.breakout_window_short || 20),
-      breakout_window_long: Number(byId('wbBreakoutWindowLong')?.value || base.breakout_window_long || 55),
-      breakout_entry_buffer_pct: Number(byId('wbBreakoutBuffer')?.value || base.breakout_entry_buffer_pct || 0),
-      entry_confirm_mode: normalizeMultiAlphaOption(byId('wbEntryConfirmMode')?.value, base.entry_confirm_mode || 'none'),
-      entry_delay_mode: normalizeMultiAlphaOption(byId('wbEntryDelayMode')?.value, base.entry_delay_mode || 'none'),
-    };
-  }
-  if (normalized === 'rsi_reversal') {
-    return {
-      ...base,
-      rsi_period: Number(byId('wbMrRsiPeriod')?.value || base.rsi_period || 6),
-      rsi_buy_threshold: Number(byId('wbMrRsiBuy')?.value || base.rsi_buy_threshold || 20),
-      rsi_sell_threshold: Number(byId('wbMrRsiSell')?.value || base.rsi_sell_threshold || 80),
-      mr_max_hold_days: Number(byId('wbMrMaxHold')?.value || base.mr_max_hold_days || base.max_hold_days || 5),
-      mr_stop_loss_pct: Number(byId('wbMrStopLoss')?.value || 3) / 100,
-    };
-  }
-  return base;
-}
-
-function buildRegimeMatrixFromUi(moduleNames = []) {
-  const names = Array.isArray(moduleNames) && moduleNames.length ? moduleNames : composeRowNames(currentComposeRows());
-  const matrix = {};
-  MULTI_ALPHA_REGIMES.forEach((regime) => {
-    matrix[regime] = names.filter((name) => !!document.querySelector('#wbRegimeMatrix input[data-regime="' + regime + '"][data-module="' + name + '"]')?.checked);
-  });
-  return matrix;
-}
-
-function validateMultiAlphaDraft(draft) {
-  const errors = [];
-  const signalModules = Array.isArray(draft && draft.signal_generation && draft.signal_generation.modules)
-    ? draft.signal_generation.modules
-    : [];
-  const composition = draft && draft.signal_composition ? draft.signal_composition : {};
-  const compositionModules = Array.isArray(composition.modules) ? composition.modules : [];
-  const declaredNames = signalModules.map((module) => normalizeMultiAlphaName(module && module.name)).filter(Boolean);
-  const duplicateNames = declaredNames.filter((name, idx) => declaredNames.indexOf(name) !== idx);
-  if (!signalModules.length) errors.push('multi-alpha requires signal_generation.modules');
-  if (duplicateNames.length) errors.push('duplicate multi-alpha modules: ' + Array.from(new Set(duplicateNames)).join(', '));
-  declaredNames.forEach((name) => {
-    if (!supportedMultiAlphaDescriptor(name)) errors.push('unsupported multi-alpha module: ' + name);
-  });
-  if (normalizeMultiAlphaOption(composition.compose_mode, MULTI_ALPHA_COMPOSE_MODE).toUpperCase() !== MULTI_ALPHA_COMPOSE_MODE) {
-    errors.push('compose_mode must be ' + MULTI_ALPHA_COMPOSE_MODE);
-  }
-  if (normalizeMultiAlphaOption(composition.same_symbol_policy, MULTI_ALPHA_SAME_SYMBOL_POLICY).toUpperCase() !== MULTI_ALPHA_SAME_SYMBOL_POLICY) {
-    errors.push('same_symbol_policy must be ' + MULTI_ALPHA_SAME_SYMBOL_POLICY);
-  }
-  if (normalizeMultiAlphaOption(composition.holding_ownership, MULTI_ALPHA_HOLDING_OWNERSHIP).toUpperCase() !== MULTI_ALPHA_HOLDING_OWNERSHIP) {
-    errors.push('holding_ownership must be ' + MULTI_ALPHA_HOLDING_OWNERSHIP);
-  }
-  if (String((draft && draft.position_risk && draft.position_risk.portfolio_mode) || '').trim() !== MULTI_ALPHA_PORTFOLIO_MODE) {
-    errors.push('portfolio_mode must be ' + MULTI_ALPHA_PORTFOLIO_MODE + ' when multi-alpha is enabled');
-  }
-  compositionModules.forEach((module) => {
-    const name = normalizeMultiAlphaName(module && module.name);
-    if (!name) errors.push('signal_composition.modules[*].name is required');
-    else if (!declaredNames.includes(name)) errors.push('signal_composition.modules contains undeclared module: ' + name);
-  });
-  const regimeMatrix = composition && typeof composition.regime_matrix === 'object' ? composition.regime_matrix : {};
-  MULTI_ALPHA_REGIMES.forEach((regime) => {
-    const entries = Array.isArray(regimeMatrix[regime]) ? regimeMatrix[regime] : [];
-    if (!entries.length) errors.push('regime_matrix.' + regime + ' must include at least one module');
-    entries.forEach((name) => {
-      const normalized = normalizeMultiAlphaName(name);
-      if (!declaredNames.includes(normalized)) errors.push('regime_matrix.' + regime + ' references undeclared module: ' + normalized);
-      if (normalized && !supportedMultiAlphaDescriptor(normalized)) errors.push('regime_matrix.' + regime + ' contains unsupported module: ' + normalized);
-    });
-  });
-  const maxPos = Number(draft && draft.position_risk && draft.position_risk.max_positions);
-  if (!(Number.isFinite(maxPos) && maxPos > 0)) errors.push('max_positions must be > 0');
-  const singlePct = Number(draft && draft.position_risk && draft.position_risk.single_stock_cap) * 100;
-  if (!(Number.isFinite(singlePct) && singlePct >= 0 && singlePct <= 100)) errors.push('single_stock_cap must be within 0-100');
-  const industryPct = Number(draft && draft.position_risk && draft.position_risk.industry_cap) * 100;
-  if (!(Number.isFinite(industryPct) && industryPct >= 0 && industryPct <= 100)) errors.push('industry_cap must be within 0-100');
-  return errors;
+  return;
 }
 
 function validateConfigDraft(draft) {
-  const errors = [];
-  const multiAlphaEnabled = hasPhase1MultiAlphaIntent(draft);
-  if (multiAlphaEnabled) {
-    errors.push(...validateMultiAlphaDraft(draft));
-    return Array.from(new Set(errors));
+  const core = window.configDraftCore;
+  if (!core || typeof core.validateConfigDraft !== 'function') {
+    throw new Error('configDraftCore.validateConfigDraft is not available');
   }
-  const trend = (draft && draft.signal_generation && (draft.signal_generation.trend || draft.signal_generation.sma)) || {};
-  const strategyPack = String((draft && (draft.strategy_pack || (draft.signal_generation && draft.signal_generation.strategy))) || '').toUpperCase();
-  const regimeOn = !!(draft && draft.signal_generation && draft.signal_generation.regime_detection && draft.signal_generation.regime_detection.enabled);
-  const fast = Number(trend.fast_ma);
-  const slow = Number(trend.slow_ma);
-  if (!(Number.isFinite(fast) && Number.isFinite(slow) && fast < slow)) errors.push('fast_ma must be smaller than slow_ma');
-  const maxPos = Number(draft && draft.position_risk && draft.position_risk.max_positions);
-  if (!(Number.isFinite(maxPos) && maxPos > 0)) errors.push('max_positions must be > 0');
-  const singlePct = Number(draft && draft.position_risk && draft.position_risk.single_stock_cap) * 100;
-  if (!(Number.isFinite(singlePct) && singlePct >= 0 && singlePct <= 100)) errors.push('single/industry cap must be within 0-100');
-  const indPct = Number(draft && draft.position_risk && draft.position_risk.industry_cap) * 100;
-  if (!(Number.isFinite(indPct) && indPct >= 0 && indPct <= 100)) errors.push('行业上限% 必须在 0-100');
-  const entry = Number((((draft && draft.signal_generation && (draft.signal_generation.trend || draft.signal_generation.sma)) || {}).entry_buffer_pct));
-  if (!(Number.isFinite(entry) && entry >= 0 && entry <= 5)) errors.push('entry_buffer% must be within 0-5');
-  if (strategyPack === 'RSI_REVERSAL' && !regimeOn) errors.push('RSI_REVERSAL is only supported as the MR arm under Regime Router');
-  if (regimeOn && !['EMA_CROSS', 'SMA_CROSS'].includes(String(trend.strategy || '').toUpperCase())) {
-    errors.push('Regime Router trend arm only supports EMA_CROSS / SMA_CROSS');
-  }
-  return errors;
+  return core.validateConfigDraft(draft);
 }
 
 function flattenObject(obj, prefix = '', out = {}) {
@@ -640,7 +299,7 @@ function renderConfigDiff() {
   const draft = state.config_draft || {};
   const groupCfg = state.active_artifacts?.config || null;
   if (!groupCfg) {
-    el.textContent = '当前结果无 config.json，无法对比';
+    el.textContent = 'Current result is missing config.json';
     return;
   }
   const a = flattenObject(draft);
@@ -652,7 +311,7 @@ function renderConfigDiff() {
     const vb = JSON.stringify(b[k]);
     if (va !== vb) lines.push(`${k}\n  draft=${va}\n  group=${vb}`);
   });
-  el.textContent = lines.length ? lines.join('\n\n') : '无差异';
+  el.textContent = lines.length ? lines.join('\n\n') : 'No diff';
 }
 
 function updateSignalCompositionSurface(draft, errors) {
@@ -721,392 +380,11 @@ function refreshConfigPanels() {
 }
 
 function buildConfigDraft() {
-  const loadedBase = cloneJson(state.loaded_config_json) || {};
-  const loadedUniverse = loadedBase.universe || {};
-  const loadedUniverseFilters = loadedUniverse.filters || {};
-  const loadedSignalGeneration = loadedBase.signal_generation || {};
-  const loadedSignalRegimeDetection = loadedSignalGeneration.regime_detection || {};
-  const loadedSignalRegimeFilter = loadedSignalRegimeDetection.regime_filter || {};
-  const loadedTrend = loadedSignalGeneration.trend || {};
-  const loadedMr = loadedSignalGeneration.mr || {};
-  const loadedSma = loadedSignalGeneration.sma || {};
-  const loadedEma = loadedSignalGeneration.ema || {};
-  const loadedBreakout = loadedSignalGeneration.breakout || {};
-  const loadedEntryFilter = loadedSignalGeneration.entry_filter || {};
-  const loadedRanking = loadedSignalGeneration.ranking || {};
-  const loadedExitRules = loadedBase.exit_rules || {};
-  const loadedAtrStop = loadedExitRules.atr_stop || {};
-  const loadedTrailing = loadedExitRules.trailing || {};
-  const loadedTimeExit = loadedExitRules.time_exit || {};
-  const loadedHoldConstraint = loadedExitRules.hold_constraint || {};
-  const loadedTakeProfit = loadedExitRules.take_profit || {};
-  const loadedFixedStop = loadedExitRules.fixed_stop || {};
-  const loadedMa20Exit = loadedExitRules.ma20_exit || {};
-  const loadedLow10Exit = loadedExitRules.low10_exit || {};
-  const loadedPositionRisk = loadedBase.position_risk || {};
-  const loadedRiskBudget = loadedPositionRisk.risk_budget || {};
-  const loadedMarketFilter = loadedPositionRisk.market_filter || {};
-  const loadedBreadth = loadedPositionRisk.breadth || {};
-  const loadedSizing = loadedBase.sizing || {};
-  const loadedSignalComposition = loadedBase.signal_composition || {};
-  const breadthEnabled = !!byId('wbBreadthEnabled')?.checked;
-  const weightMode = byId('wbWeightMode')?.value || loadedSizing.weight_mode || 'equal';
-  const minPositions = Number(byId('wbMinPositions')?.value || loadedSizing.min_positions || 10);
-  const includeBreadth = !!loadedPositionRisk.breadth || breadthEnabled;
-  const includeSizing = !!loadedBase.sizing || weightMode !== 'equal' || minPositions !== 10;
-  const multiAlphaEnabled = !!byId('wbEnableComposition')?.checked;
-  const composeRows = multiAlphaEnabled ? ensurePhase1ComposeRows(currentComposeRows()) : currentComposeRows();
-  const strategyPack = multiAlphaEnabled ? 'COMPOSITE' : getStrategyPackValue();
-  const composeNames = composeRowNames(composeRows);
-  const composeMode = multiAlphaEnabled
-    ? coercePhase1MultiAlphaOption(byId('wbComposeMode')?.value, MULTI_ALPHA_COMPOSE_MODE)
-    : normalizeMultiAlphaOption(byId('wbComposeMode')?.value, MULTI_ALPHA_COMPOSE_MODE);
-  const sameSymbolPolicy = multiAlphaEnabled
-    ? coercePhase1MultiAlphaOption(byId('wbSameSymbolPolicy')?.value, MULTI_ALPHA_SAME_SYMBOL_POLICY)
-    : normalizeMultiAlphaOption(byId('wbSameSymbolPolicy')?.value, MULTI_ALPHA_SAME_SYMBOL_POLICY);
-  const holdingOwnership = multiAlphaEnabled
-    ? coercePhase1MultiAlphaOption(byId('wbHoldingOwnership')?.value, MULTI_ALPHA_HOLDING_OWNERSHIP)
-    : normalizeMultiAlphaOption(byId('wbHoldingOwnership')?.value, MULTI_ALPHA_HOLDING_OWNERSHIP);
-  const regimeMatrix = multiAlphaEnabled
-    ? normalizePhase1MultiAlphaRegimeMatrix(buildRegimeMatrixFromUi(composeNames), composeRows)
-    : buildRegimeMatrixFromUi(composeNames);
-  const portfolioMode = multiAlphaEnabled
-    ? MULTI_ALPHA_PORTFOLIO_MODE
-    : String(byId('wbPortfolioMode')?.value || loadedPositionRisk.portfolio_mode || 'equal_10').trim();
-  const rankingScoreSourceMode = readOptionalInputValue('wbScoreSourceMode');
-  const rankingResidualWindow = readOptionalNumberInput('wbResidualWindow');
-  const trailingActivateProfitPct = readOptionalNumberInput('wbTrailingActivateProfitPct');
-  const preProfitBreakoutFailureEnabled = !!byId('wbPreProfitBreakoutFailureEnabled')?.checked;
-  const preProfitBreakoutFailureMaxBarsInput = readOptionalNumberInput('wbPreProfitBreakoutFailureMaxBars');
-  const preProfitBreakoutFailureAtrBufferInput = readOptionalNumberInput('wbPreProfitBreakoutFailureAtrBufferK');
-  if (multiAlphaEnabled) {
-    if (byId('wbComposeMode')) byId('wbComposeMode').value = composeMode;
-    if (byId('wbSameSymbolPolicy')) byId('wbSameSymbolPolicy').value = sameSymbolPolicy;
-    if (byId('wbHoldingOwnership')) byId('wbHoldingOwnership').value = holdingOwnership;
-    if (byId('wbPortfolioMode')) byId('wbPortfolioMode').value = portfolioMode;
-    hydrateRegimeMatrix(regimeMatrix, composeRows, { useDefault: true });
+  const core = window.configDraftCore;
+  if (!core || typeof core.buildConfigDraft !== 'function') {
+    throw new Error('configDraftCore.buildConfigDraft is not available');
   }
-  const signalModules = multiAlphaEnabled
-    ? composeRows.map((row) => ({
-      name: row.name,
-      enabled: row.enabled,
-      alpha_id: normalizeMultiAlphaOption(row.alpha_id, row.name),
-      family: normalizeMultiAlphaOption(row.family, ''),
-      params: buildKnownModuleParams(row.name, row.params),
-    }))
-    : [];
-  if (multiAlphaEnabled) {
-    state.multi_alpha_module_state = Object.fromEntries(signalModules.map((module) => [module.name, {
-      alpha_id: module.alpha_id,
-      family: module.family,
-      params: cloneJson(module.params) || {},
-    }]));
-  }
-  const signalGenerationDraft = multiAlphaEnabled
-    ? {
-      enabled: !!byId('wbEnableSignal')?.checked,
-      strategy: 'COMPOSITE',
-      modules: signalModules,
-    }
-    : {
-      ...loadedSignalGeneration,
-      enabled: !!byId('wbEnableSignal')?.checked,
-      strategy: strategyPack,
-      regime_detection: {
-        ...loadedSignalRegimeDetection,
-        enabled: !!byId('wbRegimeEnabled')?.checked,
-        regime_ma: Number(byId('wbRegimeMa')?.value || 60),
-        regime_filter: {
-          ...loadedSignalRegimeFilter,
-          enabled: !!byId('wbRegimeFilterEnabled')?.checked,
-          regime_threshold: Number(byId('wbRfThreshold')?.value || 0.3),
-          alpha_m: Number(byId('wbRfAlpha')?.value || 2.0),
-          alpha_sec: Number(byId('wbRfAlpha')?.value || 2.0),
-          alpha_i: Number(byId('wbRfAlpha')?.value || 2.0),
-        },
-      },
-      trend: {
-        ...loadedTrend,
-        strategy: (byId('wbTrendStrategy')?.value || 'EMA_CROSS').toUpperCase(),
-        fast_ma: Number(byId('wbFastMa')?.value || 20),
-        slow_ma: Number(byId('wbSlowMa')?.value || 60),
-        entry_buffer_pct: Number(byId('wbEntryBuffer')?.value || 1),
-      },
-      mr: {
-        ...loadedMr,
-        strategy: (byId('wbMrStrategy')?.value || 'RSI_REVERSAL').toUpperCase(),
-        rsi_period: Number(byId('wbMrRsiPeriod')?.value || 6),
-        rsi_buy_threshold: Number(byId('wbMrRsiBuy')?.value || 20),
-        rsi_sell_threshold: Number(byId('wbMrRsiSell')?.value || 80),
-        mr_max_hold_days: Number(byId('wbMrMaxHold')?.value || 5),
-        mr_stop_loss_pct: Number(byId('wbMrStopLoss')?.value || 3) / 100,
-      },
-      sma: {
-        ...loadedSma,
-        fast_ma: Number(byId('wbFastMa')?.value || 20),
-        slow_ma: Number(byId('wbSlowMa')?.value || 60),
-        entry_buffer_pct: Number(byId('wbEntryBuffer')?.value || 1),
-      },
-      ema: {
-        ...loadedEma,
-        fast_ma: Number(byId('wbFastMa')?.value || 20),
-        slow_ma: Number(byId('wbSlowMa')?.value || 60),
-        entry_buffer_pct: Number(byId('wbEntryBuffer')?.value || 1),
-      },
-      breakout: {
-        ...loadedBreakout,
-        breakout_window: Number(byId('wbBreakoutWindow')?.value || 55),
-        enable_dual_breakout: !!byId('wbDualBreakout')?.checked,
-        breakout_window_short: Number(byId('wbBreakoutWindowShort')?.value || 20),
-        breakout_window_long: Number(byId('wbBreakoutWindowLong')?.value || 55),
-        breakout_entry_buffer_pct: Number(byId('wbBreakoutBuffer')?.value || 0),
-        entry_confirm_mode: byId('wbEntryConfirmMode')?.value || 'none',
-        entry_delay_mode: byId('wbEntryDelayMode')?.value || 'none',
-      },
-      entry_filter: {
-        ...loadedEntryFilter,
-        enable_entry_above_slow_ma: !!byId('wbEntryAboveSlowMa')?.checked,
-        enable_entry_slow_ma_slope: !!byId('wbEntrySlowMaSlope')?.checked,
-        entry_slope_lookback: Number(byId('wbEntrySlopeLookback')?.value || 5),
-      },
-      ranking: {
-        ...loadedRanking,
-        momentum_top_pct: Number(byId('wbMomentumTopPct')?.value || 0),
-      },
-    };
-  if (!multiAlphaEnabled) {
-    if (rankingScoreSourceMode != null || hasOwnConfigKey(loadedRanking, 'score_source_mode')) {
-      signalGenerationDraft.ranking.score_source_mode = rankingScoreSourceMode != null
-        ? rankingScoreSourceMode
-        : loadedRanking.score_source_mode;
-    }
-    if (rankingResidualWindow != null || hasOwnConfigKey(loadedRanking, 'residual_window')) {
-      signalGenerationDraft.ranking.residual_window = rankingResidualWindow != null
-        ? rankingResidualWindow
-        : loadedRanking.residual_window;
-    }
-  }
-  const signalCompositionDraft = multiAlphaEnabled
-    ? {
-      enabled: true,
-      compose_mode: composeMode,
-      same_symbol_policy: sameSymbolPolicy,
-      holding_ownership: holdingOwnership,
-      modules: composeRows.map((row) => ({
-        name: row.name,
-        enabled: row.enabled,
-        role: row.role,
-        weight: Number(row.weight),
-        priority: Number(row.priority),
-      })),
-      regime_matrix: regimeMatrix,
-    }
-    : (Object.keys(loadedSignalComposition).length ? cloneJson(loadedSignalComposition) : { enabled: false });
-  const universeMode = byId('wbUniverseMode')?.value || 'ALL_A';
-  const universeDraft = {
-    ...loadedUniverse,
-    start: byId('wbStartDate')?.value || '2021-01-01',
-    end: byId('wbEndDate')?.value || '2026-02-01',
-    benchmark: byId('wbBenchmark')?.value || '000300.SH',
-    symbols: (byId('wbSymbols')?.value || '').split(',').map((s) => s.trim()).filter(Boolean),
-    limit: Number(byId('wbUniverseLimit')?.value || 1000),
-    price_adj: byId('wbPriceAdj')?.value || 'hfq',
-    filters: {
-      ...loadedUniverseFilters,
-      exclude_st: !!byId('wbExcludeSt')?.checked,
-      exclude_suspended: !!byId('wbExcludeSuspended')?.checked,
-      min_list_days: Number(byId('wbMinListDays')?.value || 120),
-      min_avg_turnover_20d: Number(byId('wbMinTurnover')?.value || 1e8),
-      price_min: Number(byId('wbPriceMin')?.value || 0),
-      price_max: Number(byId('wbPriceMax')?.value || 99999),
-      atr_pct_range: byId('wbAtrRange')?.value || '0,100',
-      limit_rule: byId('wbLimitRule')?.value || 'ignore',
-    },
-  };
-  if (supportsMembershipMode(universeMode)) {
-    universeDraft.membership_mode = membershipModeFromUiValue(byId('wbConstituent')?.value || 'dynamic');
-  } else {
-    delete universeDraft.membership_mode;
-  }
-
-  const exitPriorityItems = Array.from(byId('wbExitPriorityList')?.querySelectorAll('li') || [])
-    .map((li) => li.textContent.replace(/^\d+\s*/, '').trim())
-    .filter(Boolean);
-  const draft = {
-    ...loadedBase,
-    mode: state.mode,
-    strategy_pack: strategyPack,
-    universe_mode: universeMode,
-    industries: getSelectedIndustries(),
-    initial_capital: Number(loadedBase.initial_capital ?? state.config_draft?.initial_capital ?? 100000),
-    universe: universeDraft,
-    signal_generation: signalGenerationDraft,
-    benchmark_regime: {
-      ...(loadedBase.benchmark_regime || {}),
-      enabled: !!byId('wbBenchmarkRegimeEnabled')?.checked,
-      fast_period: Number(byId('wbBenchmarkRegimeFast')?.value || 20),
-      slow_period: Number(byId('wbBenchmarkRegimeSlow')?.value || 120),
-      slope_window: Number(byId('wbBenchmarkRegimeSlope')?.value || 5),
-    },
-    stock_trend_filter: {
-      ...(loadedBase.stock_trend_filter || {}),
-      enabled: !!byId('wbStockTrendEnabled')?.checked,
-      short_ma: Number(byId('wbStockTrendShortMa')?.value || 20),
-      long_ma: Number(byId('wbStockTrendLongMa')?.value || 60),
-    },
-    sector_gate: {
-      ...(loadedBase.sector_gate || {}),
-      enabled: !!byId('wbSectorGateEnabled')?.checked,
-      rank_window: Number(byId('wbSectorRankWindow')?.value || 60),
-      top_pct: Number(byId('wbSectorTopPct')?.value || 0.3),
-    },
-    signal_composition: signalCompositionDraft,
-    exit_rules: {
-      ...loadedExitRules,
-      enabled: !!byId('wbEnableExit')?.checked,
-      signal_reverse: !!byId('wbExitReverse')?.checked,
-      atr_stop: {
-        ...loadedAtrStop,
-        enabled: !!byId('wbExitAtr')?.checked,
-        k: Number(byId('wbAtrK')?.value || 0.8),
-      },
-      trailing: {
-        ...loadedTrailing,
-        enabled: !!byId('wbExitTrail')?.checked,
-        k: Number(byId('wbTrailK')?.value || 2.0),
-      },
-      time_exit: {
-        ...loadedTimeExit,
-        enabled: !!byId('wbExitTime')?.checked,
-        n_days: Number(byId('wbExitDays')?.value || 20),
-      },
-      hold_constraint: {
-        ...loadedHoldConstraint,
-        min_hold_days: Number(byId('wbMinHoldDays')?.value || 0),
-        cooldown_days: Number(byId('wbCooldownDays')?.value || 0),
-      },
-      take_profit: {
-        ...loadedTakeProfit,
-        enabled: !!byId('wbExitTakeProfit')?.checked,
-        mode: byId('wbTakeProfitMode')?.value || 'pct',
-        pct: Number(byId('wbTakeProfitPct')?.value || 10) / 100,
-        atr_k: Number(byId('wbTakeProfitAtrK')?.value || 3.0),
-      },
-      fixed_stop: {
-        ...loadedFixedStop,
-        enabled: !!byId('wbExitFixedStop')?.checked,
-        pct: Number(byId('wbFixedStopPct')?.value || 5) / 100,
-      },
-      ma20_exit: {
-        ...loadedMa20Exit,
-        enabled: !!byId('wbExitMa20')?.checked,
-      },
-      low10_exit: {
-        ...loadedLow10Exit,
-        enabled: !!byId('wbExitLow10')?.checked,
-      },
-    },
-    universe_filter: {
-      ...(loadedBase.universe_filter || {}),
-      min_price: Number(byId('wbPriceMin')?.value || 0),
-    },
-    position_risk: {
-      ...loadedPositionRisk,
-      enabled: !!byId('wbEnableRisk')?.checked,
-      max_positions: Number(byId('wbMaxPositions')?.value || 10),
-      single_stock_cap: Number(byId('wbSingleCap')?.value || 10) / 100,
-      industry_cap: Number(byId('wbIndustryCap')?.value || 30) / 100,
-      lot: Number(byId('wbLot')?.value || 100),
-      cash_shortage_policy: byId('wbCashPolicy')?.value || 'skip',
-      portfolio_mode: portfolioMode,
-      risk_budget: {
-        ...loadedRiskBudget,
-        enabled: !!byId('wbRiskBudget')?.checked,
-        base_portfolio_risk: Number(byId('wbBasePortfolioRisk')?.value || 6) / 100,
-        atr_stop_k: Number(byId('wbAtrStopK')?.value || 2.0),
-        min_active_ratio: Number(byId('wbMinActiveRatio')?.value || 60) / 100,
-        dd_scale_10: Number(byId('wbDdScale10')?.value || 0.8),
-        dd_scale_15: Number(byId('wbDdScale15')?.value || 0.6),
-        dd_fixed_20: Number(byId('wbDdFixed20')?.value || 3) / 100,
-        dd_stop_pct: Number(byId('wbDdStopPct')?.value || 35) / 100,
-        dd_stop_cooldown_days: Number(byId('wbDdStopCooldown')?.value || 60),
-        dd_stop_protect_days: Number(byId('wbDdStopProtect')?.value || 30),
-      },
-      market_filter: {
-        ...loadedMarketFilter,
-        enabled: !!byId('wbMarketFilter')?.checked,
-        slope_ma_period: Number(byId('wbMfSlopeMaPeriod')?.value || 50),
-        slope_window: Number(byId('wbMfSlopeWindow')?.value || 10),
-        bull_multiplier: Number(byId('wbMfBullMult')?.value || 1.5),
-        light_multiplier: Number(byId('wbMfLightMult')?.value || 0.6),
-        ema_light_fast: Number(byId('wbMfEmaFast')?.value || 5),
-        ema_light_slow: Number(byId('wbMfEmaSlow')?.value || 20),
-      },
-      cost_model: {
-        commission: 'fixed_assumption',
-        stamp_tax: 'fixed_assumption',
-        slippage: 'fixed_assumption',
-        matching: 'next_open',
-      },
-      ...(includeBreadth ? { breadth: {
-        ...loadedBreadth,
-        enabled: !!byId('wbBreadthEnabled')?.checked,
-        mode: byId('wbBreadthMode')?.value || 'dynamic_maxpos',
-        score_type: byId('wbBreadthScoreType')?.value || 'B',
-        mapping_mode: byId('wbBreadthMappingMode')?.value || 'smooth',
-        min_positions: Number(byId('wbBreadthMinPositions')?.value || 3),
-        max_positions: Number(byId('wbBreadthMaxPositions')?.value || 15),
-        step_high: Number(byId('wbBreadthStepHigh')?.value || 0.6),
-        step_mid: Number(byId('wbBreadthStepMid')?.value || 0.45),
-        smooth_lo: Number(byId('wbBreadthSmoothLo')?.value || 0.4),
-        smooth_range: Number(byId('wbBreadthSmoothRange')?.value || 0.2),
-        ema_fast: Number(byId('wbBreadthEmaFast')?.value || 8),
-        ema_slow: Number(byId('wbBreadthEmaSlow')?.value || 25),
-        gate_threshold: Number(byId('wbBreadthGateThreshold')?.value || 0.45),
-        gate_quantile_window: Number(byId('wbBreadthGateWindow')?.value || 252),
-        gate_quantile_pct: Number(byId('wbBreadthGatePct')?.value || 0.2),
-        gate_persist_days: Number(byId('wbBreadthGatePersist')?.value || 3),
-        size_scale_floor: Number(byId('wbBreadthScaleFloor')?.value || 0.3),
-      } } : {}),
-    },
-    ...(includeSizing ? { sizing: {
-      ...loadedSizing,
-      weight_mode: weightMode,
-      min_positions: minPositions,
-    } } : {}),
-    exit_priority: exitPriorityItems.length ? exitPriorityItems : (cloneJson(loadedBase.exit_priority) || []),
-  };
-  if (trailingActivateProfitPct != null || hasOwnConfigKey(loadedTrailing, 'activate_profit_pct')) {
-    draft.exit_rules.trailing.activate_profit_pct = trailingActivateProfitPct != null
-      ? trailingActivateProfitPct / 100
-      : loadedTrailing.activate_profit_pct;
-  }
-  if (preProfitBreakoutFailureEnabled || hasOwnConfigKey(loadedTrailing, 'pre_profit_breakout_failure_enabled')) {
-    draft.exit_rules.trailing.pre_profit_breakout_failure_enabled = preProfitBreakoutFailureEnabled;
-  }
-  if (preProfitBreakoutFailureEnabled || hasOwnConfigKey(loadedTrailing, 'pre_profit_breakout_failure_max_bars')) {
-    draft.exit_rules.trailing.pre_profit_breakout_failure_max_bars = preProfitBreakoutFailureMaxBarsInput != null
-      ? preProfitBreakoutFailureMaxBarsInput
-      : (loadedTrailing.pre_profit_breakout_failure_max_bars ?? 5);
-  }
-  if (preProfitBreakoutFailureEnabled || hasOwnConfigKey(loadedTrailing, 'pre_profit_breakout_failure_atr_buffer_k')) {
-    draft.exit_rules.trailing.pre_profit_breakout_failure_atr_buffer_k = preProfitBreakoutFailureAtrBufferInput != null
-      ? preProfitBreakoutFailureAtrBufferInput
-      : (loadedTrailing.pre_profit_breakout_failure_atr_buffer_k ?? 0.5);
-  }
-  state.config_draft = draft;
-  state.strategy_pack = draft.strategy_pack;
-  state.universe_mode = draft.universe_mode;
-  if (byId('wbStrategyPack')) byId('wbStrategyPack').value = draft.strategy_pack;
-  syncExitLinkage();
-  refreshConfigPanels();
-  syncConfigSourceUI();
-  if (typeof syncResultsWorkbenchSurface === 'function') {
-    syncResultsWorkbenchSurface({ perf: false, explain: false, execution: false });
-  } else {
-    renderSummaryBar();
-  }
-  return draft;
+  return core.buildConfigDraft();
 }
 
 function hydrateComposeRows(rows, options = {}) {
@@ -1166,15 +444,14 @@ function hydrateRegimeMatrix(matrix = null, rows = [], options = {}) {
 function setMode(mode) {
   state.mode = mode;
   document.querySelectorAll('#wbMode button').forEach((b) => b.classList.toggle('active', b.getAttribute('data-mode') === mode));
-  addLog(`切换模式: ${mode}`);
+  addLog(`Mode switch: ${mode}`);
   buildConfigDraft();
   syncPresetHint();
 }
 
 function renderRunHints() {
-  // 左侧股票池验收提示区已下线，保留空函数以兼容旧调用点。
+  // Keep run hints aligned with the current draft and source provenance.
 }
-
 
 function resolveSummaryConfig() {
   const artCfg = (state.active_artifacts || {}).config;
@@ -1253,12 +530,12 @@ function runtimeStrategySummary(cfg, art) {
   const br = cfg?.benchmark_regime || {};
   const brTag = br.enabled ? ' | BR=' + (br.fast_period ?? 20) + '/' + (br.slow_period ?? 120) : '';
   if (strategyName === 'BREAKOUT_TREND') {
-    return 'BREAKOUT_TREND | 突破=' + (params.breakout_window ?? 55) + ' | ATR止损=' + (params.atr_stop_k ?? '-') + ' | ATR追踪=' + (params.atr_trail_k ?? '-') + ' | regime_ma=' + (params.regime_ma ?? '-') + brTag + ' | 最大持仓=' + maxPositions;
+    return 'BREAKOUT_TREND | BreakoutWindow=' + (params.breakout_window ?? 55) + ' | ATRStop=' + (params.atr_stop_k ?? '-') + ' | ATRTrail=' + (params.atr_trail_k ?? '-') + ' | regime_ma=' + (params.regime_ma ?? '-') + brTag + ' | MaxPositions=' + maxPositions;
   }
   if (strategyName === 'SMA_CROSS' || strategyName === 'EMA_CROSS') {
-    return strategyName + ' | 快线=' + (strategy.fast ?? '-') + ' 慢线=' + (strategy.slow ?? '-') + brTag + ' | 最大持仓=' + maxPositions;
+    return strategyName + ' | Fast=' + (strategy.fast ?? '-') + ' | Slow=' + (strategy.slow ?? '-') + brTag + ' | MaxPositions=' + maxPositions;
   }
-  return (strategyName || 'STRATEGY') + ' | 最大持仓=' + maxPositions;
+  return (strategyName || 'STRATEGY') + ' | MaxPositions=' + maxPositions;
 }
 
 function runtimeStrategyOverview(cfg, art) {
@@ -1281,21 +558,21 @@ function runtimeStrategyOverview(cfg, art) {
   const maxPositions = art?.run_meta?.counters?.max_positions ?? cfg?.position_risk?.max_positions ?? '-';
   const portfolioMode = cfg?.position_risk?.portfolio_mode || cfg?.risk_budget?.portfolio_mode || 'equal_10';
   const br = cfg?.benchmark_regime || {};
-  const brText = br.enabled ? 'BR ' + (br.fast_period ?? 20) + '/' + (br.slow_period ?? 120) + '/' + (br.slope_window ?? 5) : 'BR 关闭';
+  const brText = br.enabled ? 'BR ' + (br.fast_period ?? 20) + '/' + (br.slow_period ?? 120) + '/' + (br.slope_window ?? 5) : 'BR Off';
   if (strategyName === 'BREAKOUT_TREND') {
     return {
       name: 'BREAKOUT_TREND',
-      core: '?? ' + (params.breakout_window ?? 55) + ' | ATR ' + (params.atr_stop_k ?? '-') + ' / ' + (params.atr_trail_k ?? '-'),
+      core: 'BreakoutWindow=' + (params.breakout_window ?? 55) + ' | ATR ' + (params.atr_stop_k ?? '-') + ' / ' + (params.atr_trail_k ?? '-'),
       portfolioMode,
-      extra: 'regime_ma=' + (params.regime_ma ?? '-') + ' | ' + brText + ' | 最大持仓=' + maxPositions,
+      extra: 'regime_ma=' + (params.regime_ma ?? '-') + ' | ' + brText + ' | MaxPositions=' + maxPositions,
     };
   }
   if (strategyName === 'SMA_CROSS' || strategyName === 'EMA_CROSS') {
     return {
       name: strategyName,
-      core: '?? ' + (strategy.fast ?? '-') + ' | ?? ' + (strategy.slow ?? '-'),
+      core: 'Fast=' + (strategy.fast ?? '-') + ' | Slow=' + (strategy.slow ?? '-'),
       portfolioMode,
-      extra: brText + ' | 最大持仓=' + maxPositions,
+      extra: brText + ' | MaxPositions=' + maxPositions,
     };
   }
   const sg = cfg?.signal_generation || {};
@@ -1305,7 +582,7 @@ function runtimeStrategyOverview(cfg, art) {
     const mr = sg.mr || {};
     return {
       name: 'REGIME',
-      core: '趋势 ' + String(trend.strategy || 'SMA').toUpperCase() + ' ' + (trend.fast_ma ?? 20) + '/' + (trend.slow_ma ?? 60),
+      core: 'Trend=' + String(trend.strategy || 'SMA').toUpperCase() + ' ' + (trend.fast_ma ?? 20) + '/' + (trend.slow_ma ?? 60),
       portfolioMode: cfg?.position_risk?.portfolio_mode ?? 'equal_10',
       extra: 'MR RSI(' + (mr.rsi_period ?? 6) + ') ' + (mr.rsi_buy_threshold ?? 20) + '/' + (mr.rsi_sell_threshold ?? 80) + ' | regime_ma=' + (sg.regime_detection?.regime_ma ?? 60),
     };
@@ -1314,21 +591,14 @@ function runtimeStrategyOverview(cfg, art) {
   return {
     name: stratName || 'STRATEGY',
     core: stratName === 'BREAKOUT_TREND'
-      ? 'Breakout ' + (breakout.breakout_window ?? 55) + ' | confirm=' + (breakout.entry_confirm_mode ?? 'none')
-      : 'Fast ' + (trend.fast_ma ?? '-') + ' | Slow ' + (trend.slow_ma ?? '-'),
+      ? 'BreakoutWindow=' + (breakout.breakout_window ?? 55) + ' | confirm=' + (breakout.entry_confirm_mode ?? 'none')
+      : 'Fast=' + (trend.fast_ma ?? '-') + ' | Slow=' + (trend.slow_ma ?? '-'),
     portfolioMode: cfg?.position_risk?.portfolio_mode ?? 'equal_10',
-    extra: 'max_positions=' + (cfg?.position_risk?.max_positions ?? '-') + ' | portfolio=' + (cfg?.position_risk?.portfolio_mode ?? 'equal_10'),
+    extra: 'MaxPositions=' + (cfg?.position_risk?.max_positions ?? '-') + ' | portfolio=' + (cfg?.position_risk?.portfolio_mode ?? 'equal_10'),
   };
 }
 
 function renderSummaryBar() {
-  if (window.resultsWorkbenchBridge?.isMounted?.()) {
-    if (typeof publishResultsWorkbenchSnapshot === 'function') publishResultsWorkbenchSnapshot();
-    return;
-  }
-  if (typeof window.isDesktopFallbackModeEnabled === 'function' && !window.isDesktopFallbackModeEnabled()) {
-    return;
-  }
   const row = state.active_result || {};
   const art = state.active_artifacts || {};
   const cfg = resolveSummaryConfig();
@@ -1344,18 +614,18 @@ function renderSummaryBar() {
   const rawCount = rmUni.raw_count;
   const tradableCount = rmUni.tradable_symbols ?? rmUni.after_filters_symbols;
   const symbolsText = Number.isFinite(Number(rawCount))
-    ? (Number.isFinite(Number(tradableCount)) ? `${fmtInt(rawCount)} → ${fmtInt(tradableCount)}` : fmtInt(rawCount))
+    ? (Number.isFinite(Number(tradableCount)) ? `${fmtInt(rawCount)} -> ${fmtInt(tradableCount)}` : fmtInt(rawCount))
     : (Array.isArray(u.symbols) ? fmtInt(u.symbols.length) : '-');
   const strategyInfo = runtimeStrategyOverview(cfg, art);
-  const configSource = rm?.candidate?.candidate_name
+  const inputSource = rm?.candidate?.candidate_name
     || rm?.report_consistency?.config_source
-    || state.loaded_config_meta?.display_name
-    || state.config_source_mode
-    || '草稿';
+    || state.loaded_source_meta?.display_name
+    || state.loaded_source_sync_mode
+    || 'Current Draft';
 
   setTextById('wbOverviewExpId', row.exp_id || '-');
-  setTextById('wbOverviewStatus', row.exp_id ? (row.status || '-') : '等待运行');
-  setTextById('wbOverviewConfigSource', String(configSource || '-'));
+  setTextById('wbOverviewStatus', row.exp_id ? (row.status || '-') : 'Not loaded');
+  setTextById('wbOverviewConfigSource', String(inputSource || '-'));
   setTextById('wbSummaryUniverse', `${start} ~ ${end}`);
   setTextById('wbOverviewBenchmark', benchmark);
   setTextById('wbOverviewUniverseMode', universeMode);
@@ -1441,7 +711,7 @@ function applyConfigToUI(cfg) {
   _set('wbMomentumTopPct', sgCfg.ranking?.momentum_top_pct ?? 0);
   const scoreSourceModeEl = byId('wbScoreSourceMode');
   if (scoreSourceModeEl) {
-    cleanupUnsupportedOptions(scoreSourceModeEl);
+    cleanupUnsupportedOptionsCompat(scoreSourceModeEl);
     const scoreSourceMode = sgCfg.ranking?.score_source_mode;
     if (scoreSourceMode && !Array.from(scoreSourceModeEl.options).some((option) => option.value === scoreSourceMode)) {
       const option = document.createElement('option');
@@ -1514,7 +784,7 @@ function applyConfigToUI(cfg) {
   if (hasMultiAlphaIntent) {
     _set('wbPortfolioMode', MULTI_ALPHA_PORTFOLIO_MODE);
   } else {
-    setSelectValuePreserveUnsupported('wbPortfolioMode', pr.portfolio_mode ?? 'equal_10', 'equal_10');
+    setSelectValuePreserveUnsupportedCompat('wbPortfolioMode', pr.portfolio_mode ?? 'equal_10', 'equal_10');
   }
 
   const rb = pr.risk_budget || {};
@@ -1583,9 +853,9 @@ function applyConfigToUI(cfg) {
     _set('wbSameSymbolPolicy', MULTI_ALPHA_SAME_SYMBOL_POLICY);
     _set('wbHoldingOwnership', MULTI_ALPHA_HOLDING_OWNERSHIP);
   } else {
-    setSelectValuePreserveUnsupported('wbComposeMode', cfg?.signal_composition?.compose_mode ?? MULTI_ALPHA_COMPOSE_MODE, MULTI_ALPHA_COMPOSE_MODE);
-    setSelectValuePreserveUnsupported('wbSameSymbolPolicy', cfg?.signal_composition?.same_symbol_policy ?? MULTI_ALPHA_SAME_SYMBOL_POLICY, MULTI_ALPHA_SAME_SYMBOL_POLICY);
-    setSelectValuePreserveUnsupported('wbHoldingOwnership', cfg?.signal_composition?.holding_ownership ?? MULTI_ALPHA_HOLDING_OWNERSHIP, MULTI_ALPHA_HOLDING_OWNERSHIP);
+    setSelectValuePreserveUnsupportedCompat('wbComposeMode', cfg?.signal_composition?.compose_mode ?? MULTI_ALPHA_COMPOSE_MODE, MULTI_ALPHA_COMPOSE_MODE);
+    setSelectValuePreserveUnsupportedCompat('wbSameSymbolPolicy', cfg?.signal_composition?.same_symbol_policy ?? MULTI_ALPHA_SAME_SYMBOL_POLICY, MULTI_ALPHA_SAME_SYMBOL_POLICY);
+    setSelectValuePreserveUnsupportedCompat('wbHoldingOwnership', cfg?.signal_composition?.holding_ownership ?? MULTI_ALPHA_HOLDING_OWNERSHIP, MULTI_ALPHA_HOLDING_OWNERSHIP);
   }
 
   const composeRows = hasMultiAlphaIntent ? ensurePhase1ComposeRows(mergeComposeRowsFromConfig(cfg)) : defaultComposeRows();
@@ -1621,7 +891,7 @@ function switchInspectorTab(tab) {
 }
 
 
-/* ── Risk & Exit Enhancement Functions ── */
+/* Risk & Exit enhancement functions */
 
 function syncExitLinkage() {
   const trailCb = byId('wbExitTrail');
@@ -1646,9 +916,9 @@ function updateAtrNote() {
   if (!el) return;
   const priceAdj = byId('wbPriceAdj');
   const matchPrice = byId('wbMatchPrice');
-  const adjLabel = priceAdj ? (priceAdj.options[priceAdj.selectedIndex]?.text || priceAdj.value) : '前复权';
-  const matchLabel = matchPrice ? (matchPrice.options[matchPrice.selectedIndex]?.text || matchPrice.value) : '次日开盘';
-  el.textContent = `ATR 窗口: 14日 · 价格口径: ${adjLabel} · 触发价: ${matchLabel}`;
+  const adjLabel = priceAdj ? (priceAdj.options[priceAdj.selectedIndex]?.text || priceAdj.value) : 'Forward Adjusted';
+  const matchLabel = matchPrice ? (matchPrice.options[matchPrice.selectedIndex]?.text || matchPrice.value) : 'Next Open';
+  el.textContent = `ATR Window: 14D | Price Adj: ${adjLabel} | Match Price: ${matchLabel}`;
 }
 
 function populateExitStats(counters) {
@@ -1659,7 +929,7 @@ function populateExitStats(counters) {
     const el = container.querySelector(`[data-key="${k}"]`);
     if (el) {
       const v = counters[k];
-      el.textContent = v != null && Number.isFinite(Number(v)) ? num(v, 0) : '—';
+      el.textContent = v != null && Number.isFinite(Number(v)) ? num(v, 0) : '-';
     }
   });
 }
@@ -1680,7 +950,7 @@ function populateConstraintStats(counters, config) {
   };
   Object.entries(vals).forEach(([k, v]) => {
     const el = container.querySelector(`[data-key="${k}"]`);
-    if (el) el.textContent = Number.isFinite(Number(v)) ? num(v, k === 'avg_positions' || k === 'slots_left' ? 1 : 0) : '—';
+    if (el) el.textContent = Number.isFinite(Number(v)) ? num(v, k === 'avg_positions' || k === 'slots_left' ? 1 : 0) : '-';
   });
 }
 
@@ -1695,7 +965,8 @@ function populateMarketStateStats(counters) {
     const el = container.querySelector(`[data-key="${k}"]`);
     if (el) {
       const v = counters[k];
-      el.textContent = v != null && Number.isFinite(Number(v)) ? num(v, 0) : '—';
+      el.textContent = v != null && Number.isFinite(Number(v)) ? num(v, 0) : '-';
     }
   });
 }
+

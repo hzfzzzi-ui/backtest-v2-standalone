@@ -7,6 +7,7 @@ import pandas as pd
 
 from backend.api.backtest_v2 import impl as backtest_impl
 from backend.api.backtest_v2 import configs_impl as _config_store
+from backend.api.backtest_v2 import builtin_config_library as _builtin_configs
 from backend.core.tools import saved_config_access
 from backend.core.tools.saved_config_access import create_saved_config_record, load_saved_config_record
 
@@ -104,12 +105,12 @@ def test_builtin_config_metadata_refreshes_even_when_hash_is_unchanged(
 ) -> None:
     configs_root = tmp_path / "configs"
     configs_root.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(_config_store, "_configs_root", lambda: configs_root)
+    monkeypatch.setattr(_builtin_configs, "_configs_root", lambda: configs_root)
     monkeypatch.setattr(saved_config_access, "configs_root", lambda: configs_root)
 
     stale = create_saved_config_record(
-        _config_store._br35_atr10_csi800_10y_config_json(),
-        config_id=_config_store._BR35_ATR10_CSI800_10Y_CONFIG_ID,
+        _builtin_configs._br35_atr10_csi800_10y_config_json(),
+        config_id=_builtin_configs._BR35_ATR10_CSI800_10Y_CONFIG_ID,
         name="BR35+ATR1.0+CSI800+10Y",
         display_name="BR35+ATR1.0+CSI800+10Y",
         tags=["builtin", "candidate", "breakout35", "atr10", "csi800", "10y"],
@@ -117,14 +118,14 @@ def test_builtin_config_metadata_refreshes_even_when_hash_is_unchanged(
         owner="builtin",
         locked=True,
     )
-    configs_root.joinpath(f"{_config_store._BR35_ATR10_CSI800_10Y_CONFIG_ID}.json").write_text(
+    configs_root.joinpath(f"{_builtin_configs._BR35_ATR10_CSI800_10Y_CONFIG_ID}.json").write_text(
         json.dumps(stale, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
-    _config_store._ensure_builtin_champion_configs()
+    _builtin_configs._ensure_builtin_champion_configs()
 
-    refreshed = load_saved_config_record(_config_store._BR35_ATR10_CSI800_10Y_CONFIG_ID)
+    refreshed = load_saved_config_record(_builtin_configs._BR35_ATR10_CSI800_10Y_CONFIG_ID)
     assert refreshed is not None
     assert refreshed.get("display_name") == "BR35+ATR1.0+HS300+ZZ500+10Y (PIT)"
     assert "hs300_zz500" in list(refreshed.get("tags") or [])
@@ -183,6 +184,7 @@ def test_run_meta_report_consistency_includes_resolved_config_details(tmp_path: 
     assert consistency.get("resolved_config_hash") == "abc123"
     assert (consistency.get("resolved_config_meta") or {}).get("display_name") == "BR35+ATR1.0+HS300+ZZ500+10Y"
     assert (consistency.get("resolved_config_meta") or {}).get("universe_mode") == "HS300_ZZ500"
+    assert "fallbacks" not in consistency
 
 
 def test_stage_summary_artifact_is_written_and_indexed(tmp_path: Path) -> None:

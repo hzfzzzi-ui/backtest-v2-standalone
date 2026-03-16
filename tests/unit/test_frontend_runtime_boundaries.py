@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -15,25 +15,60 @@ def test_desktop_page_shell_owns_surface_fetch_and_snapshot_bridge() -> None:
     assert "/surface/${encodeURIComponent(normalizedSection)}" in source
     assert "mergeDesktopSurfaceIntoSnapshot" in source
     assert "mergeDesktopSurfaceSectionIntoSnapshot" in source
+    assert "setDesktopFallbackMode" not in source
+    assert "readDesktopFallback" not in source
+
+
+def test_desktop_results_have_single_vue_owner_without_fallback_dom() -> None:
+    index_source = _read_repo_file("frontend", "index.html")
+    page_shell_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-research-page.js")
+    controller_source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
+    artifacts_source = _read_repo_file("frontend", "assets", "js", "artifacts.js")
+    vue_shell_source = _read_repo_file("frontend", "app", "results-workbench", "main.js")
+    assert 'id="wbResultsWorkbenchMount"' in index_source
+    assert 'id="wbResultsFallbackRoot"' not in index_source
+    assert "assets/js/report.js" not in index_source
+    assert "setDesktopFallbackMode" not in page_shell_source
+    assert "isDesktopFallbackModeEnabled" not in controller_source
+    assert "wbResultsFallbackRoot" not in controller_source
+    assert "Fallback only" not in artifacts_source
+    assert "bridge.setMounted(true)" in vue_shell_source
+    assert "bridge.setMounted(false)" in vue_shell_source
+    assert "setDesktopFallbackMode" not in vue_shell_source
+
+
+def test_desktop_main_path_uses_canonical_surface_and_sections_only() -> None:
+    controller_source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
+    artifacts_source = _read_repo_file("frontend", "assets", "js", "artifacts.js")
+    load_controls_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-load-controls.js")
+    assert "/artifacts/read" not in controller_source
+    assert "/artifacts/read" not in artifacts_source
+    assert "/artifacts/read" not in load_controls_source
+    assert "/surface/${encodeURIComponent(normalizedSection)}" in artifacts_source
+    assert "requiredSections = ['nav', 'stage_funnel', 'run_meta', 'config', 'reason_codes']" in artifacts_source
+    assert "optionalSections = ['trades', 'daily', 'symbol_stats', 'stock_names']" in artifacts_source
+    assert "ensureDesktopExperimentSurfaceSection(state, normalizedExpId, 'config')" in load_controls_source
 
 
 def test_legacy_desktop_controller_delegates_to_page_shell_helpers() -> None:
     source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
     load_controls = _read_repo_file("frontend", "assets", "js", "pages", "desktop-load-controls.js")
     assert "window.getDesktopResultsWorkbenchBridge" in source
-    assert "window.isDesktopFallbackModeEnabled" in source
-    assert "window.readDesktopFallbackOpenPanels" in source
     assert "window.buildDesktopResultsWorkbenchSnapshot" in source
     assert "window.publishDesktopResultsWorkbenchSnapshot" in source
     assert "window.clearDesktopResultsWorkbenchState" in load_controls
+    assert "window.isDesktopFallbackModeEnabled" not in source
+    assert "window.readDesktopFallbackOpenPanels" not in source
+    assert "generateReport(" not in source
+    assert "copyAgentMarkdownReport(" not in source
 
 
-def test_artifact_renderers_request_lazy_surface_sections_via_bridge() -> None:
+def test_artifact_renderers_publish_canonical_lazy_sections() -> None:
     source = _read_repo_file("frontend", "assets", "js", "artifacts.js")
-    assert "lazySections: ['nav', 'symbol_stats', 'stage_funnel']" in source
-    assert "lazySections: ['symbol_stats']" in source
-    assert "lazySections: ['nav']" in source
-    assert "lazySections: ['stage_funnel']" in source
+    assert "lazySections: ['nav', 'symbol_stats', 'stage_funnel', 'run_meta', 'config', 'trades', 'daily', 'reason_codes', 'stock_names']" in source
+    assert "publishResultsWorkbenchSnapshot({ lazySections: ['symbol_stats', 'stock_names'] });" in source
+    assert "publishResultsWorkbenchSnapshot({ lazySections: ['trades'] });" in source
+    assert "publishResultsWorkbenchSnapshot({ lazySections: ['stage_funnel', 'run_meta', 'reason_codes', 'daily'] });" in source
 
 
 def test_stage_funnel_workbench_accepts_surface_funnel_rows() -> None:
@@ -50,38 +85,15 @@ def test_optional_market_series_requests_are_silent_on_backend_outage() -> None:
     assert "if (suppressStatusOnError) _clearApiStatus(key);" in api_client_source
 
 
-def test_fallback_root_is_hidden_by_default_and_only_enabled_explicitly() -> None:
+def test_frontend_exposes_market_data_sync_status_surface() -> None:
     index_source = _read_repo_file("frontend", "index.html")
-    page_shell_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-research-page.js")
-    vue_shell_source = _read_repo_file("frontend", "app", "results-workbench", "main.js")
-    bundle_source = _read_repo_file("frontend", "assets", "dist", "results-workbench-vue-shell.js")
-    assert 'id="wbResultsFallbackRoot"' in index_source
-    assert "hidden" in index_source
-    assert "inert" in index_source
-    assert 'data-fallback-mode="disabled"' in index_source
-    assert "function readDesktopFallbackQueryFlag()" in page_shell_source
-    assert "function setDesktopFallbackMode(enabled, reason = '')" in page_shell_source
-    assert "window.setDesktopFallbackMode?.(false, 'vue-mounted')" in vue_shell_source
-    assert "window.setDesktopFallbackMode?.(true, 'vue-mount-failed')" in vue_shell_source
-    assert (
-        'window.setDesktopFallbackMode?.(false,"vue-mounted")' in bundle_source
-        or 'window.setDesktopFallbackMode?.(!1,"vue-mounted")' in bundle_source
-    )
-    assert (
-        'window.setDesktopFallbackMode?.(true,"vue-mount-failed")' in bundle_source
-        or 'window.setDesktopFallbackMode?.(!0,"vue-mount-failed")' in bundle_source
-    )
-
-
-def test_legacy_result_renderers_only_touch_fallback_dom_in_explicit_fallback_mode() -> None:
+    api_client_source = _read_repo_file("frontend", "assets", "js", "api-client.js")
     controller_source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
-    ui_controls_source = _read_repo_file("frontend", "assets", "js", "ui-controls.js")
-    artifacts_source = _read_repo_file("frontend", "assets", "js", "artifacts.js")
-    assert "if (!isResultsFallbackModeEnabled()) return;" in controller_source
-    assert "bindDesktopFallbackAccordions()" in controller_source
-    assert "resetDesktopFallbackAccordions()" in controller_source
-    assert "window.isDesktopFallbackModeEnabled" in ui_controls_source
-    assert "window.isDesktopFallbackModeEnabled" in artifacts_source
+    assert 'id="wbDataSyncHint"' in index_source
+    assert 'id="wbMarketDataSyncStatus"' in index_source
+    assert "apiRequestJson('market_data_sync_status', '/api/backtest_v2/market_data/sync_status')" in api_client_source
+    assert "renderMarketDataSyncStatus" in api_client_source
+    assert "refreshMarketDataSyncStatus" in controller_source
 
 
 def test_config_center_controls_are_extracted_from_ui_controls() -> None:
@@ -99,6 +111,97 @@ def test_config_center_controls_are_extracted_from_ui_controls() -> None:
     assert "function copyConfigJson()" not in ui_controls_source
 
 
+def test_config_draft_core_is_extracted_from_ui_controls() -> None:
+    index_source = _read_repo_file("frontend", "index.html")
+    core_source = _read_repo_file("frontend", "assets", "js", "state", "config-draft-core.js")
+    ui_controls_source = _read_repo_file("frontend", "assets", "js", "ui-controls.js")
+    assert "assets/js/state/config-draft-core.js" in index_source
+    assert "function validateConfigDraftCore(draft)" in core_source
+    assert "function buildConfigDraftCore()" in core_source
+    assert "globalScope.configDraftCore = Object.freeze" in core_source
+    assert "configDraftCore.validateConfigDraft" in ui_controls_source
+    assert "configDraftCore.buildConfigDraft" in ui_controls_source
+    assert "const loadedBase = cloneJson(state.loaded_config_json) || {};" not in ui_controls_source
+
+
+def test_frontend_source_truth_is_not_driven_by_state_config_id() -> None:
+    controller_source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
+    workbench_state_source = _read_repo_file("frontend", "assets", "js", "state", "workbench-state.js")
+    load_controls_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-load-controls.js")
+    save_controls_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-save-controls.js")
+    assert "state.config_id" not in controller_source
+    assert "config_id: null" not in workbench_state_source
+    assert "state.config_id" not in load_controls_source
+    assert "state.config_id" not in save_controls_source
+
+
+def test_frontend_loaded_source_state_uses_runtime_friendly_names() -> None:
+    controller_source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
+    ui_controls_source = _read_repo_file("frontend", "assets", "js", "ui-controls.js")
+    workbench_state_source = _read_repo_file("frontend", "assets", "js", "state", "workbench-state.js")
+    active_experiment_state_source = _read_repo_file("frontend", "assets", "js", "state", "active-experiment-state.js")
+    assert "loaded_config_meta" not in controller_source
+    assert "loaded_config_snapshot" not in controller_source
+    assert "config_source_mode" not in controller_source
+    assert "currentLoadedSourceMode" in controller_source
+    assert "currentRuntimeSourceRef" in controller_source
+    assert "rememberRuntimeSource" in controller_source
+    assert "syncLoadedSourceUI" in controller_source
+    assert "input_source_meta" not in ui_controls_source
+    assert "currentLoadedSourceMode" in ui_controls_source
+    assert "syncLoadedSourceUI" in ui_controls_source
+    assert "loaded_source_meta" in workbench_state_source
+    assert "loaded_source_asset_context" in workbench_state_source
+    assert "loaded_source_config" in workbench_state_source
+    assert "loaded_source_snapshot" in workbench_state_source
+    assert "active_manifest" in active_experiment_state_source
+    assert "active_surface_summary" in active_experiment_state_source
+    assert "active_asset_context" in active_experiment_state_source
+    assert "runtime_source_kind" in active_experiment_state_source
+    assert "runtime_source_id" in active_experiment_state_source
+    assert "loaded_source_kind" in active_experiment_state_source
+    assert "loaded_source_id" in active_experiment_state_source
+
+
+def test_runtime_snapshot_source_is_preferred_over_loaded_source_metadata() -> None:
+    controller_source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
+    page_shell_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-research-page.js")
+    history_panel_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-history-panel.js")
+    load_controls_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-load-controls.js")
+    artifacts_source = _read_repo_file("frontend", "assets", "js", "artifacts.js")
+    assert "currentRuntimeSourceRef" in controller_source
+    assert "runtime_source_kind" in page_shell_source
+    assert "runtime_source_id" in page_shell_source
+    assert "assetContext" in page_shell_source
+    assert "manifest: cloneJson(state.active_manifest) || null" in page_shell_source
+    assert "rememberRuntimeSource('experiment', expId, manifest, state.active_asset_context)" in history_panel_source
+    assert "clearRuntimeSource" in load_controls_source
+    assert "state.active_surface_summary" in artifacts_source
+    assert "state.active_asset_context" in artifacts_source
+    assert "rememberRuntimeSource('experiment', expId, state.active_manifest, state.active_asset_context)" in artifacts_source
+    assert "state.loaded_source_meta =" not in artifacts_source
+    assert "rememberLoadedSource" not in artifacts_source
+
+
+def test_frontend_runtime_payloads_and_snapshot_include_asset_scope_context() -> None:
+    config_core_source = _read_repo_file("frontend", "assets", "js", "state", "config-draft-core.js")
+    run_controls_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-run-controls.js")
+    bridge_source = _read_repo_file("frontend", "app", "results-workbench", "composables", "useResultsWorkbenchBridge.js")
+    controller_source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
+    assert "asset_scope:" in config_core_source
+    assert "asset_scope: assetScope" in run_controls_source
+    assert "asset_scope: String(state.config_draft?.asset_scope || 'cn_a_equity').trim() || 'cn_a_equity'" in run_controls_source
+    assert "assetContext: {}" in bridge_source
+    assert "normalizeAssetContext" in controller_source
+    assert "assetContextFromPayload" in controller_source
+
+
+def test_frontend_industry_picker_uses_api_client_instead_of_raw_fetch() -> None:
+    ui_controls_source = _read_repo_file("frontend", "assets", "js", "ui-controls.js")
+    assert "fetch('/api/backtest_v2/industries')" not in ui_controls_source
+    assert "apiRequestJson('industries', '/api/backtest_v2/industries'" in ui_controls_source
+
+
 def test_history_panel_controls_are_extracted_from_backtest_controller() -> None:
     index_source = _read_repo_file("frontend", "index.html")
     history_panel_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-history-panel.js")
@@ -110,9 +213,6 @@ def test_history_panel_controls_are_extracted_from_backtest_controller() -> None
     assert "async function loadExperimentList()" not in controller_source
     assert "function renderHistoryPanel(experiments)" not in controller_source
     assert "async function loadHistoricalExperiment(expId)" not in controller_source
-    assert "_legacyLoadExperimentListMovedToDesktopHistoryPanel" not in controller_source
-    assert "_legacyRenderHistoryPanelMovedToDesktopHistoryPanel" not in controller_source
-    assert "_legacyLoadHistoricalExperimentMovedToDesktopHistoryPanel" not in controller_source
 
 
 def test_load_controls_are_extracted_from_backtest_controller() -> None:
@@ -128,9 +228,14 @@ def test_load_controls_are_extracted_from_backtest_controller() -> None:
     assert "function applyLoadedConfigToWorkbench(workbenchConfig, meta)" not in controller_source
     assert "async function loadBaselineToWorkbench(baselineId)" not in controller_source
     assert "async function loadExperimentBundle(expId)" not in controller_source
-    assert "_legacyOpenExperimentLoadDropdownMovedToDesktopLoadControls" not in controller_source
-    assert "_legacyApplyLoadedConfigToWorkbenchMovedToDesktopLoadControls" not in controller_source
-    assert "_legacyLoadExperimentBundleMovedToDesktopLoadControls" not in controller_source
+
+
+def test_load_controls_reuse_initial_experiment_payload_when_building_dropdown() -> None:
+    load_controls_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-load-controls.js")
+    assert "const experimentItems = Array.isArray(experimentPayload?.items)" in load_controls_source
+    assert "normalizeLoadItems(baselinePayload?.items || [], experimentItems)" in load_controls_source
+    assert "{ experiments: experimentItems }" in load_controls_source
+    assert "function buildExperimentMetricMap(experiments)" in load_controls_source
 
 
 def test_run_controls_are_extracted_from_ui_controls() -> None:
@@ -146,10 +251,8 @@ def test_run_controls_are_extracted_from_ui_controls() -> None:
     assert "async function runExperiment(presetOverride = null)" not in ui_controls_source
     assert "async function previewExecution()" not in ui_controls_source
     assert "async function runByMode()" not in ui_controls_source
-    assert "_legacyPollJobMovedToDesktopRunControls" not in ui_controls_source
-    assert "_legacyRunExperimentMovedToDesktopRunControls" not in ui_controls_source
-    assert "_legacyPreviewExecutionMovedToDesktopRunControls" not in ui_controls_source
-    assert "_legacyRunByModeMovedToDesktopRunControls" not in ui_controls_source
+    assert "function setRunStatusText(text)" in run_controls_source
+    assert "const dimsEl = byId('wbDims');" in run_controls_source
 
 
 def test_save_controls_are_extracted_from_backtest_controller() -> None:
@@ -161,17 +264,6 @@ def test_save_controls_are_extracted_from_backtest_controller() -> None:
     assert "async function saveCurrentBaseline()" in save_controls_source
     assert "async function saveConfig(kind = 'draft')" not in controller_source
     assert "async function saveCurrentBaseline()" not in controller_source
-    assert "_legacySaveConfigMovedToDesktopSaveControls" not in controller_source
-    assert "_legacySaveCurrentBaselineMovedToDesktopSaveControls" not in controller_source
-
-
-def test_config_legacy_wrappers_are_removed_from_ui_controls() -> None:
-    ui_controls_source = _read_repo_file("frontend", "assets", "js", "ui-controls.js")
-    assert "_legacyLoadConfigMovedToDesktopConfigControls" not in ui_controls_source
-    assert "_legacyLoadConfigListMovedToDesktopConfigControls" not in ui_controls_source
-    assert "_legacyOpenConfigCenterDropdownMovedToDesktopConfigControls" not in ui_controls_source
-    assert "_legacyCopyConfigJsonMovedToDesktopConfigControls" not in ui_controls_source
-    assert "_legacyPasteConfigJsonMovedToDesktopConfigControls" not in ui_controls_source
 
 
 def test_frontend_config_load_legacy_params_are_removed() -> None:
@@ -182,4 +274,3 @@ def test_frontend_config_load_legacy_params_are_removed() -> None:
     assert "legacy_config_id" not in controller_source
     assert "legacy_config_id" not in load_controls_source
     assert "legacy_config_id" not in save_controls_source
-

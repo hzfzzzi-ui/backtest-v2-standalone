@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pandas as pd
 
 from backend.core.tools.experiment_runner import _project_daily_csv_schema
@@ -34,6 +35,19 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
                     "after_held_filter_count": 3,
                     "after_slot_filter_count": 2,
                     "after_cash_lot_count": 2,
+                    "diagnostics_input_json": json.dumps(
+                        {
+                            "route_id": "strict_inline_runtime",
+                            "candidates_count": 3,
+                            "selected_count": 2,
+                            "raw_buy_signal_count": 3,
+                            "raw_buy_candidate_count": 3,
+                            "raw_after_held_filter_count": 3,
+                            "raw_after_slot_filter_count": 2,
+                            "raw_after_cash_lot_count": 2,
+                        },
+                        ensure_ascii=False,
+                    ),
                     "positions_before_sell": 1,
                     "sells_executed_count": 0,
                     "positions_after_sell": 1,
@@ -82,3 +96,4 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
     assert row["after_slot_filter_count"] == 2
     assert row["after_cash_lot_count"] == 2
     assert row["candidates_after_held_filter_count"] == 3
+    assert json.loads(row["diagnostics_input_json"])["raw_after_slot_filter_count"] == 2

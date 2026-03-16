@@ -1,0 +1,61 @@
+study_id: v10/regime_source_minimal_r1
+title: V10 Regime Source Minimal R1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10
+hypothesis: 在不改动核心 breakout 信号口径的前提下，替换 regime 来源有机会改善市场环境过滤的稳健性，并降低单一 benchmark regime 的依赖。
+change_scope:
+  modules_modified:
+    - universe.benchmark
+    - benchmark_regime.enabled
+    - position_risk.breadth
+variants:
+  - name: B0_HS300
+  - name: R_CSI800_BENCH
+    config_patches:
+      - path: universe.benchmark
+        value: 000906.SH
+  - name: R_BREADTH_REGIME
+    config_patches:
+      - path: benchmark_regime.enabled
+        value: false
+      - path: position_risk.breadth
+        value:
+          enabled: true
+          mode: dynamic_maxpos
+          score_type: B
+          mapping_mode: smooth
+          min_positions: 0
+          max_positions: 10
+          step_high: 0.60
+          step_mid: 0.45
+          smooth_lo: 0.40
+          smooth_range: 0.20
+          ema_fast: 8
+          ema_slow: 25
+          gate_threshold: 0.45
+          gate_quantile_window: 252
+          gate_quantile_pct: 0.20
+          gate_persist_days: 3
+          size_scale_floor: 0.30
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-03-01"
+    end: "2026-03-01"
+    periods:
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2019_2021_bull: ["2019-01-02", "2021-02-18"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2022_2024_weak: ["2022-11-01", "2024-02-05"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+hard_gates:
+  min_cagr: 0.1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: outputs/baselines/baseline_V10/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

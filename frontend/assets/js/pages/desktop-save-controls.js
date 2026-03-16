@@ -21,13 +21,13 @@
       body.display_name = body.name;
       body.tags = ['flow_script'];
     }
-    const j = await apiRequestJson('configs_save', '/api/backtest_v2/configs', {
+    const payload = await apiRequestJson('configs_save', '/api/backtest_v2/configs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    rememberLoadedConfig(j, stableSerializeConfig(cfg), cfg);
-    addLog(`配置已保存(${kind}): ${j.config_id}`);
+    rememberLoadedSource(payload, stableSerializeConfig(cfg), cfg);
+    addLog(`配置已保存(${kind}): ${payload.config_id}`);
     await loadConfigList();
   }
 
@@ -36,11 +36,13 @@
     const suggestedName = String(
       state.loaded_source_kind === 'baseline'
         ? (state.loaded_source_id || DEFAULT_BOOTSTRAP_BASELINE_ID)
-        : (state.loaded_config_meta?.display_name || DEFAULT_BOOTSTRAP_BASELINE_ID)
+        : (state.loaded_source_meta?.display_name || DEFAULT_BOOTSTRAP_BASELINE_ID)
     ).trim() || DEFAULT_BOOTSTRAP_BASELINE_ID;
     const baselineName = String(window.prompt('请输入基线名称', suggestedName) || '').trim();
     if (!baselineName) return;
-    const linkedExpId = currentConfigSourceMode() === 'loaded-clean' ? String(state.active_result?.exp_id || '').trim() : '';
+    const linkedExpId = currentLoadedSourceMode() === 'loaded-clean'
+      ? String(state.active_result?.exp_id || '').trim()
+      : '';
     const payload = await apiRequestJson('baseline_save', '/api/backtest_v2/baselines', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -56,8 +58,9 @@
     });
     state.loaded_source_kind = 'baseline';
     state.loaded_source_id = String(payload?.baseline_id || baselineName).trim();
-    state.loaded_config_meta = {
-      config_id: state.loaded_source_id,
+    state.loaded_source_meta = {
+      source_id: state.loaded_source_id,
+      config_ref: state.loaded_source_id,
       display_name: String(payload?.display_name || payload?.name || state.loaded_source_id),
       name: String(payload?.name || payload?.display_name || state.loaded_source_id),
       source_type: 'baseline',
@@ -67,12 +70,11 @@
       universe_mode: currentDraft?.universe_mode || null,
       membership_mode: currentDraft?.universe?.membership_mode || null,
     };
-    state.loaded_config_json = cloneJson(currentDraft);
-    state.loaded_config_snapshot = stableSerializeConfig(state.config_draft || currentDraft || {});
-    state.config_id = state.loaded_source_id;
-    syncWorkbenchConfigSourceToUrl(state.loaded_source_kind, state.loaded_source_id);
+    state.loaded_source_config = cloneJson(currentDraft);
+    state.loaded_source_snapshot = stableSerializeConfig(state.config_draft || currentDraft || {});
+    syncWorkbenchLoadedSourceToUrl(state.loaded_source_kind, state.loaded_source_id);
     syncLoadHint(state.loaded_source_id);
-    syncConfigSourceUI();
+    syncLoadedSourceUI();
     addLog(`基线已保存：${state.loaded_source_id}${linkedExpId ? ` | 关联实验=${linkedExpId}` : ' | 无关联结果'}`);
   }
 

@@ -152,18 +152,14 @@ def _set_nested_value(obj: dict[str, Any], path: tuple[Any, ...], value: Any) ->
 
 
 def _build_static_t1_guard() -> dict[str, Any]:
-    sim_path = _repo_root() / "backend" / "core" / "engine_vector" / "portfolio_simulator_strict.py"
-    sim_impl_path = _repo_root() / "backend" / "core" / "engine_vector" / "strict_runtime_impl.py"
+    sim_path = _repo_root() / "backend" / "core" / "engine_vector" / "strict_runtime_breakout.py"
     provider_path = _repo_root() / "backend" / "core" / "engine_vector" / "breakout_signal_provider.py"
     sim_text = sim_path.read_text(encoding="utf-8")
     sim_guard_path = sim_path
     required_sim_patterns = (
-        "provider.day_signals(day, i, ctx)",
+        "ds = provider.day_signals(day, i, ctx)",
         "pending[next_day] = [",
     )
-    if any(pattern not in sim_text for pattern in required_sim_patterns) and sim_impl_path.exists():
-        sim_text = sim_impl_path.read_text(encoding="utf-8")
-        sim_guard_path = sim_impl_path
     provider_text = provider_path.read_text(encoding="utf-8")
 
     missing_sim = [pattern for pattern in required_sim_patterns if pattern not in sim_text]
@@ -181,8 +177,8 @@ def _build_static_t1_guard() -> dict[str, Any]:
 
     return sanitize_json(
         {
-            "provider_signal_ref": f"{sim_guard_path}:1564",
-            "next_day_queue_ref": f"{sim_guard_path}:1657",
+            "provider_signal_ref": f"{sim_guard_path}:469",
+            "next_day_queue_ref": f"{sim_guard_path}:595",
             "provider_regime_ref": f"{provider_path}:176",
             "audit_mode": "static_code_contract",
             "t1_execution_confirmed": True,

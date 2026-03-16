@@ -15,13 +15,12 @@ ARTIFACT_FILENAMES: dict[str, str] = {
     "orders": "orders.csv",
     "daily": "portfolio_daily.csv",
     "candidate_signals": "candidate_signals.csv",
+    "cash_blocked_buys_recent": "cash_blocked_buys_recent.csv",
     "alpha_funnel": "alpha_funnel.csv",
     "score_diagnostics": "score_diagnostics.csv",
     "symbol_performance": "symbol_performance.csv",
     "stage_summary": "stage_summary.json",
 }
-
-ARTIFACT_HISTORICAL_ALIASES: dict[str, tuple[str, ...]] = {}
 
 COUNTER_CANONICAL_FIELDS: tuple[str, ...] = (
     "raw_signal",
@@ -29,16 +28,6 @@ COUNTER_CANONICAL_FIELDS: tuple[str, ...] = (
     "orders",
     "skipped",
     "closed_trades",
-)
-
-COUNTER_HISTORICAL_ALIASES: dict[str, tuple[str, ...]] = {}
-
-_COUNTER_DEPRECATED_FIELDS: tuple[str, ...] = (
-    "raw_signal_count",
-    "blocked_count",
-    "orders_count",
-    "skipped_count",
-    "closed_trades_count",
 )
 
 MISSING_FIELD_KEYS: dict[str, str] = {
@@ -50,26 +39,10 @@ MISSING_FIELD_KEYS: dict[str, str] = {
 }
 
 
-def candidate_artifact_names(key: str) -> list[str]:
-    canonical = str(ARTIFACT_FILENAMES.get(key, "") or "").strip()
-    names: list[str] = []
-    if canonical:
-        names.append(canonical)
-    for alias in ARTIFACT_HISTORICAL_ALIASES.get(key, ()):
-        alias_name = str(alias or "").strip()
-        if alias_name and alias_name not in names:
-            names.append(alias_name)
-    return names
-
-
 def resolve_artifact_path(root: Path, key: str, preferred_rel: str | None = None) -> Path:
     """Resolve an artifact path using the canonical filename contract."""
     if preferred_rel:
         p = (root / str(preferred_rel)).resolve()
-        if p.exists():
-            return p
-    for candidate in candidate_artifact_names(key):
-        p = (root / candidate).resolve()
         if p.exists():
             return p
     canonical = str(ARTIFACT_FILENAMES.get(key, "") or "").strip()
@@ -79,9 +52,7 @@ def resolve_artifact_path(root: Path, key: str, preferred_rel: str | None = None
 def normalize_counters(raw: dict[str, Any] | None) -> tuple[dict[str, Any], int]:
     """Return counters using the canonical field set only."""
     src = dict(raw or {})
-    out = dict(src)
-    for alias in _COUNTER_DEPRECATED_FIELDS:
-        out.pop(alias, None)
+    out = {key: src.get(key, 0) for key in COUNTER_CANONICAL_FIELDS}
     for key in COUNTER_CANONICAL_FIELDS:
-        out.setdefault(key, 0)
+        out[key] = out.get(key, 0)
     return out, 0

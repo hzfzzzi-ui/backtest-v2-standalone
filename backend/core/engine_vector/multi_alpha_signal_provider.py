@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -11,36 +10,15 @@ from backend.core.config.models import ExitConfig
 from backend.core.core.models import Position, Signal
 from backend.core.core.types import Side
 from backend.core.engine_vector.breakout_signal_provider import BreakoutTrendProvider
+from backend.core.engine_vector.multi_alpha_common import (
+    ModuleSpec as _ModuleSpec,
+    normalized_name as _normalized_name,
+    normalized_symbol as _normalized_symbol,
+    safe_score as _safe_score,
+)
 from backend.core.engine_vector.signal_provider import DayContext, DaySignals, ExitCounts
 from backend.core.strategies.breakout_trend import BreakoutTrendStrategy
 from backend.core.strategies.multi_alpha_strategy import MultiAlphaStrategy
-
-
-@dataclass(frozen=True, slots=True)
-class _ModuleSpec:
-    name: str
-    alpha_id: str
-    family: str
-    sleeve_id: str
-    params: dict[str, Any]
-
-
-def _normalized_symbol(value: Any) -> str:
-    return str(value or "").strip().lower()
-
-
-def _normalized_name(value: Any) -> str:
-    return str(value or "").strip().lower()
-
-
-def _safe_score(value: Any, *, fallback: float = 0.5) -> float:
-    try:
-        score = float(value)
-    except Exception:
-        return float(fallback)
-    if np.isnan(score):
-        return float(fallback)
-    return float(score)
 
 
 class MultiAlphaSignalProvider:
@@ -263,7 +241,7 @@ class MultiAlphaSignalProvider:
         diagnostics["suppressed_raw_alpha_signal_count"] = int(suppressed_by_regime)
         diagnostics["conflict_resolution_count"] = int(conflict_resolution_count)
         diagnostics["raw_buy_signal_count"] = int(sum(1 for sig in raw_alpha_signals if sig.side == Side.BUY))
-        diagnostics["buy_candidate_count"] = int(len(composed_buy_signals))
+        diagnostics["buy_candidate_count"] = int(diagnostics["raw_buy_signal_count"])
         diagnostics["after_held_filter_count"] = int(len(composed_buy_signals))
         diagnostics["source_only_exit_count"] = int(
             sum(1 for sig in composed_sell_signals if str((sig.meta or {}).get("exit_owner", "") or "") == "source_only")

@@ -9,13 +9,12 @@
 #### Scenario: Vue 挂载成功
 - **WHEN** 页面加载并成功挂载结果工作台
 - **THEN** 可见结果区 SHALL 仅由 Vue 渲染
-- **THEN** legacy 结果区容器 SHALL 被设置为 `hidden`
-- **THEN** legacy 结果区容器 SHALL 被设置为 `inert`
+- **THEN** 页面 SHALL NOT 再保留可见的 fallback 结果容器
 
 #### Scenario: Vue 挂载失败
 - **WHEN** 结果工作台挂载失败
-- **THEN** 系统 MAY 回退到 legacy 结果区
-- **THEN** fallback 行为 SHALL 被显式记录到前端状态或诊断输出
+- **THEN** 系统 MUST 记录失败状态到前端状态或诊断输出
+- **THEN** 页面 SHALL NOT 回退到独立 legacy 结果区
 
 ### Requirement: 结果工作台不得依赖 legacy 全局 helper
 结果工作台用于构造漏斗、退出原因、Markdown 报告和结果格式化的逻辑 MUST 通过前端模块 import 获取。结果工作台 SHALL NOT 依赖 `window._finalBuildStageRows`、`window.renderUnifiedStageFunnel`、`window.reasonByPrefix`、`window.buildAgentMarkdownReport` 这类 legacy 全局 helper。
@@ -56,16 +55,23 @@
 - **THEN** 面板内容 SHALL 完整显示
 - **THEN** 下面的结果区块 SHALL 被正常推开而不是覆盖
 
-### Requirement: fallback 结果容器必须降级为显式受控的诊断路径
-系统 MUST 将 fallback 结果容器降级为显式受控的诊断路径。正常生产路径下，Vue results workbench MUST 成为唯一可见结果 owner；fallback 容器默认 MUST 处于 `hidden + inert` 状态。
+### Requirement: 生产主路径必须移除 fallback 结果 DOM
+系统 MUST 从生产主路径中移除 fallback 结果 DOM。桌面结果区在正常运行下 SHALL 只保留 Vue results workbench 作为唯一可见结果渲染 owner。
 
-#### Scenario: Vue workbench 正常挂载
-- **WHEN** 页面成功挂载 Vue results workbench
-- **THEN** fallback 结果容器 MUST 保持隐藏且不可交互
-- **THEN** `backtest_v2.js`、`artifacts.js` 等旧脚本 SHALL NOT 继续向 fallback 容器写入可见结果 DOM
+#### Scenario: 桌面页正常加载
+- **WHEN** 用户正常打开桌面研究页并加载实验结果
+- **THEN** 结果区 MUST 仅由 Vue results workbench 渲染
+- **THEN** 页面 SHALL NOT 再保留可见的 fallback 结果容器
 
-#### Scenario: 显式进入诊断模式
-- **WHEN** 用户或开发者通过显式诊断开关进入 fallback 模式，或 workbench 挂载失败且状态中心已记录失败原因
-- **THEN** 系统 MAY 启用 fallback 容器
-- **THEN** fallback 激活原因 MUST 可被状态中心或诊断输出观察
+#### Scenario: 旧脚本尝试更新结果 DOM
+- **WHEN** `backtest_v2.js`、`artifacts.js` 或其他旧脚本参与结果刷新
+- **THEN** 这些脚本 MUST 只更新 snapshot 或调用 workbench 桥接层
+- **THEN** 它们 SHALL NOT 直接写入旧结果面 DOM
 
+### Requirement: desktop-research-page 必须成为唯一结果协调层
+系统 MUST 让 `desktop-research-page` 成为桌面结果加载、snapshot 组装与 workbench 推送的唯一协调层。其他旧控制器 SHALL NOT 绕过该层直接接管结果渲染流程。
+
+#### Scenario: 加载某个实验 surface
+- **WHEN** 桌面页请求某个实验的主 surface 或 section
+- **THEN** `desktop-research-page` MUST 负责组装 `ResultsWorkbenchSnapshot`
+- **THEN** Vue workbench MUST 仅消费该 snapshot

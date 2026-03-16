@@ -7,7 +7,7 @@ import numpy as np
 
 from backend.core.core.types import Side
 from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
-from backend.core.portfolio.portfolio_builder import build_rebalance_orders
+from backend.core.portfolio.portfolio_runtime import build_rebalance_orders
 from backend.core.stage_pipeline.contracts import ExecutionIntent, StageOutputs
 
 
@@ -295,6 +295,16 @@ def _merge_runtime_reject_reason_counts(runtime: Any, reject_reason_counts: dict
         target[key] = int(target.get(key, 0)) + int(count or 0)
 
 
+def _retain_fast_mode_candidate_diagnostics(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    kept: list[dict[str, Any]] = []
+    for row in list(rows or ()):
+        reason = str((row or {}).get("reject_reason", "") or "").strip().upper()
+        blocked = bool((row or {}).get("cash_blocked_flag", False))
+        if blocked or reason == "SKIP_NO_CASH":
+            kept.append(dict(row))
+    return kept
+
+
 def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
     if runtime._current_day is None:
         raise RuntimeError("current day is not prepared")
@@ -329,7 +339,7 @@ def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
         day=day,
         controls=controls,
         day_signals=day_signals,
-        candidate_rows=(None if bool(runtime.request.fast_mode) else day_candidate_rows),
+        candidate_rows=day_candidate_rows,
         debug_plan=debug_plan,
     )
 
@@ -354,7 +364,7 @@ def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
         mf_score_map=dict(day_signals.mf_score_map),
         momentum_top_pct=float(runtime.request.momentum_top_pct),
         decision_date=day,
-        candidate_audit=(None if bool(runtime.request.fast_mode) else day_candidate_rows),
+        candidate_audit=day_candidate_rows,
         debug_plan=debug_plan,
         weight_mode=runtime._weight_mode,
         min_positions=runtime._min_positions_cfg,
@@ -400,7 +410,9 @@ def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
         merged_reject_reason_counts[str(reason)] = int(merged_reject_reason_counts.get(str(reason), 0)) + int(count or 0)
     debug_plan["reject_reason_counts"] = merged_reject_reason_counts
     _merge_runtime_reject_reason_counts(runtime, merged_reject_reason_counts)
-    if not bool(runtime.request.fast_mode):
+    if bool(runtime.request.fast_mode):
+        runtime.candidate_rows.extend(_retain_fast_mode_candidate_diagnostics(day_candidate_rows))
+    else:
         runtime.candidate_rows.extend(day_candidate_rows)
 
     runtime._apply_daily_decision_diagnostics(

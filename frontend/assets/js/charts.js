@@ -161,10 +161,27 @@ class MarketStatePaneView {
 }
 
 class MarketStateOverlay {
-  constructor() { this._data = []; this._chart = null; this._paneView = new MarketStatePaneView(this); }
-  setData(data) { this._data = data || []; }
-  attached(p) { this._chart = p.chart || (p.series?.chart ? p.series.chart() : null); p.requestUpdate(); }
-  detached() { this._chart = null; }
+  constructor() {
+    this._data = [];
+    this._chart = null;
+    this._paneView = new MarketStatePaneView(this);
+    this._requestUpdate = null;
+  }
+  setData(data) {
+    this._data = data || [];
+    if (typeof this._requestUpdate === 'function') {
+      try { this._requestUpdate(); } catch (_) {}
+    }
+  }
+  attached(p) {
+    this._chart = p.chart || (p.series?.chart ? p.series.chart() : null);
+    this._requestUpdate = typeof p.requestUpdate === 'function' ? (() => p.requestUpdate()) : null;
+    if (typeof this._requestUpdate === 'function') this._requestUpdate();
+  }
+  detached() {
+    this._chart = null;
+    this._requestUpdate = null;
+  }
   paneViews() { return [this._paneView]; }
 }
 
@@ -173,10 +190,215 @@ let _lwChartNav = null;  // 收益图
 let _lwChartDd = null;   // 回撤图
 let _syncLock = false;   // 防止时间轴同步递归
 
+let _lwNavState = null;
+
+function destroyNavChartState() {
+  const state = _lwNavState;
+  if (!state) {
+    if (_lwChartNav) {
+      try { _lwChartNav.remove(); } catch (_) {}
+      _lwChartNav = null;
+    }
+    return;
+  }
+  const container = state.container;
+  const timeScaleApi = typeof state.chart?.timeScale === 'function' ? state.chart.timeScale() : null;
+  if (timeScaleApi && state.visibleLogicalRangeHandler && typeof timeScaleApi.unsubscribeVisibleLogicalRangeChange === 'function') {
+    try { timeScaleApi.unsubscribeVisibleLogicalRangeChange(state.visibleLogicalRangeHandler); } catch (_) {}
+  }
+  if (timeScaleApi && state.visibleTimeRangeHandler && typeof timeScaleApi.unsubscribeVisibleTimeRangeChange === 'function') {
+    try { timeScaleApi.unsubscribeVisibleTimeRangeChange(state.visibleTimeRangeHandler); } catch (_) {}
+  }
+  if (container && state.wheelHandler) {
+    try { container.removeEventListener('wheel', state.wheelHandler); } catch (_) {}
+    if (container.__wbPriceScaleWheelHandler === state.wheelHandler) {
+      container.__wbPriceScaleWheelHandler = null;
+    }
+  }
+  if (state.resizeObserver) {
+    try { state.resizeObserver.disconnect(); } catch (_) {}
+  }
+  if (state.chart) {
+    try { state.chart.remove(); } catch (_) {}
+  }
+  _lwNavState = null;
+  _lwChartNav = null;
+}
+
+function addNavLineSeries(chart, LWC, opts) {
+  return typeof chart.addLineSeries === 'function'
+    ? chart.addLineSeries(opts)
+    : chart.addSeries(LWC.LineSeries, opts);
+}
+
+function addNavCandlestickSeries(chart, LWC, opts) {
+  return typeof chart.addCandlestickSeries === 'function'
+    ? chart.addCandlestickSeries(opts)
+    : chart.addSeries(LWC.CandlestickSeries, opts);
+}
+
+function createNavChartState(container, LWC) {
+  if (!container) return null;
+  container.innerHTML = '';
+  const chart = LWC.createChart(container, {
+    width: container.clientWidth,
+    height: container.clientHeight || 420,
+    layout: {
+      background: { type: LWC.ColorType ? LWC.ColorType.Solid : 'solid', color: 'transparent' },
+      textColor: '#94a3b8',
+      fontSize: 11,
+    },
+    grid: {
+      vertLines: { color: 'rgba(51,65,85,0.4)' },
+      horzLines: { color: 'rgba(51,65,85,0.4)' },
+    },
+    crosshair: { mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 0 },
+    leftPriceScale: { visible: false, borderColor: '#334155', autoScale: true },
+    rightPriceScale: { visible: true, borderColor: '#334155', autoScale: true },
+    handleScale: {
+      mouseWheel: true,
+      pinch: true,
+      axisPressedMouseMove: {
+        time: true,
+        price: true,
+      },
+      axisDoubleClickReset: {
+        time: true,
+        price: true,
+      },
+    },
+    timeScale: {
+      borderColor: '#334155',
+      timeVisible: false,
+      barSpacing: 6,
+      minBarSpacing: 2,
+      rightOffset: 5,
+    },
+  });
+  const state = {
+    container,
+    chart,
+    shapeKey: '',
+    visibleKey: '',
+    showLeftBenchmarkScale: false,
+    symbolBadgeUpdater: null,
+    benchmarkSeries: null,
+    primarySeries: null,
+    suspensionSeries: null,
+    marketOverlay: null,
+    refreshVisiblePriceScales: () => {},
+    wheelHandler: null,
+    visibleLogicalRangeHandler: null,
+    visibleTimeRangeHandler: null,
+    resizeObserver: null,
+  };
+  state.refreshVisiblePriceScales = () => {
+    try { state.chart.priceScale('right').applyOptions({ autoScale: true }); } catch (_) {}
+    if (state.showLeftBenchmarkScale) {
+      try { state.chart.priceScale('left').applyOptions({ autoScale: true }); } catch (_) {}
+    }
+    if (typeof state.symbolBadgeUpdater === 'function') {
+      requestAnimationFrame(state.symbolBadgeUpdater);
+    }
+  };
+  state.wheelHandler = () => {
+    requestAnimationFrame(state.refreshVisiblePriceScales);
+  };
+  container.__wbPriceScaleWheelHandler = state.wheelHandler;
+  container.addEventListener('wheel', state.wheelHandler, { passive: true });
+  const timeScaleApi = chart.timeScale();
+  state.visibleLogicalRangeHandler = () => {
+    requestAnimationFrame(state.refreshVisiblePriceScales);
+  };
+  state.visibleTimeRangeHandler = () => {
+    requestAnimationFrame(state.refreshVisiblePriceScales);
+  };
+  if (typeof timeScaleApi?.subscribeVisibleLogicalRangeChange === 'function') {
+    timeScaleApi.subscribeVisibleLogicalRangeChange(state.visibleLogicalRangeHandler);
+  } else if (typeof timeScaleApi?.subscribeVisibleTimeRangeChange === 'function') {
+    timeScaleApi.subscribeVisibleTimeRangeChange(state.visibleTimeRangeHandler);
+  }
+  state.resizeObserver = new ResizeObserver(() => {
+    if (_lwNavState !== state) return;
+    try {
+      state.chart.applyOptions({ width: container.clientWidth, height: container.clientHeight || 420 });
+    } catch (_) {}
+    if (typeof state.symbolBadgeUpdater === 'function') {
+      requestAnimationFrame(state.symbolBadgeUpdater);
+    }
+  });
+  state.resizeObserver.observe(container);
+  _lwChartNav = chart;
+  _lwNavState = state;
+  return state;
+}
+
+function resetNavChartSeries(state, LWC, shape) {
+  if (!state?.chart) return state;
+  if (typeof state.chart.removeSeries !== 'function') {
+    destroyNavChartState();
+    return createNavChartState(state?.container, LWC);
+  }
+  for (const series of [state.benchmarkSeries, state.primarySeries, state.suspensionSeries]) {
+    if (!series) continue;
+    try { state.chart.removeSeries(series); } catch (_) {}
+  }
+  state.benchmarkSeries = null;
+  state.primarySeries = null;
+  state.suspensionSeries = null;
+  state.marketOverlay = null;
+
+  if (shape.benchmarkKind === 'candlestick-right') {
+    state.benchmarkSeries = addNavCandlestickSeries(state.chart, LWC, {
+      upColor: '#26a69a',
+      downColor: '#ef5350',
+      borderDownColor: '#ef5350',
+      borderUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
+      wickUpColor: '#26a69a',
+      priceScaleId: 'right',
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+  } else if (shape.benchmarkKind === 'line-left') {
+    state.benchmarkSeries = addNavLineSeries(state.chart, LWC, {
+      color: '#58a6ff',
+      lineWidth: 2,
+      lineStyle: LWC.LineStyle ? LWC.LineStyle.Solid : 0,
+      priceScaleId: 'left',
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+  }
+
+  if (shape.hasNav) {
+    const buildPrimarySeries = (color) => addNavLineSeries(state.chart, LWC, {
+      color,
+      lineWidth: 2,
+      crosshairMarkerVisible: !shape.hasSuspension,
+      priceLineVisible: false,
+      lastValueVisible: !shape.hasSuspension && shape.mode !== 'symbol',
+    });
+    if (shape.hasSuspension) {
+      state.suspensionSeries = buildPrimarySeries('#999');
+      state.primarySeries = buildPrimarySeries('#f59e0b');
+    } else {
+      state.primarySeries = buildPrimarySeries(shape.mode === 'symbol' ? '#f59e0b' : '#58a6ff');
+    }
+    state.marketOverlay = new MarketStateOverlay();
+    if (state.primarySeries && typeof state.primarySeries.attachPrimitive === 'function') {
+      try { state.primarySeries.attachPrimitive(state.marketOverlay); } catch (_) {}
+    }
+  }
+  state.shapeKey = shape.key;
+  return state;
+}
+
 function renderLoadingSkeleton() {
   setHtmlById('wbGroupLoadStatus', '<span class="wb-mini">加载组产物中...</span>');
   // 清理 lightweight-charts 实例后再替换 innerHTML
-  if (_lwChartNav) { _lwChartNav.remove(); _lwChartNav = null; }
+  destroyNavChartState();
   if (_lwChartDd) { _lwChartDd.remove(); _lwChartDd = null; }
   setHtmlById('wbNavChart', '<div class="wb-skeleton" style="height:100%"></div>');
   setHtmlById('wbDdChart', '<div class="wb-skeleton" style="height:100%"></div>');
@@ -587,6 +809,206 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
 }
 
 // 回撤图 — LightweightCharts AreaSeries 渲染
+function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts = {}) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  clearChartValueBadge(container);
+
+  const hasNav = Array.isArray(navSeries) && navSeries.length > 0;
+  const hasBench = Array.isArray(benchOhlc) && benchOhlc.length > 0;
+  const mode = String(opts.mode || 'portfolio');
+  const markers = Array.isArray(opts.markers) ? opts.markers : [];
+  const useUnifiedRightScale = mode === 'portfolio';
+  const showLeftBenchmarkScale = !!showBenchmark && hasBench && !useUnifiedRightScale;
+  const useRelativeBenchLine = !!showBenchmark && hasBench;
+  const benchFirstClose = Number(benchOhlc[0]?.close) || 1;
+  const normalizedBenchLineData = useRelativeBenchLine
+    ? benchOhlc.map((p) => ({ time: p.time, value: Number(p.close) / benchFirstClose }))
+    : [];
+  const normalizedBenchOhlc = useRelativeBenchLine
+    ? benchOhlc.map((p) => ({
+        time: p.time,
+        open: Number(p.open) / benchFirstClose,
+        high: Number(p.high) / benchFirstClose,
+        low: Number(p.low) / benchFirstClose,
+        close: Number(p.close) / benchFirstClose,
+      }))
+    : [];
+  const suspensionRanges = Array.isArray(opts.suspensionRanges) ? opts.suspensionRanges : [];
+  const hasSuspension = mode === 'symbol' && suspensionRanges.length > 0;
+
+  if (!hasNav && !hasBench) {
+    destroyNavChartState();
+    container.innerHTML = '<div class="wb-empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>杩愯瀹為獙鍚庢樉绀哄噣鍊兼洸绾?/span></div>';
+    return;
+  }
+
+  const LWC = window.LightweightCharts;
+  if (!LWC) {
+    destroyNavChartState();
+    container.innerHTML = '<div class="wb-empty"><span>lightweight-charts 鍔犺浇澶辫触</span></div>';
+    return;
+  }
+
+  const shape = {
+    key: [
+      mode,
+      hasNav ? 'nav' : 'no-nav',
+      showBenchmark && hasBench ? (useUnifiedRightScale ? 'bench-candle-right' : 'bench-line-left') : 'bench-none',
+      hasSuspension ? 'susp' : 'plain',
+    ].join('|'),
+    mode,
+    hasNav,
+    hasSuspension,
+    benchmarkKind: showBenchmark && hasBench ? (useUnifiedRightScale ? 'candlestick-right' : 'line-left') : 'none',
+  };
+
+  let navState = _lwNavState;
+  if (!navState || navState.container !== container) {
+    destroyNavChartState();
+    navState = createNavChartState(container, LWC);
+  }
+  if (!navState) return;
+  if (navState.shapeKey !== shape.key) {
+    navState = resetNavChartSeries(navState, LWC, shape);
+  }
+  if (!navState?.chart) return;
+
+  const chart = navState.chart;
+  navState.showLeftBenchmarkScale = showLeftBenchmarkScale;
+  navState.symbolBadgeUpdater = null;
+
+  try {
+    chart.applyOptions({
+      leftPriceScale: { visible: showLeftBenchmarkScale, borderColor: '#334155', autoScale: true },
+      rightPriceScale: { visible: true, borderColor: '#334155', autoScale: true },
+    });
+  } catch (_) {}
+
+  if (navState.benchmarkSeries) {
+    if (shape.benchmarkKind === 'candlestick-right') {
+      navState.benchmarkSeries.setData(normalizedBenchOhlc);
+    } else if (shape.benchmarkKind === 'line-left') {
+      navState.benchmarkSeries.setData(normalizedBenchLineData);
+    }
+  }
+
+  if (hasNav && navState.primarySeries) {
+    const firstVal = navSeries[0]?.value || 1;
+    const lineData = navSeries.map((p) => ({
+      time: p.date,
+      value: mode === 'symbol' ? Number(p.value) : (Number(p.value) / firstVal),
+    }));
+    const rightValues = lineData
+      .map((p) => Number(p.value))
+      .filter((v) => Number.isFinite(v));
+    if (useUnifiedRightScale && normalizedBenchOhlc.length) {
+      rightValues.push(
+        ...normalizedBenchOhlc
+          .flatMap((p) => [Number(p.open), Number(p.high), Number(p.low), Number(p.close)])
+          .filter((v) => Number.isFinite(v)),
+      );
+    }
+    const fixedRightAutoscaleProvider = rightValues.length
+      ? (() => {
+          const minValue = Math.min(...rightValues);
+          const maxValue = Math.max(...rightValues);
+          const span = Math.max(maxValue - minValue, Math.max(Math.abs(maxValue), 1) * 0.02, 1e-6);
+          const pad = span * 0.08;
+          return () => ({
+            priceRange: {
+              minValue: minValue - pad,
+              maxValue: maxValue + pad,
+            },
+          });
+        })()
+      : null;
+
+    if (fixedRightAutoscaleProvider) {
+      try { navState.primarySeries.applyOptions({ autoscaleInfoProvider: fixedRightAutoscaleProvider }); } catch (_) {}
+      try { navState.suspensionSeries?.applyOptions({ autoscaleInfoProvider: fixedRightAutoscaleProvider }); } catch (_) {}
+    }
+
+    if (hasSuspension && navState.suspensionSeries) {
+      const suspSet = new Set();
+      for (const range of suspensionRanges) {
+        for (const point of lineData) {
+          if (point.time >= range.start && point.time <= range.end) suspSet.add(point.time);
+        }
+      }
+      const normalData = [];
+      const suspData = [];
+      for (let i = 0; i < lineData.length; i++) {
+        const point = lineData[i];
+        const isSusp = suspSet.has(point.time);
+        const prevSusp = i > 0 && suspSet.has(lineData[i - 1].time);
+        const nextSusp = i < lineData.length - 1 && suspSet.has(lineData[i + 1].time);
+        if (isSusp) {
+          suspData.push(point);
+          if (!prevSusp || !nextSusp) normalData.push(point);
+        } else {
+          normalData.push(point);
+          if (nextSusp) suspData.push(point);
+          if (prevSusp) suspData.push(point);
+        }
+      }
+      const dedup = (arr) => {
+        const byTime = new Map();
+        for (const point of arr) byTime.set(point.time, point);
+        return Array.from(byTime.values()).sort((a, b) => (a.time < b.time ? -1 : 1));
+      };
+      navState.suspensionSeries.setData(dedup(suspData));
+      navState.primarySeries.setData(dedup(normalData));
+    } else {
+      navState.primarySeries.setData(lineData);
+    }
+
+    if (typeof navState.primarySeries.setMarkers === 'function') {
+      try { navState.primarySeries.setMarkers(markers); } catch (_) {}
+    } else if (markers.length && typeof LWC.createSeriesMarkers === 'function') {
+      try { LWC.createSeriesMarkers(navState.primarySeries, markers); } catch (_) {}
+    }
+
+    if (navState.marketOverlay) {
+      navState.marketOverlay.setData(Array.isArray(opts.marketStates) ? opts.marketStates : []);
+    }
+
+    if (mode === 'symbol' && lineData.length) {
+      const lastValue = Number(lineData[lineData.length - 1]?.value);
+      const lastClose = Number(opts?.symbolLastClose);
+      const label = Number.isFinite(lastClose)
+        ? `涓偂鏀剁洏浠?${num(lastClose, 2)}`
+        : `涓偂鍑€鍊?${num(lastValue, 2)}x`;
+      navState.symbolBadgeUpdater = () => renderChartValueBadge(container, navState.primarySeries, lastValue, label);
+    }
+  }
+
+  const totalBars = Math.max(benchOhlc?.length || 0, navSeries?.length || 0);
+  const chartWidth = container.clientWidth || 600;
+  const maxVisibleBars = Math.floor(chartWidth / 6);
+  const visibleKey = [
+    totalBars,
+    normalizedBenchOhlc[0]?.time || normalizedBenchLineData[0]?.time || '',
+    normalizedBenchOhlc[normalizedBenchOhlc.length - 1]?.time || normalizedBenchLineData[normalizedBenchLineData.length - 1]?.time || '',
+    navSeries?.[0]?.date || '',
+    navSeries?.[navSeries.length - 1]?.date || '',
+    mode,
+    showBenchmark ? 'bench' : 'no-bench',
+  ].join('|');
+  if (navState.visibleKey !== visibleKey) {
+    if (totalBars > maxVisibleBars) {
+      chart.timeScale().scrollToPosition(5, false);
+    } else {
+      chart.timeScale().fitContent();
+    }
+    navState.visibleKey = visibleKey;
+  }
+
+  if (typeof navState.symbolBadgeUpdater === 'function') {
+    requestAnimationFrame(navState.symbolBadgeUpdater);
+  }
+}
+
 function renderDdChartLW(containerId, ddSeries, benchDdSeries, showBenchmark, opts = {}) {
   const container = document.getElementById(containerId);
   if (!container) return;

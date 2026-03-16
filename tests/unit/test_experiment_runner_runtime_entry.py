@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from backend.core.portfolio.portfolio_builder import PortfolioBacktestResult
+from backend.core.portfolio.types import PortfolioBacktestResult
 from backend.core.tools import experiment_runner as mod
 
 

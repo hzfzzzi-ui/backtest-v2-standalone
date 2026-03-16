@@ -1,5 +1,6 @@
 study_id: v10/onset_ingress_minimal_s2
 title: V10 入场结构 S2
+asset_scope: cn_a_equity
 baseline_id: baseline_V10
 hypothesis: 双突破窗口的最小改动组合，可能提升突破入场确认质量并减少假突破。
 change_scope:

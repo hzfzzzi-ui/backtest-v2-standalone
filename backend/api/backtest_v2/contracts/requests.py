@@ -11,6 +11,7 @@ class _StrictPublicModel(BaseModel):
 
 class PublicExperimentRunRequest(_StrictPublicModel):
     preset: str = "G1-G4"
+    asset_scope: str = "cn_a_equity"
     config_json: dict[str, Any] | None = None
     fast_mode: bool | None = None
 
@@ -18,13 +19,9 @@ class PublicExperimentRunRequest(_StrictPublicModel):
 class ExecutionPreviewRequest(_StrictPublicModel):
     config_json: dict[str, Any]
     exp_id: str
+    asset_scope: str = "cn_a_equity"
     as_of_date: str | None = None
     top_n: int = 10
 
 
-class ArtifactReadRequest(_StrictPublicModel):
-    exp_id: str = Field(min_length=1)
-    rel_path: str = Field(min_length=1)
-
-
-__all__ = ["ArtifactReadRequest", "ExecutionPreviewRequest", "PublicExperimentRunRequest"]
+__all__ = ["ExecutionPreviewRequest", "PublicExperimentRunRequest"]

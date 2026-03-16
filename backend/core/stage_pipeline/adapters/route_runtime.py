@@ -25,8 +25,8 @@ class RouteControls:
     breadth_maxpos_arr: np.ndarray
 
 
-def build_signal_provider(strategy: Any) -> tuple[str, SignalProvider]:
-    return build_signal_provider_for_strategy(strategy)
+def build_signal_provider(strategy: Any, asset_context: dict[str, Any] | None = None) -> tuple[str, SignalProvider]:
+    return build_signal_provider_for_strategy(strategy, asset_context=asset_context)
 
 
 def coerce_market_filter_cfg(value: MarketFilterConfig | Mapping[str, Any] | None) -> MarketFilterConfig | None:

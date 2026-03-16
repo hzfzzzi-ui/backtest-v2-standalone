@@ -17,11 +17,15 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from backend.api.backtest_v2.router import router as backtest_v2_router  # noqa: E402
 from backend.api.mobile import router as mobile_dashboard_router  # noqa: E402
-from backend.api.endpoints.transactions import router as transactions_router  # noqa: E402
+from backend.api.transactions import router as transactions_router  # noqa: E402
 from backend.api.shared.mobile_access import (  # noqa: E402
     is_allowed_mobile_host,
     is_mobile_protected_path,
     mobile_private_access_enabled,
+)
+from backend.core.services.market_data_sync_service import (  # noqa: E402
+    start_market_data_sync_scheduler,
+    stop_market_data_sync_scheduler,
 )
 
 
@@ -91,3 +95,13 @@ def mobile_index() -> FileResponse:
 @app.get("/mobile.html")
 def mobile_page() -> FileResponse:
     return FileResponse(str(FRONTEND_DIR / "mobile.html"), headers=_NO_CACHE)
+
+
+@app.on_event("startup")
+def startup_market_data_sync_scheduler() -> None:
+    start_market_data_sync_scheduler()
+
+
+@app.on_event("shutdown")
+def shutdown_market_data_sync_scheduler() -> None:
+    stop_market_data_sync_scheduler()

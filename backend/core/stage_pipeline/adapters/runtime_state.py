@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 
 from backend.core.config.models import BenchmarkRegimeConfig, CostConfig, MarketFilterConfig, RiskBudgetConfig, SizingConfig
-from backend.core.portfolio.portfolio_builder import build_backtest_price_indices
+from backend.core.portfolio.portfolio_runtime import build_backtest_price_indices
 
 
 @dataclass(frozen=True, slots=True)

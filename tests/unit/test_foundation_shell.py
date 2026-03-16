@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from backend.core.engine_runtime import foundation_shell as mod
-from backend.core.portfolio.portfolio_builder import PortfolioBacktestResult
+from backend.core.portfolio.types import PortfolioBacktestResult
 from backend.core.stage_pipeline.adapters import StagePipelineBridgeBacktestResult
 from backend.core.stage_pipeline.context import DayContext, PortfolioState
 from backend.core.stage_pipeline.shell import StageDayResult, StagePipelineResult

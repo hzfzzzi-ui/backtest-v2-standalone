@@ -1,88 +1,26 @@
 (function initDesktopResearchPageShell(globalScope) {
-  const ALLOWED_LAZY_SECTIONS = ['nav', 'drawdown', 'symbol_stats', 'stage_funnel'];
+  const ALLOWED_LAZY_SECTIONS = [
+    'nav',
+    'drawdown',
+    'symbol_stats',
+    'stage_funnel',
+    'run_meta',
+    'config',
+    'trades',
+    'daily',
+    'reason_codes',
+    'stock_names',
+  ];
 
   function cloneJson(value) {
-    if (value == null) return value;
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch (_) {
-      return value;
-    }
+    if (Array.isArray(value)) return value.slice();
+    if (value && typeof value === 'object') return { ...value };
+    return value;
   }
 
   function getDesktopResultsWorkbenchBridge() {
     const bridge = globalScope.resultsWorkbenchBridge;
     return bridge && typeof bridge === 'object' ? bridge : null;
-  }
-
-  function getDesktopFallbackRoot() {
-    return globalScope.document?.getElementById('wbResultsFallbackRoot') || null;
-  }
-
-  function readDesktopFallbackQueryFlag() {
-    try {
-      const params = new URLSearchParams(String(globalScope.location?.search || ''));
-      const raw = String(params.get('wb_fallback') || '').trim().toLowerCase();
-      return raw === '1' || raw === 'true' || raw === 'debug';
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function ensureDesktopFallbackState() {
-    if (!globalScope.__desktopFallbackState || typeof globalScope.__desktopFallbackState !== 'object') {
-      globalScope.__desktopFallbackState = {};
-    }
-    const holder = globalScope.__desktopFallbackState;
-    if (!('explicitRequested' in holder)) {
-      holder.explicitRequested = readDesktopFallbackQueryFlag();
-    }
-    if (!('enabled' in holder)) {
-      holder.enabled = !!holder.explicitRequested;
-    }
-    if (!('reason' in holder)) {
-      holder.reason = holder.enabled ? 'explicit-debug' : '';
-    }
-    return holder;
-  }
-
-  function setDesktopFallbackMode(enabled, reason = '') {
-    const holder = ensureDesktopFallbackState();
-    holder.enabled = !!enabled;
-    holder.reason = holder.enabled ? String(reason || 'manual') : '';
-    const root = getDesktopFallbackRoot();
-    if (!root) return holder.enabled;
-    root.hidden = !holder.enabled;
-    root.inert = !holder.enabled;
-    root.dataset.fallbackMode = holder.enabled ? 'enabled' : 'disabled';
-    if (holder.reason) {
-      root.dataset.fallbackReason = holder.reason;
-    } else {
-      delete root.dataset.fallbackReason;
-    }
-    if (holder.enabled) {
-      root.removeAttribute('aria-hidden');
-    } else {
-      root.setAttribute('aria-hidden', 'true');
-    }
-    return holder.enabled;
-  }
-
-  function isDesktopFallbackRequested() {
-    return !!ensureDesktopFallbackState().explicitRequested;
-  }
-
-  function isDesktopFallbackModeEnabled() {
-    return !!ensureDesktopFallbackState().enabled;
-  }
-
-  function readDesktopFallbackOpenPanels() {
-    if (!isDesktopFallbackModeEnabled()) return {};
-    return {
-      symbolPanel: !!globalScope.document?.getElementById('wbAccSymbolPanel')?.classList.contains('wb-open'),
-      funnelPanel: !!globalScope.document?.getElementById('wbAccBuyFunnel')?.classList.contains('wb-open'),
-      tradesPanel: !!globalScope.document?.getElementById('wbAccTrades')?.classList.contains('wb-open'),
-    };
   }
 
   function currentExperimentId(state) {
@@ -142,6 +80,43 @@
       if (normalized === 'nav' && !unique.includes('drawdown')) unique.push('drawdown');
     });
     return unique;
+  }
+
+  function pushLazySection(sections, name) {
+    const normalized = String(name || '').trim().toLowerCase();
+    if (!ALLOWED_LAZY_SECTIONS.includes(normalized) || sections.includes(normalized)) return;
+    sections.push(normalized);
+    if (normalized === 'nav' && !sections.includes('drawdown')) sections.push('drawdown');
+  }
+
+  function resolveLazySectionsForSnapshot(snapshot, sections) {
+    const resolved = normalizeLazySections(sections);
+    const view = snapshot?.view && typeof snapshot.view === 'object' ? snapshot.view : {};
+    const openPanels = view?.openPanels && typeof view.openPanels === 'object' ? view.openPanels : {};
+    if (snapshot?.active) {
+      pushLazySection(resolved, 'nav');
+      pushLazySection(resolved, 'config');
+    }
+    if (String(view.chartMode || '').trim().toLowerCase() === 'symbol') {
+      pushLazySection(resolved, 'symbol_stats');
+      pushLazySection(resolved, 'stock_names');
+      pushLazySection(resolved, 'trades');
+    }
+    if (openPanels.symbolPanel) {
+      pushLazySection(resolved, 'symbol_stats');
+      pushLazySection(resolved, 'stock_names');
+    }
+    if (openPanels.funnelPanel) {
+      pushLazySection(resolved, 'stage_funnel');
+      pushLazySection(resolved, 'run_meta');
+      pushLazySection(resolved, 'reason_codes');
+      pushLazySection(resolved, 'daily');
+    }
+    if (openPanels.tradesPanel) {
+      pushLazySection(resolved, 'trades');
+      pushLazySection(resolved, 'stock_names');
+    }
+    return resolved;
   }
 
   async function ensureDesktopExperimentSurface(state, expId) {
@@ -237,6 +212,7 @@
   function mergeDesktopSurfaceIntoSnapshot(snapshot, surface) {
     const nextSnapshot = cloneJson(snapshot) || {};
     const summary = surface && typeof surface.summary === 'object' ? cloneJson(surface.summary) : {};
+    const assetContext = cloneJson(surface?.asset_context || summary?.asset_context || nextSnapshot.assetContext || {}) || {};
     const artifacts = nextSnapshot.artifacts && typeof nextSnapshot.artifacts === 'object'
       ? { ...nextSnapshot.artifacts }
       : {};
@@ -249,10 +225,12 @@
       ...((surface && typeof surface.audit === 'object') ? cloneJson(surface.audit) : {}),
     };
     artifacts.surfaceSummary = summary;
+    artifacts.assetContext = assetContext;
     artifacts.machineOutputs = cloneJson(surface?.machine_outputs) || {};
     artifacts.humanOutputs = cloneJson(surface?.human_outputs) || {};
     artifacts.surfaceLazySections = cloneJson(surface?.lazy_sections) || {};
     nextSnapshot.surface = cloneJson(surface) || null;
+    nextSnapshot.assetContext = assetContext;
     nextSnapshot.result = {
       ...(nextSnapshot.result || {}),
       ...(summary.exp_id ? { exp_id: summary.exp_id } : {}),
@@ -273,7 +251,7 @@
     const sections = artifacts.surfaceSections && typeof artifacts.surfaceSections === 'object'
       ? { ...artifacts.surfaceSections }
       : {};
-    const data = cloneJson(sectionPayload?.data) || [];
+    const data = cloneJson(sectionPayload?.data);
     sections[section] = data;
     artifacts.surfaceSections = sections;
 
@@ -288,11 +266,11 @@
       section,
       available: true,
       inline: true,
-      data,
+      data: data == null ? null : data,
     };
 
     if (section === 'nav') {
-      const navRows = normalizeNavSectionData(data);
+      const navRows = normalizeNavSectionData(Array.isArray(data) ? data : []);
       artifacts.nav = navRows;
       artifacts.navSeries = navRows.map((row) => ({ date: row.date, value: row.nav }));
       if (!Array.isArray(artifacts.drawdownSeries) || !artifacts.drawdownSeries.length) {
@@ -325,11 +303,29 @@
         }
       }
     } else if (section === 'drawdown') {
-      artifacts.drawdownSeries = normalizeDrawdownSectionData(data);
+      artifacts.drawdownSeries = normalizeDrawdownSectionData(Array.isArray(data) ? data : []);
     } else if (section === 'symbol_stats') {
-      artifacts.symbolPerformanceRows = normalizeSymbolStatsSectionData(data);
+      artifacts.symbolPerformanceRows = normalizeSymbolStatsSectionData(Array.isArray(data) ? data : []);
     } else if (section === 'stage_funnel') {
-      artifacts.funnelRows = cloneJson(data) || [];
+      artifacts.funnelRows = Array.isArray(data) ? cloneJson(data) || [] : [];
+    } else if (section === 'run_meta') {
+      const normalizeRunMetaCounters = globalScope.normalizeRunMetaCounters;
+      artifacts.run_meta = typeof normalizeRunMetaCounters === 'function'
+        ? normalizeRunMetaCounters(data || {})
+        : (cloneJson(data) || {});
+    } else if (section === 'config') {
+      artifacts.config = data && typeof data === 'object' ? cloneJson(data) : null;
+    } else if (section === 'trades') {
+      artifacts.tradesRows = Array.isArray(data) ? cloneJson(data) || [] : [];
+    } else if (section === 'daily') {
+      const dailyRows = Array.isArray(data) ? cloneJson(data) || [] : [];
+      artifacts.dailyRows = dailyRows;
+      const parseMarketStates = globalScope._parseMarketStates;
+      artifacts.marketStates = typeof parseMarketStates === 'function' ? parseMarketStates(dailyRows) : [];
+    } else if (section === 'reason_codes') {
+      artifacts.reasonRows = Array.isArray(data) ? cloneJson(data) || [] : [];
+    } else if (section === 'stock_names') {
+      artifacts.stockNames = data && typeof data === 'object' ? cloneJson(data) || {} : {};
     }
 
     nextSnapshot.artifacts = artifacts;
@@ -340,33 +336,49 @@
     const state = args && args.state ? args.state : {};
     const currentSnapshot = args && args.currentSnapshot ? args.currentSnapshot : {};
     const currentView = currentSnapshot && currentSnapshot.view ? currentSnapshot.view : {};
-    const openPanels = args && args.openPanels ? args.openPanels : {};
-    const sourceKind = String((args && args.sourceKind) || state.loaded_source_kind || '').trim()
+    const viewPatch = args && args.viewPatch && typeof args.viewPatch === 'object' ? args.viewPatch : {};
+    const openPanels = args && args.openPanels ? args.openPanels : (currentView.openPanels || {});
+    const runtimeSourceKind = String(state.runtime_source_kind || '').trim()
+      || (state.active_manifest && state.active_manifest.exp_id ? 'experiment' : '');
+    const runtimeSourceId = String(state.runtime_source_id || '').trim()
+      || String((state.active_manifest && state.active_manifest.exp_id) || '');
+    const sourceKind = String((args && args.sourceKind) || runtimeSourceKind || state.loaded_source_kind || '').trim()
       || (state.active_result && state.active_result.exp_id ? 'experiment' : '');
-    const sourceId = String((args && args.sourceId) || state.loaded_source_id || '').trim()
+    const sourceId = String((args && args.sourceId) || runtimeSourceId || state.loaded_source_id || '').trim()
       || String((state.active_result && state.active_result.exp_id) || '');
     const currentArtifacts = currentSnapshot && currentSnapshot.artifacts ? cloneJson(currentSnapshot.artifacts) : {};
+    const assetContext = cloneJson(
+      state.active_asset_context
+      || state.loaded_source_asset_context
+      || currentSnapshot?.assetContext
+      || currentArtifacts?.assetContext
+      || {},
+    ) || {};
     return {
       active: !!((state.active_result && state.active_result.exp_id) || state.active_artifacts),
       source: {
         kind: sourceKind,
         id: sourceId,
       },
+      assetContext,
       result: cloneJson(state.active_result) || null,
+      manifest: cloneJson(state.active_manifest) || null,
       artifacts: {
         ...(currentArtifacts || {}),
         ...(cloneJson(state.active_artifacts) || {}),
       },
       surface: cloneJson(currentSnapshot.surface) || null,
       view: {
-        chartMode: String(state.chart_mode || currentView.chartMode || 'portfolio'),
-        chartRange: String(state.chart_range || currentView.chartRange || 'D'),
-        showBenchmark: typeof state.chart_show_benchmark === 'boolean'
+        chartMode: String(viewPatch.chartMode || state.chart_mode || currentView.chartMode || 'portfolio'),
+        chartRange: String(viewPatch.chartRange || state.chart_range || currentView.chartRange || 'D'),
+        showBenchmark: typeof viewPatch.showBenchmark === 'boolean'
+          ? !!viewPatch.showBenchmark
+          : (typeof state.chart_show_benchmark === 'boolean'
           ? state.chart_show_benchmark
-          : !!currentView.showBenchmark,
-        symbolFilter: String(state.symbol_filter || currentView.symbolFilter || ''),
-        symbolSort: String(state.symbol_sort || currentView.symbolSort || 'return_desc'),
-        selectedSymbol: String(state.selected_symbol || currentView.selectedSymbol || '').toLowerCase(),
+          : !!currentView.showBenchmark),
+        symbolFilter: String(viewPatch.symbolFilter || state.symbol_filter || currentView.symbolFilter || ''),
+        symbolSort: String(viewPatch.symbolSort || state.symbol_sort || currentView.symbolSort || 'return_desc'),
+        selectedSymbol: String(viewPatch.selectedSymbol || state.selected_symbol || currentView.selectedSymbol || '').toLowerCase(),
         openPanels: {
           ...(currentView.openPanels || {}),
           ...(openPanels || {}),
@@ -380,65 +392,54 @@
     const bridge = getDesktopResultsWorkbenchBridge();
     if (!bridge || typeof bridge.setSnapshot !== 'function') return false;
     const currentSnapshot = typeof bridge.getSnapshot === 'function' ? (bridge.getSnapshot() || {}) : {};
-    const openPanels = args && args.openPanels ? args.openPanels : (
-      currentSnapshot?.view?.openPanels || readDesktopFallbackOpenPanels()
-    );
+    const openPanels = args && args.openPanels ? args.openPanels : (currentSnapshot?.view?.openPanels || {});
     const expId = currentExperimentId(state);
     let snapshot = buildDesktopResultsWorkbenchSnapshot({
       state,
       currentSnapshot,
+      viewPatch: args?.viewPatch,
       openPanels,
       sourceKind: args?.sourceKind,
       sourceId: args?.sourceId,
     });
+
+    const lazySections = resolveLazySectionsForSnapshot(snapshot, args?.lazySections || []);
 
     if (expId) {
       try {
         const surface = await ensureDesktopExperimentSurface(state, expId);
         if (surface && currentExperimentId(state) === expId) {
           snapshot = mergeDesktopSurfaceIntoSnapshot(snapshot, surface);
-          const runtime = ensureDesktopSurfaceRuntime(state);
-          const cachedSections = runtime.sections || {};
-          for (const sectionName of Object.keys(cachedSections)) {
-            const cached = cachedSections[sectionName];
-            if (!cached?.payload) continue;
-            snapshot = await mergeDesktopSurfaceSectionIntoSnapshot(snapshot, state, expId, cached.payload, {
-              reuseExistingBenchmark: true,
-            });
-          }
         }
       } catch (_) {
-    // Surface fallback should not block local artifact rendering.
+        // Surface fetch should not break the local snapshot publish path.
+      }
+    }
+
+    if (expId && currentExperimentId(state) === expId && lazySections.length) {
+      const payloads = await Promise.all(lazySections.map(async (section) => {
+        try {
+          return await ensureDesktopExperimentSurfaceSection(state, expId, section);
+        } catch (_) {
+          return null;
+        }
+      }));
+      for (const payload of payloads) {
+        if (!payload || currentExperimentId(state) !== expId) continue;
+        snapshot = await mergeDesktopSurfaceSectionIntoSnapshot(snapshot, state, expId, payload, {
+          reuseExistingBenchmark: true,
+        });
       }
     }
 
     bridge.setSnapshot(snapshot);
-
-    const lazySections = normalizeLazySections(args?.lazySections || []);
-    for (const section of lazySections) {
-      if (!expId || currentExperimentId(state) !== expId) break;
-      try {
-        const payload = await ensureDesktopExperimentSurfaceSection(state, expId, section);
-        if (!payload || currentExperimentId(state) !== expId) continue;
-        const latestSnapshot = typeof bridge.getSnapshot === 'function' ? (bridge.getSnapshot() || {}) : snapshot;
-        const merged = await mergeDesktopSurfaceSectionIntoSnapshot(latestSnapshot, state, expId, payload, {
-          reuseExistingBenchmark: true,
-        });
-        bridge.setSnapshot(merged);
-      } catch (_) {
-        // Lazy section failures should not break the workbench shell.
-      }
-    }
     return true;
   }
 
   globalScope.getDesktopResultsWorkbenchBridge = getDesktopResultsWorkbenchBridge;
-  globalScope.isDesktopFallbackRequested = isDesktopFallbackRequested;
-  globalScope.isDesktopFallbackModeEnabled = isDesktopFallbackModeEnabled;
-  globalScope.setDesktopFallbackMode = setDesktopFallbackMode;
-  globalScope.readDesktopFallbackOpenPanels = readDesktopFallbackOpenPanels;
+  globalScope.ensureDesktopExperimentSurface = ensureDesktopExperimentSurface;
+  globalScope.ensureDesktopExperimentSurfaceSection = ensureDesktopExperimentSurfaceSection;
   globalScope.buildDesktopResultsWorkbenchSnapshot = buildDesktopResultsWorkbenchSnapshot;
   globalScope.publishDesktopResultsWorkbenchSnapshot = publishDesktopResultsWorkbenchSnapshot;
   globalScope.clearDesktopResultsWorkbenchState = clearDesktopResultsWorkbenchState;
-  setDesktopFallbackMode(isDesktopFallbackRequested(), isDesktopFallbackRequested() ? 'explicit-debug' : '');
 })(window);

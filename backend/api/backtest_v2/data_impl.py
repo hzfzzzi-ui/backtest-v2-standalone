@@ -32,11 +32,9 @@ from backend.core.tools.experiment_artifact_access import (
     experiment_surface_flags,
     load_manifest as load_experiment_manifest,
     manifest_artifact_rel,
-    resolve_declared_artifact_path,
     resolve_experiment_dir_by_id,
 )
 from backend.api.backtest_v2.contracts.requests import (
-    ArtifactReadRequest as PublicBacktestV2ArtifactReadRequest,
     ExecutionPreviewRequest as PublicBacktestV2ExecutionPreviewRequest,
 )
 from backend.core.tools.runtime_data_access import (
@@ -47,6 +45,7 @@ from backend.core.tools.runtime_data_access import (
     resolve_stock_names as resolve_runtime_stock_names,
     resolve_validation_universe,
 )
+from backend.core.services.market_data_sync_service import build_market_data_sync_status
 from backend.core.universe.lineage import annotate_universe_meta
 from backend.api.backtest_v2 import configs_impl as _config_store
 from backend.api.backtest_v2 import runner_impl
@@ -64,9 +63,6 @@ logger = logging.getLogger(__name__)
 
 
 BacktestV2ExecutionPreviewRequest = PublicBacktestV2ExecutionPreviewRequest
-
-
-BacktestV2ArtifactReadRequest = PublicBacktestV2ArtifactReadRequest
 
 
 # ── Helper functions (main-file-only) ──────────────────────────────────────
@@ -259,29 +255,6 @@ def _load_manifest_or_404(exp_id: str) -> tuple[Path, dict[str, Any]]:
     if not manifest:
         raise HTTPException(status_code=404, detail=f"manifest not found: {results_dir / 'manifest.json'}")
     return results_dir, manifest
-
-
-def _read_declared_artifact_payload(results_dir: Path, manifest: dict[str, Any], rel: str) -> dict[str, Any]:
-    target = resolve_declared_artifact_path(results_dir, manifest, rel)
-    if target is None:
-        raise HTTPException(status_code=400, detail=f"artifact path is not declared by manifest: {rel}")
-    if not target.exists():
-        raise HTTPException(status_code=404, detail=f"artifact not found: {target}")
-    ext = target.suffix.lower()
-    if ext == ".json":
-        try:
-            obj = json.loads(target.read_text(encoding="utf-8-sig"))
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"json parse failed: {exc}")
-        return _sanitize_for_json({"kind": "json", "path": rel, "data": obj})
-    if ext == ".csv":
-        try:
-            df = pd.read_csv(target)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"csv parse failed: {exc}")
-        return _sanitize_for_json({"kind": "csv", "path": rel, "rows": df.to_dict(orient="records"), "columns": list(df.columns)})
-    text = target.read_text(encoding="utf-8", errors="ignore")
-    return _sanitize_for_json({"kind": "text", "path": rel, "text": text[:200000]})
 
 
 def _parse_symbols_from_query(request: Request) -> list[str]:
@@ -524,6 +497,10 @@ def get_stock_names(body: dict):
     return {"names": resolve_runtime_stock_names(list(symbols), bt_root=_bt_root())}
 
 
+def get_market_data_sync_status():
+    return sanitize_json(build_market_data_sync_status())
+
+
 # ── Validate data route ────────────────────────────────────────────────────
 
 
@@ -535,7 +512,6 @@ def validate_backtest_v2_data(
     benchmark: str = Query("000300.SH"),
     audit_dump: bool = Query(True),
     strict_suspended: bool = Query(False),
-    allow_cn_index_fallback: bool = Query(False),
 ):
     try:
         start_d = date.fromisoformat(start)
@@ -670,7 +646,7 @@ def validate_backtest_v2_data(
             benchmark=benchmark,
             audit_dump=audit_dump,
             strict_suspended=strict_suspended,
-            allow_cn_index_fallback=allow_cn_index_fallback,
+            allow_cn_index_fallback=False,
             required_turnover_rate_field=turnover_rate_field if min_avg_turnover_rate_20d > 0.0 else None,
             results_root=_results_root(),
         )
@@ -707,7 +683,7 @@ def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
     base_cfg = runner_impl._load_base_config(_bt_root())
     semantic_compile = runner_impl._compile_semantic_config_bundle(
         base_cfg=base_cfg,
-        body=runner_impl.BacktestV2ExperimentRequest(),
+        body=runner_impl.BacktestV2ExperimentRequest(asset_scope=body.asset_scope),
         semantic_cfg=body.config_json,
         config_source="config_json",
         use_body_universe_fields=False,
@@ -786,7 +762,7 @@ def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
                     "reasons": ["source=config_symbols", f"active_group={picked[0]['group_id'] if picked else 'N/A'}"],
                 }
             )
-        source = "config_symbols_fallback"
+        source = "config_symbols"
     else:
         for idx, g in enumerate(picked, start=1):
             candidates.append(
@@ -842,21 +818,3 @@ def preview_backtest_v2_execution(body: BacktestV2ExecutionPreviewRequest):
 def get_backtest_v2_manifest(exp_id: str):
     _, manifest = _load_manifest_or_404(exp_id)
     return _sanitize_for_json(manifest)
-
-
-@router.get("/api/backtest_v2/experiments/{exp_id}/artifacts/{rel_path:path}")
-def get_backtest_v2_artifact(exp_id: str, rel_path: str):
-    results_dir, manifest = _load_manifest_or_404(exp_id)
-    rel = str(rel_path or "").strip().replace("\\", "/").lstrip("/")
-    if not rel:
-        raise HTTPException(status_code=400, detail="rel_path is required")
-    return _read_declared_artifact_payload(results_dir, manifest, rel)
-
-
-@router.post("/api/backtest_v2/artifacts/read")
-def read_backtest_v2_artifact(body: BacktestV2ArtifactReadRequest):
-    results_dir, manifest = _load_manifest_or_404(str(body.exp_id or "").strip())
-    rel = str(body.rel_path or "").strip().replace("\\", "/").lstrip("/")
-    if not rel:
-        raise HTTPException(status_code=400, detail="rel_path is required")
-    return _read_declared_artifact_payload(results_dir, manifest, rel)

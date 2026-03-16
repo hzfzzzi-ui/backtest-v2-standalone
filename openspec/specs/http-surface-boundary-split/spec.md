@@ -1,7 +1,7 @@
-﻿# http-surface-boundary-split Specification
+# http-surface-boundary-split Specification
 
 ## Purpose
-Synced from delta spec during archive. The capability contract is now part of the main spec set.
+定义桌面与移动端 HTTP surface 的正式边界，确保结果读取统一收敛到 `manifest`、`surface` 与按需 `surface/{section}`，并让实验级资产上下文成为稳定输出的一部分。
 
 ## Requirements
 
@@ -44,4 +44,61 @@ Synced from delta spec during archive. The capability contract is now part of th
 - **THEN** 系统 SHALL NOT 返回完整 `nav`、`symbol_stats` 或 `stage_funnel`
 - **THEN** 移动端接口 MUST 保持薄读模型
 
+### Requirement: 桌面主路径必须优先消费 manifest、surface 与 section 接口
+系统 MUST 让桌面研究页主路径优先使用 `manifest`、`surface`、`surface/{section}` 与少量专用接口。桌面研究页的正常结果读取 SHALL NOT 继续依赖通用 `/api/backtest_v2/artifacts/read`。
 
+#### Scenario: 桌面页加载实验结果
+- **WHEN** 桌面研究页加载某个实验的结果工作台
+- **THEN** 系统 MUST 先读取该实验的 `manifest`
+- **THEN** 系统 MUST 再读取 `surface` 与按需的 `surface/{section}`
+
+#### Scenario: 桌面页渲染结果区
+- **WHEN** 前端主路径需要渲染 KPI、图表、阶段漏斗、交易明细或个股表现
+- **THEN** 系统 SHALL 通过统一结果面或专用 section 获取数据
+- **THEN** 前端 SHALL NOT 通过 `/api/backtest_v2/artifacts/read` 直接读取底层 artifact 文件
+
+### Requirement: 通用 artifact 读取接口必须退出桌面主路径
+系统 MAY 保留通用 artifact 读取接口用于极少量运维、调试或迁移工具，但桌面研究页的主交互路径 MUST 不再把该接口当作正常读取面。
+
+#### Scenario: 主交互路径调用 artifact 读取
+- **WHEN** 桌面研究页的主路径触发实验加载、baseline 加载或结果刷新
+- **THEN** 这些调用 MUST 不再依赖通用 artifact 读取接口
+
+#### Scenario: 调试工具读取 artifact
+- **WHEN** 运维、迁移脚本或显式调试工具需要读取物理 artifact
+- **THEN** 系统 MAY 继续提供受限的通用读取能力
+- **THEN** 该能力 SHALL NOT 重新回流到桌面研究页主路径
+
+### Requirement: backtest 主 HTTP surface 必须暴露实验级资产上下文
+系统 MUST 在实验列表、manifest、surface 和相关摘要接口中返回实验级薄资产上下文，以便桌面端和移动端在不解析底层配置的前提下识别结果所属资产边界。
+
+#### Scenario: 历史实验列表显示资产归属
+- **WHEN** 客户端请求历史实验列表
+- **THEN** 列表项 MUST 返回实验级薄资产上下文
+- **THEN** 列表接口 SHALL NOT 要求前端重新读取底层 config 才能判断资产归属
+
+#### Scenario: 读取单个实验结果
+- **WHEN** 客户端请求某个实验的 manifest 或 surface
+- **THEN** 响应 MUST 包含与该实验一致的资产上下文摘要
+- **THEN** HTTP surface SHALL 对桌面端和移动端保持统一语义
+
+### Requirement: 配置与运行入口必须显式拒绝未知 asset scope
+系统 MUST 对 HTTP 层收到的未知或未正式支持的 `asset_scope` 进行显式校验失败，而 SHALL NOT 静默回退到当前 A 股 profile。
+
+#### Scenario: 提交未知资产范围
+- **WHEN** 客户端提交未知 `asset_scope`
+- **THEN** HTTP 层 MUST 返回明确的 validation error
+- **THEN** 系统 SHALL NOT 默认将其解释成 A 股运行
+
+### Requirement: 桌面 HTTP surface 必须暴露最近一周资金不足拦截明细
+系统 MUST 在实验 `surface` 中暴露 `cash_blocked_buys_recent` section，使桌面端和诊断工具可以通过统一 `surface/{section}` 读取最近 5 个交易日内的资金不足拦截买入明细。客户端 SHALL NOT 通过底层 artifact 路径自行推断该信息。
+
+#### Scenario: 客户端请求资金不足拦截明细
+- **WHEN** 客户端请求 `/api/backtest_v2/experiments/{id}/surface/cash_blocked_buys_recent`
+- **THEN** 系统 MUST 返回最近 5 个交易日内的资金不足拦截明细列表
+- **THEN** 每条记录 MUST 至少包含 `date`、`symbol`、`cash_available`、`estimated_qty`、`estimated_amount`
+
+#### Scenario: 实验没有资金不足拦截记录
+- **WHEN** 对应实验最近 5 个交易日没有 `SKIP_NO_CASH` 明细
+- **THEN** 系统 MUST 返回空列表
+- **THEN** `surface` 的 lazy section 元数据 MUST 标记该 section 可用

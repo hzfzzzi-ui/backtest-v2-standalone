@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from backend.api.shared.paths import experiments_root as _experiments_root
+from backend.core.config.asset_profiles import build_asset_context
 from backend.core.tools.experiment_artifact_access import (
     experiment_surface_flags,
     load_manifest,
@@ -70,12 +71,23 @@ def _experiment_surface_meta(exp_dir, manifest: dict[str, Any] | None = None) ->
             workbench_cfg = candidate
             break
     universe_cfg = workbench_cfg.get("universe") if isinstance((workbench_cfg or {}).get("universe"), dict) else {}
+    asset_context = build_asset_context(
+        (manifest or {}).get("asset_scope"),
+        config_json=workbench_cfg if isinstance(workbench_cfg, dict) else cfg_payload,
+        metadata_scope=((manifest or {}).get("asset_context") or {}).get("asset_scope")
+        if isinstance((manifest or {}).get("asset_context"), dict)
+        else None,
+    )
     return {
         "cagr": perf.get("cagr") if isinstance(perf, dict) else None,
         "max_drawdown": perf.get("max_drawdown") if isinstance(perf, dict) else None,
         "universe_mode": str((workbench_cfg or {}).get("universe_mode") or ""),
+        "membership_mode": str(universe_cfg.get("membership_mode") or ""),
         "start_year": _extract_year(universe_cfg.get("start")),
         "end_year": _extract_year(universe_cfg.get("end")),
+        "asset_scope": str(asset_context.get("asset_scope") or ""),
+        "asset_profile_id": str(asset_context.get("asset_profile_id") or ""),
+        "market_profile_id": str(asset_context.get("market_profile_id") or ""),
     }
 
 

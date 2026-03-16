@@ -1,0 +1,66 @@
+study_id: v10/rotation_replace_minimal_r1
+title: V10 Rotation Replace Minimal R1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10
+hypothesis: 在 baseline V10 上仅打开最小 rotation replace 交换逻辑，可能改善强 risk-on 阶段的持仓更新效率，同时保持原有评分与执行口径不变。
+change_scope:
+  modules_modified:
+    - sizing.rotation_replace_enabled
+    - sizing.rotation_replace_only_strong_risk_on
+    - sizing.rotation_replace_max_swaps_per_day
+    - sizing.rotation_replace_candidate_top_n
+    - sizing.rotation_replace_min_score_gap
+variants:
+  - name: B0
+  - name: R1
+    config_patches:
+      - path: sizing.rotation_replace_enabled
+        value: true
+      - path: sizing.rotation_replace_only_strong_risk_on
+        value: true
+      - path: sizing.rotation_replace_max_swaps_per_day
+        value: 1
+      - path: sizing.rotation_replace_candidate_top_n
+        value: 3
+      - path: sizing.rotation_replace_min_score_gap
+        value: 0.15
+  - name: R1b
+    config_patches:
+      - path: sizing.rotation_replace_enabled
+        value: true
+      - path: sizing.rotation_replace_only_strong_risk_on
+        value: true
+      - path: sizing.rotation_replace_max_swaps_per_day
+        value: 1
+      - path: sizing.rotation_replace_candidate_top_n
+        value: 3
+      - path: sizing.rotation_replace_min_score_gap
+        value: 0.10
+windows:
+  - key: "0717"
+    role: hard_gate
+    start: "2007-01-15"
+    end: "2017-01-15"
+    periods:
+      phase_2009_bull: ["2009-01-05", "2009-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2015_2017_post_crash: ["2015-06-15", "2017-01-13"]
+  - key: "1626"
+    role: main
+    start: "2016-03-01"
+    end: "2026-03-01"
+    periods:
+      phase_2018_bear: ["2018-01-02", "2018-12-28"]
+      phase_2021_2022_drawdown: ["2021-02-19", "2022-10-31"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+hard_gates:
+  min_cagr: 0.1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: outputs/baselines/baseline_V10/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

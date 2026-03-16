@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date
 from types import MappingProxyType
@@ -33,6 +34,30 @@ def _freeze_pipeline_modules(raw: Mapping[str, Sequence[str]] | None = None) -> 
             for key, value in dict(raw or {}).items()
         }
     )
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        return int(value)
+    except Exception:
+        try:
+            return int(float(value))
+        except Exception:
+            return None
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +165,110 @@ class AccountingSnapshot:
             "daily_marks": dict(self.daily_marks),
             "counters": dict(self.counters),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeDiagnosticsInput:
+    route_id: str = ""
+    candidates_count: int = 0
+    selected_count: int = 0
+    positions_before_sell: int = 0
+    positions_after_sell: int = 0
+    buy_slots: int = 0
+    raw_buy_signal_count: int = 0
+    raw_alpha_signal_count: int = 0
+    composed_buy_signal_count: int = 0
+    composed_sell_signal_count: int = 0
+    raw_buy_candidate_count: int = 0
+    raw_after_held_filter_count: int = 0
+    raw_after_slot_filter_count: int | None = None
+    raw_after_cash_lot_count: int | None = None
+    benchmark_regime_on: bool = False
+    strong_risk_on: bool = False
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
+    debug_plan: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "route_id", str(self.route_id or ""))
+        object.__setattr__(self, "candidates_count", int(self.candidates_count))
+        object.__setattr__(self, "selected_count", int(self.selected_count))
+        object.__setattr__(self, "positions_before_sell", int(self.positions_before_sell))
+        object.__setattr__(self, "positions_after_sell", int(self.positions_after_sell))
+        object.__setattr__(self, "buy_slots", int(self.buy_slots))
+        object.__setattr__(self, "raw_buy_signal_count", int(self.raw_buy_signal_count))
+        object.__setattr__(self, "raw_alpha_signal_count", int(self.raw_alpha_signal_count))
+        object.__setattr__(self, "composed_buy_signal_count", int(self.composed_buy_signal_count))
+        object.__setattr__(self, "composed_sell_signal_count", int(self.composed_sell_signal_count))
+        object.__setattr__(self, "raw_buy_candidate_count", int(self.raw_buy_candidate_count))
+        object.__setattr__(self, "raw_after_held_filter_count", int(self.raw_after_held_filter_count))
+        object.__setattr__(self, "raw_after_slot_filter_count", _coerce_optional_int(self.raw_after_slot_filter_count))
+        object.__setattr__(self, "raw_after_cash_lot_count", _coerce_optional_int(self.raw_after_cash_lot_count))
+        object.__setattr__(self, "benchmark_regime_on", _coerce_bool(self.benchmark_regime_on))
+        object.__setattr__(self, "strong_risk_on", _coerce_bool(self.strong_risk_on))
+        object.__setattr__(self, "diagnostics", _freeze_mapping(self.diagnostics))
+        object.__setattr__(self, "debug_plan", _freeze_mapping(self.debug_plan))
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "route_id": self.route_id,
+            "candidates_count": int(self.candidates_count),
+            "selected_count": int(self.selected_count),
+            "positions_before_sell": int(self.positions_before_sell),
+            "positions_after_sell": int(self.positions_after_sell),
+            "buy_slots": int(self.buy_slots),
+            "raw_buy_signal_count": int(self.raw_buy_signal_count),
+            "raw_alpha_signal_count": int(self.raw_alpha_signal_count),
+            "composed_buy_signal_count": int(self.composed_buy_signal_count),
+            "composed_sell_signal_count": int(self.composed_sell_signal_count),
+            "raw_buy_candidate_count": int(self.raw_buy_candidate_count),
+            "raw_after_held_filter_count": int(self.raw_after_held_filter_count),
+            "raw_after_slot_filter_count": self.raw_after_slot_filter_count,
+            "raw_after_cash_lot_count": self.raw_after_cash_lot_count,
+            "benchmark_regime_on": bool(self.benchmark_regime_on),
+            "strong_risk_on": bool(self.strong_risk_on),
+            "diagnostics": dict(self.diagnostics),
+            "debug_plan": dict(self.debug_plan),
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_payload(), ensure_ascii=False, sort_keys=True)
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, Any] | None = None) -> "RuntimeDiagnosticsInput":
+        data = dict(raw or {})
+        return cls(
+            route_id=str(data.get("route_id") or ""),
+            candidates_count=int(data.get("candidates_count") or 0),
+            selected_count=int(data.get("selected_count") or 0),
+            positions_before_sell=int(data.get("positions_before_sell") or 0),
+            positions_after_sell=int(data.get("positions_after_sell") or 0),
+            buy_slots=int(data.get("buy_slots") or 0),
+            raw_buy_signal_count=int(data.get("raw_buy_signal_count") or 0),
+            raw_alpha_signal_count=int(data.get("raw_alpha_signal_count") or 0),
+            composed_buy_signal_count=int(data.get("composed_buy_signal_count") or 0),
+            composed_sell_signal_count=int(data.get("composed_sell_signal_count") or 0),
+            raw_buy_candidate_count=int(data.get("raw_buy_candidate_count") or 0),
+            raw_after_held_filter_count=int(data.get("raw_after_held_filter_count") or 0),
+            raw_after_slot_filter_count=data.get("raw_after_slot_filter_count"),
+            raw_after_cash_lot_count=data.get("raw_after_cash_lot_count"),
+            benchmark_regime_on=bool(data.get("benchmark_regime_on", False)),
+            strong_risk_on=bool(data.get("strong_risk_on", False)),
+            diagnostics=data.get("diagnostics") if isinstance(data.get("diagnostics"), Mapping) else {},
+            debug_plan=data.get("debug_plan") if isinstance(data.get("debug_plan"), Mapping) else {},
+        )
+
+    @classmethod
+    def from_json(cls, raw: str | None) -> "RuntimeDiagnosticsInput | None":
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return None
+        if not isinstance(payload, Mapping):
+            return None
+        return cls.from_mapping(payload)
 
 
 @dataclass(frozen=True, slots=True)

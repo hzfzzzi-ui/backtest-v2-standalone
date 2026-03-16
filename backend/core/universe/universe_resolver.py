@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from backend.core.config.asset_profiles import canonical_asset_scope
 from backend.core.config.models import DBConfig, DBRuntimeConfig
 from backend.core.data.mapping import normalize_stock_symbol
 from backend.core.universe.hs300_csi500 import UniverseLoadError, load_constituents_from_db
@@ -225,6 +226,7 @@ def resolve_universe_by_mode(
     as_of: date,
     db: DBConfig,
     runtime: DBRuntimeConfig,
+    asset_scope: str = "cn_a_equity",
     industries: list[str] | None = None,
     symbols: list[str] | None = None,
     universe_limit: int | None = None,
@@ -234,17 +236,28 @@ def resolve_universe_by_mode(
     返回 (symbols, meta) 元组。
     """
     mode_upper = (mode or "CUSTOM").strip().upper()
+    canonical_scope = canonical_asset_scope(asset_scope)
 
     if mode_upper == "ALL_A":
-        return _resolve_all_a(as_of, db, runtime, universe_limit)
+        resolved_symbols, meta = _resolve_all_a(as_of, db, runtime, universe_limit)
+        meta["asset_scope"] = canonical_scope
+        return resolved_symbols, meta
     elif mode_upper == "HS300_ZZ500":
-        return _resolve_hs300_zz500(as_of, db, runtime, universe_limit)
+        resolved_symbols, meta = _resolve_hs300_zz500(as_of, db, runtime, universe_limit)
+        meta["asset_scope"] = canonical_scope
+        return resolved_symbols, meta
     elif mode_upper == "CSI1000":
-        return _resolve_csi1000(as_of, db, runtime, universe_limit)
+        resolved_symbols, meta = _resolve_csi1000(as_of, db, runtime, universe_limit)
+        meta["asset_scope"] = canonical_scope
+        return resolved_symbols, meta
     elif mode_upper == "INDUSTRY":
-        return _resolve_industry(as_of, db, runtime, industries or [], universe_limit)
+        resolved_symbols, meta = _resolve_industry(as_of, db, runtime, industries or [], universe_limit)
+        meta["asset_scope"] = canonical_scope
+        return resolved_symbols, meta
     elif mode_upper == "CUSTOM":
-        return _resolve_custom(symbols, universe_limit)
+        resolved_symbols, meta = _resolve_custom(symbols, universe_limit)
+        meta["asset_scope"] = canonical_scope
+        return resolved_symbols, meta
     else:
         raise UniverseLoadError(
             status=f"ERROR:UNKNOWN_MODE:{mode_upper}",

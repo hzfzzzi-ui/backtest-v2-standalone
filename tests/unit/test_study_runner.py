@@ -12,6 +12,7 @@ def _study():
         {
             "study_id": "v10/demo",
             "title": "Demo Study",
+            "asset_scope": "cn_a_equity",
             "baseline_id": "baseline_V10",
             "hypothesis": "residual split should improve ranking stability",
             "change_scope": {"modules_modified": ["ranking"]},
@@ -43,6 +44,7 @@ def test_build_execution_plan_applies_window_and_variant_patch() -> None:
     payload = plan[0]["request_payload"]
     assert payload["start_date"] == "2024-01-01"
     assert payload["end_date"] == "2024-02-01"
+    assert payload["asset_scope"] == "cn_a_equity"
     assert payload["config_json"]["signal_generation"]["ranking"]["residual_window"] == 40
     assert payload["config_json"]["universe"]["start"] == "2024-01-01"
 
@@ -57,6 +59,7 @@ def test_build_execution_plan_can_patch_config_loaded_from_config_path(tmp_path:
         {
             "study_id": "v10/demo_path",
             "title": "Demo From Path",
+            "asset_scope": "cn_a_equity",
             "baseline_id": "baseline_V10",
             "hypothesis": "path-backed patching",
             "change_scope": {"modules_modified": ["ranking"]},
@@ -76,6 +79,7 @@ def test_build_execution_plan_can_patch_config_loaded_from_config_path(tmp_path:
     )
 
     payload = study_runner.build_execution_plan(study)[0]["request_payload"]
+    assert payload["asset_scope"] == "cn_a_equity"
     assert payload["config_json"]["signal_generation"]["ranking"]["residual_window"] == 40
 
 
@@ -84,13 +88,13 @@ def test_run_study_delegates_to_runtime_and_output_services(monkeypatch, tmp_pat
     exp_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
-        study_runner._internal_helper,
-        "run_internal_experiment_sync",
+        study_runner.experiment_runtime_access,
+        "run_experiment_sync",
         lambda payload: {"exp_id": "exp_demo", "results_dir": str(exp_dir)},
     )
     monkeypatch.setattr(
-        study_runner._internal_helper,
-        "resolve_internal_results_dir",
+        study_runner.experiment_runtime_access,
+        "resolve_results_dir",
         lambda **kwargs: exp_dir,
     )
     monkeypatch.setattr(
