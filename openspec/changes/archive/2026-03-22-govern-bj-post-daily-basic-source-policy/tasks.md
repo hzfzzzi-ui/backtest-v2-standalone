@@ -1,0 +1,8 @@
+- [x] 在 `cn-stock-v2-audit-gates` delta spec 中补充 `BJ post daily_basic` 已知 provider gap 的 formal gate 语义。
+- [x] 在 `update_pams_ohlcv_daily_v2.py` 将 `BJ post` 相关 `turnover_rate_imputed_zero` 收敛成 `bj_post_daily_basic_gap`。
+- [x] 在 `pams_ohlcv_daily_v2_common.py` 扩展 `KNOWN_SOURCE_GAP_ISSUE_CAUSES`。
+- [x] 在 `audit_pams_ohlcv_daily_v2.py` 扩展 runtime 的 `known_source_gap_low_turnover` 识别条件。
+- [x] 更新 `tests/unit/test_update_pams_ohlcv_daily_v2.py` 和 `tests/unit/test_audit_pams_ohlcv_daily_v2.py`。
+- [x] 更新 `docs/db/v2_source_matrix.md` 和 `docs/db/pams_ohlcv_daily_v2_runbook.md`。
+- [x] 重刷 `2021-11-15 ~ 2026-03-20` 的受影响 `BJ post` 切片，并重跑 `pams_ohlcv_daily_v2_formal_audits`。
+- [x] 运行 `pytest` 与 `openspec validate`，核对新的 formal audit summary。

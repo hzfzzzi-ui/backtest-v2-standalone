@@ -48,6 +48,49 @@ def _frame_to_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
     return records
 
 
+def _build_canonical_gate(
+    *,
+    per_trade_date: list[dict[str, Any]],
+    critical_exception_rows_raw: int,
+    known_source_gap_rows: int,
+    critical_exception_rows: int,
+    start: date,
+    end: date,
+) -> dict[str, Any]:
+    market_phase_totals: dict[str, int] = {}
+    row_status_totals: dict[str, int] = {}
+    for item in per_trade_date:
+        for key, value in (item.get("market_phase_counts") or {}).items():
+            market_phase_totals[str(key)] = market_phase_totals.get(str(key), 0) + int(value)
+        for key, value in (item.get("row_status_counts") or {}).items():
+            row_status_totals[str(key)] = row_status_totals.get(str(key), 0) + int(value)
+
+    has_full_window = bool(start == v2_common.DEFAULT_BACKFILL_START and end == v2_common.OFFICIAL_END_DATE)
+    gate = {
+        "eligible_no_source_rows": int(sum(int(item["eligible_missing_daily_count"]) for item in per_trade_date)),
+        "delist_tail_confirmed_rows": int(row_status_totals.get("delist_tail_confirmed", 0)),
+        "v2_minus_v1_total": int(sum(int(item["v2_minus_v1"]) for item in per_trade_date)),
+        "hard_field_null_rows": int(sum(int(item.get("hard_field_null_count", 0)) for item in per_trade_date)),
+        "critical_exception_rows_raw": int(critical_exception_rows_raw),
+        "known_source_gap_rows": int(known_source_gap_rows),
+        "critical_exception_rows": int(critical_exception_rows),
+        "official_window": {
+            "start": v2_common.DEFAULT_BACKFILL_START.isoformat(),
+            "end": v2_common.OFFICIAL_END_DATE.isoformat(),
+        },
+        "has_full_window": has_full_window,
+        "market_phase_totals": market_phase_totals,
+        "row_status_totals": row_status_totals,
+    }
+    gate["can_promote_shadow"] = bool(
+        gate["eligible_no_source_rows"] == 0
+        and gate["hard_field_null_rows"] == 0
+        and gate["critical_exception_rows"] == 0
+        and gate["has_full_window"]
+    )
+    return gate
+
+
 def _table_exists(cur, table: str) -> bool:
     cur.execute("SELECT to_regclass(%s)", (f"public.{common.safe_ident(table)}",))
     return cur.fetchone()[0] is not None
@@ -345,6 +388,106 @@ def _count_distinct_exception_rows(
     return int(frame.iloc[0]["rows"]) if not frame.empty else 0
 
 
+def _count_exception_gate_rows(
+    conn,
+    *,
+    start: date,
+    end: date,
+    issue_types: set[str],
+    symbol_filter: set[str],
+) -> dict[str, int]:
+    if not issue_types:
+        return {
+            "critical_exception_rows_raw": 0,
+            "known_source_gap_rows": 0,
+            "critical_exception_rows": 0,
+        }
+    known_gap_clauses = [
+        f"(issue_type = '{issue_type}' AND cause_class = '{cause_class}')"
+        for issue_type, cause_class in sorted(v2_common.KNOWN_SOURCE_GAP_ISSUE_CAUSES)
+    ]
+    known_gap_sql = " OR ".join(known_gap_clauses) if known_gap_clauses else "FALSE"
+    query = f"""
+        WITH dedup AS (
+            SELECT
+                trade_date,
+                COALESCE(symbol, '') AS symbol,
+                issue_type,
+                BOOL_OR({known_gap_sql}) AS is_known_source_gap
+            FROM (
+                SELECT DISTINCT
+                    e.trade_date,
+                    COALESCE(e.symbol, '') AS symbol,
+                    e.issue_type,
+                    COALESCE(e.cause_class, 'unknown') AS cause_class
+                FROM public.{common.safe_ident(v2_common.V2_EXCEPTIONS_TABLE)} e
+                INNER JOIN public.{common.safe_ident(v2_common.V2_MAIN_TABLE)} v2
+                  ON v2.symbol = e.symbol
+                 AND v2.trade_date = e.trade_date
+                 AND v2.build_run_id = e.build_run_id
+                WHERE e.trade_date >= %s
+                  AND e.trade_date <= %s
+                  AND e.issue_type = ANY(%s)
+                  AND COALESCE(e.symbol, '') <> ''
+            ) base
+            GROUP BY 1, 2, 3
+        )
+        SELECT
+            COUNT(*) AS raw_rows,
+            COUNT(*) FILTER (WHERE is_known_source_gap) AS known_source_gap_rows,
+            COUNT(*) FILTER (WHERE NOT is_known_source_gap) AS effective_rows
+        FROM dedup
+    """
+    params: tuple[Any, ...] = (start, end, sorted(issue_types))
+    if symbol_filter:
+        query = f"""
+            WITH dedup AS (
+                SELECT
+                    trade_date,
+                    COALESCE(symbol, '') AS symbol,
+                    issue_type,
+                    BOOL_OR({known_gap_sql}) AS is_known_source_gap
+                FROM (
+                    SELECT DISTINCT
+                        e.trade_date,
+                        COALESCE(e.symbol, '') AS symbol,
+                        e.issue_type,
+                        COALESCE(e.cause_class, 'unknown') AS cause_class
+                    FROM public.{common.safe_ident(v2_common.V2_EXCEPTIONS_TABLE)} e
+                    INNER JOIN public.{common.safe_ident(v2_common.V2_MAIN_TABLE)} v2
+                      ON v2.symbol = e.symbol
+                     AND v2.trade_date = e.trade_date
+                     AND v2.build_run_id = e.build_run_id
+                    WHERE e.trade_date >= %s
+                      AND e.trade_date <= %s
+                      AND e.issue_type = ANY(%s)
+                      AND COALESCE(e.symbol, '') <> ''
+                      AND e.symbol = ANY(%s)
+                ) base
+                GROUP BY 1, 2, 3
+            )
+            SELECT
+                COUNT(*) AS raw_rows,
+                COUNT(*) FILTER (WHERE is_known_source_gap) AS known_source_gap_rows,
+                COUNT(*) FILTER (WHERE NOT is_known_source_gap) AS effective_rows
+            FROM dedup
+        """
+        params = (start, end, sorted(issue_types), sorted(symbol_filter))
+    frame = v2_common.df_from_query(conn, query, params)
+    if frame.empty:
+        return {
+            "critical_exception_rows_raw": 0,
+            "known_source_gap_rows": 0,
+            "critical_exception_rows": 0,
+        }
+    row = frame.iloc[0]
+    return {
+        "critical_exception_rows_raw": int(row.get("raw_rows") or 0),
+        "known_source_gap_rows": int(row.get("known_source_gap_rows") or 0),
+        "critical_exception_rows": int(row.get("effective_rows") or 0),
+    }
+
+
 def _load_exception_breakdown(
     conn,
     *,
@@ -367,9 +510,10 @@ def _load_exception_breakdown(
             COALESCE(e.cause_class, 'unknown') AS cause_class,
             COUNT(*) AS rows
         FROM public.{common.safe_ident(v2_common.V2_EXCEPTIONS_TABLE)} e
-        LEFT JOIN public.{common.safe_ident(v2_common.V2_MAIN_TABLE)} v2
+        INNER JOIN public.{common.safe_ident(v2_common.V2_MAIN_TABLE)} v2
           ON v2.symbol = e.symbol
          AND v2.trade_date = e.trade_date
+         AND v2.build_run_id = e.build_run_id
         WHERE e.trade_date >= %s
           AND e.trade_date <= %s
           AND COALESCE(e.symbol, '') <> ''
@@ -393,9 +537,10 @@ def _load_exception_breakdown(
                 COALESCE(e.cause_class, 'unknown') AS cause_class,
                 COUNT(*) AS rows
             FROM public.{common.safe_ident(v2_common.V2_EXCEPTIONS_TABLE)} e
-            LEFT JOIN public.{common.safe_ident(v2_common.V2_MAIN_TABLE)} v2
+            INNER JOIN public.{common.safe_ident(v2_common.V2_MAIN_TABLE)} v2
               ON v2.symbol = e.symbol
              AND v2.trade_date = e.trade_date
+             AND v2.build_run_id = e.build_run_id
             WHERE e.trade_date >= %s
               AND e.trade_date <= %s
               AND COALESCE(e.symbol, '') <> ''
@@ -438,6 +583,10 @@ def _load_key_exception_drilldown(
             e.issue_type,
             COUNT(*) AS rows
         FROM public.{common.safe_ident(v2_common.V2_EXCEPTIONS_TABLE)} e
+        INNER JOIN public.{common.safe_ident(v2_common.V2_MAIN_TABLE)} v2
+          ON v2.symbol = e.symbol
+         AND v2.trade_date = e.trade_date
+         AND v2.build_run_id = e.build_run_id
         {base_where}
         {symbol_clause}
         GROUP BY 1, 2
@@ -461,9 +610,10 @@ def _load_key_exception_drilldown(
             e.issue_type,
             COUNT(*) AS rows
         FROM public.{common.safe_ident(v2_common.V2_EXCEPTIONS_TABLE)} e
-        LEFT JOIN public.{common.safe_ident(v2_common.V2_MAIN_TABLE)} v2
+        INNER JOIN public.{common.safe_ident(v2_common.V2_MAIN_TABLE)} v2
           ON v2.symbol = e.symbol
          AND v2.trade_date = e.trade_date
+         AND v2.build_run_id = e.build_run_id
         {base_where}
         {symbol_clause}
         GROUP BY 1, 2
@@ -479,6 +629,10 @@ def _load_key_exception_drilldown(
             e.symbol,
             COUNT(*) AS rows
         FROM public.{common.safe_ident(v2_common.V2_EXCEPTIONS_TABLE)} e
+        INNER JOIN public.{common.safe_ident(v2_common.V2_MAIN_TABLE)} v2
+          ON v2.symbol = e.symbol
+         AND v2.trade_date = e.trade_date
+         AND v2.build_run_id = e.build_run_id
         {base_where}
         {symbol_clause}
         GROUP BY 1, 2
@@ -518,9 +672,21 @@ def _load_runtime_exclusion_breakdown(
                 market_phase,
                 CASE
                     WHEN row_status = 'source_unresolved' THEN 'row_status_source_unresolved'
+                    WHEN row_status = 'delist_tail_confirmed' THEN 'row_status_delist_tail_confirmed'
                     WHEN row_status = 'synthetic_gap_fill' THEN 'row_status_synthetic_gap_fill'
                     WHEN pre_close_confidence < 1 THEN 'low_pre_close_confidence'
                     WHEN adj_factor_confidence < 1 THEN 'low_adj_factor_confidence'
+                    WHEN market_phase = 'bj_pre_20211115'
+                         AND turnover_rate_confidence < 1
+                         AND is_suspended = FALSE
+                         AND turnover_rate_source = 'imputed_zero' THEN '{v2_common.KNOWN_SOURCE_GAP_LOW_TURNOVER_REASON}'
+                    WHEN market_phase = 'bj_post_20211115'
+                         AND turnover_rate_confidence < 1
+                         AND is_suspended = FALSE
+                         AND turnover_rate_source = 'imputed_zero'
+                         AND source_daily_basic_present = FALSE
+                         AND float_share IS NULL
+                         AND free_share IS NULL THEN '{v2_common.KNOWN_SOURCE_GAP_LOW_TURNOVER_REASON}'
                     WHEN turnover_rate_confidence < 1 AND is_suspended = FALSE THEN 'low_turnover_rate_confidence'
                     ELSE 'runtime_eligible'
                 END AS exclusion_reason
@@ -710,13 +876,9 @@ def _build_trade_date_audit(
     traded_mask = row_status_series == "traded"
     daily_basic_join_count = int(source_daily_basic_present.sum())
     moneyflow_join_count = int(source_moneyflow_present.loc[traded_mask].sum())
-    eligible_missing_daily_count = int(
-        (
-            row_status_series.isin(["synthetic_gap_fill", "source_unresolved"])
-            & (~source_daily_present)
-            & (~source_suspend_present)
-        ).sum()
-    )
+    delist_tail_confirmed_count = int((row_status_series == "delist_tail_confirmed").sum())
+    synthetic_gap_fill_count = int((row_status_series == "synthetic_gap_fill").sum())
+    eligible_missing_daily_count = int(((row_status_series == "source_unresolved") & (~source_daily_present) & (~source_suspend_present)).sum())
     daily_basic_missing_count = int((~source_daily_basic_present).sum())
     moneyflow_missing_count = int((traded_mask & ~source_moneyflow_present).sum())
     turnover_rate_f_null_count = int(pd.to_numeric(merged["turnover_rate_f"], errors="coerce").isna().sum())
@@ -760,6 +922,34 @@ def _build_trade_date_audit(
                 "eligible_no_source",
                 "missing_in_all_sources",
                 f"eligible_missing_daily_count={eligible_missing_daily_count}",
+                v2_common.V2_MAIN_TABLE,
+                "",
+                now,
+            )
+        )
+    if delist_tail_confirmed_count > 0:
+        exception_rows.append(
+            (
+                trade_date,
+                None,
+                None,
+                "delist_tail_confirmed",
+                "official_terminal_boundary",
+                f"delist_tail_confirmed_count={delist_tail_confirmed_count}",
+                v2_common.V2_MAIN_TABLE,
+                "",
+                now,
+            )
+        )
+    if synthetic_gap_fill_count > 0:
+        exception_rows.append(
+            (
+                trade_date,
+                None,
+                None,
+                "synthetic_gap_fill_side_evidence",
+                "side_evidence_without_trading_bar",
+                f"synthetic_gap_fill_count={synthetic_gap_fill_count}",
                 v2_common.V2_MAIN_TABLE,
                 "",
                 now,
@@ -849,9 +1039,12 @@ def _build_runtime_gate(
         runtime_eligible_rows = int(eligible_rows["rows"].sum()) if not eligible_rows.empty else 0
     return {
         "unresolved_rows": int(row_status_totals.get("source_unresolved", 0)),
+        "delist_tail_confirmed_rows": int(row_status_totals.get("delist_tail_confirmed", 0)),
         "synthetic_gap_fill_rows": int(row_status_totals.get("synthetic_gap_fill", 0)),
+        "excluded_delist_tail_confirmed_rows": int(counts.get("row_status_delist_tail_confirmed", 0)),
         "excluded_low_pre_close_confidence_rows": int(counts.get("low_pre_close_confidence", 0)),
         "excluded_low_adj_factor_confidence_rows": int(counts.get("low_adj_factor_confidence", 0)),
+        "excluded_known_source_gap_low_turnover_rows": int(counts.get(v2_common.KNOWN_SOURCE_GAP_LOW_TURNOVER_REASON, 0)),
         "excluded_low_turnover_rate_confidence_rows": int(counts.get("low_turnover_rate_confidence", 0)),
         "runtime_eligible_rows": int(runtime_eligible_rows),
         "exclusion_breakdown": counts,
@@ -1022,7 +1215,7 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
                     ]
                     _insert_exception_rows(cur, exception_rows)
                 summary["exception_rows"] = int(len(exception_rows))
-                critical_exception_rows = _count_distinct_exception_rows(
+                critical_gate_counts = _count_exception_gate_rows(
                     conn,
                     start=start,
                     end=end,
@@ -1054,33 +1247,17 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
                     symbol_filter=symbol_filter,
                 )
 
-                market_phase_totals: dict[str, int] = {}
-                row_status_totals: dict[str, int] = {}
-                for item in summary["per_trade_date"]:
-                    for key, value in (item.get("market_phase_counts") or {}).items():
-                        market_phase_totals[str(key)] = market_phase_totals.get(str(key), 0) + int(value)
-                    for key, value in (item.get("row_status_counts") or {}).items():
-                        row_status_totals[str(key)] = row_status_totals.get(str(key), 0) + int(value)
-
-                canonical_gate = {
-                    "eligible_no_source_rows": int(
-                        sum(int(item["eligible_missing_daily_count"]) for item in summary["per_trade_date"])
-                    ),
-                    "v2_minus_v1_total": int(sum(int(item["v2_minus_v1"]) for item in summary["per_trade_date"])),
-                    "hard_field_null_rows": int(
-                        sum(int(item.get("hard_field_null_count", 0)) for item in summary["per_trade_date"])
-                    ),
-                    "critical_exception_rows": int(critical_exception_rows),
-                    "has_full_window": bool(start == v2_common.DEFAULT_BACKFILL_START and end == v2_common.OFFICIAL_END_DATE),
-                    "market_phase_totals": market_phase_totals,
-                    "row_status_totals": row_status_totals,
-                }
-                canonical_gate["can_promote_shadow"] = bool(
-                    canonical_gate["eligible_no_source_rows"] == 0 and canonical_gate["hard_field_null_rows"] == 0
+                canonical_gate = _build_canonical_gate(
+                    per_trade_date=summary["per_trade_date"],
+                    critical_exception_rows_raw=int(critical_gate_counts["critical_exception_rows_raw"]),
+                    known_source_gap_rows=int(critical_gate_counts["known_source_gap_rows"]),
+                    critical_exception_rows=int(critical_gate_counts["critical_exception_rows"]),
+                    start=start,
+                    end=end,
                 )
                 runtime_gate = _build_runtime_gate(
                     runtime_exclusion_breakdown,
-                    row_status_totals=row_status_totals,
+                    row_status_totals=dict(canonical_gate.get("row_status_totals") or {}),
                 )
                 summary["gate"] = {
                     "canonical": canonical_gate,

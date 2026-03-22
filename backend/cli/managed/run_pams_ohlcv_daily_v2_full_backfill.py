@@ -12,6 +12,7 @@ from . import audit_pams_ohlcv_daily_v2 as audit_build
 from . import cn_side_table_common as common
 from . import pams_ohlcv_daily_v2_common as v2_common
 from . import refresh_security_master
+from . import run_pams_ohlcv_daily_v2_formal_audits as formal_audit_build
 from . import update_pams_ohlcv_daily_v2 as main_build
 from . import update_pams_ohlcv_daily_v2_raw as raw_build
 from . import update_pit_stock_moneyflow_v2 as moneyflow_build
@@ -43,7 +44,7 @@ def _clip_segments(start: date, end: date) -> list[tuple[date, date]]:
     return out
 
 
-def _build_steps(start: date, end: date) -> list[BackfillStep]:
+def _build_steps(start: date, end: date, *, symbols_csv: str = "") -> list[BackfillStep]:
     steps: list[BackfillStep] = [
         BackfillStep(
             name="security_master",
@@ -95,6 +96,20 @@ def _build_steps(start: date, end: date) -> list[BackfillStep]:
             args_builder=audit_build.build_update_args,
         )
     )
+    if (
+        start == v2_common.DEFAULT_BACKFILL_START
+        and end == v2_common.OFFICIAL_END_DATE
+        and not str(symbols_csv or "").strip()
+    ):
+        steps.append(
+            BackfillStep(
+                name="audit_formal_windows",
+                start=None,
+                end=None,
+                runner=formal_audit_build.run_update,
+                args_builder=formal_audit_build.build_update_args,
+            )
+        )
     return steps
 
 
@@ -191,7 +206,7 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
     heartbeat_path = output_dir / "heartbeat.json"
     run_id = v2_common.build_run_id("v2_full_backfill")
     started_at = datetime.now().isoformat(timespec="seconds")
-    steps = _build_steps(start, end)
+    steps = _build_steps(start, end, symbols_csv=str(args.symbols_csv or ""))
     if resume_from_step and resume_from_step not in {step.name for step in steps}:
         raise ValueError(f"resume_from_step not found in current plan: {resume_from_step}")
     step_rows = _step_status_rows(steps, output_dir)
@@ -346,7 +361,11 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the full pams_ohlcv_daily_v2 historical backfill workflow")
     parser.add_argument("--start", default="", help="inclusive start date YYYY-MM-DD; default 2007-01-04")
-    parser.add_argument("--end", default="", help="inclusive end date YYYY-MM-DD; default 2026-03-16")
+    parser.add_argument(
+        "--end",
+        default="",
+        help=f"inclusive end date YYYY-MM-DD; default {v2_common.OFFICIAL_END_DATE.isoformat()}",
+    )
     parser.add_argument("--symbols-csv", default="", help="optional comma-separated symbols for smoke runs")
     parser.add_argument("--output-dir", default="", help="output directory for runner status and per-step summaries")
     parser.add_argument("--resume-from-step", default="", help="resume from a named step, skipping earlier completed steps")

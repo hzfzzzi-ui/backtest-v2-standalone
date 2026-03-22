@@ -1,7 +1,8 @@
-﻿# cn-stock-v2-source-governance Specification
+# cn-stock-v2-source-governance Specification
 
 ## Purpose
-浠?2026-03-22 褰掓。鍙樻洿鎭㈠鐨勪富瑙勬牸銆?
+规范 V2 字段级 source matrix、BJ 分阶段治理、左截断锚点缺口与 terminal tail 源治理。
+
 ## Requirements
 
 ### Requirement: V2 MUST 维护字段级 source matrix
@@ -31,9 +32,35 @@
 - **THEN** 报告 SHALL NOT 直接把全部 `bj%` 异常解释为“北交所数据源失败”
 
 ### Requirement: Source governance MUST 区分源缺失与构建缺失
-系统 MUST 在 `v2` 审计与异常分类中区分“源本身缺失”和“构建阶段未正确消费源”。对于 `eligible_no_source`、`turnover_rate_imputed_zero` 等异常，系统 MUST 能说明该异常是由于所有候选源均无数据、主源缺失但补源可得、映射失败，还是构建规则拒绝落行。
+系统 MUST 在 `v2` 审计与异常分类中区分“源本身缺失”和“构建阶段未正确消费源”。对于 `eligible_no_source`、`turnover_rate_imputed_zero`、`pre_close_imputed_zero` 等异常，系统 MUST 能说明该异常是由于所有候选源均无数据、主源缺失但补源可得、历史左截断导致当前窗口内缺少价格/换手锚点，还是构建规则拒绝落行。
 
 #### Scenario: 生成异常分类
 - **WHEN** 系统为 `v2` 生成 exceptions
 - **THEN** 每条异常 MUST 至少能归入一种来源解释分类
 - **THEN** 异常汇总 MUST 能按来源解释分类聚合输出
+
+#### Scenario: `pre_close` 左截断锚点缺口单独归类
+- **WHEN** 某条非 `traded` 的 canonical 行无法从 `daily_pre_close`、`prev_close_carry`、`basic_close_anchor`、`daily_close_anchor` 获得正 `pre_close`
+- **AND** 该行属于窗口起始连续缺锚点区段，而不是已有正锚点后的中段回归
+- **THEN** 系统 MUST 将 `pre_close_imputed_zero` 归类为 `left_censored_anchor_gap`
+- **THEN** 系统 SHALL NOT 继续将该样本记为泛化的 `source_present_low_confidence_fill`
+
+#### Scenario: `turnover_rate` 左截断锚点缺口单独归类
+- **WHEN** 某条非 `traded` 的 canonical 行无法从 `daily_basic.turnover_rate`、AkShare fallback、`float_share` 公式回填获得有效 `turnover_rate`
+- **AND** 该行已同时命中窗口起始连续缺锚点的 `pre_close_imputed_zero`
+- **THEN** 系统 MUST 将 `turnover_rate_imputed_zero` 归类为 `left_censored_turnover_gap`
+- **THEN** 系统 SHALL NOT 继续将该样本记为泛化的 `fallback_available`
+
+#### Scenario: 真无源 `turnover_rate` 不得并入左截断已知源缺口
+- **WHEN** 行状态仍为 `source_unresolved`
+- **THEN** 系统 SHALL NOT 仅因为该行也出现 `turnover_rate_imputed_zero` 就将其并入 `left_censored_turnover_gap`
+- **THEN** 系统 MUST 继续保留其真无源语义
+
+### Requirement: source governance MUST 区分 pre-window pause terminal tail 与真无源缺口
+系统 MUST 能区分“formal window 起点已经落在暂停上市后的 terminal tail”与“整个窗口内都没有任何可审计证据的真无源缺口”。前者可以进入显式 override；后者 SHALL 继续保留为 `source_unresolved`。
+
+#### Scenario: pre-window pause 证据不足时不得进入 override
+- **WHEN** 某个 symbol 虽然在 `2007-01-04 ~ delist_date` 连续无源
+- **BUT** formal window 起点之前没有正式暂停上市证据
+- **THEN** 系统 SHALL NOT 仅凭 `delist_date` 就把这段窗口并入 `delist_tail_confirmed`
+- **AND** 这些行 MUST 继续保留为 `source_unresolved`

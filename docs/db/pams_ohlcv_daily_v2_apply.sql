@@ -234,7 +234,7 @@ BEGIN
     ) THEN
         ALTER TABLE public.pams_ohlcv_daily_v2
             ADD CONSTRAINT chk_pams_ohlcv_daily_v2_row_status
-            CHECK (row_status IN ('traded', 'suspended_confirmed', 'synthetic_gap_fill', 'source_unresolved'));
+            CHECK (row_status IN ('traded', 'suspended_confirmed', 'delist_tail_confirmed', 'synthetic_gap_fill', 'source_unresolved'));
     END IF;
     IF NOT EXISTS (
         SELECT 1

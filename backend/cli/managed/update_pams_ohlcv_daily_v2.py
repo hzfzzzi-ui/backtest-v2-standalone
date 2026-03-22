@@ -203,6 +203,136 @@ def _load_security_master(conn, symbol_filter: set[str]) -> pd.DataFrame:
     return frame.reset_index(drop=True)
 
 
+def _load_last_raw_source_trade_dates(conn, symbol_filter: set[str]) -> dict[str, date]:
+    symbol_clause = ""
+    params: list[Any] = []
+    if symbol_filter:
+        ts_codes = [v2_common.symbol_to_tushare_code(symbol) for symbol in sorted(symbol_filter)]
+        symbol_clause = "WHERE ts_code = ANY(%s)"
+        params.append(ts_codes)
+    frame = v2_common.df_from_query(
+        conn,
+        f"""
+        WITH per_table AS (
+            SELECT ts_code, MAX(trade_date) AS max_trade_date
+            FROM public.{common.safe_ident(v2_common.RAW_DAILY_TABLE)}
+            {symbol_clause}
+            GROUP BY ts_code
+            UNION ALL
+            SELECT ts_code, MAX(trade_date) AS max_trade_date
+            FROM public.{common.safe_ident(v2_common.RAW_SUSPEND_TABLE)}
+            {symbol_clause}
+            GROUP BY ts_code
+            UNION ALL
+            SELECT ts_code, MAX(trade_date) AS max_trade_date
+            FROM public.{common.safe_ident(v2_common.RAW_DAILY_BASIC_TABLE)}
+            {symbol_clause}
+            GROUP BY ts_code
+            UNION ALL
+            SELECT ts_code, MAX(trade_date) AS max_trade_date
+            FROM public.{common.safe_ident(v2_common.RAW_ADJ_FACTOR_TABLE)}
+            {symbol_clause}
+            GROUP BY ts_code
+            UNION ALL
+            SELECT ts_code, MAX(trade_date) AS max_trade_date
+            FROM public.{common.safe_ident(v2_common.RAW_STK_LIMIT_TABLE)}
+            {symbol_clause}
+            GROUP BY ts_code
+            UNION ALL
+            SELECT ts_code, MAX(trade_date) AS max_trade_date
+            FROM public.{common.safe_ident(v2_common.RAW_MONEYFLOW_TABLE)}
+            {symbol_clause}
+            GROUP BY ts_code
+        )
+        SELECT ts_code, MAX(max_trade_date) AS last_source_trade_date
+        FROM per_table
+        GROUP BY ts_code
+        """,
+        tuple(params * 6),
+    )
+    if frame.empty:
+        return {}
+    out: dict[str, date] = {}
+    for row in frame.itertuples(index=False):
+        symbol = v2_common.normalize_stock_symbol(str(row.ts_code))
+        last_trade_date = v2_common.to_date_or_none(row.last_source_trade_date)
+        if symbol and last_trade_date is not None:
+            out[symbol] = last_trade_date
+    return out
+
+
+def _load_code_transition_terminal_dates(conn, symbol_filter: set[str]) -> dict[str, tuple[date, str]]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass(%s)", (f"public.{common.safe_ident(v2_common.SYMBOL_LINEAGE_TABLE)}",))
+        if cur.fetchone()[0] is None:
+            return {}
+    clauses = ["phase_type = 'cn_code_transition'", "is_active = TRUE", "phase_end IS NOT NULL"]
+    params: list[Any] = []
+    if symbol_filter:
+        clauses.append("historical_symbol = ANY(%s)")
+        params.append(sorted(symbol_filter))
+    frame = v2_common.df_from_query(
+        conn,
+        f"""
+        SELECT historical_symbol, phase_end, mapping_source
+        FROM public.{common.safe_ident(v2_common.SYMBOL_LINEAGE_TABLE)}
+        WHERE {" AND ".join(clauses)}
+        ORDER BY historical_symbol, phase_end
+        """,
+        tuple(params),
+    )
+    out: dict[str, tuple[date, str]] = {}
+    for row in frame.itertuples(index=False):
+        symbol = v2_common.normalize_stock_symbol(str(row.historical_symbol))
+        phase_end = v2_common.to_date_or_none(row.phase_end)
+        mapping_source = str(row.mapping_source or "pit_security_symbol_lineage").strip() or "pit_security_symbol_lineage"
+        if not symbol or phase_end is None:
+            continue
+        current = out.get(symbol)
+        if current is None or phase_end < current[0]:
+            out[symbol] = (phase_end, mapping_source)
+    return out
+
+
+def _apply_terminal_boundaries(
+    security_master: pd.DataFrame,
+    code_transition_terminal_dates: dict[str, tuple[date, str]],
+) -> pd.DataFrame:
+    if security_master.empty:
+        frame = security_master.copy()
+        frame["effective_end_date"] = pd.Series(dtype="object")
+        frame["effective_end_source"] = pd.Series(dtype="object")
+        return frame
+    frame = security_master.copy()
+    effective_end_dates: list[date | None] = []
+    effective_end_sources: list[str] = []
+    for row in frame.itertuples(index=False):
+        symbol = v2_common.normalize_stock_symbol(str(row.symbol))
+        delist_date = v2_common.to_date_or_none(row.delist_date)
+        transition_end, _mapping_source = code_transition_terminal_dates.get(symbol, (None, ""))
+        if transition_end is not None and (delist_date is None or transition_end <= delist_date):
+            effective_end_dates.append(transition_end)
+            effective_end_sources.append("pit_security_symbol_lineage")
+            continue
+        effective_end_dates.append(delist_date)
+        effective_end_sources.append("pit_security_master" if delist_date is not None else "")
+    frame["effective_end_date"] = effective_end_dates
+    frame["effective_end_source"] = effective_end_sources
+    return frame.reset_index(drop=True)
+
+
+def _load_official_terminal_overrides(
+    symbol_filter: set[str],
+) -> dict[str, v2_common.OfficialTerminalOverride]:
+    if not symbol_filter:
+        return dict(v2_common.OFFICIAL_TERMINAL_OVERRIDES)
+    return {
+        symbol: override
+        for symbol, override in v2_common.OFFICIAL_TERMINAL_OVERRIDES.items()
+        if symbol in symbol_filter
+    }
+
+
 def _load_prev_state(conn, table: str, start: date, symbol_filter: set[str]) -> dict[str, v2_common.PrevState]:
     query = f"""
         SELECT DISTINCT ON (symbol)
@@ -299,6 +429,79 @@ def _is_st(st_periods: dict[str, list[tuple[date, date | None]]], symbol: str, t
     )
 
 
+def _gap_side_evidence_sources(
+    *,
+    adj_present: bool,
+    basic_present: bool,
+    limit_present: bool,
+) -> list[str]:
+    sources: list[str] = []
+    if adj_present:
+        sources.append(v2_common.RAW_ADJ_FACTOR_TABLE)
+    if basic_present:
+        sources.append(v2_common.RAW_DAILY_BASIC_TABLE)
+    if limit_present:
+        sources.append(v2_common.RAW_STK_LIMIT_TABLE)
+    return sources
+
+
+def _classify_row_status(
+    *,
+    market_phase: str,
+    daily_present: bool,
+    suspend_present: bool,
+    adj_present: bool,
+    basic_present: bool,
+    limit_present: bool,
+) -> tuple[str, list[str]]:
+    if daily_present:
+        return "traded", []
+    if suspend_present:
+        return "suspended_confirmed", []
+    side_sources = _gap_side_evidence_sources(
+        adj_present=adj_present,
+        basic_present=basic_present,
+        limit_present=limit_present,
+    )
+    if market_phase in {"sh", "sz", "bj_post_20211115"} and side_sources:
+        return "synthetic_gap_fill", side_sources
+    return "source_unresolved", []
+
+
+def _is_delist_tail_confirmed(
+    *,
+    row_status: str,
+    market_phase: str,
+    trade_date: date,
+    last_source_trade_date: date | None,
+    terminal_end_date: date | None,
+) -> bool:
+    if row_status != "source_unresolved":
+        return False
+    if market_phase == "bj_pre_20211115":
+        return False
+    if terminal_end_date is None or last_source_trade_date is None:
+        return False
+    return bool(last_source_trade_date < trade_date <= terminal_end_date)
+
+
+def _match_official_terminal_override(
+    *,
+    row_status: str,
+    symbol: str,
+    trade_date: date,
+    official_terminal_overrides: dict[str, v2_common.OfficialTerminalOverride],
+) -> v2_common.OfficialTerminalOverride | None:
+    if row_status != "source_unresolved":
+        return None
+    override = official_terminal_overrides.get(symbol)
+    if override is None:
+        return None
+    if override.start_date <= trade_date <= override.end_date:
+        return override
+    return None
+
+
 def _resolve_turnover_rate(
     *,
     trade_date: date,
@@ -307,6 +510,7 @@ def _resolve_turnover_rate(
     basic_row: dict[str, Any],
     prev_state: v2_common.PrevState | None,
     row_status: str,
+    pre_close_source: str = "",
     volume: int,
     ak_cache: v2_common.AkShareTurnoverCache,
     exceptions: list[dict[str, Any]],
@@ -330,7 +534,18 @@ def _resolve_turnover_rate(
     if derived_from_prev is not None:
         return float(derived_from_prev), "formula_from_prev_float_share", 1
     if market_phase == "bj_pre_20211115":
-        cause_class = "mapping_failure"
+        cause_class = "bj_pre_daily_basic_gap"
+    elif market_phase == "bj_post_20211115":
+        cause_class = "bj_post_daily_basic_gap"
+    elif (
+        market_phase in {"sh", "sz"}
+        and row_status in {"synthetic_gap_fill", "delist_tail_confirmed"}
+        and pre_close_source == "imputed_zero"
+        and basic_turnover is None
+        and ak_turnover is None
+        and prev_float_share is None
+    ):
+        cause_class = v2_common.TURNOVER_LEFT_CENSORED_CAUSE
     elif row_status == "source_unresolved":
         cause_class = "missing_in_all_sources"
     else:
@@ -342,7 +557,7 @@ def _resolve_turnover_rate(
             "ts_code": ts_code,
             "issue_type": "turnover_rate_imputed_zero",
             "cause_class": cause_class,
-            "issue_detail": f"turnover_rate missing after tushare, akshare, and formula fallback; market_phase={market_phase}; ak_source={ak_source or 'none'}; ak_value={ak_turnover}",
+            "issue_detail": f"turnover_rate missing after tushare, akshare, and formula fallback; market_phase={market_phase}; ak_source={ak_source or 'none'}; ak_value={ak_turnover}; basic_turnover={basic_turnover}",
             "source_table": v2_common.RAW_DAILY_BASIC_TABLE,
         }
     )
@@ -370,13 +585,16 @@ def _resolve_anchor_price(
         value = v2_common.to_float_or_none(candidate)
         if value is not None and value > 0:
             return value, source, confidence
+    cause_class = "source_present_low_confidence_fill"
+    if row_status in {"synthetic_gap_fill", "suspended_confirmed", "delist_tail_confirmed"}:
+        cause_class = v2_common.PRE_CLOSE_LEFT_CENSORED_CAUSE
     exceptions.append(
         {
             "trade_date": trade_date,
             "symbol": symbol,
             "ts_code": ts_code,
             "issue_type": "pre_close_imputed_zero",
-            "cause_class": "source_present_low_confidence_fill",
+            "cause_class": cause_class,
             "issue_detail": f"failed to resolve anchor price for {row_status} row",
             "source_table": v2_common.RAW_DAILY_TABLE,
         }
@@ -476,6 +694,8 @@ def _build_trade_date_rows(
     ak_cache: v2_common.AkShareTurnoverCache,
     bj_pre_evidence_dates: dict[str, set[date]],
     build_run_id: str,
+    last_source_trade_dates: dict[str, date] | None = None,
+    official_terminal_overrides: dict[str, v2_common.OfficialTerminalOverride] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any], list[dict[str, Any]]]:
     daily_map = {
         row.symbol: row._asdict()
@@ -503,7 +723,10 @@ def _build_trade_date_rows(
     traded_count = 0
     suspended_count = 0
     eligible_no_source_count = 0
+    delist_tail_confirmed_count = 0
     skipped_bj_pre_no_evidence_count = 0
+    last_source_trade_dates = last_source_trade_dates or {}
+    official_terminal_overrides = official_terminal_overrides or {}
 
     for sec in eligible_frame.itertuples(index=False):
         symbol = v2_common.normalize_stock_symbol(str(sec.symbol))
@@ -524,17 +747,38 @@ def _build_trade_date_rows(
             if trade_date not in evidence_dates:
                 skipped_bj_pre_no_evidence_count += 1
                 continue
-        if daily_present:
-            row_status = "traded"
-        elif suspend_present:
-            row_status = "suspended_confirmed"
-        else:
-            row_status = "source_unresolved"
+        row_status, gap_side_sources = _classify_row_status(
+            market_phase=market_phase,
+            daily_present=daily_present,
+            suspend_present=suspend_present,
+            adj_present=bool(adj_row),
+            basic_present=basic_present,
+            limit_present=limit_present,
+        )
+        terminal_end_date = v2_common.to_date_or_none(getattr(sec, "effective_end_date", getattr(sec, "delist_date", None)))
+        terminal_source = str(getattr(sec, "effective_end_source", "") or "").strip()
+        last_source_trade_date = last_source_trade_dates.get(symbol)
+        override = _match_official_terminal_override(
+            row_status=row_status,
+            symbol=symbol,
+            trade_date=trade_date,
+            official_terminal_overrides=official_terminal_overrides,
+        )
+        if _is_delist_tail_confirmed(
+            row_status=row_status,
+            market_phase=market_phase,
+            trade_date=trade_date,
+            last_source_trade_date=last_source_trade_date,
+            terminal_end_date=terminal_end_date,
+        ):
+            row_status = "delist_tail_confirmed"
+        elif override is not None:
+            row_status = "delist_tail_confirmed"
         if daily_present:
             traded_count += 1
         else:
             suspended_count += 1
-            if not suspend_present:
+            if row_status == "source_unresolved":
                 eligible_no_source_count += 1
                 exceptions.append(
                     {
@@ -545,6 +789,45 @@ def _build_trade_date_rows(
                         "cause_class": "mapping_failure" if market_phase == "bj_pre_20211115" else "missing_in_all_sources",
                         "issue_detail": "missing raw daily and suspend_d on eligible open trade_date",
                         "source_table": f"{v2_common.RAW_DAILY_TABLE},{v2_common.RAW_SUSPEND_TABLE}",
+                    }
+                )
+            elif row_status == "delist_tail_confirmed":
+                delist_tail_confirmed_count += 1
+                issue_detail = (
+                    f"terminal_end_date={terminal_end_date.isoformat() if terminal_end_date else 'none'}; "
+                    f"last_source_trade_date={last_source_trade_date.isoformat() if last_source_trade_date else 'none'}"
+                )
+                cause_class = "code_transition_retired" if terminal_source == "pit_security_symbol_lineage" else "official_delist_tail"
+                source_table = terminal_source or "pit_security_master"
+                if override is not None:
+                    cause_class = "official_terminal_override"
+                    source_table = override.evidence_source
+                    issue_detail = (
+                        f"override_start_date={override.start_date.isoformat()}; "
+                        f"override_end_date={override.end_date.isoformat()}; "
+                        f"evidence_kind={override.evidence_kind}"
+                    )
+                exceptions.append(
+                    {
+                        "trade_date": trade_date,
+                        "symbol": symbol,
+                        "ts_code": ts_code,
+                        "issue_type": "delist_tail_confirmed",
+                        "cause_class": cause_class,
+                        "issue_detail": issue_detail,
+                        "source_table": source_table,
+                    }
+                )
+            elif row_status == "synthetic_gap_fill":
+                exceptions.append(
+                    {
+                        "trade_date": trade_date,
+                        "symbol": symbol,
+                        "ts_code": ts_code,
+                        "issue_type": "synthetic_gap_fill_side_evidence",
+                        "cause_class": "side_evidence_without_trading_bar",
+                        "issue_detail": f"missing raw daily and suspend_d; side evidence present in {','.join(gap_side_sources)}",
+                        "source_table": ",".join(gap_side_sources),
                     }
                 )
         is_suspended = row_status == "suspended_confirmed"
@@ -626,6 +909,7 @@ def _build_trade_date_rows(
             basic_row=basic_row,
             prev_state=current_state,
             row_status=row_status,
+            pre_close_source=pre_close_source,
             volume=volume_value,
             ak_cache=ak_cache,
             exceptions=exceptions,
@@ -707,6 +991,7 @@ def _build_trade_date_rows(
         "built_symbol_count": int(len(frame)),
         "traded_rows": int(traded_count),
         "suspended_rows": int(suspended_count),
+        "delist_tail_confirmed_rows": int(delist_tail_confirmed_count),
         "eligible_no_source_rows": int(eligible_no_source_count),
         "skipped_bj_pre_no_evidence_rows": int(skipped_bj_pre_no_evidence_count),
         "turnover_rate_f_null_count": int(pd.to_numeric(frame["turnover_rate_f"], errors="coerce").isna().sum()) if not frame.empty else 0,
@@ -776,7 +1061,11 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
                 open_trade_dates = _load_open_trade_dates(conn, start, end)
                 symbol_filter = common.parse_symbols_csv(str(args.symbols_csv or ""))
                 security_master = _load_security_master(conn, symbol_filter)
+                code_transition_terminal_dates = _load_code_transition_terminal_dates(conn, symbol_filter)
+                security_master = _apply_terminal_boundaries(security_master, code_transition_terminal_dates)
                 prev_state = _load_prev_state(conn, str(args.table), start, symbol_filter)
+                last_source_trade_dates = _load_last_raw_source_trade_dates(conn, symbol_filter)
+                official_terminal_overrides = _load_official_terminal_overrides(symbol_filter)
                 st_periods = v2_common.load_st_periods(start, end)
                 lineage_resolver = v2_common.SymbolLineageResolver.load_from_db(conn)
                 ak_cache = v2_common.AkShareTurnoverCache(lineage_resolver=lineage_resolver)
@@ -823,7 +1112,7 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
                     try:
                         eligible = security_master[
                             (security_master["list_date"].isna() | (security_master["list_date"] <= trade_date))
-                            & (security_master["delist_date"].isna() | (security_master["delist_date"] >= trade_date))
+                            & (security_master["effective_end_date"].isna() | (security_master["effective_end_date"] >= trade_date))
                         ].copy()
                         if eligible.empty:
                             continue
@@ -869,6 +1158,8 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
                             prev_state=prev_state,
                             ak_cache=ak_cache,
                             bj_pre_evidence_dates=bj_pre_evidence_dates,
+                            last_source_trade_dates=last_source_trade_dates,
+                            official_terminal_overrides=official_terminal_overrides,
                             build_run_id=run_id,
                         )
                         rows = _rows_to_upsert(built_frame)

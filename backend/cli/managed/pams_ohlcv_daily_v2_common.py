@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT_ROOT = common.DEFAULT_OUTPUT_ROOT
 DEFAULT_BACKFILL_START = common.DEFAULT_BACKFILL_START
 BUILD_VERSION = "pams_ohlcv_daily_v2_db_completion_20260317"
-OFFICIAL_END_DATE = date(2026, 3, 16)
+OFFICIAL_END_DATE = date(2026, 3, 20)
 BJ_ESTABLISHED_DATE = date(2021, 11, 15)
 
 RAW_STOCK_BASIC_TABLE = "raw_tushare_stock_basic"
@@ -68,6 +68,14 @@ HARD_FIELDS = [
     "turnover_rate_confidence",
 ]
 
+CANONICAL_ROW_STATUSES = (
+    "traded",
+    "suspended_confirmed",
+    "delist_tail_confirmed",
+    "synthetic_gap_fill",
+    "source_unresolved",
+)
+
 SOFT_FIELDS = [
     "turnover_rate_f",
     "volume_ratio",
@@ -82,6 +90,17 @@ CRITICAL_BUILD_ISSUE_TYPES = {
     "turnover_rate_imputed_zero",
     "source_unresolved",
 }
+
+KNOWN_SOURCE_GAP_ISSUE_CAUSES: set[tuple[str, str]] = {
+    ("turnover_rate_imputed_zero", "bj_pre_daily_basic_gap"),
+    ("turnover_rate_imputed_zero", "bj_post_daily_basic_gap"),
+    ("turnover_rate_imputed_zero", "left_censored_turnover_gap"),
+    ("pre_close_imputed_zero", "left_censored_anchor_gap"),
+}
+
+KNOWN_SOURCE_GAP_LOW_TURNOVER_REASON = "known_source_gap_low_turnover"
+PRE_CLOSE_LEFT_CENSORED_CAUSE = "left_censored_anchor_gap"
+TURNOVER_LEFT_CENSORED_CAUSE = "left_censored_turnover_gap"
 
 DAILY_BASIC_FIELDS = [
     "close",
@@ -131,6 +150,92 @@ class LineageCandidate:
     symbol: str
     source: str
     confidence: int
+
+
+@dataclass(slots=True, frozen=True)
+class OfficialTerminalOverride:
+    symbol: str
+    start_date: date
+    end_date: date
+    evidence_source: str
+    evidence_kind: str
+
+
+@dataclass(slots=True, frozen=True)
+class FormalAuditWindow:
+    key: str
+    label: str
+    start_date: date
+    end_date: date
+
+
+OFFICIAL_TERMINAL_OVERRIDES: dict[str, OfficialTerminalOverride] = {
+    "sh600680": OfficialTerminalOverride(
+        symbol="sh600680",
+        start_date=date(2019, 5, 24),
+        end_date=date(2019, 5, 24),
+        evidence_source="sse_c_20190517_4820838",
+        evidence_kind="official_delist_and_delist_day",
+    ),
+    "sh601268": OfficialTerminalOverride(
+        symbol="sh601268",
+        start_date=date(2014, 5, 26),
+        end_date=date(2014, 9, 1),
+        evidence_source="sse_factbook_2015_601268_terminal_window",
+        evidence_kind="official_suspend_window_before_covered_terminal_tail",
+    ),
+    "sh600286": OfficialTerminalOverride(
+        symbol="sh600286",
+        start_date=DEFAULT_BACKFILL_START,
+        end_date=date(2007, 5, 31),
+        evidence_source="prewindow_pause_notice_600286_20060518_plus_stock_basic_delist_date",
+        evidence_kind="pre_window_pause_notice_with_master_delist_date",
+    ),
+    "sz000583": OfficialTerminalOverride(
+        symbol="sz000583",
+        start_date=DEFAULT_BACKFILL_START,
+        end_date=date(2007, 5, 21),
+        evidence_source="prewindow_pause_notice_000583_20060509_plus_stock_basic_delist_date",
+        evidence_kind="pre_window_pause_notice_with_master_delist_date",
+    ),
+    "sz000699": OfficialTerminalOverride(
+        symbol="sz000699",
+        start_date=DEFAULT_BACKFILL_START,
+        end_date=date(2007, 4, 4),
+        evidence_source="cninfo_15880923_pause_20050509_plus_stock_basic_delist_date",
+        evidence_kind="pre_window_pause_notice_with_master_delist_date",
+    ),
+}
+
+FORMAL_AUDIT_WINDOWS: tuple[FormalAuditWindow, ...] = (
+    FormalAuditWindow(
+        key="2016_2026",
+        label="2016-2026",
+        start_date=date(2016, 3, 1),
+        end_date=OFFICIAL_END_DATE,
+    ),
+    FormalAuditWindow(
+        key="2012_2017",
+        label="2012-2017",
+        start_date=date(2012, 1, 4),
+        end_date=date(2017, 12, 29),
+    ),
+    FormalAuditWindow(
+        key="2007_2026",
+        label="2007-2026",
+        start_date=DEFAULT_BACKFILL_START,
+        end_date=OFFICIAL_END_DATE,
+    ),
+)
+
+FORMAL_AUDIT_REQUIRED_WINDOW_KEYS: tuple[str, ...] = (
+    "2016_2026",
+    "2012_2017",
+)
+
+FORMAL_AUDIT_ADVISORY_WINDOW_KEYS: tuple[str, ...] = (
+    "2007_2026",
+)
 
 
 class SymbolLineageResolver:
@@ -265,6 +370,15 @@ def to_float_or_none(value: Any) -> float | None:
     if pd.isna(number):
         return None
     return float(number)
+
+
+def normalize_cause_class(value: Any) -> str:
+    text = str(value or "").strip()
+    return text or "unknown"
+
+
+def is_known_source_gap(issue_type: Any, cause_class: Any) -> bool:
+    return (str(issue_type or "").strip(), normalize_cause_class(cause_class)) in KNOWN_SOURCE_GAP_ISSUE_CAUSES
 
 
 def to_int_or_none(value: Any) -> int | None:

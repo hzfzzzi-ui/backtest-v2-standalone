@@ -1,0 +1,7 @@
+- [x] 在 `cn-stock-v2-audit-gates` delta spec 中定义 `BJ pre daily_basic` 已知源断层的 formal gate 语义。
+- [x] 在 `pams_ohlcv_daily_v2_common.py` 增加已知源断层键常量。
+- [x] 在 `audit_pams_ohlcv_daily_v2.py` 实现 raw/effective critical 统计，并给 runtime gate 增加 `known_source_gap_low_turnover` 可见性。
+- [x] 更新 `tests/unit/test_audit_pams_ohlcv_daily_v2.py`，覆盖 canonical/runtime 新口径。
+- [x] 更新 `docs/db/v2_source_matrix.md` 和 `docs/db/pams_ohlcv_daily_v2_runbook.md`。
+- [x] 重刷 `2016-03-01 ~ 2021-11-12` 的受影响 `BJ pre` 切片，并重跑 `pams_ohlcv_daily_v2_formal_audits`。
+- [x] 运行 `pytest` 与 `openspec validate`，核对新 formal audit summary。

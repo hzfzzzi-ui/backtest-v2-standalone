@@ -9,6 +9,7 @@ from typing import Any
 _TARGETS = {
     "pams_ohlcv_daily": "backend.cli.managed.update_pams_ohlcv_daily",
     "pams_ohlcv_daily_v2_full_backfill": "backend.cli.managed.run_pams_ohlcv_daily_v2_full_backfill",
+    "pams_ohlcv_daily_v2_formal_audits": "backend.cli.managed.run_pams_ohlcv_daily_v2_formal_audits",
     "pams_ohlcv_daily_v2_raw": "backend.cli.managed.update_pams_ohlcv_daily_v2_raw",
     "pams_ohlcv_daily_v2": "backend.cli.managed.update_pams_ohlcv_daily_v2",
     "pams_ohlcv_daily_v2_audit": "backend.cli.managed.audit_pams_ohlcv_daily_v2",

@@ -26,9 +26,9 @@ docker exec -i pams-postgres psql -U pams -d pams < docs/db/cn_daily_feature_sid
 ## 最小 Smoke
 
 ```powershell
-docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_daily_basic -- --start 2026-03-16 --end 2026-03-16 --apply
-docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_moneyflow -- --start 2026-03-16 --end 2026-03-16 --apply
-docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_feature_coverage -- --start 2026-03-16 --end 2026-03-16
+docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_daily_basic -- --start 2026-03-20 --end 2026-03-20 --apply
+docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_moneyflow -- --start 2026-03-20 --end 2026-03-20 --apply
+docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_feature_coverage -- --start 2026-03-20 --end 2026-03-20
 ```
 
 ## 历史回填
@@ -38,13 +38,13 @@ docker exec backtest-v2-standalone python -m backend.cli data_refresh --target p
 ```powershell
 docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_daily_basic -- --start 2007-01-04 --end 2012-12-31 --apply
 docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_daily_basic -- --start 2013-01-01 --end 2018-12-31 --apply
-docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_daily_basic -- --start 2019-01-01 --end 2026-03-16 --apply
+docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_daily_basic -- --start 2019-01-01 --end 2026-03-20 --apply
 ```
 
 ```powershell
 docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_moneyflow -- --start 2007-01-04 --end 2012-12-31 --apply
 docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_moneyflow -- --start 2013-01-01 --end 2018-12-31 --apply
-docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_moneyflow -- --start 2019-01-01 --end 2026-03-16 --apply
+docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_moneyflow -- --start 2019-01-01 --end 2026-03-20 --apply
 ```
 
 如果不传 `--end`，脚本按最新可得交易日收口。
@@ -54,7 +54,7 @@ docker exec backtest-v2-standalone python -m backend.cli data_refresh --target p
 全量回填完成后必须立即执行：
 
 ```powershell
-docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_feature_coverage -- --start 2007-01-04 --end 2026-03-16
+docker exec backtest-v2-standalone python -m backend.cli data_refresh --target pit_stock_feature_coverage -- --start 2007-01-04 --end 2026-03-20
 ```
 
 审计产物至少检查：

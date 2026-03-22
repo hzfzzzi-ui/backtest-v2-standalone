@@ -11,9 +11,13 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backend.cli.managed import pams_ohlcv_daily_v2_common as v2_common
 from backend.cli.managed import refresh_csi800_pit as csi800_pit_refresher
 from backend.cli.managed import update_pams_ohlcv_daily as daily_updater
+from backend.cli.managed import update_pams_ohlcv_daily_v2 as v2_main_updater
+from backend.cli.managed import update_pams_ohlcv_daily_v2_raw as v2_raw_updater
 from backend.cli.managed import update_pit_index_daily as pit_index_updater
+from backend.cli.managed import update_pit_stock_moneyflow_v2 as v2_moneyflow_updater
 from backend.core.services import sim_account_auto_sync_service
 
 
@@ -27,6 +31,8 @@ DEFAULT_SCHEDULE_TIME = "18:30"
 DEFAULT_POLL_SECONDS = 300
 DEFAULT_RETRY_SECONDS = 3600
 DEFAULT_LIVE_CALENDAR_LOOKBACK_DAYS = 60
+MAINLINE_FRESHNESS_BASIS = "v2_mainline_min(v2_main,v2_moneyflow,v2_moneyflow_whitelist)"
+MAINLINE_COMPONENT_KEYS = ("v2_main", "v2_moneyflow", "v2_moneyflow_whitelist")
 
 _SCHEDULER_LOCK = threading.Lock()
 _SCHEDULER_STOP = threading.Event()
@@ -183,23 +189,120 @@ def ensure_sync_runs_table() -> None:
         conn.commit()
 
 
-def _latest_cn_a_trade_date(*, conn: Any | None = None) -> date | None:
+def _latest_table_trade_date(
+    table: str,
+    *,
+    conn: Any | None = None,
+    market: str | None = None,
+) -> date | None:
     owns_conn = conn is None
     conn = conn or _connect()
     try:
+        query = f"SELECT MAX(trade_date) FROM public.{daily_updater._safe_ident(table)}"
+        params: tuple[Any, ...] = ()
+        if market:
+            query += " WHERE market = %s"
+            params = (market,)
         with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT MAX(trade_date)
-                FROM public.{daily_updater._safe_ident(daily_updater.DEFAULT_TABLE)}
-                WHERE market = 'CN_A'
-                """
-            )
+            cur.execute(query, params)
             row = cur.fetchone()
         return _normalize_date(row[0] if row else None)
     finally:
         if owns_conn:
             conn.close()
+
+
+def _latest_legacy_cn_a_trade_date(*, conn: Any | None = None) -> date | None:
+    return _latest_table_trade_date(daily_updater.DEFAULT_TABLE, conn=conn, market="CN_A")
+
+
+def _mainline_component_trade_dates(*, conn: Any | None = None) -> dict[str, date | None]:
+    owns_conn = conn is None
+    conn = conn or _connect()
+    try:
+        return {
+            "legacy_cn_a": _latest_legacy_cn_a_trade_date(conn=conn),
+            "v2_main": _latest_table_trade_date(v2_common.V2_MAIN_TABLE, conn=conn),
+            "v2_moneyflow": _latest_table_trade_date(v2_common.V2_MONEYFLOW_TABLE, conn=conn),
+            "v2_moneyflow_whitelist": _latest_table_trade_date(v2_common.V2_MONEYFLOW_WHITELIST_TABLE, conn=conn),
+        }
+    finally:
+        if owns_conn:
+            conn.close()
+
+
+def _coerce_mainline_trade_date(component_dates: dict[str, date | None]) -> date | None:
+    required_dates = [component_dates.get(key) for key in MAINLINE_COMPONENT_KEYS]
+    if any(item is None for item in required_dates):
+        return None
+    return min(item for item in required_dates if item is not None)
+
+
+def _serialize_trade_date_map(values: dict[str, date | None] | None) -> dict[str, str | None]:
+    if not isinstance(values, dict):
+        return {}
+    return {str(key): (value.isoformat() if isinstance(value, date) else None) for key, value in values.items()}
+
+
+def _latest_cn_a_trade_date(*, conn: Any | None = None) -> date | None:
+    return _coerce_mainline_trade_date(_mainline_component_trade_dates(conn=conn))
+
+
+def _summary_block(summary: dict[str, Any], key: str) -> dict[str, Any]:
+    value = summary.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _summary_component_trade_dates(
+    summary: dict[str, Any],
+    *,
+    conn: Any | None = None,
+) -> dict[str, date | None]:
+    component_dates = {
+        "legacy_cn_a": _normalize_date(summary.get("latest_cn_a_after")) or _normalize_date(summary.get("latest_cn_a_before")),
+        "v2_main": _normalize_date(_summary_block(summary, "v2_main_refresh").get("latest_trade_date_after"))
+        or _normalize_date(_summary_block(summary, "v2_main_refresh").get("latest_trade_date_before")),
+        "v2_moneyflow": _normalize_date(_summary_block(summary, "v2_moneyflow_refresh").get("latest_trade_date_after"))
+        or _normalize_date(_summary_block(summary, "v2_moneyflow_refresh").get("latest_trade_date_before")),
+        # whitelist is built in the same updater and should track the same trade-date frontier.
+        "v2_moneyflow_whitelist": _normalize_date(_summary_block(summary, "v2_moneyflow_refresh").get("latest_trade_date_after"))
+        or _normalize_date(_summary_block(summary, "v2_moneyflow_refresh").get("latest_trade_date_before")),
+    }
+    if conn is None:
+        return component_dates
+    db_component_dates = _mainline_component_trade_dates(conn=conn)
+    for key, value in db_component_dates.items():
+        component_dates.setdefault(key, value)
+        if component_dates.get(key) is None:
+            component_dates[key] = value
+    return component_dates
+
+
+def _latest_mainline_trade_date_from_summary(
+    summary: dict[str, Any],
+    *,
+    conn: Any | None = None,
+) -> date | None:
+    return _coerce_mainline_trade_date(_summary_component_trade_dates(summary, conn=conn))
+
+
+def _aggregate_rows_upserted(summary: dict[str, Any]) -> int:
+    total = int(summary.get("upserted_rows") or 0)
+    total += int(_summary_block(summary, "v2_main_refresh").get("built_rows") or 0)
+    total += int(_summary_block(summary, "v2_moneyflow_refresh").get("rows") or 0)
+    return total
+
+
+def _build_mainline_gap_error(target_trade_date: date, component_dates: dict[str, date | None]) -> str:
+    details = ", ".join(
+        f"{key}={(value.isoformat() if value else 'missing')}"
+        for key, value in component_dates.items()
+        if key != "legacy_cn_a"
+    )
+    return (
+        f"v2 mainline finished without reaching target trade date {target_trade_date.isoformat()} "
+        f"({details})"
+    )
 
 
 def _advisory_lock(conn: Any, sync_key: str) -> bool:
@@ -281,6 +384,13 @@ def _row_to_record(row: Any) -> SyncRunRecord | None:
         summary_json=summary_json,
         error_text=str(row.get("error_text") or "").strip() or None,
     )
+
+
+def _record_uses_mainline_basis(record: SyncRunRecord | None) -> bool:
+    if record is None:
+        return False
+    summary_json = record.summary_json if isinstance(record.summary_json, dict) else {}
+    return str(summary_json.get("freshness_basis") or "").strip() == MAINLINE_FRESHNESS_BASIS
 
 
 def _load_latest_records(*, conn: Any | None = None) -> tuple[SyncRunRecord | None, SyncRunRecord | None]:
@@ -455,10 +565,17 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
             return {"status": "running", "target_trade_date": target_trade_date.isoformat(), "message": "sync already locked by another process"}
 
         latest_run, latest_success = _load_latest_records(conn=lock_conn)
-        latest_success_date = latest_success.latest_trade_date_after if latest_success else None
+        effective_latest_run = latest_run if _record_uses_mainline_basis(latest_run) else None
+        effective_latest_success = latest_success if _record_uses_mainline_basis(latest_success) else None
+        latest_success_date = effective_latest_success.latest_trade_date_after if effective_latest_success else None
         latest_available_before = _latest_cn_a_trade_date(conn=lock_conn)
+        mainline_component_dates_before = _mainline_component_trade_dates(conn=lock_conn)
         if not force and latest_success_date is not None and latest_success_date >= target_trade_date:
-            if latest_run is None or latest_run.target_trade_date != target_trade_date or latest_run.status not in {"success", "skipped"}:
+            if (
+                effective_latest_run is None
+                or effective_latest_run.target_trade_date != target_trade_date
+                or effective_latest_run.status not in {"success", "skipped"}
+            ):
                 _insert_run_record(
                     conn=lock_conn,
                     target_trade_date=target_trade_date,
@@ -466,21 +583,28 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
                     started_at=started_at_utc,
                     finished_at=started_at_utc,
                     latest_trade_date_before=latest_available_before,
-                    latest_trade_date_after=latest_available_before,
+                    latest_trade_date_after=latest_available_before or latest_success_date,
                     rows_upserted=0,
-                    summary_json={"reason": "already_fresh", "latest_trade_date_after": latest_success_date.isoformat()},
+                    summary_json={
+                        "reason": "already_fresh",
+                        "latest_trade_date_after": latest_success_date.isoformat(),
+                        "freshness_basis": MAINLINE_FRESHNESS_BASIS,
+                        "mainline_component_trade_dates": _serialize_trade_date_map(mainline_component_dates_before),
+                    },
                 )
                 lock_conn.commit()
             return {
                 "status": "skipped",
                 "target_trade_date": target_trade_date.isoformat(),
                 "latest_trade_date_after": latest_success_date.isoformat(),
+                "freshness_basis": MAINLINE_FRESHNESS_BASIS,
+                "mainline_component_trade_dates": _serialize_trade_date_map(mainline_component_dates_before),
                 "message": "already synced to target trade date",
             }
 
-        if not force and not _should_retry_failed_run(latest_run, target_trade_date, local_now):
+        if not force and not _should_retry_failed_run(effective_latest_run, target_trade_date, local_now):
             return {
-                "status": latest_run.status if latest_run else "running",
+                "status": effective_latest_run.status if effective_latest_run else "running",
                 "target_trade_date": target_trade_date.isoformat(),
                 "message": "recent run already attempted for current target trade date",
             }
@@ -492,25 +616,60 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
             status="running",
             started_at=started_at,
             latest_trade_date_before=latest_available_before,
-            summary_json={"target_trade_date": target_trade_date.isoformat()},
+            summary_json={
+                "target_trade_date": target_trade_date.isoformat(),
+                "freshness_basis": MAINLINE_FRESHNESS_BASIS,
+                "mainline_component_trade_dates": _serialize_trade_date_map(mainline_component_dates_before),
+            },
         )
         lock_conn.commit()
 
         output_dir = daily_updater.DEFAULT_OUTPUT_ROOT / "cn_daily_sync" / local_now.strftime("%Y%m%dT%H%M%S")
         output_dir.mkdir(parents=True, exist_ok=True)
+        summary: dict[str, Any] = {
+            "target_trade_date": target_trade_date.isoformat(),
+            "freshness_basis": MAINLINE_FRESHNESS_BASIS,
+            "mainline_component_trade_dates_before": _serialize_trade_date_map(mainline_component_dates_before),
+        }
 
         try:
-            summary = daily_updater.run_update_to_target(
+            legacy_summary = daily_updater.run_update_to_target(
                 end=target_trade_date.isoformat(),
                 output_dir=str(output_dir),
                 apply=True,
             )
+            summary.update(legacy_summary)
+            summary["legacy_daily_refresh"] = legacy_summary
             pit_index_summary = pit_index_updater.run_update_to_target(
                 end=target_trade_date.isoformat(),
                 output_dir=str(output_dir / "pit_index_daily"),
                 apply=True,
             )
             summary["pit_index_daily_refresh"] = pit_index_summary
+            v2_raw_summary = v2_raw_updater.run_update(
+                v2_raw_updater.build_update_args(
+                    end=target_trade_date.isoformat(),
+                    output_dir=str(output_dir / "pams_ohlcv_daily_v2_raw"),
+                    apply=True,
+                )
+            )
+            summary["v2_raw_refresh"] = v2_raw_summary
+            v2_main_summary = v2_main_updater.run_update(
+                v2_main_updater.build_update_args(
+                    end=target_trade_date.isoformat(),
+                    output_dir=str(output_dir / "pams_ohlcv_daily_v2"),
+                    apply=True,
+                )
+            )
+            summary["v2_main_refresh"] = v2_main_summary
+            v2_moneyflow_summary = v2_moneyflow_updater.run_update(
+                v2_moneyflow_updater.build_update_args(
+                    end=target_trade_date.isoformat(),
+                    output_dir=str(output_dir / "pit_stock_moneyflow_v2"),
+                    apply=True,
+                )
+            )
+            summary["v2_moneyflow_refresh"] = v2_moneyflow_summary
             pit_summary = csi800_pit_refresher.run_refresh(
                 out_dir=csi800_pit_refresher.DEFAULT_OUT_DIR,
                 ops_dir=output_dir / "csi800_pit",
@@ -539,23 +698,30 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
             summary["sim_account_auto_sync"] = auto_sync_summary
         except Exception as exc:
             with _connect() as record_conn:
+                latest_after = _latest_mainline_trade_date_from_summary(summary, conn=record_conn)
+                mainline_component_dates_after = _summary_component_trade_dates(summary, conn=record_conn)
                 _update_run_record(
                     conn=record_conn,
                     run_id=run_id,
                     status="failed",
                     finished_at=datetime.now(UTC),
                     latest_trade_date_before=latest_available_before,
-                    latest_trade_date_after=_latest_cn_a_trade_date(conn=record_conn),
+                    latest_trade_date_after=latest_after,
                     rows_upserted=0,
-                    summary_json={"output_dir": str(output_dir)},
+                    summary_json={
+                        **summary,
+                        "output_dir": str(output_dir),
+                        "mainline_component_trade_dates": _serialize_trade_date_map(mainline_component_dates_after),
+                    },
                     error_text=str(exc),
                 )
                 record_conn.commit()
             raise
 
-        latest_after = _normalize_date(summary.get("latest_cn_a_after"))
-        if latest_after is None:
-            latest_after = _normalize_date(summary.get("latest_cn_a_before")) or latest_available_before
+        mainline_component_dates_after = _summary_component_trade_dates(summary)
+        latest_after = _coerce_mainline_trade_date(mainline_component_dates_after)
+        summary["mainline_component_trade_dates"] = _serialize_trade_date_map(mainline_component_dates_after)
+        summary["latest_mainline_trade_date_after"] = latest_after.isoformat() if latest_after else None
         integrity_summary = summary.get("adj_factor_integrity") if isinstance(summary.get("adj_factor_integrity"), dict) else {}
         integrity_ok = bool(integrity_summary.get("ok", True))
         success = latest_after is not None and latest_after >= target_trade_date and integrity_ok
@@ -563,7 +729,7 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
         if success:
             error_text = None
         elif latest_after is None or latest_after < target_trade_date:
-            error_text = f"sync finished without reaching target trade date {target_trade_date.isoformat()}"
+            error_text = _build_mainline_gap_error(target_trade_date, mainline_component_dates_after)
         else:
             remaining_rows = int(integrity_summary.get("remaining_rows") or 0)
             remaining_dates = integrity_summary.get("after_dates")
@@ -583,9 +749,9 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
                 run_id=run_id,
                 status=final_status,
                 finished_at=datetime.now(UTC),
-                latest_trade_date_before=_normalize_date(summary.get("latest_cn_a_before")) or latest_available_before,
+                latest_trade_date_before=latest_available_before,
                 latest_trade_date_after=latest_after,
-                rows_upserted=int(summary.get("upserted_rows") or 0),
+                rows_upserted=_aggregate_rows_upserted(summary),
                 summary_json={**summary, "output_dir": str(output_dir)},
                 error_text=error_text,
             )
@@ -647,6 +813,7 @@ def _build_status_payload(
     target_trade_date: date | None,
     latest_success_trade_date: date | None,
     latest_available_trade_date: date | None,
+    component_trade_dates: dict[str, date | None] | None,
     lag_days: int | None,
     latest_run: SyncRunRecord | None,
     message: str,
@@ -663,6 +830,9 @@ def _build_status_payload(
         "latest_success_trade_date": _serialize_date(latest_success_trade_date),
         "latest_available_trade_date": _serialize_date(latest_available_trade_date),
         "latest_display_trade_date": _serialize_date(latest_display_trade_date),
+        "freshness_basis": MAINLINE_FRESHNESS_BASIS,
+        "mainline_component_trade_dates": _serialize_trade_date_map(component_trade_dates),
+        "legacy_latest_trade_date": _serialize_date((component_trade_dates or {}).get("legacy_cn_a")),
         "date_source": "sync_runs" if latest_success_trade_date else ("db_max_date" if latest_available_trade_date else "none"),
         "lag_days": lag_days,
         "last_run_status": latest_run.status if latest_run else None,
@@ -680,7 +850,13 @@ def build_market_data_sync_status(now: datetime | None = None) -> dict[str, Any]
         target_trade_date = resolve_target_trade_date(local_now)
         with _connect() as conn:
             latest_available_trade_date = _latest_cn_a_trade_date(conn=conn)
+            component_trade_dates = _mainline_component_trade_dates(conn=conn)
             latest_run, latest_success = _load_latest_records(conn=conn)
+
+        if not _record_uses_mainline_basis(latest_run):
+            latest_run = None
+        if not _record_uses_mainline_basis(latest_success):
+            latest_success = None
 
         latest_success_trade_date = latest_success.latest_trade_date_after if latest_success else None
         lag_anchor = latest_success_trade_date or latest_available_trade_date
@@ -714,6 +890,7 @@ def build_market_data_sync_status(now: datetime | None = None) -> dict[str, Any]
             target_trade_date=target_trade_date,
             latest_success_trade_date=latest_success_trade_date,
             latest_available_trade_date=latest_available_trade_date,
+            component_trade_dates=component_trade_dates,
             lag_days=lag_days,
             latest_run=latest_run,
             message=_format_status_message(
@@ -733,6 +910,7 @@ def build_market_data_sync_status(now: datetime | None = None) -> dict[str, Any]
             target_trade_date=None,
             latest_success_trade_date=None,
             latest_available_trade_date=None,
+            component_trade_dates=None,
             lag_days=None,
             latest_run=None,
             message=str(exc) or "market data sync status unavailable",

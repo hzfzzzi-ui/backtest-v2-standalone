@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-本合同用于约束 `V2` 的 canonical 主表、moneyflow 侧表、审计表和异常表，确保后续字段新增、删除、升降级都以统一真相为准。
+本合同约束 `V2` canonical 主表、moneyflow 侧表、审计表和异常表，确保字段新增、删除、降级和消费方式都以统一真相层为准。
 
 当前适用对象：
 - `pams_ohlcv_daily_v2`
@@ -29,22 +29,26 @@
 `pams_ohlcv_daily_v2.row_status` 正式允许值：
 - `traded`
 - `suspended_confirmed`
+- `delist_tail_confirmed`
 - `synthetic_gap_fill`
 - `source_unresolved`
 
 含义：
 - `traded`：存在有效 `daily` 原始行
 - `suspended_confirmed`：无 `daily` 但有 `suspend_d` 证据
+- `delist_tail_confirmed`：正式终止边界已知，但终止尾段缺少 `daily/suspend_d` 原始源；可来自通用 terminal rule、显式官方 override，或“正式停牌证据早于 formal window 起点 + canonical `delist_date`”的显式 override
 - `synthetic_gap_fill`：为满足连续性补位，但缺少完整一手证据
 - `source_unresolved`：应有行存在，但主源与补源均未形成可接受证据链
 
 约束：
 - 无 `daily` 且无 `suspend_d` 的记录，禁止落成 `suspended_confirmed`
+- `delist_tail_confirmed` 仅允许用于有显式终止边界的尾段；默认应位于最后原始源日期之后，例外仅限显式、已审过的 override symbol/date 窗口
+- 当 explicit override 依赖“formal window 起点之前已暂停上市”的证据时，窗口终点必须仍由 canonical `delist_date` 锚定，不得脱离 `pit_security_master/raw_tushare_stock_basic` 单独外推
 - `source_unresolved` 允许存在于 canonical，但不得被 runtime 默认无差别消费
 
 ## 4. 市场阶段合同
 
-新增字段建议：
+建议字段：
 - `market_phase`
 
 允许值：
@@ -74,9 +78,9 @@
 | `market` | `varchar(10)` | 是 | 当前固定 `CN_A` |
 | `market_phase` | `varchar(24)` | 是 | `sh/sz/bj_pre_20211115/bj_post_20211115` |
 | `trade_date` | `date` | 是 | 交易日 |
-| `row_status` | `varchar(24)` | 是 | 四元状态 |
+| `row_status` | `varchar(24)` | 是 | 五元状态 |
 | `is_suspended` | `boolean` | 是 | 是否停牌 |
-| `pre_close` | `numeric(12,4)` | 是 | 昨收或锚点价 |
+| `pre_close` | `numeric(12,4)` | 是 | 昨收或锚定价 |
 | `open` | `numeric(12,4)` | 是 | 开盘价 |
 | `high` | `numeric(12,4)` | 是 | 最高价 |
 | `low` | `numeric(12,4)` | 是 | 最低价 |
@@ -130,7 +134,7 @@
 
 ## 6. 侧表合同
 
-`pit_stock_moneyflow_v2` 继续保持侧表，不进入主表硬合同。
+`pit_stock_moneyflow_v2` 保持为侧表，不进入主表硬合同。
 
 原则：
 - 只按 `symbol + trade_date` 对齐
@@ -141,7 +145,7 @@
 
 表名：`pams_ohlcv_daily_v2_exceptions`
 
-新增字段建议：
+建议字段：
 - `cause_class`
 
 允许值：
@@ -153,6 +157,7 @@
 
 关键 `issue_type`：
 - `eligible_no_source`
+- `delist_tail_confirmed`
 - `turnover_rate_imputed_zero`
 - `pre_close_imputed_zero`
 - `adj_factor_missing`
@@ -164,11 +169,11 @@
 
 ## 8. 审计表合同
 
-`pams_ohlcv_daily_v2_audit_daily` 后续必须支持两层门禁：
+`pams_ohlcv_daily_v2_audit_daily` 后续必须支撑两层门禁：
 - `canonical gate`
 - `runtime gate`
 
-后续扩展字段建议：
+建议扩展字段：
 - `market_phase`
 - `runtime_eligible_count`
 - `canonical_gate_blocked`
@@ -179,14 +184,16 @@
 `V2` 升格分两层：
 
 ### 9.1 Canonical 升格
+
 要求：
 - 全历史可重建
 - 核心字段空值受控
 - unresolved 行可解释
-- `BJ` 前后阶段解释清楚
+- `BJ` 前后阶段解释清晰
 - source matrix 完整
 
 ### 9.2 Runtime 升格
+
 要求：
 - 已有独立 runtime compat 层
 - `V10.1` 等 baseline 的三窗口回归通过

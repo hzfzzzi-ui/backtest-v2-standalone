@@ -36,11 +36,12 @@
 | `trade_cal` | `Tushare trade_cal` | 无 | `SSE/SZSE/BSE` 官网日历/规则页 | 全阶段 | 主源足够 |
 | `security master` | `pit_security_master` | `巨潮资讯`、交易所公告 | `SSE/SZSE/BSE`、`中证` 公告 | 全阶段 | 现有主数据可用，但 `BJ pre-2021-11-15` 需 lineage 治理 |
 | `daily OHLCV` | `Tushare daily` | `AkShare stock_zh_a_hist` | 交易所官网历史资料 | `SH/SZ`、`BJ post-2021-11-15` 优先 | 主源可用；`BJ pre-2021-11-15` 不可直接视为正式北交所行情 |
+| `pre_close` | `daily.pre_close` | `prev_close_carry`、`daily_basic.close`、`daily.close` | 无 | 全阶段 | 主源优先；若 `synthetic_gap_fill/suspended_confirmed/delist_tail_confirmed` 在窗口起始连续缺历史锚点，只允许记为 `left_censored_anchor_gap`，不得伪装成已修复主源 |
 | `adj_factor` | `Tushare adj_factor` | 无正式补源 | 与 `close` 链、分红送配事件交叉核 | 全阶段 | 主源可用，但须保留来源与低可信回填标记 |
-| `daily_basic.turnover_rate` | `Tushare daily_basic` | `AkShare stock_zh_a_hist` | 无 | `SH/SZ`、`BJ post-2021-11-15` | 最值得补源的字段 |
+| `daily_basic.turnover_rate` | `Tushare daily_basic` | `AkShare stock_zh_a_hist` | 无 | `SH/SZ`、`BJ post-2021-11-15` | 最值得补源的字段；`BJ pre-2021-11-15` 当前只允许记为已知源断层，不得伪装成可消费主源；`BJ post-2021-11-15` 当前存在正式 provider coverage gap，缺口期只能记为已知源断层；`SH/SZ` 的窗口起始连续左截断非 traded 样本，只允许记为 `left_censored_turnover_gap` |
 | `daily_basic.turnover_rate_f` | `Tushare daily_basic` | 无稳定免费补源 | 无 | 全阶段 | 软字段，只保留审计 |
 | `daily_basic.volume_ratio` | `Tushare daily_basic` | 无稳定免费补源 | 无 | 全阶段 | 软字段，只保留审计 |
-| `daily_basic.float_share/free_share/circ_mv` | `Tushare daily_basic` | `巨潮资讯` 事件型股本数据、公式推导 | 无 | 全阶段 | 需要 source/confidence 表达 |
+| `daily_basic.float_share/free_share/circ_mv` | `Tushare daily_basic` | `巨潮资讯` 事件型股本数据、公式推导 | 无 | 全阶段 | 需要 source/confidence 表达；`BJ pre-2021-11-15` 是后续正式治理重点 |
 | `suspend_d` | `Tushare suspend_d` | 无 | 交易所停复牌公告 | 全阶段 | 有源时可确认为 `suspended_confirmed` |
 | `stk_limit` | `Tushare stk_limit` | 规则推导 | 交易所制度规则 | 全阶段 | 主源可用，推导只做兜底 |
 | `moneyflow` | `Tushare moneyflow` | 无全历史免费补源 | `东方财富`、`AkShare` 近端核验 | 全阶段 | 只做侧表，不进主表硬合同 |
@@ -76,6 +77,10 @@
 - 不允许没有 source matrix 说明就把新字段接入 `V2`
 - 不允许把补源值与主源值混写但不保留 `*_source`
 - 不允许把 `BJ pre-2021-11-15` 直接按“正式北交所缺数”统计
+- 不允许为了通过 hard gate，把 `BJ pre daily_basic` 已知源断层伪装成高置信 `turnover_rate`
+- 不允许把 `BJ post daily_basic` provider coverage gap 伪装成已补齐主源
+- 不允许把窗口起始连续缺历史锚点的 `pre_close_imputed_zero` 伪装成当前构建失败或高置信 `pre_close`
+- 不允许把窗口起始连续缺历史锚点的非 traded `turnover_rate_imputed_zero` 继续伪装成泛化 `fallback_available`
 - 不允许把 `东方财富` 直接当 canonical 主源
 
 ## 7. 后续更新规则

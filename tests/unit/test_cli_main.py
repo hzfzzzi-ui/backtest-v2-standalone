@@ -23,6 +23,7 @@ def test_cli_lists_data_refresh_targets(capsys) -> None:
         "pams_ohlcv_daily",
         "pams_ohlcv_daily_v2",
         "pams_ohlcv_daily_v2_audit",
+        "pams_ohlcv_daily_v2_formal_audits",
         "pams_ohlcv_daily_v2_full_backfill",
         "pams_ohlcv_daily_v2_raw",
         "pit_index_daily",

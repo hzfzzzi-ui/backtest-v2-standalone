@@ -11,7 +11,29 @@ from backend.cli.managed import run_pams_ohlcv_daily_v2_full_backfill as full_ba
 
 
 def test_full_backfill_builds_expected_default_steps() -> None:
-    steps = full_backfill._build_steps(date(2007, 1, 4), date(2026, 3, 16))
+    steps = full_backfill._build_steps(date(2007, 1, 4), date(2026, 3, 20))
+    assert [step.name for step in steps] == [
+        "security_master",
+        "raw_2007_2012",
+        "raw_2013_2018",
+        "raw_2019_2026",
+        "main_2007_2012",
+        "main_2013_2018",
+        "main_2019_2026",
+        "moneyflow_2007_2012",
+        "moneyflow_2013_2018",
+        "moneyflow_2019_2026",
+        "audit_full_window",
+        "audit_formal_windows",
+    ]
+
+
+def test_full_backfill_skips_formal_audits_for_symbol_smoke() -> None:
+    steps = full_backfill._build_steps(
+        date(2007, 1, 4),
+        date(2026, 3, 20),
+        symbols_csv="sh600000,sz000001",
+    )
     assert [step.name for step in steps] == [
         "security_master",
         "raw_2007_2012",
@@ -27,6 +49,35 @@ def test_full_backfill_builds_expected_default_steps() -> None:
     ]
 
 
+def test_full_backfill_defaults_to_official_window_end(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, date] = {}
+
+    def _ok_runner(_args: Namespace) -> dict[str, str]:
+        return {"status": "ok"}
+
+    def _build_steps(start: date, end: date, *, symbols_csv: str = "") -> list[full_backfill.BackfillStep]:
+        captured["start"] = start
+        captured["end"] = end
+        captured["symbols_csv"] = symbols_csv
+        return [full_backfill.BackfillStep("security_master", None, None, _ok_runner, None)]
+
+    monkeypatch.setattr(full_backfill, "_build_steps", _build_steps)
+
+    summary = full_backfill.run_update(
+        full_backfill.build_update_args(
+            output_dir=str(tmp_path),
+            apply=False,
+        )
+    )
+
+    assert summary["status"] == "dry_run"
+    assert captured == {
+        "start": full_backfill.v2_common.DEFAULT_BACKFILL_START,
+        "end": full_backfill.v2_common.OFFICIAL_END_DATE,
+        "symbols_csv": "",
+    }
+
+
 def test_full_backfill_runner_writes_failure_status_on_step_error(monkeypatch, tmp_path: Path) -> None:
     def _ok_runner(_args: Namespace) -> dict[str, str]:
         return {"status": "ok"}
@@ -37,7 +88,7 @@ def test_full_backfill_runner_writes_failure_status_on_step_error(monkeypatch, t
     monkeypatch.setattr(
         full_backfill,
         "_build_steps",
-        lambda _start, _end: [
+        lambda _start, _end, symbols_csv="": [
             full_backfill.BackfillStep("step_ok", None, None, _ok_runner, None),
             full_backfill.BackfillStep("step_boom", None, None, _boom_runner, None),
         ],
@@ -83,7 +134,7 @@ def test_full_backfill_runner_can_resume_from_raw_step(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(
         full_backfill,
         "_build_steps",
-        lambda _start, _end: [
+        lambda _start, _end, symbols_csv="": [
             full_backfill.BackfillStep("security_master", None, None, _runner, None),
             full_backfill.BackfillStep("raw_2007_2012", date(2007, 1, 4), date(2012, 12, 31), _runner, _builder),
             full_backfill.BackfillStep("main_2007_2012", date(2007, 1, 4), date(2012, 12, 31), _runner, _builder),
@@ -92,7 +143,7 @@ def test_full_backfill_runner_can_resume_from_raw_step(monkeypatch, tmp_path: Pa
 
     args = full_backfill.build_update_args(
         start="2007-01-04",
-        end="2026-03-16",
+        end="2026-03-20",
         output_dir=str(tmp_path),
         resume_from_step="raw_2007_2012",
         resume_trade_date="2011-04-21",
