@@ -1,4 +1,4 @@
-# backtest-research-audit Specification
+﻿# backtest-research-audit Specification
 
 ## Purpose
 为每次回测实验提供统一的 research audit 结论，用于判断实验结果是否可信。
@@ -166,6 +166,8 @@
 ### Requirement: timing_alignment 必须优先消费显式 lineage 证据
 系统 MUST 在实验提供 execution lineage 证据时，优先依据 `signal_date`、`scheduled_date`、`fill_date` 和终态记录判断时间对齐风险，而不是仅依赖配置推断。
 
+系统 MUST 在实验提供 execution lineage 证据时，优先依据 `signal_date`、`scheduled_date`、`fill_date` 和终态记录判断时间对齐风险，而不是仅依赖配置推断。
+
 #### Scenario: 明确发现同日生成同日成交
 - **WHEN** lineage 证据显示某条以收盘后信号为前提的交易在同一交易日完成成交
 - **THEN** `research_audit.gates.timing_alignment.status` SHALL 为 `FAIL`
@@ -177,9 +179,9 @@
 #### Scenario: lineage 证据缺失或不完整
 - **WHEN** 当前实验没有 lineage 证据，或证据不足以证明完整链路
 - **THEN** `timing_alignment` SHALL 回退到既有推断路径或输出 `UNKNOWN`
-- **THEN** 系统 SHALL NOT 因缺少显式 lineage 证据而伪造 `PASS`
+- **THEN** 系统 SHALL NOT 因缺少显式 lineage 证据而伪造 `PASS`### Requirement: research_audit 必须包含 accounting_integrity gate
+系统 MUST 在 `research_audit.gates` 中新增 `accounting_integrity` gate，并基于主线 execution audit 的会计恒等式证据输出统一状态。
 
-### Requirement: research_audit 必须包含 accounting_integrity gate
 系统 MUST 在 `research_audit.gates` 中新增 `accounting_integrity` gate，并基于主线 execution audit 的会计恒等式证据输出统一状态。
 
 #### Scenario: 会计恒等式出现失败

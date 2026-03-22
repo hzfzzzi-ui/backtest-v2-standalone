@@ -1,26 +1,31 @@
 # rsi-feature-matrix
 
-向量化 RSI 特征矩阵计算，为均值回归信号提供底层指标。
+## Purpose
+
+定义向量化 RSI 特征矩阵的计算与接口要求，为均值回归信号和 benchmark/行业序列提供统一的底层 RSI 指标。
 
 ## Requirements
 
-### REQ-1: RSI 矩阵计算
+### Requirement: RSI 矩阵计算
 
-- 在 `FeatureMatrices` 中新增 `rsi` 字段：`np.ndarray`，shape = (T, N)
-- RSI 计算方式：Wilder's smoothed RSI（与 A 股常用 RSI 一致）
-  - `avg_gain = ewm(gain, span=period)`, `avg_loss = ewm(abs(loss), span=period)`
-  - `RS = avg_gain / avg_loss`
-  - `RSI = 100 - 100 / (1 + RS)`
-- 默认周期: 由调用方传入（策略层默认 6）
-- NaN 处理: 数据不足 period+1 天时为 NaN
+系统 SHALL 在 `FeatureMatrices` 中新增 `rsi` 字段，并按 Wilder smoothed RSI 公式输出形状为 `(T, N)` 的 RSI 矩阵。
 
-### REQ-2: compute_feature_matrices 签名扩展
+#### Scenario: 单列 RSI 结果可用
+- **WHEN** 调用方传入一段单股票价格序列并请求 RSI 矩阵
+- **THEN** 系统 SHALL 输出与 Wilder RSI 公式一致的 RSI 序列
 
-- 新增可选参数 `rsi_period: int = 6`
-- 当 `rsi_period > 0` 时计算 RSI 矩阵
-- 向后兼容：现有调用不需要传 rsi_period，默认计算 RSI(6)
+### Requirement: `compute_feature_matrices` 支持 `rsi_period`
 
-### REQ-3: 性能要求
+系统 MUST 为 `compute_feature_matrices` 新增可选参数 `rsi_period: int = 6`；当 `rsi_period > 0` 时计算 RSI，未显式传入时 SHALL 保持默认 RSI(6) 兼容行为。
 
-- RSI 计算使用列式循环（per-column），与现有 ATR 计算模式一致
-- 不引入额外依赖（只用 numpy + pandas）
+#### Scenario: 默认参数向后兼容
+- **WHEN** 现有调用方不传 `rsi_period`
+- **THEN** 系统 SHALL 继续计算默认 RSI(6)
+
+### Requirement: RSI 计算保持轻依赖与列式实现
+
+系统 SHALL 使用与 ATR 相同级别的列式实现完成 RSI 计算，并且 SHALL NOT 引入除 numpy 与 pandas 外的额外依赖。
+
+#### Scenario: 依赖集合不扩张
+- **WHEN** 维护者检查 RSI 特征实现
+- **THEN** 代码 SHALL 仅依赖 numpy 和 pandas

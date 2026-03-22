@@ -1,4 +1,10 @@
-## ADDED Requirements
+# architecture-doc Specification
+
+## Purpose
+
+定义仓库架构文档的存在性、同步要求和引用边界，确保维护者可以从主规格获取与当前代码结构一致的架构说明。
+
+## Requirements
 
 ### Requirement: ARCHITECTURE.md 架构文档
 项目根目录 SHALL 包含 `ARCHITECTURE.md` 文件，描述项目整体架构、目录结构、模块职责和依赖关系。

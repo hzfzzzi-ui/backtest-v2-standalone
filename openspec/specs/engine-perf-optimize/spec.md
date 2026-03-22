@@ -1,4 +1,10 @@
-## ADDED Requirements
+# engine-perf-optimize Specification
+
+## Purpose
+
+定义回测引擎热点路径的向量化和性能优化要求，减少 Python 循环与无效分配而不改变研究口径。
+
+## Requirements
 
 ### Requirement: 特征矩阵向量化计算
 引擎 SHALL 使用 DataFrame 级别的 `rolling()`/`ewm()` 操作代替 per-column Python 循环来计算特征矩阵（fast_ma、slow_ma、trend_fast_ma、trend_slow_ma、strength_ma、ATR）。

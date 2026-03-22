@@ -6,30 +6,50 @@ Cross-sectional breadth/dispersion score calculation engine. Computes daily scor
 
 ## Requirements
 
-### R1: Three Indicator Types
-- **A (breadth_up)**: Proportion of stocks with positive daily return among tradable stocks, smoothed with SMA5
-- **B (breadth_momo)**: Proportion of stocks where EMA(fast) > EMA(slow), smoothed with SMA5
-- **C (dispersion)**: 20-day rolling z-score of cross-sectional return standard deviation, mapped to [0, 1] (low dispersion = high score)
-- **combo**: 0.5 x B + 0.5 x C
+### Requirement: 三类基础广度指标与组合分数
 
-### R2: Data Source and Adjustment
-- Daily returns r_1d computed from hfq (back-adjusted) close prices to avoid ex-dividend jumps
-- Denominator is count of stocks with tradable=True on that day (excluding suspended, ST, insufficient listing days)
-- NaN values excluded from statistics (use nanmean/nanstd)
+系统 SHALL 计算三类基础广度指标 `breadth_up`、`breadth_momo`、`dispersion`，并进一步输出组合分数 `combo = 0.5 * breadth_momo + 0.5 * dispersion`。
 
-### R3: No Lookahead Bias
-- All rolling/EMA calculations use only historical data (t and earlier)
-- Daily score based on current and prior data only, no future references
+#### Scenario: 输出四类分数序列
+- **WHEN** 引擎对一段可交易股票矩阵执行 breadth score 计算
+- **THEN** 结果 SHALL 包含 `scores_A`、`scores_B`、`scores_C` 与 `scores_combo`
 
-### R4: Vectorized Implementation
-- Use numpy (T x N) matrix operations, avoid symbols x days nested Python loops
-- T-dimension loops (~2400 steps) acceptable; N-dimension (~700 stocks) must be vectorized
+### Requirement: 数据口径与分母定义
 
-### R5: Output Interface
-- Return `BreadthScoreResult` containing scores_A / B / C / combo as four (T,) arrays
-- Each value in [0, 1], NaN indicates no valid data for that day
-- Warmup period (EMA/rolling window not yet full) outputs NaN
+系统 MUST 使用 hfq 收盘价计算日收益，并以当日 `tradable=True` 的股票数量作为横截面统计分母；NaN 值 SHALL 从统计中排除。
 
-### R6: Observability
-- Score values written to daily_rows diagnostics (field name `breadth_score`)
-- Logging: warmup day count, valid day ratio, score mean/std
+#### Scenario: 停牌和 ST 不计入分母
+- **WHEN** 某日部分股票停牌、ST 或不满足上市天数约束
+- **THEN** 这些股票 SHALL NOT 计入 breadth 分母
+
+### Requirement: 计算过程不得前视
+
+系统 MUST 保证所有 rolling、EMA 和 z-score 计算仅使用 t 日及以前的数据，不得引用未来样本。
+
+#### Scenario: 当日分数仅基于历史
+- **WHEN** 计算某交易日 t 的 breadth 分数
+- **THEN** 系统 SHALL 只使用 t 日及以前的输入矩阵
+
+### Requirement: 宽度维度必须向量化
+
+系统 MUST 采用 T×N 矩阵级 numpy 或等价向量化实现，避免 symbols×days 的双重 Python 嵌套循环。
+
+#### Scenario: 横截面计算向量化
+- **WHEN** 股票数量达到数百只级别
+- **THEN** N 维计算 SHALL 使用向量化矩阵操作
+
+### Requirement: 输出值域和暖机行为
+
+系统 SHALL 返回 `BreadthScoreResult`，其中各分数字段值域位于 `[0, 1]`，暖机期或无有效输入的日期输出 `NaN`。
+
+#### Scenario: 暖机期输出 NaN
+- **WHEN** EMA 或 rolling 窗口尚未满足长度要求
+- **THEN** 对应日期的 breadth 分数 SHALL 为 `NaN`
+
+### Requirement: 结果可观测
+
+系统 MUST 将 breadth score 写入 `daily_rows` 诊断字段 `breadth_score`，并记录暖机天数、有效天数占比和分数均值/标准差日志。
+
+#### Scenario: 诊断字段可读取
+- **WHEN** 回测完成并输出 daily diagnostics
+- **THEN** 维护者 SHALL 能读取 `breadth_score` 和相关统计日志

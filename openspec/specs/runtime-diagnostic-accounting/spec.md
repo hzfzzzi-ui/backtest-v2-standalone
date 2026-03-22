@@ -1,4 +1,4 @@
-# runtime-diagnostic-accounting Specification
+﻿# runtime-diagnostic-accounting Specification
 
 ## Purpose
 TBD - created by archiving change decouple-runtime-diagnostics-from-execution. Update Purpose after archive.
@@ -19,6 +19,8 @@ TBD - created by archiving change decouple-runtime-diagnostics-from-execution. U
 ### Requirement: Stage count 归一化必须属于 diagnostics 层
 系统 MUST 将 `buy_candidate_count`、`after_held_filter_count`、`after_slot_filter_count`、`after_cash_lot_count` 等最终 stage 计数语义定义在 diagnostics 层，而不是执行层。
 
+系统 MUST 将 `buy_candidate_count`、`after_held_filter_count`、`after_slot_filter_count`、`after_cash_lot_count` 等最终 stage 计数语义定义在 diagnostics 层，而不是执行层。
+
 #### Scenario: route 专属 stage 计数归一化
 - **WHEN** breakout route 或其他 route 需要对原始计数做口径归一化
 - **THEN** 系统 MUST 在 diagnostics builder 中完成归一化
@@ -28,4 +30,3 @@ TBD - created by archiving change decouple-runtime-diagnostics-from-execution. U
 - **WHEN** 系统对 `baseline_V10.1` 对应实验执行 diagnostics compare
 - **THEN** 归一化后的 stage count MUST 与既有 baseline 结果一致
 - **THEN** 任一差异都 MUST 被视为 diagnostics 口径漂移
-

@@ -1,8 +1,10 @@
 # adaptive-regime-strategy
 
-对现有 adaptive-regime-strategy spec 的修改 — 从硬编码双模式改为可插拔子策略架构。
+## Purpose
 
-## MODIFIED Requirements
+定义自适应 regime 策略的可插拔双模式架构要求，明确趋势模式与均值回归模式的路由、参数和兼容行为。
+
+## Requirements
 
 ### Requirement: 双模式信号路由
 
@@ -25,6 +27,8 @@
 - **THEN** 趋势模式使用 EMA 金叉/死叉信号
 
 ### Requirement: 策略参数
+
+系统 MUST 定义 adaptive regime 策略的分层参数表，并明确 regime、trend、mr 与 common 参数组的默认值和语义。
 
 | 参数组 | 参数 | 默认值 | 说明 |
 |-------|------|-------|------|

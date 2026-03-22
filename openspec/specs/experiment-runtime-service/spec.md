@@ -1,9 +1,11 @@
-# experiment-runtime-service Specification
+﻿# experiment-runtime-service Specification
 
 ## Purpose
 定义核心 experiment runtime service 的职责边界与输入输出真相。
 ## Requirements
 ### Requirement: 实验运行必须通过核心 runtime service
+系统 MUST 提供核心实验运行服务，承接单次实验的配置编译结果、运行调用和返回结果组装。脚本层与 API 层 SHALL 通过该 service 发起实验运行，而不是直接共享 endpoint 内部函数。runtime service MUST 允许正式 baseline 注册流程通过工作台配置快照显式传入 `data_source.data_role = v2_canonical`，并保持 `membership_mode = PIT_DYNAMIC` 的严格历史成员加载口径。
+
 系统 MUST 提供核心实验运行服务，承接单次实验的配置编译结果、运行调用和返回结果组装。脚本层与 API 层 SHALL 通过该 service 发起实验运行，而不是直接共享 endpoint 内部函数。runtime service MUST 允许正式 baseline 注册流程通过工作台配置快照显式传入 `data_source.data_role = v2_canonical`，并保持 `membership_mode = PIT_DYNAMIC` 的严格历史成员加载口径。
 
 #### Scenario: API 发起实验运行
@@ -20,13 +22,12 @@
 - **WHEN** 正式 baseline 注册流程运行 `baseline_V10.2`
 - **THEN** runtime service MUST 接收 `data_source.data_role = v2_canonical`
 - **THEN** runtime service MUST 使用 `membership_mode = PIT_DYNAMIC` 的严格历史成员加载口径
-- **THEN** 运行结果 MUST 正常落成 linked experiment 产物
-
-### Requirement: runtime service 必须保持配置真相与实验输出不变
+- **THEN** 运行结果 MUST 正常落成 linked experiment 产物### Requirement: runtime service 必须保持配置真相与实验输出不变
 runtime service 下沉 MUST 保持 `config_json -> runtime plan -> run_experiment -> experiment_id` 主链不变，不得引入新的配置来源或改变基线实验结果口径。
 
 #### Scenario: baseline 复跑
 - **WHEN** 使用基线配置复跑既有 baseline 实验
 - **THEN** 核心 compare 结果 SHALL 继续通过
 - **THEN** 不得新增核心产物漂移
+
 

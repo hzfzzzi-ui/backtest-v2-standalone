@@ -1,4 +1,10 @@
-## ADDED Requirements
+# chart-sync Specification
+
+## Purpose
+
+定义结果图之间的时间轴与交互联动要求，确保收益图与回撤图在查看体验上保持同步和一致。
+
+## Requirements
 
 ### Requirement: 收益与回撤图时间轴同步
 

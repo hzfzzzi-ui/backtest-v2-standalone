@@ -1,7 +1,13 @@
-## ADDED Requirements
+# param-sweep-report Specification
+
+## Purpose
+
+定义参数扫描实验的对比报告输出要求，确保多实验结果可以按统一格式汇总、排序、分组展示，并保留失败样本的可观测性。
+
+## Requirements
 
 ### Requirement: 从多个实验产物生成对比表
-`sweep_report.py` 扫描指定实验目录列表，从每个实验的 `perf.json` 提取关键指标，生成对比 CSV 和终端表格。
+`sweep_report.py` MUST 扫描指定实验目录列表，从每个实验的 `perf.json` 提取关键指标，生成对比 CSV 和终端表格。
 
 #### Scenario: 生成对比 CSV
 - **WHEN** 调用 `sweep_report.generate_report(run_ids=[...])` 传入一组实验 run_id
@@ -16,7 +22,7 @@
 - **THEN** 该行在对比表中标记为 `FAILED`，不影响其他行的输出
 
 ### Requirement: 支持按轮次分组对比
-对比表应支持按实验轮次（RSI 轮 / ATR 轮）和 universe（CSI800 / ALL_A）分组展示。
+对比表 MUST 支持按实验轮次（RSI 轮 / ATR 轮）和 universe（CSI800 / ALL_A）分组展示。
 
 #### Scenario: 分组对比
 - **WHEN** 生成报告时传入 `group_by="round"`

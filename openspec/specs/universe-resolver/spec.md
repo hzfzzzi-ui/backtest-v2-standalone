@@ -1,4 +1,4 @@
-# universe-resolver Specification
+﻿# universe-resolver Specification
 
 ## Purpose
 Backend universe resolver that supports 4 modes (ALL_A, HS300_ZZ500, INDUSTRY, CUSTOM) for determining the stock universe used in backtests, replacing the previous single-mode symbol list approach.
@@ -46,6 +46,10 @@ Backend universe resolver that supports 4 modes (ALL_A, HS300_ZZ500, INDUSTRY, C
 ### Requirement: resolver 返回元数据
 resolver SHALL 返回 `(symbols, meta)` 元组，其中 `meta` 除了原有 `symbols_source`、`raw_count` 和 `universe_mode` 外，在 `PIT_DYNAMIC` 指数股票池场景下还 MUST 暴露足够的 lineage 质量字段，用于区分正式单源历史链与低保真 fallback。
 
+resolver SHALL 返回 `(symbols, meta)` 元组，其中 `meta` 除了原有 `symbols_source`、`raw_count` 和 `universe_mode` 外，在 `PIT_DYNAMIC` 指数股票池场景下还 MUST 暴露足够的 lineage 质量字段，用于区分正式单源历史链与低保真 fallback。
+
+resolver SHALL 返回 `(symbols, meta)` 元组，其中 `meta` 除了原有 `symbols_source`、`raw_count` 和 `universe_mode` 外，在 `PIT_DYNAMIC` 指数股票池场景下还 MUST 暴露足够的 lineage 质量字段，用于区分正式单源历史链与低保真 fallback。
+
 #### Scenario: HS300_ZZ500 暴露正式 lineage 元数据
 - **WHEN** 回测使用 `universe_mode='HS300_ZZ500'` 且 membership mode 为 `PIT_DYNAMIC`
 - **THEN** `meta` 或其后续落盘的等价元信息 MUST 包含 `index_code='000906.SH'`
@@ -54,16 +58,17 @@ resolver SHALL 返回 `(symbols, meta)` 元组，其中 `meta` 除了原有 `sym
 #### Scenario: 正式入口不得继续引用月度链为 formal lineage
 - **WHEN** 系统对外暴露 `HS300_ZZ500` 的正式导入资产或 lineage 说明
 - **THEN** 正式入口 MUST 指向新的 `Tushare` 历史链
-- **THEN** 旧月度脚本只能作为 fallback/approximate 说明存在，MUST NOT 再被标注为 formal lineage
-
-### Requirement: experiment_runner 集成
+- **THEN** 旧月度脚本只能作为 fallback/approximate 说明存在，MUST NOT 再被标注为 formal lineage### Requirement: experiment_runner 集成
 `experiment_runner.run_experiment()` SHALL 在加载配置后、执行回测前，调用 universe resolver 解析 symbols 列表，替代当前直接使用 `cfg_obj.universe.symbols` 的逻辑。
 
 #### Scenario: 端到端集成
 - **WHEN** 前端发送 `universe_mode='ALL_A'` 的回测请求
 - **THEN** experiment_runner SHALL 调用 resolver 获取全 A 股列表，传入引擎执行回测
 
-### Requirement: Universe resolver 必须先按 asset family 分发
+#### Scenario: 正式入口改为正式历史链物化
+- **WHEN** 系统对外暴露 `HS300_ZZ500` 的正式导入资产或 lineage 说明
+- **THEN** 正式入口 MUST 指向“长历史 seed/正式链物化 -> replace import”
+- **THEN** `Tushare trade_date` 抓取脚本只可作为正式链 tail update 来源或 fallback 说明，MUST NOT 再被描述为单独可用的全历史 formal lineage### Requirement: Universe resolver 必须先按 asset family 分发
 系统 MUST 让 universe resolver 入口先消费 canonical `asset_profile`，再把解析流程分发到对应的 asset-family resolver。当前 A 股 resolver SHALL 只是其中一个 adapter。
 
 #### Scenario: 运行 A 股 universe 解析
@@ -83,4 +88,58 @@ resolver SHALL 返回 `(symbols, meta)` 元组，其中 `meta` 除了原有 `sym
 - **WHEN** A 股 profile 使用 `INDUSTRY` 模式
 - **THEN** 系统 MUST 继续使用现有 A 股行业历史数据规则
 - **THEN** 这些规则 SHALL 仅在 A 股 adapter 内生效
+
+### Requirement: Universe resolver 必须正式支持 CSI1000 历史成分口径
+系统 MUST 将 `CSI1000` 视为正式支持的指数股票池模式，并在 `PIT_DYNAMIC` 口径下使用 `pit_index_constituents` 中 `index_code='000852.SH'` 的历史成分记录，而不是把它视作临时脚本输出。
+
+#### Scenario: 解析中证1000历史成分
+- **WHEN** `universe_mode='CSI1000'` 且 `membership_mode='PIT_DYNAMIC'`
+- **THEN** resolver 或其上游数据加载链路 MUST 从 `pit_index_constituents` 的 `000852.SH` 历史记录生成成分并集和 membership history
+
+#### Scenario: 缺失历史成分时报错
+- **WHEN** `CSI1000` 的 `PIT_DYNAMIC` 请求缺少有效历史成分记录
+- **THEN** 系统 MUST 返回可审计的错误或告警
+- **THEN** 系统 MUST 不得静默回退到最新静态成分
+
+### Requirement: CSI1000 resolver 元信息必须暴露 lineage 与质量字段
+系统 MUST 为 `CSI1000` 的 resolver/data bundle 输出足够的 lineage 和质量元信息，以便研究者判断该 universe 是否具备 PIT 可信度。
+
+#### Scenario: 输出中证1000 lineage 元信息
+- **WHEN** 回测使用 `CSI1000` 股票池
+- **THEN** `run_meta.json` 或等价元信息 MUST 包含 `index_code`、`membership_mode`、`membership_history_rows`、`union_symbol_count`、`membership_source` 和 `membership_data_quality`
+
+#### Scenario: 标记动态成分门控模式
+- **WHEN** `CSI1000` 使用历史成分门控
+- **THEN** 元信息 MUST 显式标记 `historical_membership_dynamic=true`
+- **THEN** 元信息 MUST 显式标记当前过滤模式为基于动态成分的门控，而不是静态预过滤
+
+### Requirement: Universe filters MUST 支持可选科创板排除
+系统 MUST 在共享 `universe.filters` 链路中支持布尔字段 `exclude_star_market`。当该字段为 `true` 时，resolver SHALL 在候选集合与股票代码集合两个层面排除科创板标的；当字段缺省或为 `false` 时，系统 SHALL 保持现有股票池行为不变。
+
+#### Scenario: 默认关闭不改变现有股票池
+- **WHEN** 运行配置未提供 `universe.filters.exclude_star_market`
+- **THEN** resolver SHALL 不额外排除任何科创板标的
+- **THEN** 结果股票池口径 SHALL 与改动前保持一致
+
+#### Scenario: 显式开启后排除科创板
+- **WHEN** `universe.filters.exclude_star_market=true`
+- **THEN** resolver SHALL 排除标准化后属于 `688xxx.SH` 或 `689xxx.SH` 的 A 股标的
+- **THEN** 非科创板 A 股标的 SHALL 保留
+
+### Requirement: 科创板过滤结果 MUST 写入现有 universe 元数据
+当科创板过滤启用时，系统 MUST 将过滤配置与排除计数写入现有 universe 元数据，确保验证接口、bundle 构建与真实执行可以审计该过滤是否生效。
+
+#### Scenario: 记录过滤配置与排除数量
+- **WHEN** `exclude_star_market=true` 且股票池中存在科创板标的
+- **THEN** universe 元数据 SHALL 在 `filters_config` 中记录 `exclude_star_market=true`
+- **THEN** universe 元数据 SHALL 在 `excluded_counts` 中记录 `EXCLUDE_STAR_MARKET` 的排除数量
+
+### Requirement: Dynamic universe 路径 MUST 复用同一科创板过滤语义
+系统 MUST 让 dynamic universe 解析路径与静态候选过滤路径复用同一套科创板识别和排除语义，避免验证结果、bundle 构建和运行期消费出现口径分叉。
+
+#### Scenario: Dynamic ALL_A 路径启用科创板过滤
+- **WHEN** `membership_mode` 为 dynamic 路径且 `exclude_star_market=true`
+- **THEN** 下游消费的 symbol 列表 SHALL 在进入可交易集合前排除科创板标的
+- **THEN** 实际运行期股票池 SHALL 与验证接口返回的过滤结果一致
+
 

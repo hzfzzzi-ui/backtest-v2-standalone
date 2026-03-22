@@ -1,8 +1,9 @@
-# regime-signal-ui
+﻿# regime-signal-ui
 
-前端分层信号面板 — 将 Signal Generation 拆分为市况判断 + 趋势信号 + 震荡信号三个独立可配置子面板。
+## Purpose
+定义前端市场状态与分层信号配置 UI 的正式合同，覆盖 legacy、weekly five-state 与正式 regime framework 三类配置入口及其编译一致性。
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: 市况判断子面板
 
@@ -104,3 +105,68 @@ Signal Generation 区域 MUST 包含一个"震荡模式"子面板（仅当市况
 #### Scenario: regime 启用时摘要
 - **WHEN** regime detection 启用
 - **THEN** 摘要栏显示 "Regime(N) → TREND:策略(参数) + MR:策略(参数)" 格式
+
+### Requirement: UI 支持选择 weekly five-state engine
+系统 SHALL 在 regime 配置 UI 中提供 `regime_engine.engine` 选择项：
+
+- `ma200_legacy`
+- `weekly_five_state`
+
+#### Scenario: 选择 weekly five-state
+- **WHEN** 用户在工作台选择 `weekly_five_state`
+- **THEN** 配置草稿 SHALL 正确序列化该 engine
+
+### Requirement: UI 只暴露低自由度参数
+当 `regime_engine.engine = weekly_five_state` 时，UI MUST 保持低自由度。
+
+允许暴露：
+
+- engine 选择
+- `TURN_WEAK` 风险预算
+- 基准指数只读展示为 `000001.SH`
+
+不得暴露：
+
+- 任意新增宏观参数
+- 任意额外趋势/广度/量能窗口
+- 任意复杂状态阈值面板
+
+#### Scenario: 周度五态 UI 保持简单
+- **WHEN** 用户切换到 `weekly_five_state`
+- **THEN** 界面 SHALL 显示固定规则说明，而不是大量可调参数
+
+### Requirement: Regime UI 必须区分 legacy 模式与正式框架模式
+配置工作台中的市场状态/信号面板 MUST 显式区分：
+- `ma200_legacy`
+- `market_regime_framework`
+
+系统 MUST 不再把 MA200 参数直接当成唯一 regime 配置，而应首先暴露 `regime_engine` 选择。
+
+#### Scenario: 用户选择 legacy 模式
+- **WHEN** 用户在 UI 中选择 `ma200_legacy`
+- **THEN** 工作台仅显示现有 MA200/斜率相关配置，并隐藏正式框架特征组
+
+#### Scenario: 用户选择正式框架模式
+- **WHEN** 用户在 UI 中选择 `market_regime_framework`
+- **THEN** 工作台 MUST 显示正式框架的输入块、persistence 参数和 fallback 配置
+
+### Requirement: Regime UI 必须按输入块分层展示参数
+当正式框架启用时，UI SHALL 将配置至少拆分为以下分层块：
+- 趋势块
+- 风险块
+- 广度块
+- 参与度块
+- persistence / hysteresis
+- fallback / 审计
+
+#### Scenario: 正式框架参数分层展示
+- **WHEN** 用户展开市场状态配置
+- **THEN** 工作台 MUST 能按输入块查看和编辑参数，而不是把所有 regime 参数堆在一个均线面板里
+
+### Requirement: UI 配置编译必须保留 regime engine 唯一真相
+前端配置草稿、后端 API payload 和运行时编译结果 MUST 保持同一个 `regime_engine` 与参数结构，不得在前端推导、重命名或隐式补默认值导致字段漂移。
+
+#### Scenario: 配置往返一致
+- **WHEN** 用户保存并重新加载一条使用正式框架的实验
+- **THEN** `regime_engine`、输入块参数和 persistence 参数 MUST 被完整回填
+

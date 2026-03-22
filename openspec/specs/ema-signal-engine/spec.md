@@ -1,4 +1,10 @@
-## ADDED Requirements
+# ema-signal-engine Specification
+
+## Purpose
+
+定义 EMA 交叉信号与固定金额 sizing 的引擎支持要求，保证其与现有 SMA 路径兼容并保持可观测。
+
+## Requirements
 
 ### Requirement: EMA 均线交叉信号计算
 VECTOR 引擎 SHALL 支持 EMA 类型的均线交叉信号，与现有 SMA 并列。

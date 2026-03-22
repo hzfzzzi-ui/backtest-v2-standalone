@@ -1,4 +1,10 @@
-## ADDED Requirements
+# engine-shared-primitives Specification
+
+## Purpose
+
+定义多条运行路径共享的成交处理与价格索引基础函数，减少重复实现并统一核心原语行为。
+
+## Requirements
 
 ### Requirement: 订单成交处理函数
 引擎 SHALL 提供共享函数 `_process_pending_fills()` 处理待执行订单的成交逻辑。该函数 MUST：

@@ -1,4 +1,10 @@
-## ADDED Requirements
+# hold-cooldown-constraint Specification
+
+## Purpose
+
+定义最短持有天数与个股卖出冷却期约束，约束卖出后再买回与过早反向交易的行为。
+
+## Requirements
 
 ### Requirement: 最短持有天数约束
 引擎 SHALL 支持 `min_hold_days` 参数，持仓天数不足时阻断普通卖出信号。

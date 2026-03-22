@@ -1,4 +1,10 @@
-## ADDED Requirements
+# min-trade-hint Specification
+
+## Purpose
+
+定义前端对最小成交资金门槛的提示要求，帮助用户在运行前识别 `SKIP_LOT_TOO_SMALL` 风险。
+
+## Requirements
 
 ### Requirement: Minimum trade cost hint
 The Position & Risk block SHALL display a hint estimating the minimum cash required to buy one lot, and warn when SKIP_LOT_TOO_SMALL may be triggered.

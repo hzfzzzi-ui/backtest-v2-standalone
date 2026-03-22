@@ -1,4 +1,4 @@
-# experiment-artifact-service Specification
+﻿# experiment-artifact-service Specification
 
 ## Purpose
 定义核心 experiment artifact service 的职责边界与兼容契约。
@@ -40,6 +40,8 @@ artifact service 下沉 MUST 保持 `manifest.json`、`perf.json`、`nav.csv`、
 ### Requirement: artifact service 必须保留 stage_funnel 可用性语义
 当核心 artifact service 生成 `stage_funnel` lazy section 或 `run_meta.counters.buy_stage_funnel` 时，系统 MUST 原样保留阶段可用性语义。对于没有可靠计数来源的阶段，artifact service MUST 输出 `available=false`，并将对应的 `input_count`、`output_count`、`filtered_count` 保持为 `null`。对于有正式来源且真实计数为 `0` 的阶段，artifact service MUST 保持 `available=true` 且数值为 `0`。
 
+当核心 artifact service 生成 `stage_funnel` lazy section 或 `run_meta.counters.buy_stage_funnel` 时，系统 MUST 原样保留阶段可用性语义。对于没有可靠计数来源的阶段，artifact service MUST 输出 `available=false`，并将对应的 `input_count`、`output_count`、`filtered_count` 保持为 `null`。对于有正式来源且真实计数为 `0` 的阶段，artifact service MUST 保持 `available=true` 且数值为 `0`。
+
 #### Scenario: 聚合 unavailable 阶段
 - **WHEN** 上游 `daily_row` 或正式诊断来源无法为某个漏斗阶段提供可靠计数
 - **THEN** artifact service SHALL 在 `stage_funnel` 与 `run_meta.counters.buy_stage_funnel` 中将该阶段标记为 `available=false`
@@ -54,4 +56,3 @@ artifact service 下沉 MUST 保持 `manifest.json`、`perf.json`、`nav.csv`、
 - **WHEN** 同一个实验同时生成 `stage_funnel` lazy section 与 `run_meta.counters.buy_stage_funnel`
 - **THEN** 两个输出面的 `available`、`input_count`、`output_count`、`filtered_count` 语义 SHALL 保持一致
 - **THEN** 前端消费任一路径都 SHALL 得到相同的 unavailable/zero 判断结果
-

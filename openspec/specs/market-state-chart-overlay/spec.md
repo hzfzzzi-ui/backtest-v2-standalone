@@ -1,4 +1,4 @@
-# market-state-chart-overlay Specification
+﻿# market-state-chart-overlay Specification
 
 ## Purpose
 在 LightweightCharts 收益率图表上绘制市场状态半透明色带蒙版。
@@ -80,11 +80,15 @@ MarketStateOverlay SHALL 同时挂载到 drawdown 图表 (`wbDdChart`)，色带�
 - `trade_mode`
 - `regime_confidence`
 
+当结果页加载使用正式 `market-regime-framework` 的实验时，图表蒙版 SHALL 直接展示正式 regime 输出，而不是假定当前颜色等同于 MA200 简化状态机。前端 MUST 能识别：
+- `regime_engine`
+- `market_state`
+- `trade_mode`
+- `regime_confidence`
+
 #### Scenario: 正式框架实验显示正式状态
 - **WHEN** 实验产物中的 `regime_engine = market_regime_framework`
-- **THEN** 图表蒙版 MUST 以正式状态字段绘制阶段分区
-
-### Requirement: 图表蒙版必须显示状态图例与语义说明
+- **THEN** 图表蒙版 MUST 以正式状态字段绘制阶段分区### Requirement: 图表蒙版必须显示状态图例与语义说明
 结果图在显示市场状态蒙版时 MUST 同时提供可见图例或状态说明，明确告知用户颜色表示的是：
 - 市场结构状态
 - 交易模式
@@ -97,7 +101,43 @@ MarketStateOverlay SHALL 同时挂载到 drawdown 图表 (`wbDdChart`)，色带�
 ### Requirement: 图表蒙版必须保留 legacy 兼容
 当实验使用 `ma200_legacy` fallback 时，图表蒙版 SHALL 继续显示现有状态段，但 MUST 明确标记其为 legacy regime，而不是正式多因子 regime。
 
+当实验使用 `ma200_legacy` fallback 时，图表蒙版 SHALL 继续显示现有状态段，但 MUST 明确标记其为 legacy regime，而不是正式多因子 regime。
+
 #### Scenario: legacy 实验显示兼容标签
 - **WHEN** 实验产物中的 `regime_engine = ma200_legacy`
-- **THEN** 图表蒙版或图例 MUST 显示该实验正在使用 legacy MA200 状态机
+- **THEN** 图表蒙版或图例 MUST 显示该实验正在使用 legacy MA200 状态机### Requirement: 市场状态蒙版支持五态显示
+系统 SHALL 允许结果图在 `weekly_five_state` 模式下显示五档市场状态蒙版：
+
+- `BULL_MAIN`
+- `TURN_STRONG`
+- `LIGHT_TREND`
+- `TURN_WEAK`
+- `DEFENSIVE`
+
+#### Scenario: 五态蒙版加载
+- **WHEN** 实验使用 `weekly_five_state`
+- **THEN** 前端 SHALL 根据 `market_state_5` 渲染对应阶段蒙版
+
+### Requirement: 五态颜色语义可解释
+系统 SHALL 为五态提供稳定且可解释的颜色语义，并在图例中明确标示状态名称与预算：
+
+- `BULL_MAIN`：主趋势，100%
+- `TURN_STRONG`：转强，70%
+- `LIGHT_TREND`：轻仓趋势，40%
+- `TURN_WEAK`：转弱，10%~20%
+- `DEFENSIVE`：空仓防守，0%
+
+#### Scenario: 图例可读
+- **WHEN** 用户查看 weekly five-state 实验结果
+- **THEN** 图上 SHALL 能直接识别各颜色对应的状态与风险预算
+
+### Requirement: 图表蒙版必须显示状态图例与语义说明
+结果图在显示市场状态蒙版时 MUST 同时提供可见图例或状态说明，明确告知用户颜色表示的是：
+- 市场结构状态
+- 交易模式
+- legacy/fallback 与正式框架的差异
+
+#### Scenario: 用户无需猜测颜色含义
+- **WHEN** 用户查看带阶段蒙版的结果图
+- **THEN** 页面 MUST 存在可见图例，解释每种颜色对应的状态语义
 

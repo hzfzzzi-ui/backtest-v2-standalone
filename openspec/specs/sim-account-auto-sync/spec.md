@@ -1,4 +1,10 @@
-## ADDED Requirements
+# sim-account-auto-sync Specification
+
+## Purpose
+
+定义模拟盘持仓的自动导入、reconcile 触发和状态可观测性要求，确保移动端与桌面端可消费一致的自动同步结果。
+
+## Requirements
 
 ### Requirement: 模拟盘持仓必须支持定时文件导入
 系统 MUST 支持从可配置 JSON 文件路径自动导入模拟盘真实持仓，并将其标准化为 sim account holdings snapshot。导入器 SHALL 至少支持 `account_id`、`trade_date`、`cash`、`positions[]` 字段，并复用现有 snapshot 标准化校验。

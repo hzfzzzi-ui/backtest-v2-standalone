@@ -1,4 +1,10 @@
-## ADDED Requirements
+# cn-index-daily-sync-bridge Specification
+
+## Purpose
+
+定义每日 A 股同步后指数基准表的桥接刷新要求，确保 market snapshot 使用的指数基准能够追上最新交易日。
+
+## Requirements
 
 ### Requirement: 每日 A 股调度必须同步 `pit_index_daily`
 系统在每日 A 股定时导入成功刷新 `pams_ohlcv_daily` 后，MUST 继续将最新 `CN_INDEX` 行情增量同步到 `pit_index_daily`。该步骤 SHALL 与同次 scheduler run 绑定，并在 run summary 中记录其结果。

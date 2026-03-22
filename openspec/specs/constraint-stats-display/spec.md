@@ -1,4 +1,10 @@
-## ADDED Requirements
+# constraint-stats-display Specification
+
+## Purpose
+
+定义约束触发统计在后端产物与前端展示层的可观测性，确保仓位与约束类计数器能被稳定显示和审计。
+
+## Requirements
 
 ### Requirement: Constraint trigger statistics display
 Position & Risk 面板 SHALL 使用中文标签显示约束触发统计。

@@ -93,6 +93,8 @@ Synced from delta spec during archive. The capability contract is now part of th
 ### Requirement: 已迁移顶层脚本必须保持薄 wrapper 形态
 系统 MUST 要求已迁移的顶层脚本保持薄 wrapper 形态。对于已迁移到 CLI 或 study runner 的脚本，顶层 `backend/scripts/*.py` SHALL 只保留最小路径引导与委托调用。
 
+系统 MUST 要求已迁移的顶层脚本保持薄 wrapper 形态。对于已迁移到 CLI 或 study runner 的脚本，顶层 `backend/scripts/*.py` SHALL 只保留最小路径引导与委托调用。
+
 #### Scenario: study 已迁移完成
 - **WHEN** 某个研究专题已经迁移到 `.study.yaml` 与 `study_run`
 - **THEN** 对应顶层脚本 MUST 只保留薄 wrapper
@@ -101,9 +103,7 @@ Synced from delta spec during archive. The capability contract is now part of th
 #### Scenario: 正式命令已迁移完成
 - **WHEN** 某个正式命令已经迁移到 `backend/cli/managed/*`
 - **THEN** 顶层同名脚本 MUST 只保留兼容导向入口
-- **THEN** 活跃逻辑 SHALL NOT 再留在顶层脚本
-
-### Requirement: 工作区临时产物必须受控
+- **THEN** 活跃逻辑 SHALL NOT 再留在顶层脚本### Requirement: 工作区临时产物必须受控
 系统 MUST 将本地临时产物、浏览器 profile、测试输出和一次性 `tmp_*` 文件纳入工作区治理。此类产物 SHALL NOT 长期污染版本控制工作区。
 
 #### Scenario: 本地产生临时目录或文件
@@ -144,4 +144,44 @@ Synced from delta spec during archive. The capability contract is now part of th
 - **WHEN** 某个退役脚本被移除
 - **THEN** inventory 和治理测试 MUST 同步移除对其主实现身份的假设
 - **THEN** 默认测试 collect SHALL NOT 因历史导入路径而失败
+
+### Requirement: 活跃脚本面必须被限制为正式命令面与 generated thin script
+系统 MUST 将活跃研究脚本面限制为 `backend/cli/main.py`、`research/studies/*.study.yaml` 与 `backend/scripts/generated/run_<study_id>.py`。顶层 `backend/scripts/run_*_research.py` SHALL NOT 再作为正式研究入口保留。
+
+#### Scenario: 新增正式研究入口
+- **WHEN** 需要新增正式研究入口
+- **THEN** 系统 MUST 先定义 study 或 CLI 命令
+- **THEN** 系统 MAY 按需生成 thin script
+- **THEN** 系统 SHALL NOT 再新增顶层大型研究脚本
+
+#### Scenario: 已过时顶层研究脚本
+- **WHEN** 顶层 `run_*_research.py` 已存在等价 study 路线，且不再承担正式主线研究职责
+- **THEN** 该脚本 MUST 被删除
+- **THEN** 不得再保留仅为历史习惯服务的 wrapper
+
+### Requirement: 顶层研究定义脚本必须持续迁出
+系统 MUST 持续将被标记为 `study-definition` 的顶层研究脚本迁入 `research/studies/*.study.yaml + backend.cli study_run + generated thin script`。已过时研究若无保留价值 MUST 直接删除。
+
+#### Scenario: 迁移一批研究脚本
+- **WHEN** 某批研究脚本完成 study 化迁移
+- **THEN** `backend/scripts/inventory.json` MUST 更新分类、映射和删除状态
+- **THEN** governance 测试 MUST 能阻止这批顶层入口重新回流
+
+#### Scenario: 研究已经过时
+- **WHEN** 某个研究脚本对应的实验方向已经过时或无保留价值
+- **THEN** 系统 MUST 允许直接删除该入口
+- **THEN** 系统 SHALL NOT 为其保留前向兼容壳
+
+### Requirement: 工作区临时产物必须受控
+系统 MUST 将本地临时产物、浏览器 profile、测试输出和一次性 `tmp_*` 文件纳入工作区治理。此类产物 SHALL NOT 长期污染版本控制工作区。
+
+#### Scenario: 本地产生临时目录或文件
+- **WHEN** 调试、截图、浏览器 profile 或一次性测试运行生成临时产物
+- **THEN** 系统 MUST 通过 `.gitignore` 或清理规则将其排除出长期活跃面
+- **THEN** 这些产物 SHALL NOT 在日常工作区中持续作为未跟踪噪音存在
+
+#### Scenario: 需要保留人工文档或研究报告
+- **WHEN** 某个本地文件属于人工报告、研究说明或可追溯资产
+- **THEN** 系统 MAY 保留该文件
+- **THEN** 它 MUST 与临时产物治理策略区分开
 

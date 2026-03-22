@@ -1,4 +1,10 @@
-## MODIFIED Requirements
+# batch-experiment-runner Specification
+
+## Purpose
+
+定义批量实验运行器的 overrides 透传契约，确保批跑路径与单实验运行路径在关键参数上保持一致。
+
+## Requirements
 
 ### Requirement: 实验运行器支持完整参数透传
 现有 `batch_runner.py` / `experiment_runner.py` 的 overrides 字典 SHALL 支持透传 `enable_strength_rank`、`strength_ma`、`strength_top_k_mode`、`enable_multifactor_rank`、`mf_topk` 到 `run_portfolio_backtest()`。

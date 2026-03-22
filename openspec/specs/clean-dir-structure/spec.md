@@ -1,4 +1,10 @@
-## ADDED Requirements
+# clean-dir-structure Specification
+
+## Purpose
+
+定义仓库主目录与前后端代码目录的目标结构，约束目录迁移后的主路径、过渡路径和遗留路径边界。
+
+## Requirements
 
 ### Requirement: Backend 目录统一归集
 所有 Python 后端代码 SHALL 位于 `backend/` 目录下。`backend/` SHALL 包含以下子目录：`api/`（API 路由）、`core/`（回测引擎）、`configs/`（策略配置）、`scripts/`（工具脚本）。

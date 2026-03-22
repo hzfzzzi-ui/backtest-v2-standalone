@@ -75,7 +75,7 @@ TBD - created by syncing change polish-ui-and-export-report. Update Purpose afte
 - **THEN** 资金不足跳过和最小手数跳过 SHALL 正常显示计数值（这些已实现）
 
 ### Requirement: 辅助函数 — 链式读取 workbench_config / base_config
-`buildConfigSummary()` 须定义辅助函数 `wcVal(path, fallback)` 实现两层链式读取：先从 `overrides.workbench_config` 按 path 取值，取不到时 fallback 到 `base_config` 对应字段，仍取不到时返回 `"-"`。
+`buildConfigSummary()` MUST 定义辅助函数 `wcVal(path, fallback)` 实现两层链式读取：先从 `overrides.workbench_config` 按 path 取值，取不到时 fallback 到 `base_config` 对应字段，仍取不到时返回 `"-"`。
 
 #### Scenario: workbench_config 存在时优先读取
 - **WHEN** config.json 包含 `overrides.workbench_config.signal_generation.sma.fast_ma = 5`
@@ -90,7 +90,7 @@ TBD - created by syncing change polish-ui-and-export-report. Update Purpose afte
 - **THEN** 该单元格显示 `"-"`
 
 ### Requirement: 子表 1 — 信号策略
-报告 §6 须包含「信号策略」子表，以 `<h3>` + `<table>` 渲染，展示以下字段：
+报告 §6 MUST 包含「信号策略」子表，以 `<h3>` + `<table>` 渲染，展示以下字段：
 - 策略名称（wc.signal_generation.strategy / bc.strategy.name）
 - 快线周期（wc.signal_generation.sma.fast_ma / bc.strategy.fast）
 - 慢线周期（wc.signal_generation.sma.slow_ma / bc.strategy.slow）
@@ -109,7 +109,7 @@ ATR 窗口和 ATR 倍数 SHALL NOT 出现在信号策略子表中（这些是退
 - **THEN** 趋势过滤 MA 显示 "-"
 
 ### Requirement: 子表 2 — 退出规则
-报告 §6 须包含「退出规则」子表，展示以下字段：
+报告 §6 MUST 包含「退出规则」子表，展示以下字段：
 - 反转退出（wc.exit_rules.signal_reverse）— 启用/禁用
 - ATR 止损（wc.exit_rules.atr_stop.enabled + k）
 - 追踪止损（wc.exit_rules.trailing.enabled + k）
@@ -133,7 +133,7 @@ ATR 窗口和 ATR 倍数 SHALL NOT 出现在信号策略子表中（这些是退
 - **THEN** 退出规则子表所有字段显示 "-"
 
 ### Requirement: 子表 3 — 仓位与风控
-报告 §6 须包含「仓位与风控」子表，展示以下字段：
+报告 §6 MUST 包含「仓位与风控」子表，展示以下字段：
 - 最大持仓数（wc.position_risk.max_positions）
 - 单票仓位上限（wc.position_risk.single_stock_cap）— 小数→百分比
 - 行业仓位上限（wc.position_risk.industry_cap）— 小数→百分比
@@ -154,7 +154,7 @@ ATR 窗口和 ATR 倍数 SHALL NOT 出现在信号策略子表中（这些是退
 - **THEN** 风险门行显示「禁用」
 
 ### Requirement: 子表 4 — 选股范围
-报告 §6 须包含「选股范围」子表，展示以下字段：
+报告 §6 MUST 包含「选股范围」子表，展示以下字段：
 - 选股模式（wc.universe_mode 或 overrides.universe_mode）
 - 标的数量（wc.universe.symbols.length 或 bc.universe.symbols.length）
 - 排除 ST（wc.universe.filters.exclude_st）
@@ -179,7 +179,7 @@ ATR 窗口和 ATR 倍数 SHALL NOT 出现在信号策略子表中（这些是退
 - **THEN** 选股模式显示 "-"，标的数量显示「3」
 
 ### Requirement: 子表 5 — 执行假设
-报告 §6 须包含「执行假设」子表，展示以下字段：
+报告 §6 MUST 包含「执行假设」子表，展示以下字段：
 - 佣金率（bc.costs.commission_rate）— 万分比显示（如 3‱）
 - 最低佣金（bc.costs.commission_min）
 - 印花税率（bc.costs.stamp_tax_rate）— 千分比显示（如 1‰）

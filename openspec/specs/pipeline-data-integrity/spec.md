@@ -1,4 +1,10 @@
-## ADDED Requirements
+# pipeline-data-integrity Specification
+
+## Purpose
+
+定义回测流水线关键计数器、reason_code 和运行配置透传的一致性要求，确保数据链路可审计且不丢字段。
+
+## Requirements
 
 ### Requirement: reason_code 随策略类型动态变化
 引擎 SHALL 根据策略 ma_type 生成对应的 reason_code。
@@ -26,6 +32,8 @@
 - **THEN** `blocked` SHALL 等于 `blocked_signals`
 
 ### Requirement: exit_rules 参数完整映射（修改）
+
+系统 MUST 在 `_build_runtime_cfg_from_workbench()` 与后续运行链中完整保留 `exit_rules` 子项映射。
 
 原要求：`_build_runtime_cfg_from_workbench()` 映射 exit_rules 子项到 strategy.params。
 新增：`atr_stop_k` 必须（SHALL）同时写入 `ExitConfig` 且不被 loader 丢弃。

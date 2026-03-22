@@ -1,4 +1,4 @@
-# signal-provider-protocol Specification
+﻿# signal-provider-protocol Specification
 
 ## Purpose
 定义统一信号提供者协议、日度上下文与信号快照的数据契约，并约束其对多 alpha 组合运行时的兼容行为。
@@ -41,6 +41,25 @@
 - `bull_breakout_quality_veto_residual_block_count`
 - `bull_breakout_quality_veto_margin_block_count`
 
+引擎 SHALL 定义 `DaySignals` 数据类作为 `day_signals()` 的返回类型，包含：
+- `sell_signals: list[Signal]`
+- `buy_signals: list[Signal]`
+- `raw_alpha_signals: list[Signal]`
+- `composed_sell_signals: list[Signal]`
+- `composed_buy_signals: list[Signal]`
+- `exit_syms: set[str]`
+- `strength_map: dict[str, float]`
+- `mf_score_map: dict[str, float]`
+- `diagnostics: dict[str, Any]`
+- `exit_counts: ExitCounts`
+
+其中 `diagnostics` SHALL 在现有稳定键之外，支持稳定透传 bull breakout veto 的诊断计数：
+
+- `bull_breakout_quality_veto_applied`
+- `bull_breakout_quality_veto_block_count`
+- `bull_breakout_quality_veto_residual_block_count`
+- `bull_breakout_quality_veto_margin_block_count`
+
 #### Scenario: bull breakout veto 诊断透传
 - **WHEN** provider 在当日对 breakout 候选执行 bull breakout quality veto
 - **THEN** `DaySignals.diagnostics` SHALL 包含上述 4 个稳定键
@@ -51,9 +70,7 @@
 - **THEN** 该买入信号 `Signal.meta` SHALL 包含：
   - `bull_breakout_quality_veto_enabled`
   - `bull_breakout_quality_veto_min_residual_strength_score`
-  - `bull_breakout_quality_veto_min_breakout_margin_score`
-
-### Requirement: DayContext 数据类
+  - `bull_breakout_quality_veto_min_breakout_margin_score`### Requirement: DayContext 数据类
 引擎 SHALL 定义 `DayContext` 数据类作为引擎状态的只读快照传递给信号提供者：
 - 持仓和成本信息：positions, position_avg_cost
 - 持仓来源信息：holding_sources（按标的暴露 `entry_alpha_id`、`entry_sleeve_id`、`entry_reason_code`、`entry_date`）
@@ -77,11 +94,17 @@
 - `bull_breakout_quality_veto_residual_block_count`
 - `bull_breakout_quality_veto_margin_block_count`
 
+引擎 SHALL 提供 `_run_unified_loop()` 函数，接收 `SignalProvider` 实例和引擎配置，执行单一日循环。
+
+当 provider 路径为 breakout runtime 时，结果指标 SHALL 透传 bull breakout veto 的稳定计数器：
+
+- `bull_breakout_quality_veto_block_count`
+- `bull_breakout_quality_veto_residual_block_count`
+- `bull_breakout_quality_veto_margin_block_count`
+
 #### Scenario: veto 计数进入 run_meta / metrics
 - **WHEN** breakout provider 启用 bull breakout veto 并完成回测
-- **THEN** `metrics` 与 `run_meta.json.counters` SHALL 包含上述 3 个计数器
-
-### Requirement: 热点 provider facade 必须允许外部 state、precompute 和 route 模块
+- **THEN** `metrics` 与 `run_meta.json.counters` SHALL 包含上述 3 个计数器### Requirement: 热点 provider facade 必须允许外部 state、precompute 和 route 模块
 系统 MUST 允许热点 signal provider 通过 facade 调度外部 state owner、precompute 模块和 day route 模块，只要对外仍保持既有 `SignalProvider` 协议不变。provider facade SHALL NOT 重新退化为同时承载全部状态、预计算和 route 行为的单文件 owner。
 
 #### Scenario: Provider facade 调度预计算
@@ -114,4 +137,5 @@
 - **WHEN** provider 需要使用 A 股特有的 lot、停牌或 benchmark 规则
 - **THEN** 这些规则 MUST 通过 asset/market profile 或对应 helper 提供
 - **THEN** façade 文件 SHALL NOT 继续把这些规则写成无条件全局逻辑
+
 

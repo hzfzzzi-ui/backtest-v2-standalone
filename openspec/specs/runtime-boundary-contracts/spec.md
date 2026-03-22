@@ -45,6 +45,8 @@ Synced from delta spec during archive. The capability contract is now part of th
 ### Requirement: 桌面研究页必须以 experiment manifest 和 runtime snapshot 为真相
 系统 MUST 让桌面研究页以 `experiment manifest`、`runtime snapshot` 与派生的 `ResultsWorkbenchSnapshot` 为主真相。配置仅作为输入来源之一，页面状态 SHALL NOT 长期以 `config_id` 作为唯一主语义。
 
+系统 MUST 让桌面研究页以 `experiment manifest`、`runtime snapshot` 与派生的 `ResultsWorkbenchSnapshot` 为唯一主真相。配置来源 metadata 仅可作为 provenance 辅助信息，页面状态 SHALL NOT 再以 `config_id` 或 `input_source_meta` 作为主运行语义。
+
 #### Scenario: 桌面页加载历史实验
 - **WHEN** 用户从历史列表载入某个实验
 - **THEN** 页面状态 MUST 围绕该实验的 manifest、surface 和 runtime snapshot 更新
@@ -55,7 +57,10 @@ Synced from delta spec during archive. The capability contract is now part of th
 - **THEN** 页面 MUST 将偏离状态表达为“当前 runtime 草稿与已加载来源不同”
 - **THEN** 页面 SHALL NOT 将 `config_id` 视为唯一可运行真相
 
-### Requirement: Config Draft 必须作为独立核心模块存在
+#### Scenario: 页面草稿偏离已加载来源
+- **WHEN** 用户在页面上修改配置并偏离已加载来源
+- **THEN** 页面 MUST 将偏离状态表达为“当前 runtime 草稿与已加载来源不同”
+- **THEN** 页面 SHALL NOT 将 `config_id` 视为唯一可运行真相### Requirement: Config Draft 必须作为独立核心模块存在
 系统 MUST 将“表单输入 -> config draft -> runtime request”的前端配置核心从旧控制器中抽离为独立模块。旧页面控制器 SHALL NOT 继续承担完整配置编译职责。
 
 #### Scenario: 用户修改配置草稿
@@ -100,4 +105,55 @@ Synced from delta spec during archive. The capability contract is now part of th
 - **WHEN** results workbench 已经成功挂载
 - **THEN** legacy 桌面壳 SHALL NOT 再直接 patch 结果区的可见 KPI、图表、漏斗或交易 DOM
 - **THEN** 桌面壳 MAY 继续负责加载态、选中实验状态和桥接元数据
+
+### Requirement: 主系统必须提供持仓感知的 semi-auto reconcile surface
+系统 MUST 在 runtime boundary 中提供面向半自动交易链路的 `PositionAwareReconcileSurface`。该 surface SHALL 至少包含：
+- `strategy_source`
+- `account_id`
+- `holding_sync`
+- `snapshot_id`
+- `reconcile_id`
+- `as_of_date`
+- `positions`
+- `action_sheet`
+- `freshness`
+- `risk_flags`
+
+该 surface MUST 与现有 experiment surface / execution preview 分层，而 SHALL NOT 由客户端自行把多个底层产物临时拼接成真相。
+
+#### Scenario: 手机端读取最新动作单真相
+- **WHEN** 手机端请求半自动交易所需的聚合结果
+- **THEN** 后端 MUST 返回 `PositionAwareReconcileSurface`
+- **THEN** 客户端 SHALL 能直接读取当前持仓、动作单和 freshness，而不必自己拼接实验成交和 preview 差集
+
+#### Scenario: reconcile surface 不可用时显式返回降级状态
+- **WHEN** 最新持仓快照缺失、最新 reconcile run 失败，或当前仍处于 experiment fallback 模式
+- **THEN** surface MUST 显式返回 `status` / `source_mode` / `warnings`
+- **THEN** 客户端 SHALL NOT 把缺失 surface 误判为“当前无动作”
+
+### Requirement: reconcile surface 必须携带并发校验令牌
+系统 MUST 在 reconcile surface 和移动端动作卡中返回足以做并发校验的令牌，至少包括 `snapshot_id`、`reconcile_id` 和 `as_of_date`。任何确认请求若引用的令牌已落后于系统最新有效 surface，服务端 MUST 拒绝该请求。
+
+#### Scenario: 用户确认基于旧 snapshot 的动作卡
+- **WHEN** 用户准备确认某张动作卡，但系统最新有效 `snapshot_id` 或 `reconcile_id` 已变化
+- **THEN** 服务端 MUST 返回冲突状态
+- **THEN** 客户端 SHALL 提示用户先刷新动作单再确认
+
+#### Scenario: 当前版本仍处于 experiment fallback
+- **WHEN** 聚合接口返回 `source_mode=experiment_fallback`
+- **THEN** 服务端 SHALL NOT 生成可用于真实持仓确认的并发令牌
+- **THEN** 客户端 SHALL 显式提示该模式仅供只读参考
+
+### Requirement: Config Draft 必须作为独立核心模块存在
+系统 MUST 将“表单输入 -> config draft -> runtime request”的前端配置核心从旧控制器中抽离为独立模块。旧页面控制器 SHALL NOT 继续承担完整配置编译职责。
+
+#### Scenario: 用户修改配置草稿
+- **WHEN** 桌面页表单发生修改
+- **THEN** 系统 MUST 由独立的 config draft core 更新运行草稿
+- **THEN** 旧控制器文件 SHALL 仅负责控件联动和展示提示
+
+#### Scenario: 新资产接入复用配置核心
+- **WHEN** 系统接入新的资产类型或新的 runtime source
+- **THEN** 配置核心 MUST 允许复用统一的 draft 和 request 编译流程
+- **THEN** 旧控制器 SHALL NOT 再通过资产特化分支继续膨胀
 

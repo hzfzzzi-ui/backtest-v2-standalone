@@ -1,9 +1,21 @@
-# ma200-market-state Specification
+﻿# ma200-market-state Specification
 
 ## Purpose
 基于基准指数 MA200 位置与斜率的四态市场分类，及对应的交易模式映射。
 ## Requirements
 ### Requirement: MA200 四态市场分类
+
+系统 SHALL 在 `RegimeRouterSignalProvider.precompute()` 和 legacy 运行时路径中，基于基准指数计算四种市场状态：
+- **BULL**: benchmark close > MA(long_ma_window) 且长均线 slope >= 0
+- **TRANS_DOWN**: benchmark close > MA(long_ma_window) 且长均线 slope < 0
+- **TRANS_UP**: benchmark close < MA(long_ma_window) 且长均线 slope >= 0
+- **BEAR**: benchmark close < MA(long_ma_window) 且长均线 slope < 0
+
+长均线窗口 SHALL 由 `MarketFilterConfig.long_ma_window` 驱动，默认值为 `200`。
+
+长均线 slope 定义为 `MA(long_ma_window)[t] - MA(long_ma_window)[t - slope_window]`，其中 `slope_window` 默认 20 个交易日。
+
+市场状态 SHALL 存储为 `_market_state[T]` 数组（int8），在 precompute 阶段一次性计算。
 
 系统 SHALL 在 `RegimeRouterSignalProvider.precompute()` 和 legacy 运行时路径中，基于基准指数计算四种市场状态：
 - **BULL**: benchmark close > MA(long_ma_window) 且长均线 slope >= 0
@@ -27,9 +39,7 @@
 
 #### Scenario: 长均线数据不足
 - **WHEN** 交易天数 < `long_ma_window + slope_window`，长均线或 slope 无法计算
-- **THEN** 当日 `market_state` SHALL 默认为 `BULL`
-
-### Requirement: 交易模式映射
+- **THEN** 当日 `market_state` SHALL 默认为 `BULL`### Requirement: 交易模式映射
 
 系统 SHALL 根据 market_state 和过渡态入场条件计算每日 trade_mode：
 - **TREND_MAIN**: market_state == BULL
@@ -117,6 +127,20 @@ EMA5/20 信号矩阵 SHALL 在 precompute 阶段与 SMA 信号矩阵并行计算
 
 配置 SHALL 在 `BacktestConfig` 中作为 `market_filter: MarketFilterConfig` 字段存在。
 
+系统 SHALL 提供 `MarketFilterConfig` dataclass：
+- `enabled: bool = False` — 总开关
+- `long_ma_window: int = 200` — legacy 长均线窗口
+- `slope_window: int = 20` — 长均线斜率计算回看窗口
+- `bull_multiplier: float = 1.5` — BULL 态 risk_budget trend_multiplier
+- `light_multiplier: float = 0.6` — TREND_LIGHT 默认 multiplier
+- `trans_down_multiplier: float | None = None` — `TRANS_DOWN` 专用 multiplier；为 `None` 时回退到 `light_multiplier`
+- `trans_up_multiplier: float | None = None` — `TRANS_UP` 专用 multiplier；为 `None` 时回退到 `light_multiplier`
+- `freeze_trans_up_entries: bool = False` — 是否在 `TRANS_UP` 阶段禁止新开仓
+- `ema_light_fast: int = 5` — 轻趋势 EMA 快线周期
+- `ema_light_slow: int = 20` — 轻趋势 EMA 慢线周期
+
+配置 SHALL 在 `BacktestConfig` 中作为 `market_filter: MarketFilterConfig` 字段存在。
+
 #### Scenario: 过渡态 multiplier 分拆
 - **WHEN** 用户显式设置 `trans_down_multiplier` 与 `trans_up_multiplier`
 - **THEN** 系统 SHALL 在 `TRANS_DOWN` 与 `TRANS_UP` 使用各自 multiplier，而不是共享 `light_multiplier`
@@ -127,9 +151,7 @@ EMA5/20 信号矩阵 SHALL 在 precompute 阶段与 SMA 信号矩阵并行计算
 
 #### Scenario: freeze_trans_up_entries 配置透传
 - **WHEN** 用户在配置中设置 `freeze_trans_up_entries = true`
-- **THEN** 参数 SHALL 经 API → loader → engine → signal_provider 完整透传
-
-### Requirement: daily_row 市场状态字段
+- **THEN** 参数 SHALL 经 API → loader → engine → signal_provider 完整透传### Requirement: daily_row 市场状态字段
 
 系统 SHALL 在每日行数据中写入市场状态信息：
 - `market_state`: 字符串，"BULL" / "TRANS_DOWN" / "TRANS_UP" / "BEAR"
@@ -157,13 +179,39 @@ EMA5/20 信号矩阵 SHALL 在 precompute 阶段与 SMA 信号矩阵并行计算
 ### Requirement: MA200 状态机必须降级为显式 fallback 模式
 `ma200-market-state` SHALL 不再被视为正式市场状态真相源，而 MUST 作为 `market-regime-framework` 未启用、特征不可用或用户显式指定时的兼容 fallback 模式。系统 MUST 在运行元数据中明确标识当前使用的是 `ma200_legacy`，避免与正式 regime framework 混淆。
 
+`ma200-market-state` SHALL 不再被视为正式市场状态真相源，而 MUST 作为 `market-regime-framework` 未启用、特征不可用或用户显式指定时的兼容 fallback 模式。系统 MUST 在运行元数据中明确标识当前使用的是 `ma200_legacy`，避免与正式 regime framework 混淆。
+
 #### Scenario: 用户显式选择 legacy 模式
 - **WHEN** 用户在配置中指定 `regime_engine = ma200_legacy`
 - **THEN** 系统 MUST 使用现有 MA200 四态逻辑，并在产物中标记 `regime_engine = ma200_legacy`
 
 #### Scenario: 正式框架特征不可用时回退
 - **WHEN** 正式市场状态框架因特征覆盖不足而无法运行，且配置允许回退
-- **THEN** 系统 MUST 明确回退到 `ma200_legacy`，并记录回退原因
+- **THEN** 系统 MUST 明确回退到 `ma200_legacy`，并记录回退原因### Requirement: MA200 fallback 输出必须带兼容语义标记
+在 `ma200_legacy` 模式下，系统 SHALL 继续输出现有 `BULL / TRANS_UP / TRANS_DOWN / BEAR` 和 `TREND_MAIN / TREND_LIGHT / NO_TRADE`，但 MUST 同时输出：
+- `regime_engine`
+- `regime_semantics = legacy_price_filter`
+
+#### Scenario: 前端展示区分 legacy 与正式框架
+- **WHEN** 前端加载一条使用 MA200 fallback 的实验
+- **THEN** 结果页 MUST 能识别该状态线属于 legacy 价格过滤器，而不是正式多因子 regime 框架
+
+### Requirement: MA200 状态机作为 legacy compatibility engine 保留
+系统 SHALL 将现有 `ma200-market-state` 明确定义为 `ma200_legacy` compatibility engine。
+
+该 engine：
+
+- 继续保持当前行为
+- 继续可被正式主线调用
+- 不得被本 change 直接删除或无提示替换
+
+#### Scenario: 选择 ma200_legacy
+- **WHEN** `regime_engine.engine = ma200_legacy`
+- **THEN** 系统 SHALL 保持当前 `close vs MA200 + slope + legacy router` 行为不变
+
+#### Scenario: weekly five-state 不覆盖 legacy
+- **WHEN** 本 change 落地
+- **THEN** `ma200_legacy` SHALL 仍然可以被配置显式选中，用于 A/B 对照与回退
 
 ### Requirement: MA200 fallback 输出必须带兼容语义标记
 在 `ma200_legacy` 模式下，系统 SHALL 继续输出现有 `BULL / TRANS_UP / TRANS_DOWN / BEAR` 和 `TREND_MAIN / TREND_LIGHT / NO_TRADE`，但 MUST 同时输出：

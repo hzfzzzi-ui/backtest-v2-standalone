@@ -1,4 +1,10 @@
-## ADDED Requirements
+# exit-priority-config Specification
+
+## Purpose
+
+定义退出优先级配置在前端与序列化层的展示和保存要求，确保多退出条件的评估顺序可解释且可配置。
+
+## Requirements
 
 ### Requirement: Exit priority configuration UI
 The Exit accordion block SHALL include a priority list showing the order in which exit conditions are evaluated when multiple trigger on the same day.

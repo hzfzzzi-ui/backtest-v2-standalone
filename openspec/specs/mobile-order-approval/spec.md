@@ -1,4 +1,4 @@
-# mobile-order-approval Specification
+﻿# mobile-order-approval Specification
 
 ## Purpose
 TBD - created by archiving change add-mobile-semi-auto-trade-workflow. Update Purpose after archive.
@@ -24,6 +24,8 @@ TBD - created by archiving change add-mobile-semi-auto-trade-workflow. Update Pu
 ### Requirement: 系统必须为每次确认生成可审计的 approval ticket
 每一笔被确认的移动端指令 MUST 生成唯一的 `approval ticket`。该 ticket SHALL 至少包含来源实验、信号日期、股票标识、动作类型、原始建议、最终确认值、确认人、确认时间、二次确认标记和幂等键。
 
+每一笔被确认的移动端指令 MUST 生成唯一的 `approval ticket`。该 ticket SHALL 至少包含来源实验、信号日期、股票标识、动作类型、原始建议、最终确认值、确认人、确认时间、二次确认标记和幂等键。
+
 #### Scenario: 正常生成 approval ticket
 - **WHEN** 用户完成合法确认流程
 - **THEN** 系统 SHALL 创建唯一 ticket id
@@ -32,7 +34,18 @@ TBD - created by archiving change add-mobile-semi-auto-trade-workflow. Update Pu
 #### Scenario: 重复提交同一确认请求
 - **WHEN** 客户端使用同一幂等键重复提交确认请求
 - **THEN** 系统 SHALL 返回已存在的 ticket
-- **THEN** 系统 SHALL NOT 生成重复待执行指令
+- **THEN** 系统 SHALL NOT 生成重复待执行指令### Requirement: 桌面执行器只可消费已批准且未失效的待执行指令
+系统 MUST 只允许桌面执行器读取状态为 `approved_pending` 的 ticket。已驳回、已撤回、已执行、已过期或被风控拦截的 ticket SHALL NOT 再次进入执行队列。
+
+#### Scenario: 执行器拉取待执行指令
+- **WHEN** 桌面执行器查询待执行清单
+- **THEN** 系统 SHALL 仅返回可执行状态的 ticket
+- **THEN** 返回结果 SHALL 包含足够的审计字段供执行器回写结果
+
+#### Scenario: ticket 超时失效
+- **WHEN** ticket 超过允许执行窗口仍未被执行器接单
+- **THEN** 系统 SHALL 将其标记为 `expired`
+- **THEN** 手机端 SHALL 显示该状态并允许用户重新确认或撤销
 
 ### Requirement: 桌面执行器只可消费已批准且未失效的待执行指令
 系统 MUST 只允许桌面执行器读取状态为 `approved_pending` 的 ticket。已驳回、已撤回、已执行、已过期或被风控拦截的 ticket SHALL NOT 再次进入执行队列。

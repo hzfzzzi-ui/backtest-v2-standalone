@@ -1,10 +1,12 @@
-# canonical-artifact-migration Specification
+﻿# canonical-artifact-migration Specification
 
 ## Purpose
 TBD - created by archiving change cleanup-remaining-architecture-debt. Update Purpose after archive.
 ## Requirements
 ### Requirement: 运行时读取链必须只认 canonical artifact schema
 系统 MUST 以 canonical artifact 命名、canonical counter 字段和 canonical manifest 资产上下文作为运行时唯一真相。查询服务、API 返回和前端主路径 SHALL NOT 长期依赖查询时临时补丁去推导历史资产上下文。
+
+系统 MUST 以 canonical artifact 命名和 canonical counter 字段作为运行时唯一真相。查询服务、API 返回和前端主路径 SHALL NOT 继续在运行时常驻历史 alias、legacy trades 文件名或旧 shell label 归一化逻辑。
 
 #### Scenario: 查询实验 artifact
 - **WHEN** 查询服务读取某个实验目录的标准 artifact
@@ -16,7 +18,12 @@ TBD - created by archiving change cleanup-remaining-architecture-debt. Update Pu
 - **THEN** 系统 MUST 只写出 canonical 命名和 canonical 资产上下文
 - **THEN** 新实验 SHALL NOT 生成新的历史 alias 或缺失资产上下文字段的 manifest
 
-### Requirement: 历史 artifact alias 必须通过离线迁移退出运行时
+#### Scenario: 新实验写出产物
+- **WHEN** 新实验写出 `manifest.json`、`perf.json`、`run_meta.json` 等标准产物
+- **THEN** 系统 MUST 只写出 canonical 命名
+- **THEN** 新实验 SHALL NOT 再生成旧 alias### Requirement: 历史 artifact alias 必须通过离线迁移退出运行时
+系统 MUST 提供离线迁移和迁移审计，用于把历史 artifact、counter 字段、shell label 和缺失资产上下文的 `manifest.json` 批量更新为 canonical schema。迁移完成后，历史实验的磁盘 manifest MUST 自描述其 canonical 资产边界。
+
 系统 MUST 提供离线迁移和迁移审计，用于把历史 artifact、counter 字段、shell label 和缺失资产上下文的 `manifest.json` 批量更新为 canonical schema。迁移完成后，历史实验的磁盘 manifest MUST 自描述其 canonical 资产边界。
 
 #### Scenario: 回填历史 manifest 资产上下文
@@ -33,4 +40,17 @@ TBD - created by archiving change cleanup-remaining-architecture-debt. Update Pu
 - **WHEN** 某批历史产物完成 canonical migration
 - **THEN** 系统 MUST 以前后对照 `V10.1 -> exp_20260314_144548534_7db9` 和代表性历史实验做读取回归
 - **THEN** 若结果或 manifest 语义发生漂移，迁移 SHALL NOT 进入主路径
+
+### Requirement: 历史产物兼容必须退出运行时并改为离线迁移
+系统 MUST 将历史 artifact alias、旧 counter 字段和旧 shell label 的处理限制在离线迁移工具与迁移审计中。运行时 contract SHALL NOT 再为这些历史名称保留常驻兼容读取。
+
+#### Scenario: 需要读取旧产物目录
+- **WHEN** 某批历史产物仍使用旧命名
+- **THEN** 系统 MUST 先通过离线 migration 将其转成 canonical schema
+- **THEN** 运行时接口 SHALL NOT 因这些旧产物继续保留兼容分支
+
+#### Scenario: 迁移后回归校验
+- **WHEN** 历史产物完成 canonical migration
+- **THEN** 系统 MUST 以前后对照 `baseline_V10.1 -> exp_20260314_144548534_7db9` 复核读取结果
+- **THEN** 若出现结果漂移，迁移 SHALL NOT 进入主路径
 

@@ -1,10 +1,12 @@
-# http-surface-boundary-split Specification
+﻿# http-surface-boundary-split Specification
 
 ## Purpose
 定义桌面与移动端 HTTP surface 的正式边界，确保结果读取统一收敛到 `manifest`、`surface` 与按需 `surface/{section}`，并让实验级资产上下文成为稳定输出的一部分。
 ## Requirements
 ### Requirement: 系统必须提供新的 backtest 和 mobile API 边界
 系统 MUST 提供新的 `backend/api/backtest_v2/*` 和 `backend/api/mobile/*` 作为正式 API 边界。旧 `backend/api/endpoints/*` 文件结构可以删除，但旧 HTTP path MUST 保持兼容。
+
+系统 MUST 提供 `backend/api/backtest_v2/*`、`backend/api/mobile/*` 和必要的共享 helper 作为唯一正式 API 边界。旧 `backend/api/endpoints/*` 文件结构与其 path 兼容层 SHALL NOT 再作为长期要求保留。
 
 #### Scenario: 旧 path 请求继续可用
 - **WHEN** 客户端继续调用既有 backtest HTTP path
@@ -16,7 +18,15 @@
 - **THEN** 旧 `backend/api/endpoints/*` 文件实现 MAY 被删除
 - **THEN** 系统 MUST 保持 path 兼容和主要用户可见行为兼容
 
-### Requirement: 历史实验接口必须返回 manifest 加最小绩效摘要
+#### Scenario: 主应用挂载正式 API 边界
+- **WHEN** 系统启动并挂载 backtest、mobile 或 transactions 相关路由
+- **THEN** 主应用 MUST 只从正式 API 目录挂载这些路由
+- **THEN** 系统 SHALL NOT 要求继续保留 `backend/api/endpoints/*` 作为主路径或 path 兼容层
+
+#### Scenario: 清理旧 endpoints 载体
+- **WHEN** 旧 `backend/api/endpoints/*` 文件只承担历史兼容或转发作用
+- **THEN** 这些文件 MUST 可以被直接删除
+- **THEN** 删除动作 SHALL NOT 被旧 path 兼容要求阻止### Requirement: 历史实验接口必须返回 manifest 加最小绩效摘要
 系统 MUST 将历史实验列表和加载弹窗统一为 `manifest + 少量 perf 摘要`。该接口 SHALL NOT 直接内联完整 `ExperimentSurface`。
 
 #### Scenario: 历史实验列表展示对比信息
@@ -45,6 +55,8 @@
 ### Requirement: 桌面主路径必须优先消费 manifest、surface 与 section 接口
 系统 MUST 让桌面研究页主路径优先使用 `manifest`、`surface`、`surface/{section}` 与少量专用接口。桌面研究页的正常结果读取 SHALL NOT 继续依赖通用 `/api/backtest_v2/artifacts/read`。
 
+系统 MUST 让桌面研究页主路径只消费 `manifest`、`surface`、`surface/{section}` 和少量明确语义的专用接口。桌面研究页正常结果读取 SHALL NOT 继续依赖通用 `/api/backtest_v2/artifacts/read`。
+
 #### Scenario: 桌面页加载实验结果
 - **WHEN** 桌面研究页加载某个实验的结果工作台
 - **THEN** 系统 MUST 先读取该实验的 `manifest`
@@ -53,9 +65,7 @@
 #### Scenario: 桌面页渲染结果区
 - **WHEN** 前端主路径需要渲染 KPI、图表、阶段漏斗、交易明细或个股表现
 - **THEN** 系统 SHALL 通过统一结果面或专用 section 获取数据
-- **THEN** 前端 SHALL NOT 通过 `/api/backtest_v2/artifacts/read` 直接读取底层 artifact 文件
-
-### Requirement: 通用 artifact 读取接口必须退出桌面主路径
+- **THEN** 前端 SHALL NOT 通过 `/api/backtest_v2/artifacts/read` 直接读取底层 artifact 文件### Requirement: 通用 artifact 读取接口必须退出桌面主路径
 系统 MAY 保留通用 artifact 读取接口用于极少量运维、调试或迁移工具，但桌面研究页的主交互路径 MUST 不再把该接口当作正常读取面。
 
 #### Scenario: 主交互路径调用 artifact 读取
@@ -104,6 +114,8 @@
 ### Requirement: 旧 endpoints 目录必须退化为薄 shim
 系统 MUST 将 `backend/api/endpoints/*` 退化为 path 兼容用的薄 shim。旧目录 SHALL NOT 继续承载重型实现、新的编排逻辑或新的领域规则。
 
+系统 MUST 将 `backend/api/endpoints/*` 退化为 path 兼容用的薄 shim。旧目录 SHALL NOT 继续承载重型实现、新的编排逻辑或新的领域规则。
+
 #### Scenario: 旧 path 继续可用
 - **WHEN** 客户端继续访问旧 HTTP path
 - **THEN** 系统 MUST 保持 path 兼容
@@ -112,7 +124,18 @@
 #### Scenario: 新增 API 行为
 - **WHEN** 需要新增或调整 API 行为
 - **THEN** 实现 MUST 落在 `backend/api/backtest_v2/*` 或 `backend/api/mobile/*`
-- **THEN** 旧 `endpoints/*` SHALL NOT 成为新行为的正式落点
+- **THEN** 旧 `endpoints/*` SHALL NOT 成为新行为的正式落点### Requirement: 新实现不得反向依赖 compat 模块
+系统 MUST 逐步移除新实现对 compat 模块的反向 import。新目录下的正式实现 SHALL NOT 通过回跳 `backend/api/endpoints/*` 获取核心行为。
+
+#### Scenario: mobile 或 backtest 新实现读取能力
+- **WHEN** 新 API 目录中的实现需要复用能力
+- **THEN** 它 MUST 复用 service、contract 或新目录内的路由实现
+- **THEN** 它 SHALL NOT 反向 import compat module 以取得核心数据
+
+#### Scenario: 兼容实现仍需要保留
+- **WHEN** 某个 compat 模块尚未删除
+- **THEN** 它 MAY 依赖新实现
+- **THEN** 依赖方向 SHALL NOT 反过来
 
 ### Requirement: 新实现不得反向依赖 compat 模块
 系统 MUST 逐步移除新实现对 compat 模块的反向 import。新目录下的正式实现 SHALL NOT 通过回跳 `backend/api/endpoints/*` 获取核心行为。

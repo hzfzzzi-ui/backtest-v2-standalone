@@ -1,4 +1,4 @@
-# artifact-finalization-pipeline Specification
+﻿# artifact-finalization-pipeline Specification
 
 ## Purpose
 定义实验产物稳定化与 finalize pipeline 的模块边界，确保 `artifacts_impl.py` 只保留 facade 入口，具体 artifact finalize 逻辑按职责拆分，同时保持标准 artifact 协议稳定。
@@ -53,6 +53,8 @@
 ### Requirement: Artifact diagnostics 必须只消费 canonical runtime diagnostics input
 系统 MUST 要求 `artifacts_diagnostics.py` 及相关 diagnostics/funnel builder 只消费 canonical runtime diagnostics input，不再直接从执行本体推导最终 stage 语义。
 
+系统 MUST 要求 `artifacts_diagnostics.py` 及相关 diagnostics/funnel builder 只消费 canonical runtime diagnostics input，不再直接从执行本体推导最终 stage 语义。
+
 #### Scenario: 生成 buy stage funnel
 - **WHEN** 系统为实验结果生成 buy stage funnel
 - **THEN** diagnostics builder MUST 通过 canonical diagnostics input 构建阶段计数和 note
@@ -62,4 +64,3 @@
 - **WHEN** 系统生成 counters、reason summaries 或 surface diagnostics
 - **THEN** 系统 MUST 复用同一份 canonical diagnostics input
 - **THEN** 不同 artifact SHALL NOT 各自重复定义 stage count 归一化规则
-

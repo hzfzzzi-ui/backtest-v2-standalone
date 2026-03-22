@@ -1,3 +1,11 @@
+# suspension-chart-overlay Specification
+
+## Purpose
+
+定义个股图表在停牌区间的折线与 K 线渲染要求，使停牌期在前端可被清晰识别而不污染大盘蒙版语义。
+
+## Requirements
+
 ### Requirement: 停牌区间灰色折线标注
 前端图表 SHALL 在停牌区间将折线渲染为灰色，使用户能直观区分停牌期与正常交易期。背景蒙版保留给大盘走势（MarketStateOverlay），不用于停牌标注。
 

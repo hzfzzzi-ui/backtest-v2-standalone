@@ -24,7 +24,7 @@ Provide vectorized ADX (Average Directional Index) computation over T x N price 
 
 ### Requirement: ADX 矩阵 NaN 处理
 
-ADX 计算需要 2×period 个有效数据点作暖机期（period 天 ATR + period 天 DX 平滑）。
+系统 MUST 为 ADX 矩阵定义统一的暖机期与 NaN 传播规则，覆盖前置暖机和中途缺口两类情况。
 
 - 前 2×period 行 MUST 填充 NaN
 - 某列中间有 NaN（如停牌），该列的 ADX 在 NaN 之后 MUST 重新暖机或向前传播最近有效值

@@ -1,4 +1,4 @@
-# Capability: daily-funnel-schema
+﻿# Capability: daily-funnel-schema
 
 ## Purpose
 
@@ -125,6 +125,8 @@ Generic 路径已有的诊断字段（`candidates_count`、`selected_count`、`m
 ### Requirement: 买入漏斗缺口必须可被下游识别
 系统 SHALL 让下游 artifact 聚合层能够从 `daily_row` 明确区分“真实阶段计数为 0”和“该阶段当前未单独计数”。为此，买入漏斗相关字段在写入 `daily_row` 时 MUST 保留空值语义，不得在引擎层被统一数值化为 `0`。
 
+系统 SHALL 让下游 artifact 聚合层能够从 `daily_row` 明确区分“真实阶段计数为 0”和“该阶段当前未单独计数”。为此，买入漏斗相关字段在写入 `daily_row` 时 MUST 保留空值语义，不得在引擎层被统一数值化为 `0`。
+
 #### Scenario: 真实零值阶段
 - **WHEN** 某个买入漏斗阶段在当日真实发生且计数结果为 `0`
 - **THEN** `daily_row` SHALL 写入数值 `0`
@@ -135,3 +137,17 @@ Generic 路径已有的诊断字段（`candidates_count`、`selected_count`、`m
 - **THEN** `daily_row` SHALL 保留该字段为空
 - **THEN** 下游 artifact 聚合 SHALL 能够据此将该阶段标记为 unavailable
 
+#### Scenario: SMA 路径买入漏斗完整
+- **WHEN** SMA 路径完成买入信号过滤和订单构建
+- **THEN** `daily_row` SHALL 输出 `raw_buy_signal_count`、`buy_candidate_count`、`after_held_filter_count`、`after_slot_filter_count`、`after_cash_lot_count`、`buy_slots_before_buy`
+- **THEN** 漏斗字段递减关系 SHALL 成立：`raw_buy_signal_count >= buy_candidate_count >= after_held_filter_count >= after_slot_filter_count >= after_cash_lot_count`
+
+#### Scenario: stage pipeline 路径从正式来源收口计数
+- **WHEN** V10.1 stage pipeline 路径同时拥有 provider diagnostics 与订单规划 `debug_plan`
+- **THEN** `daily_accounting` SHALL 优先使用这些正式来源写入买入漏斗字段
+- **THEN** `after_slot_filter_count` 与 `after_cash_lot_count` SHALL 反映真实约束后的阶段数量，而不是机械复用 `len(day_signals.buy_signals)`
+
+#### Scenario: 阶段计数缺失时保留空值
+- **WHEN** 某条运行路径无法为 `buy_candidate_count`、`after_held_filter_count`、`after_slot_filter_count` 或 `after_cash_lot_count` 提供可靠计数
+- **THEN** 对应 `daily_row` 字段 SHALL 保持 `null` 或等价空值
+- **THEN** 引擎 SHALL NOT 用更后置阶段的数量回填这些字段

@@ -7,8 +7,14 @@
 
 ## Requirements
 
-_All requirements removed. See `risk-budget-sizing` spec for replacement._
+### Requirement: Volatility sizing capability remains retired
 
-- ~~ATR 反比调仓~~ → replaced by `risk-budget-sizing > ATR 定仓公式`
-- ~~波动率调仓可观测性~~ → replaced by `risk-budget-sizing > 风险预算可观测性`
-- ~~前端波动率调仓配置~~ → replaced by `risk-budget-sizing > 前端风险预算配置`
+系统 SHALL 将旧的 volatility sizing capability 视为已退役能力，并将其 active requirement 全部指向 `risk-budget-sizing` 的对应章节。
+
+#### Scenario: 查询旧 ATR 反比调仓要求
+- **WHEN** 维护者查阅 volatility sizing 主规格
+- **THEN** 文档 SHALL 指向 `risk-budget-sizing > ATR 定仓公式` 作为 replacement
+
+#### Scenario: 查询旧配置与可观测性要求
+- **WHEN** 维护者查阅旧的前端配置或可观测性要求
+- **THEN** 文档 SHALL 指向 `risk-budget-sizing` 中对应的前端和 observability 章节

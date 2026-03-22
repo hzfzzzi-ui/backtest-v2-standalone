@@ -1,9 +1,11 @@
-# research-db-structure-governance Specification
+﻿# research-db-structure-governance Specification
 
 ## Purpose
 TBD - created by archiving change optimize-core-db-structure. Update Purpose after archive.
 ## Requirements
 ### Requirement: 核心研究表结构治理分层
+系统 MUST 对共享 PostgreSQL `public` schema 中的数据库对象进行分层治理，并将研究主线数据库优化限制在明确定义的核心研究表范围内。
+
 系统 MUST 对共享 PostgreSQL `public` schema 中的数据库对象进行分层治理，并将研究主线数据库优化限制在明确定义的核心研究表范围内。
 
 #### Scenario: 识别核心研究表
@@ -14,9 +16,7 @@ TBD - created by archiving change optimize-core-db-structure. Update Purpose aft
 #### Scenario: 识别备份与临时对象
 - **WHEN** 团队盘点 `public` schema 中的备份表或临时脚本对象
 - **THEN** `*_backup_*` 持久表 MUST 被视为治理债务而非核心研究表
-- **THEN** 会话级 `tmp_*` 表 MUST 被视为脚本临时对象，不得被误判为长期结构资产
-
-### Requirement: L2 数据库优化只允许非语义型 DDL
+- **THEN** 会话级 `tmp_*` 表 MUST 被视为脚本临时对象，不得被误判为长期结构资产### Requirement: L2 数据库优化只允许非语义型 DDL
 系统 SHALL 将 L2 数据库结构优化限定为不会改变研究口径、查询结果集和运行时合同的非语义型 DDL。
 
 #### Scenario: 对 PIT 成分表执行 L2 优化
@@ -59,6 +59,8 @@ TBD - created by archiving change optimize-core-db-structure. Update Purpose aft
 ### Requirement: 持久化备份表必须受治理约束
 系统 MUST 对 `public` schema 中的持久化备份表建立治理边界，避免一次性脚本产物长期混入主结构认知。
 
+系统 MUST 对 `public` schema 中的持久化备份表建立治理边界，避免一次性脚本产物长期混入主结构认知。
+
 #### Scenario: 新增持久化备份表
 - **WHEN** 团队需要为运营或修复目的新增持久化备份表
 - **THEN** 该表 MUST 记录来源、创建日期、预期保留期和删除/迁移责任人
@@ -67,5 +69,16 @@ TBD - created by archiving change optimize-core-db-structure. Update Purpose aft
 #### Scenario: 盘点既有备份表
 - **WHEN** 团队盘点 `public` schema 中既有 `*_backup_*` 表
 - **THEN** 盘点结果 MUST 明确这些表不属于 baseline 主线运行时依赖
-- **THEN** 后续如需迁移或删除，必须通过独立变更执行
+- **THEN** 后续如需迁移或删除，必须通过独立变更执行### Requirement: L2 数据库优化只允许非语义型 DDL
+系统 SHALL 将 L2 数据库结构优化限定为不会改变研究口径、查询结果集和运行时合同的非语义型 DDL。
+
+#### Scenario: 对 PIT 成分表执行 L2 优化
+- **WHEN** 团队对 `pit_index_constituents` 制定首批 L2 优化
+- **THEN** 允许的 DDL MUST 限定为新增非唯一索引、注释或 runbook 配套对象
+- **THEN** 该优化 MUST NOT 改变表字段含义、查询条件语义或 Universe 结果集合
+
+#### Scenario: 对 PIT 行业历史表执行 L2 优化
+- **WHEN** 团队对 `pit_industry_history` 制定首批 L2 优化
+- **THEN** 优化 MUST 优先覆盖 `industry_l1 + 生效区间 + ts_code` 查询模式
+- **THEN** 该优化 MUST NOT 修改 `start_date` / `end_date` 的 PIT 解释方式
 

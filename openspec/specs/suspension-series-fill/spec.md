@@ -1,3 +1,11 @@
+# suspension-series-fill Specification
+
+## Purpose
+
+定义个股序列 API 对停牌缺口的填充规则，确保前端拿到日期连续、语义明确的停牌序列数据。
+
+## Requirements
+
 ### Requirement: 个股序列 API 停牌日期填充
 `/api/backtest_v2/series/symbol` 端点 SHALL 返回日期连续的序列。停牌期间缺失的交易日 SHALL 用最后交易日的收盘价 forward-fill，并标记 `suspended: true`。
 

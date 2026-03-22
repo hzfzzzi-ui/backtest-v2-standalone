@@ -7,8 +7,14 @@
 
 ## Requirements
 
-_All requirements removed. See `risk-budget-sizing` spec for replacement._
+### Requirement: Drawdown circuit breaker capability remains retired
 
-- ~~回撤熔断暂停开仓~~ → replaced by `risk-budget-sizing > 渐进式回撤缩放`
-- ~~回撤熔断计数器~~ → replaced by `risk-budget-sizing > 风险预算可观测性`（`dd_scale_08_count`、`dd_scale_06_count`、`dd_fixed_03_count`、`dd_stop_count`、`dd_stop_block_count`）
-- ~~前端回撤熔断配置~~ → replaced by `risk-budget-sizing > 前端风险预算配置`
+系统 SHALL 将旧的 drawdown circuit breaker 视为已退役 capability，并将所有 active requirement 迁移到 `risk-budget-sizing`。
+
+#### Scenario: 查询主规格
+- **WHEN** 维护者检查 drawdown circuit breaker 主规格
+- **THEN** 文档 SHALL 指向 `risk-budget-sizing` 作为唯一 active replacement
+
+#### Scenario: 检查旧需求去向
+- **WHEN** 维护者查阅旧的暂停开仓、计数器或前端配置要求
+- **THEN** 文档 SHALL 说明这些要求已分别迁移到 `risk-budget-sizing` 的对应章节

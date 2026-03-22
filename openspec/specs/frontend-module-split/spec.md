@@ -1,4 +1,4 @@
-# frontend-module-split
+﻿# frontend-module-split
 
 ## Purpose
 
@@ -92,6 +92,8 @@ TBD -- Split the monolithic `backtest_v2.js` frontend file into focused modules 
 ### Requirement: 旧桌面控制器必须继续退化为薄壳
 系统 MUST 继续收缩 `backtest_v2.js`、`ui-controls.js` 和 `artifacts.js` 的活跃职责。已经拆出的页面模块 SHALL 成为对应功能的唯一活跃实现，旧文件只允许保留 bootstrap、事件装配和少量桥接逻辑。
 
+系统 MUST 持续收缩 `backtest_v2.js`、`ui-controls.js` 和 `artifacts.js` 的活跃职责。已拆出的页面模块和状态模块 SHALL 成为对应功能的唯一正式实现；旧文件只允许保留 bootstrap、桥接和极少量事件装配。
+
 #### Scenario: 用户执行配置加载或运行控制
 - **WHEN** 桌面研究页触发配置、历史、加载、保存或运行动作
 - **THEN** 对应行为 MUST 由 `frontend/assets/js/pages/*` 中的专用模块承担
@@ -102,7 +104,10 @@ TBD -- Split the monolithic `backtest_v2.js` frontend file into focused modules 
 - **THEN** 该逻辑 MUST 不直接承担配置编译、结果摘要拼装或重型面板渲染
 - **THEN** 旧文件 MUST 维持薄壳角色，避免重新膨胀为全能控制器
 
-### Requirement: ui-controls.js 必须优先抽离配置核心
+#### Scenario: 旧控制器继续增长
+- **WHEN** 新功能需要接入桌面研究页
+- **THEN** 新逻辑 MUST 优先进入 `pages/`、`state/`、`results-workbench/` 或专用 helper
+- **THEN** `backtest_v2.js`、`ui-controls.js`、`artifacts.js` SHALL NOT 继续长胖### Requirement: ui-controls.js 必须优先抽离配置核心
 系统 MUST 优先从 `frontend/assets/js/ui-controls.js` 中抽离配置核心逻辑，包括表单字段归一化、config draft 组装、runtime request 编译和相关主路径校验。`ui-controls.js` 继续存在时 SHALL 只承担控件联动、可见性切换和提示文案。
 
 #### Scenario: 构建运行请求
@@ -118,12 +123,17 @@ TBD -- Split the monolithic `backtest_v2.js` frontend file into focused modules 
 ### Requirement: artifacts.js 必须退化为结果消费与展示适配层
 系统 MUST 让 `frontend/assets/js/artifacts.js` 仅承担结果消费、格式归一化和展示适配职责。该文件 SHALL NOT 继续承载前端主路径中的 artifact 物理读取与路径兜底逻辑。
 
+系统 MUST 让 `frontend/assets/js/artifacts.js` 只承担结果消费、canonical model 归一化和展示适配职责。该文件 SHALL NOT 再承载主路径中的 artifact 读取、物理路径兜底和运行真相决策。
+
 #### Scenario: 渲染结果卡片
 - **WHEN** 前端渲染 KPI、symbol stats、交易明细或阶段漏斗
 - **THEN** `artifacts.js` MUST 基于 canonical result model 进行展示适配
 - **THEN** 该文件 SHALL NOT 负责主路径 artifact 文件读取
 
-### Requirement: 已提取的桌面页面模块必须成为唯一活跃实现
+#### Scenario: 处理异常结果
+- **WHEN** 某个 section 缺失或 payload 不完整
+- **THEN** `artifacts.js` MAY 做展示级降级
+- **THEN** 该降级 SHALL NOT 变成物理 artifact 路径 fallback### Requirement: 已提取的桌面页面模块必须成为唯一活跃实现
 系统 MUST 将已经提取到 `frontend/assets/js/pages/*` 的桌面页面职责视为唯一活跃实现。`backtest_v2.js` 和 `ui-controls.js` 中对应职责的旧实现 SHALL NOT 继续作为正式入口。
 
 #### Scenario: 页面已提取配置中心职责
@@ -176,4 +186,30 @@ TBD -- Split the monolithic `backtest_v2.js` frontend file into focused modules 
 - **WHEN** 旧文件中因回退需要仍保留 legacy shim
 - **THEN** 这些 shim MUST 被显式标记为过渡逻辑
 - **THEN** 边界测试 MUST 阻止其重新回流为正式 owner
+
+### Requirement: ui-controls.js 必须只保留控件联动与展示提示
+系统 MUST 让 `frontend/assets/js/ui-controls.js` 只保留控件联动、显示提示和轻量 UI 行为。配置草稿构建、runtime request 编译和主真相同步 MUST 迁入独立模块。
+
+#### Scenario: 用户切换控件
+- **WHEN** 用户切换某个控件导致 hint、badge 或 panel 可见性变化
+- **THEN** `ui-controls.js` MAY 处理这些 UI 行为
+- **THEN** 它 SHALL NOT 同时承担完整配置编译
+
+#### Scenario: 页面准备发起运行
+- **WHEN** 页面准备发起 preview 或 run 请求
+- **THEN** request payload MUST 由独立配置核心生成
+- **THEN** `ui-controls.js` SHALL NOT 再作为唯一配置真相宿主
+
+### Requirement: 已提取的桌面页面模块必须成为唯一活跃实现
+系统 MUST 将已经提取到 `frontend/assets/js/pages/*` 的桌面页面职责视为唯一活跃实现。`backtest_v2.js` 和 `ui-controls.js` 中对应职责的旧实现 SHALL NOT 继续作为正式入口。
+
+#### Scenario: 页面已提取配置中心职责
+- **WHEN** 配置中心、历史面板、加载控制、保存控制或运行控制已经被提取到独立页面模块
+- **THEN** 系统 MUST 由提取后的页面模块承载活跃实现
+- **THEN** `backtest_v2.js` 或 `ui-controls.js` 中对应旧实现 SHALL NOT 再以原函数名保留为活跃入口
+
+#### Scenario: 旧控制器仍保留过渡函数
+- **WHEN** 旧控制器短期内仍保留过渡函数以便回滚
+- **THEN** 这些函数 MUST 明确标记为 legacy shim
+- **THEN** 它们 SHALL NOT 在页面初始化流程中继续承担主要控制职责
 

@@ -1,4 +1,4 @@
-# risk-budget-sizing Specification
+﻿# risk-budget-sizing Specification
 
 ## Purpose
 系统化风险预算仓位管理 — 从组合风险到单笔仓位的自上而下分配框架，包含渐进式回撤保护。
@@ -131,3 +131,116 @@
 - **WHEN** 页面渲染
 - **THEN** SHALL 不存在"波动率调仓"checkbox 及参数
 - **THEN** SHALL 不存在"回撤熔断"checkbox 及参数
+
+### Requirement: Risk budget sizing 支持 legacy overlay 归零
+
+系统 SHALL 允许 `risk-budget-sizing` 在 `ma200_legacy` 模式下消费一个辅助 veto overlay。
+
+#### Scenario: TURN_WEAK overlay 命中时预算归零
+
+- **WHEN** `regime_engine.engine = ma200_legacy`
+- **AND** `legacy_turn_weak_overlay.enabled = true`
+- **AND** 辅助 weekly 状态为 `TURN_WEAK`
+- **THEN** `risk_budget_multiplier` MUST 为 `0.00`
+
+#### Scenario: 非 TURN_WEAK 日保持 legacy 原预算
+
+- **WHEN** `regime_engine.engine = ma200_legacy`
+- **AND** `legacy_turn_weak_overlay.enabled = true`
+- **AND** 辅助 weekly 状态不为 `TURN_WEAK`
+- **THEN** 系统 MUST 保持 legacy 原有预算映射
+
+### Requirement: Risk budget sizing 支持状态预算乘子
+
+系统 SHALL 允许 `risk-budget-sizing` 消费 `regime engine` 输出的 `risk_budget_multiplier`。
+
+当 `regime_engine.engine = weekly_five_state` 时，系统 MUST 支持以下预算模式：
+
+- `five_state`
+- `three_state`
+- `asymmetric_budget`
+
+系统 SHALL 允许 `risk-budget-sizing` 消费由 regime engine 输出的 `risk_budget_multiplier`。
+
+当 `regime_engine.engine = weekly_five_state` 时：
+
+- `BULL_MAIN` -> `1.00`
+- `TURN_STRONG` -> `0.70`
+- `LIGHT_TREND` -> `0.40`
+- `TURN_WEAK` -> 默认 `0.15`
+- `DEFENSIVE` -> `0.00`
+
+系统 SHALL 允许 `risk-budget-sizing` 消费 `regime engine` 输出的 `risk_budget_multiplier`。
+
+当 `regime_engine.engine = weekly_five_state` 时，系统 MUST 支持两种预算模式：
+
+- `five_state`
+- `three_state`
+
+#### Scenario: weekly_five_state 非对称预算模式
+
+- **WHEN** `regime_engine.engine = weekly_five_state` 且 `risk_budget_mode = asymmetric_budget`
+- **THEN** 系统 SHALL 使用非对称预算映射：
+  - `BULL_MAIN -> 1.00`
+  - `TURN_STRONG -> 0.70`
+  - `LIGHT_TREND -> 0.40`
+  - `TURN_WEAK -> 0.00`
+  - `DEFENSIVE -> 0.00`
+
+#### Scenario: TURN_WEAK 在非对称模式下关闭预算
+
+- **WHEN** `risk_budget_mode = asymmetric_budget` 且 `market_state_5 = TURN_WEAK`
+- **THEN** `risk_budget_multiplier` MUST 为 `0.00`
+
+#### Scenario: TURN_STRONG 在非对称模式下不升到满仓
+
+- **WHEN** `risk_budget_mode = asymmetric_budget` 且 `market_state_5 = TURN_STRONG`
+- **THEN** `risk_budget_multiplier` MUST 保持 `0.70`
+- **THEN** 系统 MUST 不得将其抬升为 `1.00`
+
+#### Scenario: 风险预算随状态缩放
+- **WHEN** weekly five-state 运行
+- **THEN** 组合风险预算 SHALL 乘以状态预算乘子
+
+#### Scenario: weekly_five_state 五档预算模式
+
+- **WHEN** `regime_engine.engine = weekly_five_state` 且 `risk_budget_mode = five_state`
+- **THEN** 系统 SHALL 使用原五档预算映射：
+  - `BULL_MAIN -> 1.00`
+  - `TURN_STRONG -> 0.70`
+  - `LIGHT_TREND -> 0.40`
+  - `TURN_WEAK -> 0.15`
+  - `DEFENSIVE -> 0.00`
+
+#### Scenario: weekly_five_state 三档预算模式
+
+- **WHEN** `regime_engine.engine = weekly_five_state` 且 `risk_budget_mode = three_state`
+- **THEN** 系统 SHALL 将五档原始状态折叠为三档预算 bucket：
+  - `BULL_MAIN / TURN_STRONG -> RISK_ON -> 1.00`
+  - `LIGHT_TREND -> NEUTRAL -> 0.40`
+  - `TURN_WEAK / DEFENSIVE -> RISK_OFF -> 0.00`
+
+#### Scenario: 三档预算模式不保留 TURN_WEAK 低仓预算
+
+- **WHEN** `risk_budget_mode = three_state`
+- **THEN** `TURN_WEAK` MUST 不再映射到 `0.15`
+- **THEN** `TURN_WEAK` MUST 归入 `RISK_OFF`
+
+#### Scenario: 默认仍为五档预算模式
+
+- **WHEN** 用户未显式设置 `risk_budget_mode`
+- **THEN** 系统 SHALL 默认使用 `five_state`### Requirement: TURN_WEAK 预算保持低自由度
+系统 SHALL 仅允许 `TURN_WEAK` 风险预算在 `0.10~0.20` 范围内微调，默认值为 `0.15`。
+
+#### Scenario: TURN_WEAK 默认预算
+- **WHEN** 用户未显式配置
+- **THEN** `TURN_WEAK` 风险预算 SHALL 默认为 `0.15`
+
+### Requirement: DEFENSIVE 预算为零
+当 `market_state_5 = DEFENSIVE` 时，系统 MUST 将状态预算乘子设为 `0.00`，从而禁止新开仓。
+
+#### Scenario: 防守状态零预算
+- **WHEN** `market_state_5 = DEFENSIVE`
+- **THEN** `risk_budget_multiplier = 0.00`
+
+

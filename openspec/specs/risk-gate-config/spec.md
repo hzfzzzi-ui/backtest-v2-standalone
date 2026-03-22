@@ -1,4 +1,10 @@
-## ADDED Requirements
+# risk-gate-config Specification
+
+## Purpose
+
+定义组合级 Risk Gate 配置在前端的展示与序列化要求，为后续风险预算控制提供稳定配置入口。
+
+## Requirements
 
 ### Requirement: Risk Gate configuration UI
 A new "Risk Gate" accordion block SHALL appear below Position & Risk in the Risk module, allowing configuration of portfolio-level drawdown risk control.

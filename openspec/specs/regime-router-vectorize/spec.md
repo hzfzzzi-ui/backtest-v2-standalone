@@ -107,7 +107,7 @@ Vectorized signal provider for the RegimeRouter strategy, supporting both simple
 
 ### Requirement: Regime 判断从二值改为逐股票连续信号
 
-当 RegimeFilter 启用时，`regime_on` 的语义从全局二值变为逐股票信号：
+当 RegimeFilter 启用时，系统 MUST 将 `regime_on` 的语义从全局二值切换为逐股票连续信号路由：
 
 - 原逻辑：`regime_on[day_idx]` 为全局 bool，所有股票共享同一 regime 状态
 - 新逻辑：`regime_signals[day_idx, col_idx]` 为每只股票独立的连续信号 ∈ [0, 1]，通过 `>= regime_threshold` 转为 bool

@@ -1,10 +1,12 @@
-# results-workbench-finalization Specification
+﻿# results-workbench-finalization Specification
 
 ## Purpose
 定义结果工作台成为结果区唯一渲染 owner 后的最终契约。
 ## Requirements
 ### Requirement: 结果工作台必须成为结果区唯一渲染 owner
 当 Vue 结果工作台挂载成功后，系统 MUST 仅由结果工作台渲染结果概览、KPI、主图、个股排名、9 阶段漏斗、交易明细和 AI Markdown 报告。legacy 脚本 SHALL NOT 继续直接写入可见结果区 DOM。
+
+当 Vue 结果工作台挂载成功后，系统 MUST 仅由结果工作台渲染结果概览、KPI、主图、个股排名、阶段漏斗、交易明细和 AI Markdown 报告。旧 DOM 结果面和 fallback 容器 SHALL NOT 再作为生产路径保留。
 
 #### Scenario: Vue 挂载成功
 - **WHEN** 页面加载并成功挂载结果工作台
@@ -16,7 +18,15 @@
 - **THEN** 系统 MUST 记录失败状态到前端状态或诊断输出
 - **THEN** 页面 SHALL NOT 回退到独立 legacy 结果区
 
-### Requirement: 结果工作台不得依赖 legacy 全局 helper
+#### Scenario: Vue 正常挂载
+- **WHEN** 页面成功挂载结果工作台
+- **THEN** 可见结果区 MUST 仅由 Vue workbench 渲染
+- **THEN** 页面 SHALL NOT 再保留可见 fallback 结果容器
+
+#### Scenario: 旧脚本尝试写入结果 DOM
+- **WHEN** 旧控制器或旧 helper 试图直接更新结果区 DOM
+- **THEN** 这些脚本 MUST 只更新 snapshot 或调用 workbench bridge
+- **THEN** 它们 SHALL NOT 再直接拥有结果区 DOM### Requirement: 结果工作台不得依赖 legacy 全局 helper
 结果工作台用于构造漏斗、退出原因、Markdown 报告和结果格式化的逻辑 MUST 通过前端模块 import 获取。结果工作台 SHALL NOT 依赖 `window._finalBuildStageRows`、`window.renderUnifiedStageFunnel`、`window.reasonByPrefix`、`window.buildAgentMarkdownReport` 这类 legacy 全局 helper。
 
 #### Scenario: 漏斗 view model 构造
@@ -79,6 +89,8 @@
 ### Requirement: 结果工作台必须区分未单独计数与真实零值
 结果工作台在渲染交易漏斗时 MUST 保留后端提供的 `available` 与 `null` 语义。对于 `available=false` 或阶段计数为 `null` 的阶段，结果工作台 MUST 显示“未单独计数”或等价状态，并 MUST NOT 将该阶段格式化为数值 `0`。对于 `available=true` 且阶段计数真实为 `0` 的阶段，结果工作台 MUST 按真实零值显示。
 
+结果工作台在渲染交易漏斗时 MUST 保留后端提供的 `available` 与 `null` 语义。对于 `available=false` 或阶段计数为 `null` 的阶段，结果工作台 MUST 显示“未单独计数”或等价状态，并 MUST NOT 将该阶段格式化为数值 `0`。对于 `available=true` 且阶段计数真实为 `0` 的阶段，结果工作台 MUST 按真实零值显示。
+
 #### Scenario: 渲染 unavailable 阶段
 - **WHEN** 结果工作台收到某个漏斗阶段 `available=false`，或 `input_count / output_count / filtered_count` 为 `null`
 - **THEN** 该阶段 SHALL 显示 unavailable 或未单独计数状态
@@ -93,4 +105,3 @@
 - **WHEN** 结果工作台 helper 或 view model 构造漏斗面板数据
 - **THEN** helper SHALL 保留 `available=false` 与 `null` 语义到最终渲染层
 - **THEN** helper SHALL NOT 通过数值格式化或 `Number()` 收敛把空值阶段改写成 `0`
-

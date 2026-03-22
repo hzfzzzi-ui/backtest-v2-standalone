@@ -1,4 +1,10 @@
-## ADDED Requirements
+# strength-rank-api-passthrough Specification
+
+## Purpose
+
+定义 HTTP API 对 strength rank 与 multifactor rank 参数的透传要求，确保前端与后端运行入口的参数合同一致。
+
+## Requirements
 
 ### Requirement: HTTP API 透传 strength_rank 参数
 `BacktestV2ExperimentRequest` SHALL 包含 `enable_strength_rank`、`strength_ma`、`strength_top_k_mode` 可选字段，并在 overrides builder 中透传到 `run_experiment()`。

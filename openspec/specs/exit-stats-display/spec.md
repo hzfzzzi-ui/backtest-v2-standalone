@@ -1,4 +1,10 @@
-## ADDED Requirements
+# exit-stats-display Specification
+
+## Purpose
+
+定义退出统计在前端结果面板中的展示要求，确保退出原因计数和 ATR 口径说明可读且可核对。
+
+## Requirements
 
 ### Requirement: Exit trigger statistics display
 Exit Statistics 面板 SHALL 使用中文标签显示退出统计，包含新增的止盈和固定止损计数器。

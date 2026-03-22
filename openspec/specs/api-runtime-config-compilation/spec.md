@@ -1,4 +1,4 @@
-# api-runtime-config-compilation Specification
+﻿# api-runtime-config-compilation Specification
 
 ## Purpose
 定义 runtime config compile 的模块边界，确保 `runner_config_helpers.py` 只保留 facade 与总装配职责，具体配置域编译拆分到独立模块，同时不改变 `baseline_V10.1` 的 runtime config 语义。
@@ -57,4 +57,50 @@
 - **WHEN** 系统编译 `baseline_V10.1`
 - **THEN** compile 后的 canonical runtime config MUST 与当前 `V10.1` 语义等价
 - **THEN** 任何差异 MUST 被视为行为漂移，而不是结构整理
+
+### Requirement: 语义配置校验 MUST 接受科创板过滤字段
+后端语义配置 schema MUST 接受 `universe.filters.exclude_star_market` 布尔字段，并将其视为合法的 universe filter 配置项。
+
+#### Scenario: 请求携带布尔开关
+- **WHEN** 客户端提交 `universe.filters.exclude_star_market=true`
+- **THEN** 语义配置校验 SHALL 通过
+- **THEN** 该字段 SHALL 保留在规范化后的配置对象中
+
+### Requirement: Runtime compile MUST 透传科创板过滤字段
+运行时配置编译 MUST 将 `universe.filters.exclude_star_market` 原样透传到 canonical runtime config，确保真实回测执行口径与前端草稿一致。
+
+#### Scenario: 编译开启科创板过滤的草稿
+- **WHEN** workbench 草稿包含 `universe.filters.exclude_star_market=true`
+- **THEN** runtime config SHALL 包含 `universe.filters.exclude_star_market=true`
+
+#### Scenario: 缺省字段保持旧行为
+- **WHEN** workbench 草稿未提供 `exclude_star_market`
+- **THEN** runtime compile SHALL 不引入改变既有默认口径的隐式真值
+- **THEN** 旧配置在编译后 SHALL 继续保持与改动前等价的 runtime 语义
+
+### Requirement: Runtime config compile MUST 显式编译 v2 数据角色
+系统 MUST 允许 runtime config compile 显式区分 `v2` 的 canonical 角色与 runtime compatibility 角色。编译后的 runtime config MUST 能表达 baseline 当前消费的是 `v1`、canonical `v2`，还是 runtime `v2`，并保留该选择的可审计元信息。
+
+#### Scenario: 编译 baseline 使用 v2 runtime
+- **WHEN** 用户或研究配置指定 baseline 使用 `v2` runtime compatibility 数据角色
+- **THEN** compile 结果 MUST 明确记录该数据角色
+- **THEN** compile 结果 MUST 指向 compat 层，而不是 canonical 全量表
+
+#### Scenario: 编译 baseline 使用 canonical v2 做对照
+- **WHEN** 用户或研究配置指定 baseline 使用 canonical `v2` 做对照实验
+- **THEN** compile 结果 MUST 明确记录该数据角色
+- **THEN** 运行产物 MUST 能区分该实验是 canonical 对照，而非正式 runtime 消费
+
+### Requirement: Runtime config compile 必须支持显式的 shadow 股票表切换
+系统 MUST 允许 runtime config compile 在不改变默认行为的前提下，显式编译出指向 `pams_ohlcv_daily_v2` 的股票数据源配置。该切换 MUST 来自明确的 shadow 配置或 override，而不是由 compile 流程隐式替换默认 `stocks_table`。
+
+#### Scenario: Shadow 配置编译为 v2 数据源
+- **WHEN** 用户提供 `pams_cn_pg_v2.json` 或等价 shadow override
+- **THEN** runtime config compile MUST 产出指向 `pams_ohlcv_daily_v2` 的 `stocks_table` 和相应 schema mapping
+- **THEN** 其他运行时字段语义 SHALL 与默认配置保持一致
+
+#### Scenario: 默认配置不被隐式切换
+- **WHEN** 用户继续使用当前默认运行配置
+- **THEN** runtime config compile SHALL 继续产出指向 `pams_ohlcv_daily` 的结果
+- **THEN** compile 流程 SHALL NOT 因存在 `v2` 表而自动替换默认股票表
 
