@@ -1,0 +1,45 @@
+{
+  "exp_id": "exp_example_minimal",
+  "experiment_id": "exp_example_minimal",
+  "status": "OK",
+  "created_at": "2026-03-17T12:00:00",
+  "schema_version": "backtest_v2_experiment_manifest@2",
+  "artifacts": {
+    "perf": "perf.json",
+    "nav": "nav.csv",
+    "funnel": "funnel.csv",
+    "reason_codes": "reason_codes.csv",
+    "config": "config.json",
+    "run_meta": "run_meta.json"
+  },
+  "config_snapshots": {},
+  "core_artifacts": {
+    "perf": "perf.json",
+    "nav": "nav.csv",
+    "funnel": "funnel.csv",
+    "reason_codes": "reason_codes.csv",
+    "config": "config.json",
+    "run_meta": "run_meta.json"
+  },
+  "baseline_compare_status": "NOT_RUN",
+  "metrics": {
+    "total_return": 0.03,
+    "max_drawdown": -0.05,
+    "cagr": 0.03,
+    "sharpe": 0.8,
+    "trades": 2,
+    "turnover": 0.01,
+    "effective_execution_start_date": "2024-01-03",
+    "metrics_from_effective_start": true
+  },
+  "asset_scope": "cn_a_equity",
+  "asset_profile_id": "cn_a_equity_mainline",
+  "market_profile_id": "cn_a_mainland_equity_market",
+  "execution_profile_id": "cn_a_tplus1_next_open",
+  "asset_context": {
+    "asset_scope": "cn_a_equity",
+    "asset_profile_id": "cn_a_equity_mainline",
+    "market_profile_id": "cn_a_mainland_equity_market",
+    "execution_profile_id": "cn_a_tplus1_next_open"
+  }
+}

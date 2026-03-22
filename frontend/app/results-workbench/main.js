@@ -1,6 +1,7 @@
 import { createApp } from 'vue';
 import App from './App.vue';
 
+// main.js: sole visible DOM owner for #wbResultsWorkbenchMount after Vue mount.
 function mountResultsWorkbench() {
   const mountEl = document.getElementById('wbResultsWorkbenchMount');
   const bridge = window.resultsWorkbenchBridge || null;

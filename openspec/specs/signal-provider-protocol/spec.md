@@ -21,29 +21,37 @@
 - **THEN** `day_signals()` SHALL 在同一交易日内同时返回原始 alpha 信号、组合后信号和最终买卖信号
 
 ### Requirement: DaySignals 数据类
+
 引擎 SHALL 定义 `DaySignals` 数据类作为 `day_signals()` 的返回类型，包含：
-- `sell_signals: list[Signal]` - 当日最终卖出信号（供仓位控制和订单规划使用）
-- `buy_signals: list[Signal]` - 当日最终买入信号（供仓位控制和订单规划使用）
-- `raw_alpha_signals: list[Signal]` - `S6a` 生成的原始 alpha 信号
-- `composed_sell_signals: list[Signal]` - `S6b` 生成的组合后卖出信号
-- `composed_buy_signals: list[Signal]` - `S6b` 生成的组合后买入信号
-- `exit_syms: set[str]` - 已触发退出的标的集合
-- `strength_map: dict[str, float]` - 标的强度得分（用于排序）
-- `mf_score_map: dict[str, float]` - 多因子得分（用于排序）
-- `diagnostics: dict[str, Any]` - 当日诊断数据（漏斗计数、组合决策、阻断原因等）
-- `exit_counts: ExitCounts` - 引擎退出规则触发计数
+- `sell_signals: list[Signal]`
+- `buy_signals: list[Signal]`
+- `raw_alpha_signals: list[Signal]`
+- `composed_sell_signals: list[Signal]`
+- `composed_buy_signals: list[Signal]`
+- `exit_syms: set[str]`
+- `strength_map: dict[str, float]`
+- `mf_score_map: dict[str, float]`
+- `diagnostics: dict[str, Any]`
+- `exit_counts: ExitCounts`
 
-在单策略路径下，`raw_alpha_signals`、`composed_sell_signals`、`composed_buy_signals` MAY 为空列表，但 `buy_signals` 与 `sell_signals` 的现有语义 MUST 保持不变。
+其中 `diagnostics` SHALL 在现有稳定键之外，支持稳定透传 bull breakout veto 的诊断计数：
 
-#### Scenario: 诊断数据透传
-- **WHEN** 信号提供者生成组合层诊断数据
-- **THEN** 诊断数据 SHALL 通过 `diagnostics` 字段传递到 daily_row 或审计产物
-- **THEN** 诊断键名 SHALL 保持稳定并可供 UI 校验
+- `bull_breakout_quality_veto_applied`
+- `bull_breakout_quality_veto_block_count`
+- `bull_breakout_quality_veto_residual_block_count`
+- `bull_breakout_quality_veto_margin_block_count`
 
-#### Scenario: 单策略兼容
-- **WHEN** 当前运行路径未启用多 alpha 组合
-- **THEN** `buy_signals` 与 `sell_signals` SHALL 继续表示最终订单输入信号
-- **THEN** 新增的组合信号字段 SHALL 不改变单策略结果
+#### Scenario: bull breakout veto 诊断透传
+- **WHEN** provider 在当日对 breakout 候选执行 bull breakout quality veto
+- **THEN** `DaySignals.diagnostics` SHALL 包含上述 4 个稳定键
+- **THEN** 缺省时这些键 SHALL 回填为 `false / 0`
+
+#### Scenario: veto 阈值进入信号 meta
+- **WHEN** bull breakout veto 启用且候选未被阻断
+- **THEN** 该买入信号 `Signal.meta` SHALL 包含：
+  - `bull_breakout_quality_veto_enabled`
+  - `bull_breakout_quality_veto_min_residual_strength_score`
+  - `bull_breakout_quality_veto_min_breakout_margin_score`
 
 ### Requirement: DayContext 数据类
 引擎 SHALL 定义 `DayContext` 数据类作为引擎状态的只读快照传递给信号提供者：
@@ -60,23 +68,18 @@
 - **THEN** 信号提供者 SHALL 不直接引用引擎内部可变状态
 
 ### Requirement: 统一引擎循环
-引擎 SHALL 提供 `_run_unified_loop()` 函数，接收 `SignalProvider` 实例和引擎配置，执行单一日循环：
-1. 处理待成交订单（`_process_pending_fills`）
-2. 计算 NAV/回撤/峰值
-3. 检查 drawdown breaker
-4. 调用 `provider.day_signals()` 获取原始信号、组合后信号和最终卖出/买入信号
-5. 调用 `build_rebalance_orders()` 基于最终买卖信号生成订单
-6. 记录 daily_row、审计字段和组合诊断数据
-7. 入队次日订单
 
-#### Scenario: SMA 路径使用统一循环
-- **WHEN** `run_vector_portfolio_backtest_strict()` 检测到 SMA 策略
-- **THEN** 创建 `SMASignalProvider`，调用 `_run_unified_loop()`，结果与旧 SMA 路径数值一致
+引擎 SHALL 提供 `_run_unified_loop()` 函数，接收 `SignalProvider` 实例和引擎配置，执行单一日循环。
 
-#### Scenario: 多 alpha 路径使用统一循环
-- **WHEN** `run_vector_portfolio_backtest_strict()` 路由到启用组合配置的策略路径
-- **THEN** 统一循环 SHALL 记录组合层诊断并将最终信号交给订单规划
-- **THEN** 组合层 SHALL 不改变 `t` 日信号、`t+1` 执行的交易时钟
+当 provider 路径为 breakout runtime 时，结果指标 SHALL 透传 bull breakout veto 的稳定计数器：
+
+- `bull_breakout_quality_veto_block_count`
+- `bull_breakout_quality_veto_residual_block_count`
+- `bull_breakout_quality_veto_margin_block_count`
+
+#### Scenario: veto 计数进入 run_meta / metrics
+- **WHEN** breakout provider 启用 bull breakout veto 并完成回测
+- **THEN** `metrics` 与 `run_meta.json.counters` SHALL 包含上述 3 个计数器
 
 ### Requirement: 热点 provider facade 必须允许外部 state、precompute 和 route 模块
 系统 MUST 允许热点 signal provider 通过 facade 调度外部 state owner、precompute 模块和 day route 模块，只要对外仍保持既有 `SignalProvider` 协议不变。provider facade SHALL NOT 重新退化为同时承载全部状态、预计算和 route 行为的单文件 owner。

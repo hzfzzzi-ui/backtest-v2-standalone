@@ -9,6 +9,7 @@ import numpy as np
 
 from backend.core.core.models import Signal
 from backend.core.core.types import Side
+from backend.core.engine_vector.moneyflow_overlay import resolve_moneyflow_overlay_snapshot
 from backend.core.engine_vector.signal_provider import (
     DayContext,
     DaySignals,
@@ -108,6 +109,11 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
     max_positions = ctx.max_positions
     base_order_value = ctx.base_order_value
     n = mx.close.shape[1]
+    overlay_snapshot = resolve_moneyflow_overlay_snapshot(getattr(ctx, "asset_context", {}), day=day)
+    overlay_score_map = {
+        str(symbol).lower(): float(score)
+        for symbol, score in dict(overlay_snapshot.score_map or {}).items()
+    }
 
     # ── 卖出信号: engine 级退出规则 ──
     def _get_atr(sym: str, d: date) -> float | None:
@@ -185,6 +191,14 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
     breakout_count = 0
     pullback_count = 0
     overlap_count = 0
+    bull_breakout_quality_veto_applied = bool(
+        provider._bull_breakout_quality_veto_enabled
+        and bool(ctx.risk_on)
+        and str(getattr(ctx, "market_state", "") or "").upper() == "BULL"
+    )
+    bull_breakout_quality_veto_block_count = 0
+    bull_breakout_quality_veto_residual_block_count = 0
+    bull_breakout_quality_veto_margin_block_count = 0
     provider.total_buy_signals += int(len(day_cands))
 
     # Keep score maps available for held symbols too, so downstream order planning
@@ -319,6 +333,30 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
             and raw_close_val > 0.0
         ):
             entry_breakout_floor_raw = float(hmax_prev_main) * float(raw_close_val) / float(close_val)
+        if bull_breakout_quality_veto_applied and alpha_source in {"breakout", "pullback_overlap"}:
+            residual_veto = (
+                provider._bull_breakout_quality_veto_min_residual_strength_score > 0.0
+                and residual_score is not None
+                and residual_score < provider._bull_breakout_quality_veto_min_residual_strength_score
+            )
+            margin_veto = (
+                provider._bull_breakout_quality_veto_min_breakout_margin_score > 0.0
+                and breakout_margin_score is not None
+                and breakout_margin_score < provider._bull_breakout_quality_veto_min_breakout_margin_score
+            )
+            if residual_veto or margin_veto:
+                provider.bull_breakout_quality_veto_block_count += 1
+                bull_breakout_quality_veto_block_count += 1
+                if residual_veto:
+                    provider.bull_breakout_quality_veto_residual_block_count += 1
+                    bull_breakout_quality_veto_residual_block_count += 1
+                if margin_veto:
+                    provider.bull_breakout_quality_veto_margin_block_count += 1
+                    bull_breakout_quality_veto_margin_block_count += 1
+                provider.diag_reason_counts["BLOCK_BULL_QUALITY_VETO"] = int(
+                    provider.diag_reason_counts.get("BLOCK_BULL_QUALITY_VETO", 0)
+                ) + 1
+                continue
 
         buy_sigs.append(Signal(
             signal_date=day,
@@ -340,6 +378,15 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
                 "breakout_open_gap_raw": breakout_open_gap_raw,
                 "breakout_quality_score": breakout_quality_score,
                 "breakout_quality_pass": bool(breakout_quality_pass),
+                "bull_breakout_quality_veto_applied": bool(
+                    bull_breakout_quality_veto_applied and alpha_source in {"breakout", "pullback_overlap"}
+                ),
+                "bull_breakout_quality_veto_min_residual_strength_score": float(
+                    provider._bull_breakout_quality_veto_min_residual_strength_score
+                ),
+                "bull_breakout_quality_veto_min_breakout_margin_score": float(
+                    provider._bull_breakout_quality_veto_min_breakout_margin_score
+                ),
                 "ranking_mode": str(provider._ranking_mode),
                 "breakout_quality_gate_min_score": float(provider._breakout_quality_gate_min_score),
                 "breakout_quality_margin_cap_pct": float(provider._breakout_quality_margin_cap_pct),
@@ -415,6 +462,15 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
                 "sector_strength_score": sector_score,
                 "volume_price_quality_score": quality_score,
                 "final_score": final_score,
+                "moneyflow_overlay_score": overlay_score_map.get(sym),
+                "moneyflow_overlay_gate_on": bool(overlay_snapshot.gate_on),
+                "moneyflow_overlay_mode": str(overlay_snapshot.mode or "off"),
+                "moneyflow_overlay_observation_date": (
+                    overlay_snapshot.observation_date.isoformat()
+                    if isinstance(overlay_snapshot.observation_date, date)
+                    else ""
+                ),
+                "moneyflow_overlay_score_source": str(overlay_snapshot.score_source or ""),
                 "source_aware_residual_mode": str(provider._source_aware_residual_mode),
                 "residual_refine_mode": str(provider._residual_refine_mode),
                 "residual_refine_weight": float(provider._residual_refine_weight),
@@ -472,6 +528,11 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
         strength_map=strength_map,
         mf_score_map=mf_score_map,
         mf_gate_on_today=False,
+        overlay_score_map=overlay_score_map,
+        overlay_gate_on_today=bool(overlay_snapshot.gate_on),
+        overlay_mode=str(overlay_snapshot.mode or "off"),
+        overlay_observation_date=overlay_snapshot.observation_date,
+        overlay_score_source=str(overlay_snapshot.score_source or ""),
         strong_risk_on=bool(provider._strong_risk_on[i]) if provider._strong_risk_on.size else False,
         exit_counts=exit_counts,
         diagnostics={
@@ -483,6 +544,10 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
             "pullback_overlap_candidates": int(overlap_count),
             "pullback_total_candidates": int(pullback_count + overlap_count),
             "buy_signals_generated": int(len(buy_sigs)),
+            "bull_breakout_quality_veto_applied": bool(bull_breakout_quality_veto_applied),
+            "bull_breakout_quality_veto_block_count": int(bull_breakout_quality_veto_block_count),
+            "bull_breakout_quality_veto_residual_block_count": int(bull_breakout_quality_veto_residual_block_count),
+            "bull_breakout_quality_veto_margin_block_count": int(bull_breakout_quality_veto_margin_block_count),
             "strong_risk_on_today": bool(provider._strong_risk_on[i]) if provider._strong_risk_on.size else False,
             "residual_window_effective": int(provider._residual_window_effective[i]) if provider._residual_window_effective.size else int(provider._residual_window),
             "residual_benchmark_weight_effective": float(provider._residual_benchmark_weight_effective[i])
@@ -493,5 +558,16 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
             else float(provider._residual_industry_weight),
             "residual_window_regime_fast_ma": int(provider._residual_window_regime_fast_ma),
             "residual_window_regime_slow_ma": int(provider._residual_window_regime_slow_ma),
+            "moneyflow_overlay_enabled": bool(overlay_snapshot.enabled),
+            "moneyflow_overlay_gate_on": bool(overlay_snapshot.gate_on),
+            "moneyflow_overlay_mode": str(overlay_snapshot.mode or "off"),
+            "moneyflow_overlay_observation_date": (
+                overlay_snapshot.observation_date.isoformat()
+                if isinstance(overlay_snapshot.observation_date, date)
+                else ""
+            ),
+            "moneyflow_overlay_gate_status": str(overlay_snapshot.gate_status or ""),
+            "moneyflow_overlay_gate_reason": str(overlay_snapshot.gate_reason or ""),
+            "moneyflow_overlay_score_source": str(overlay_snapshot.score_source or ""),
         },
     )

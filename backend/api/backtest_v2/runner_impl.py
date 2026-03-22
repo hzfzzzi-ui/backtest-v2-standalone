@@ -44,6 +44,7 @@ from backend.api.shared.job_store import (
     job_payload as _job_payload,
 )
 from backend.api.backtest_v2.runner_config_helpers import (
+    _assert_locked_candidate_request_supported,
     _build_locked_candidate_execution_context,
     _build_runtime_cfg_from_workbench,
     _compile_semantic_config_bundle,

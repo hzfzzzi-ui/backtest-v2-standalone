@@ -36,6 +36,12 @@ def _multi_alpha_config() -> dict:
             "modules": [
                 {"name": "breakout_55", "alpha_id": "breakout_55", "family": "trend"},
                 {"name": "rsi_reversal", "alpha_id": "rsi_rev_6_20_80", "family": "mean_revert"},
+                {
+                    "name": "moneyflow_monthly",
+                    "alpha_id": "moneyflow_monthly",
+                    "family": "mean_revert",
+                    "params": {"selection_path": "outputs/demo/monthly_selection.csv"},
+                },
             ],
         },
         "signal_composition": {
@@ -46,10 +52,11 @@ def _multi_alpha_config() -> dict:
             "modules": [
                 {"name": "breakout_55", "role": "trend", "priority": 100},
                 {"name": "rsi_reversal", "role": "mean_revert", "priority": 80},
+                {"name": "moneyflow_monthly", "role": "repair", "priority": 70},
             ],
             "regime_matrix": {
-                "TREND_UP": ["breakout_55"],
-                "RANGE": ["breakout_55", "rsi_reversal"],
+                "TREND_UP": ["breakout_55", "moneyflow_monthly"],
+                "RANGE": ["breakout_55", "rsi_reversal", "moneyflow_monthly"],
             },
         },
         "position_risk": {
@@ -124,9 +131,35 @@ def test_compile_semantic_bundle_preserves_multi_alpha_runtime_payload() -> None
     multi_alpha = runtime_cfg["strategy"]["params"]["multi_alpha"]
     assert runtime_cfg["strategy"]["name"] == "composite"
     assert runtime_cfg["strategy"]["params"]["portfolio_mode"] == "hard_sleeve_budget"
-    assert [item["name"] for item in multi_alpha["signal_generation"]["modules"]] == ["breakout_55", "rsi_reversal"]
+    assert [item["name"] for item in multi_alpha["signal_generation"]["modules"]] == [
+        "breakout_55",
+        "rsi_reversal",
+        "moneyflow_monthly",
+    ]
     assert multi_alpha["signal_composition"]["compose_mode"] == "REGIME_ROUTE"
     assert multi_alpha["signal_composition"]["same_symbol_policy"] == "PREFER_HIGHER_SCORE"
+
+
+def test_compile_semantic_bundle_preserves_market_state_weight_overrides() -> None:
+    payload = _multi_alpha_config()
+    payload["signal_composition"]["market_state_weight_overrides"] = {
+        "bull": {"breakout_55": 0.7, "moneyflow_monthly": 0.3},
+        "bear": {"breakout_55": 0.3, "moneyflow_monthly": 0.7},
+    }
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=payload,
+        config_source="config_json",
+        use_body_universe_fields=False,
+    )
+
+    multi_alpha = compiled["runtime_config"]["strategy"]["params"]["multi_alpha"]
+    overrides = multi_alpha["signal_composition"]["market_state_weight_overrides"]
+    assert overrides == {
+        "BULL": {"breakout_55": 0.7, "moneyflow_monthly": 0.3},
+        "BEAR": {"breakout_55": 0.3, "moneyflow_monthly": 0.7},
+    }
 
 
 def test_compile_semantic_bundle_injects_breakout_entry_filters() -> None:
@@ -146,6 +179,55 @@ def test_compile_semantic_bundle_injects_breakout_entry_filters() -> None:
     assert params["portfolio_mode"] == "profit_release"
 
 
+def test_compile_semantic_bundle_preserves_data_role_in_runtime_config() -> None:
+    payload = _breakout_config()
+    payload["data_source"] = {"data_role": "v2_canonical"}
+
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=payload,
+        config_source="config_json",
+        use_body_universe_fields=False,
+    )
+
+    runtime_cfg = compiled["runtime_config"]
+    assert runtime_cfg["data_source"]["data_role"] == "v2_canonical"
+    assert "pams_ohlcv_daily_v2" in runtime_cfg["schema_mapping"]
+    assert runtime_cfg["schema_mapping"]["pams_ohlcv_daily_v2"]["date"] == "trade_date"
+
+
+def test_compile_semantic_bundle_preserves_regime_engine_in_runtime_config() -> None:
+    payload = _breakout_config()
+    payload["regime_engine"] = {
+        "engine": "market_regime_framework",
+        "benchmark": "000300.SH",
+        "trend_block": {"enabled": True, "long_ma_window": 200},
+        "risk_block": {"enabled": True, "realized_vol_window": 20},
+        "persistence": {"entry_confirm_bars": 3, "min_state_duration": 5},
+        "fallback": {
+            "on_feature_unavailable": "ma200_legacy",
+            "required_blocks": ["trend_block", "risk_block"],
+            "emit_feature_availability": True,
+        },
+    }
+
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=payload,
+        config_source="config_json",
+        use_body_universe_fields=False,
+    )
+
+    runtime_cfg = compiled["runtime_config"]
+    regime_engine = runtime_cfg["regime_engine"]
+    assert regime_engine["engine"] == "market_regime_framework"
+    assert regime_engine["benchmark"] == "000300.SH"
+    assert regime_engine["fallback"]["on_feature_unavailable"] == "ma200_legacy"
+    assert regime_engine["fallback"]["required_blocks"] == ["trend_block", "risk_block"]
+
+
 def test_compile_semantic_bundle_preserves_turnover_rate_filter_fields() -> None:
     payload = _breakout_config()
     payload["universe"]["filters"]["min_avg_turnover_rate_20d"] = 1.1
@@ -161,6 +243,21 @@ def test_compile_semantic_bundle_preserves_turnover_rate_filter_fields() -> None
     runtime_filters = compiled["runtime_config"]["universe"]["filters"]
     assert runtime_filters["min_avg_turnover_rate_20d"] == 1.1
     assert runtime_filters["turnover_rate_field"] == "turnover_rate_f"
+
+
+def test_compile_semantic_bundle_preserves_star_market_filter_field() -> None:
+    payload = _breakout_config()
+    payload["universe"]["filters"]["exclude_star_market"] = True
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=payload,
+        config_source="config_json",
+        use_body_universe_fields=False,
+    )
+
+    runtime_filters = compiled["runtime_config"]["universe"]["filters"]
+    assert runtime_filters["exclude_star_market"] is True
 
 
 def test_compile_semantic_bundle_emits_ranking_execution_overrides() -> None:

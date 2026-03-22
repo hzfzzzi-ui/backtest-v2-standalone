@@ -78,6 +78,9 @@ class BreakoutProviderConfig:
     breakout_quality_margin_cap_pct: float = 0.08
     breakout_quality_fade_cap_pct: float = 0.035
     breakout_quality_open_gap_cap_pct: float = 0.04
+    bull_breakout_quality_veto_enabled: bool = False
+    bull_breakout_quality_veto_min_residual_strength_score: float = 0.0
+    bull_breakout_quality_veto_min_breakout_margin_score: float = 0.0
     residual_window_regime_mode: str = "off"
     residual_window_fallback: int = 60
     residual_window_regime_fast_ma: int = 120
@@ -114,6 +117,14 @@ class BreakoutProviderRuntimeState:
     strong_risk_on: np.ndarray = field(default_factory=_empty_bool_array)
     cand_idx: Any = None
     sym_to_col: dict[str, int] = field(default_factory=dict)
+    regime_engine: str = "ma200_legacy"
+    formal_regime_features: Any = None
+    required_feature_blocks_ready: np.ndarray = field(default_factory=_empty_bool_array)
+    regime_confidence: np.ndarray = field(default_factory=_empty_float_array)
+    regime_duration_bars: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.int32))
+    regime_transition_reason: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    feature_availability: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    fallback_active: np.ndarray = field(default_factory=_empty_bool_array)
 
 
 def build_breakout_provider_config(
@@ -202,6 +213,13 @@ def build_breakout_provider_config(
         breakout_quality_margin_cap_pct=float(getattr(strategy, "breakout_quality_margin_cap_pct", 0.08) or 0.08),
         breakout_quality_fade_cap_pct=float(getattr(strategy, "breakout_quality_fade_cap_pct", 0.035) or 0.035),
         breakout_quality_open_gap_cap_pct=float(getattr(strategy, "breakout_quality_open_gap_cap_pct", 0.04) or 0.04),
+        bull_breakout_quality_veto_enabled=bool(getattr(strategy, "bull_breakout_quality_veto_enabled", False)),
+        bull_breakout_quality_veto_min_residual_strength_score=float(
+            getattr(strategy, "bull_breakout_quality_veto_min_residual_strength_score", 0.0) or 0.0
+        ),
+        bull_breakout_quality_veto_min_breakout_margin_score=float(
+            getattr(strategy, "bull_breakout_quality_veto_min_breakout_margin_score", 0.0) or 0.0
+        ),
         residual_window_regime_mode=str(getattr(strategy, "residual_window_regime_mode", "off") or "off").strip().lower(),
         residual_window_fallback=int(getattr(strategy, "residual_window_fallback", getattr(strategy, "residual_window", 60)) or getattr(strategy, "residual_window", 60)),
         residual_window_regime_fast_ma=int(getattr(strategy, "residual_window_regime_fast_ma", 120) or 120),
@@ -254,6 +272,32 @@ def capture_breakout_runtime_state(provider: Any) -> BreakoutProviderRuntimeStat
         strong_risk_on=provider._strong_risk_on,
         cand_idx=provider._cand_idx,
         sym_to_col=dict(provider._sym_to_col),
+        regime_engine=str(getattr(provider, "_regime_engine_name", "ma200_legacy") or "ma200_legacy"),
+        formal_regime_features=getattr(provider, "_formal_regime_features", None),
+        required_feature_blocks_ready=np.array(
+            getattr(provider, "_required_feature_blocks_ready", np.array([], dtype=bool)),
+            dtype=bool,
+        ),
+        regime_confidence=np.array(
+            getattr(provider, "_regime_confidence_arr", np.array([], dtype=float)),
+            dtype=float,
+        ),
+        regime_duration_bars=np.array(
+            getattr(provider, "_regime_duration_bars_arr", np.array([], dtype=np.int32)),
+            dtype=np.int32,
+        ),
+        regime_transition_reason=np.array(
+            getattr(provider, "_regime_transition_reason_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        feature_availability=np.array(
+            getattr(provider, "_feature_availability_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        fallback_active=np.array(
+            getattr(provider, "_fallback_active_arr", np.array([], dtype=bool)),
+            dtype=bool,
+        ),
     )
     provider._runtime_state = state
     return state

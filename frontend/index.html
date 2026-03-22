@@ -24,7 +24,7 @@
         <button id="wbRunBtn" class="wb-btn-run">运行</button>
         <button id="wbQuickLoad" class="pill wb-cmd-btn">加载</button>
         <button id="wbSaveBaseline" class="pill wb-cmd-btn">保存基线</button>
-        <span id="wbLoadHint" class="wb-run-status">基线：baseline_V10</span>
+        <span id="wbLoadHint" class="wb-run-status">默认：V10.2 | 2012-2026</span>
         <span id="wbDataSyncHint" class="wb-chip" title="读取市场数据同步状态">数据同步：读取中</span>
         <select id="wbPresetSelect" class="formInput wb-input-sm wb-preset-select" title="运行候选入口" hidden>
           <option value="">草稿入口</option>
@@ -158,6 +158,7 @@
             <div class="wb-inline">
               <label class="wb-toggle"><input id="wbExcludeSt" type="checkbox" checked /> ST过滤</label>
               <label class="wb-toggle"><input id="wbExcludeSuspended" type="checkbox" checked /> 停牌过滤</label>
+              <label class="wb-toggle"><input id="wbExcludeStarMarket" type="checkbox" /> 科创板过滤</label>
             </div>
           </div>
 
@@ -305,6 +306,122 @@
           <details class="wb-acc" open>
             <summary>大盘环境</summary>
             <div class="wb-acc-body">
+                <div class="wb-field">
+                  <label class="wb-field-label">Regime 框架</label>
+                  <select id="wbRegimeEngine" class="formInput">
+                    <option value="ma200_legacy">Legacy MA200 状态机</option>
+                    <option value="weekly_five_state">周度五态状态机</option>
+                    <option value="market_regime_framework">正式 Regime Framework</option>
+                  </select>
+                  <div class="wb-mini wb-gap-top">legacy 继续兼容当前主线；正式框架按趋势 / 风险 / 广度 / 参与度 / persistence 分层配置。</div>
+                </div>
+
+                <div id="wbWeeklyFiveStatePanel" hidden>
+                  <div class="wb-field">
+                    <label class="wb-field-label">周度五态状态机</label>
+                    <div class="wb-grid3">
+                      <div><label class="formLabel">TURN_WEAK 风险预算</label><input id="wbWeeklyTurnWeakBudget" type="number" step="0.01" class="formInput" value="0.15" /></div>
+                    </div>
+                    <div class="wb-mini wb-gap-top">固定使用上证指数、MA120 / 斜率 / 60日收益 / 120日收益 / ADX20；升级两周确认，降级一周生效。</div>
+                  </div>
+                </div>
+
+                <div id="wbRegimeFrameworkPanel" hidden>
+                  <div class="wb-field">
+                  <label class="wb-field-label">正式框架基准</label>
+                  <input id="wbFormalRegimeBenchmark" class="formInput" value="000001.SH" />
+                </div>
+
+                <div class="wb-field">
+                  <label class="wb-field-label">趋势块</label>
+                  <div class="wb-inline wb-gap-bottom">
+                    <label><input type="checkbox" id="wbRegimeTrendEnabled" checked /> 启用</label>
+                  </div>
+                  <div class="wb-grid3">
+                    <div><label class="formLabel">长均线窗口</label><input id="wbRegimeLongMaWindow" type="number" class="formInput" value="200" /></div>
+                    <div><label class="formLabel">斜率窗口</label><input id="wbRegimeSlopeWindow" type="number" class="formInput" value="20" /></div>
+                    <div><label class="formLabel">突破观察</label><input id="wbRegimeBreakoutLookback" type="number" class="formInput" value="20" /></div>
+                  </div>
+                </div>
+
+                <div class="wb-field">
+                  <label class="wb-field-label">风险块</label>
+                  <div class="wb-inline wb-gap-bottom">
+                    <label><input type="checkbox" id="wbRegimeRiskEnabled" checked /> 启用</label>
+                  </div>
+                  <div class="wb-grid3">
+                    <div><label class="formLabel">波动率窗口</label><input id="wbRegimeRealizedVolWindow" type="number" class="formInput" value="20" /></div>
+                    <div><label class="formLabel">ATR 窗口</label><input id="wbRegimeAtrWindow" type="number" class="formInput" value="14" /></div>
+                    <div><label class="formLabel">回撤窗口</label><input id="wbRegimeDrawdownWindow" type="number" class="formInput" value="60" /></div>
+                  </div>
+                </div>
+
+                <div class="wb-field">
+                  <label class="wb-field-label">广度块</label>
+                  <div class="wb-inline wb-gap-bottom">
+                    <label><input type="checkbox" id="wbRegimeBreadthEnabledFormal" checked /> 启用</label>
+                  </div>
+                  <div class="wb-grid2">
+                    <div>
+                      <label class="formLabel">广度股票池</label>
+                      <select id="wbRegimeBreadthUniverse" class="formInput">
+                        <option value="benchmark_constituents">基准成分股</option>
+                        <option value="strategy_universe">策略股票池</option>
+                      </select>
+                    </div>
+                    <div><label class="formLabel">新高/新低窗口</label><input id="wbRegimeNewHighLowWindow" type="number" class="formInput" value="20" /></div>
+                    <div><label class="formLabel">站上短均线窗口</label><input id="wbRegimeAboveMaShort" type="number" class="formInput" value="50" /></div>
+                    <div><label class="formLabel">站上长均线窗口</label><input id="wbRegimeAboveMaLong" type="number" class="formInput" value="200" /></div>
+                  </div>
+                </div>
+
+                <div class="wb-field">
+                  <label class="wb-field-label">参与度块</label>
+                  <div class="wb-inline wb-gap-bottom">
+                    <label><input type="checkbox" id="wbRegimeParticipationEnabled" checked /> 启用</label>
+                    <label><input type="checkbox" id="wbRegimeUseTurnoverRate" checked /> 使用换手率</label>
+                  </div>
+                  <div class="wb-grid2">
+                    <div><label class="formLabel">换手率窗口</label><input id="wbRegimeTurnoverWindow" type="number" class="formInput" value="20" /></div>
+                    <div><label class="formLabel">成交额窗口</label><input id="wbRegimeAmountWindow" type="number" class="formInput" value="20" /></div>
+                  </div>
+                </div>
+
+                <div class="wb-field">
+                  <label class="wb-field-label">Persistence / Hysteresis</label>
+                  <div class="wb-grid3">
+                    <div><label class="formLabel">入场确认 bars</label><input id="wbRegimeEntryConfirmBars" type="number" class="formInput" value="3" /></div>
+                    <div><label class="formLabel">离场确认 bars</label><input id="wbRegimeExitConfirmBars" type="number" class="formInput" value="2" /></div>
+                    <div><label class="formLabel">最短持续 bars</label><input id="wbRegimeMinStateDuration" type="number" class="formInput" value="5" /></div>
+                    <div><label class="formLabel">置信度下限</label><input id="wbRegimeConfidenceFloor" type="number" step="0.01" class="formInput" value="0.55" /></div>
+                    <div><label class="formLabel">切换冷却 bars</label><input id="wbRegimeTransitionCooldown" type="number" class="formInput" value="3" /></div>
+                  </div>
+                </div>
+
+                <div class="wb-field">
+                  <label class="wb-field-label">Fallback / 审计</label>
+                  <div class="wb-grid2">
+                    <div>
+                      <label class="formLabel">特征不可用时</label>
+                      <select id="wbRegimeFallbackMode" class="formInput">
+                        <option value="ma200_legacy">回退 legacy MA200</option>
+                        <option value="disabled">直接禁用</option>
+                      </select>
+                    </div>
+                    <div class="wb-inline" style="align-items:center;">
+                      <label><input type="checkbox" id="wbRegimeEmitFeatureAvailability" checked /> 输出 feature availability</label>
+                    </div>
+                  </div>
+                  <div class="wb-inline wb-gap-top">
+                    <label><input type="checkbox" id="wbRegimeRequiredTrend" checked /> trend</label>
+                    <label><input type="checkbox" id="wbRegimeRequiredRisk" checked /> risk</label>
+                    <label><input type="checkbox" id="wbRegimeRequiredBreadth" /> breadth</label>
+                    <label><input type="checkbox" id="wbRegimeRequiredParticipation" /> participation</label>
+                  </div>
+                </div>
+              </div>
+
+              <div id="wbRegimeLegacyPanel">
               <div class="wb-inline wb-gap-bottom">
                 <label><input type="checkbox" id="wbEnableSignal" checked /> 启用信号生成</label>
                 <label><input type="checkbox" id="wbRegimeEnabled" checked /> 启用环境路由</label>
@@ -355,6 +472,7 @@
                 <div class="wb-stat-item"><span class="wb-stat-label">转强天数</span><span class="wb-stat-value" data-key="market_state_trans_up_days">—</span></div>
                 <div class="wb-stat-item"><span class="wb-stat-label">主交易日</span><span class="wb-stat-value" data-key="trade_mode_main_days">—</span></div>
                 <div class="wb-stat-item"><span class="wb-stat-label">轻仓交易日</span><span class="wb-stat-value" data-key="trade_mode_light_days">—</span></div>
+              </div>
               </div>
             </div>
           </details>
@@ -707,21 +825,22 @@
   <script defer src="assets/js/state/run-session-state.js?v=20260316_frontendperf01"></script>
   <script defer src="assets/js/state/active-experiment-state.js?v=20260316_frontendperf01"></script>
   <script defer src="assets/js/state/view-state.js?v=20260316_frontendperf01"></script>
-  <script defer src="assets/js/pages/desktop-research-page.js?v=20260316_frontendperf01"></script>
-  <script defer src="assets/js/backtest_v2.js?v=20260316_frontendperf01"></script>
+  <script defer src="assets/js/pages/desktop-research-page.js?v=20260320_regimeframework01"></script>
+  <script defer src="assets/js/backtest_v2.js?v=20260322_baselinerefresh02"></script>
   <script defer src="assets/js/api-client.js?v=20260316_frontendperf01"></script>
   <script defer src="assets/js/pages/desktop-config-controls.js?v=20260316_frontendperf01"></script>
   <script defer src="assets/js/pages/desktop-history-panel.js?v=20260316_frontendperf01"></script>
   <script defer src="assets/js/pages/desktop-load-controls.js?v=20260316_frontendperf01"></script>
   <script defer src="assets/js/pages/desktop-save-controls.js?v=20260316_frontendperf01"></script>
   <script defer src="assets/js/state/multi-alpha-ui.js?v=20260316_frontendperf01"></script>
-  <script defer src="assets/js/state/config-draft-core.js?v=20260316_frontendperf01"></script>
-  <script defer src="assets/js/ui-controls.js?v=20260316_frontendperf01"></script>
+  <script defer src="assets/js/state/config-draft-core.js?v=20260320_regimeframework01"></script>
+  <script defer src="assets/js/ui-controls.js?v=20260320_regimeframework01"></script>
   <script defer src="assets/js/pages/desktop-run-controls.js?v=20260316_frontendperf01"></script>
   <script defer src="assets/js/charts.js?v=20260316_frontendperf01"></script>
-  <script defer src="assets/js/artifacts.js?v=20260316_frontendperf01"></script>
+  <script defer src="assets/js/results-chart-nav-override.js?v=20260320_regimeframework01"></script>
+  <script defer src="assets/js/artifacts.js?v=20260321_renderperf_fix01"></script>
   <script defer src="assets/js/compare.js?v=20260316_frontendperf01"></script>
-  <script defer src="assets/dist/results-workbench-vue-shell.js?v=20260316_frontendperf01"></script>
+  <script defer src="assets/dist/results-workbench-vue-shell.js?v=20260320_regimeframework01"></script>
   <script>
     window.addEventListener('DOMContentLoaded', () => {
       if (typeof init === 'function') init();

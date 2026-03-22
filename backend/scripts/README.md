@@ -9,6 +9,7 @@ Current policy:
 - Active research entry points must be `research/studies/*.study.yaml` plus `backend/scripts/generated/run_<study_id>.py`.
 - Historical research scripts that were only kept for migration have been removed from the top-level surface.
 - Reusable command flows belong in `backend/cli/managed/` or `backend/cli/commands/`.
+- Remaining top-level compatibility wrappers such as `refresh_csi1000_pit.py` and `fetch_csi1000_pit_by_calendar.py` must delegate into `backend/cli/managed/`.
 - New research work must not add large top-level scripts under `backend/scripts/`.
 - `backend/scripts/archive/` is a documentation-only historical marker and no longer keeps executable entrypoints.
 

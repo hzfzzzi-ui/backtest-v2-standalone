@@ -35,6 +35,7 @@ def _execution_override_snapshot(overrides: dict[str, Any]) -> dict[str, Any]:
         "universe_limit",
         "fast_mode",
         "asset_scope",
+        "data_role",
         "universe_mode",
         "industries",
         "price_adj",

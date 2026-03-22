@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from backend.cli import main as cli_main
+from backend.core.cli import main as legacy_cli_main
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -16,7 +17,21 @@ def test_cli_lists_data_refresh_targets(capsys) -> None:
     captured = capsys.readouterr().out
     payload = json.loads(captured)
     assert exit_code == 0
-    assert payload["targets"] == ["csi1000_pit", "pams_ohlcv_daily", "security_master"]
+    assert payload["targets"] == [
+        "csi1000_pit",
+        "csi800_pit",
+        "pams_ohlcv_daily",
+        "pams_ohlcv_daily_v2",
+        "pams_ohlcv_daily_v2_audit",
+        "pams_ohlcv_daily_v2_full_backfill",
+        "pams_ohlcv_daily_v2_raw",
+        "pit_index_daily",
+        "pit_stock_daily_basic",
+        "pit_stock_feature_coverage",
+        "pit_stock_moneyflow",
+        "pit_stock_moneyflow_v2",
+        "security_master",
+    ]
 
 
 def test_cli_study_run_dry_run_loads_yaml(tmp_path: Path, capsys) -> None:
@@ -27,6 +42,7 @@ def test_cli_study_run_dry_run_loads_yaml(tmp_path: Path, capsys) -> None:
             [
                 "study_id: demo/test",
                 "title: Demo Test",
+                "asset_scope: cn_a_equity",
                 "baseline_id: baseline_V10",
                 "hypothesis: test hypothesis",
                 "change_scope:",
@@ -83,6 +99,7 @@ def test_cli_study_run_can_emit_thin_script(tmp_path: Path, capsys, monkeypatch)
             [
                 "study_id: v10/demo_emit",
                 "title: Emit Demo",
+                "asset_scope: cn_a_equity",
                 "baseline_id: baseline_V10",
                 "hypothesis: test hypothesis",
                 "change_scope: {}",
@@ -110,3 +127,21 @@ def test_cli_study_run_can_emit_thin_script(tmp_path: Path, capsys, monkeypatch)
     assert exit_code == 0
     assert generated.exists()
     assert 'main(["study_run", "v10/demo_emit"' in generated.read_text(encoding="utf-8")
+
+
+def test_legacy_core_cli_delegates_to_unified_cli(capsys) -> None:
+    exit_code = legacy_cli_main.main(["data_refresh", "--list-targets"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert "csi1000_pit" in payload["targets"]
+
+
+def test_cli_surface_readme_declares_official_and_compat_roles() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    readme_path = repo_root / "backend" / "cli" / "README.md"
+    text = readme_path.read_text(encoding="utf-8")
+    assert "python -m backend.cli" in text
+    assert "backend/cli/managed/" in text
+    assert "backend/scripts/generated/" in text
+    assert "backend/core/cli/" in text
+    assert "compatibility-only" in text

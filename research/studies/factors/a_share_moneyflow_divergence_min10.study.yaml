@@ -1,0 +1,199 @@
+study_id: factors/a_share_moneyflow_divergence_min10
+title: A股主力分歧率最小前十
+asset_scope: cn_a_equity
+baseline_id: baseline_V10.1
+hypothesis: 主力分歧率最小的股票在月频上可能对应更低拥挤度或更稳定筹码结构，值得作为独立研究主题验证。
+change_scope:
+  modules_modified:
+    - backend.research.study_runner
+    - backend.research.a_share_moneyflow_divergence
+    - backend.core.data.provider
+    - backend.core.data.pg_provider
+variants:
+  - name: B0_MIN10
+  - name: LEGACY_PIT
+    request_overrides:
+      run_params:
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        output_namespace: studies/a_share_moneyflow_divergence_legacy
+  - name: LEGACY_PIT_NO_STAR
+    request_overrides:
+      run_params:
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        exclude_star_market: true
+        output_namespace: studies/a_share_moneyflow_divergence_legacy_no_star
+  - name: LEGACY_PIT_NO_GROWTH_BOARDS
+    request_overrides:
+      run_params:
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        exclude_star_market: true
+        exclude_chinext: true
+        output_namespace: studies/a_share_moneyflow_divergence_legacy_no_growth_boards
+  - name: LEGACY_PIT_NO_GROWTH_BOARDS_T5
+    request_overrides:
+      run_params:
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        exclude_star_market: true
+        exclude_chinext: true
+        top_n: 5
+        output_namespace: studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t5
+  - name: LEGACY_PIT_NO_GROWTH_BOARDS_T5_DECAY
+    request_overrides:
+      run_params:
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        exclude_star_market: true
+        exclude_chinext: true
+        top_n: 5
+        weight_mode: rank_decay_linear
+        output_namespace: studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t5_decay
+  - name: LEGACY_PIT_NO_GROWTH_BOARDS_T15
+    request_overrides:
+      run_params:
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        exclude_star_market: true
+        exclude_chinext: true
+        top_n: 15
+        output_namespace: studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t15
+  - name: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY
+    request_overrides:
+      run_params:
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        exclude_star_market: true
+        exclude_chinext: true
+        top_n: 10
+        weight_mode: rank_decay_linear
+        output_namespace: studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay
+  - name: LEGACY_PIT_CSI800_T10
+    request_overrides:
+      run_params:
+        universe_mode: HS300_ZZ500
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        top_n: 10
+        output_namespace: studies/a_share_moneyflow_divergence_legacy_csi800_t10
+  - name: LEGACY_PIT_CSI800_T10_DECAY
+    request_overrides:
+      run_params:
+        universe_mode: HS300_ZZ500
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        top_n: 10
+        weight_mode: rank_decay_linear
+        output_namespace: studies/a_share_moneyflow_divergence_legacy_csi800_t10_decay
+  - name: LEGACY_PIT_CSI800_T10_TECH_ONLY
+    request_overrides:
+      run_params:
+        universe_mode: HS300_ZZ500
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        top_n: 10
+        allowed_industry_l1:
+          - 电子
+          - 计算机
+          - 通信
+          - 传媒
+        output_namespace: studies/a_share_moneyflow_divergence_legacy_csi800_t10_tech_only
+  - name: BASE_REPAIR
+    request_overrides:
+      run_params:
+        universe_mode: HS300_ZZ500
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        top_n: 10
+        output_namespace: studies/a_share_moneyflow_divergence_repair_screening
+  - name: LIQ_REPAIR
+    request_overrides:
+      run_params:
+        universe_mode: HS300_ZZ500
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        top_n: 10
+        liquidity_bottom_quantile: 0.2
+        output_namespace: studies/a_share_moneyflow_divergence_repair_screening
+  - name: LIQ_PRICE_REPAIR
+    request_overrides:
+      run_params:
+        universe_mode: HS300_ZZ500
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        top_n: 10
+        liquidity_bottom_quantile: 0.2
+        price_repair_min_ma20_ratio: 0.97
+        output_namespace: studies/a_share_moneyflow_divergence_repair_screening
+  - name: LEGACY_PIT_NO_GROWTH_BOARDS_T20
+    request_overrides:
+      run_params:
+        moneyflow_table: pit_stock_moneyflow
+        moneyflow_whitelist_table: ""
+        allow_whitelist_fallback: true
+        denominator_mode: avg20_amount
+        exclude_star_market: true
+        exclude_chinext: true
+        top_n: 20
+        output_namespace: studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t20
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-04"
+    end: "2026-03-16"
+  - key: "2326_HC"
+    role: high_coverage
+    start: "2023-07-03"
+    end: "2026-03-16"
+  - key: "2526_1Y"
+    role: smoke
+    start: "2025-03-17"
+    end: "2026-03-16"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  fast_mode: true
+  run_params:
+    universe_mode: ALL_A
+    top_n: 10
+    moneyflow_table: pit_stock_moneyflow_v2
+    moneyflow_whitelist_table: pit_stock_moneyflow_v2_whitelist_daily
+    output_namespace: studies/a_share_moneyflow_divergence
+metadata:
+  materialize_config_json: true
+  runner_mode: a_share_moneyflow_divergence
+  min_tradable_month_ratio: 0.85
+  coverage_gate:
+    required_row_coverage_ratio: 0.95
+    required_net_coverage_ratio: 0.90

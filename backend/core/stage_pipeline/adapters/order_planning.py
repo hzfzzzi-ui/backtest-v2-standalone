@@ -9,6 +9,7 @@ from backend.core.core.types import Side
 from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
 from backend.core.portfolio.portfolio_runtime import build_rebalance_orders
 from backend.core.stage_pipeline.contracts import ExecutionIntent, StageOutputs
+from backend.core.stage_pipeline.adapters.lineage import record_scheduled_orders
 
 
 def _normalized_text(value: Any) -> str:
@@ -63,7 +64,28 @@ def _signal_rank_key(signal: Any) -> tuple[float, str, str, str]:
     )
 
 
-def _resolve_sleeve_weights(runtime: Any) -> dict[str, float]:
+def _market_state_bucket_name(value: Any) -> str:
+    state = str(value or "").strip().upper()
+    if state in {"BULL", "TRANS_UP"}:
+        return "RISK_ON"
+    if state in {"BEAR", "TRANS_DOWN"}:
+        return "RISK_OFF"
+    return ""
+
+
+def _resolve_market_state_for_day(runtime: Any, day: Any) -> str:
+    provider = getattr(runtime, "provider", None)
+    market_state_map = dict(getattr(provider, "_market_state_name_map", {}) or {})
+    state = str(market_state_map.get(day, "") or "").strip().upper()
+    if state:
+        return state
+    current_day = dict(getattr(runtime, "_current_day", {}) or {})
+    day_signals = current_day.get("day_signals")
+    diagnostics = dict(getattr(day_signals, "diagnostics", {}) or {})
+    return str(diagnostics.get("market_state", "") or "").strip().upper()
+
+
+def _resolve_sleeve_weights(runtime: Any, *, day: Any | None = None) -> tuple[dict[str, float], str]:
     provider = getattr(runtime, "provider", None)
     multi_alpha = dict(getattr(provider, "_multi_alpha", {}) or {})
     composition = dict(multi_alpha.get("signal_composition") or {})
@@ -86,7 +108,31 @@ def _resolve_sleeve_weights(runtime: Any) -> dict[str, float]:
         if weight <= 0:
             continue
         weights[sleeve_id] = float(weights.get(sleeve_id, 0.0)) + float(weight)
-    return weights
+    state_used = ""
+    overrides_raw = composition.get("market_state_weight_overrides")
+    if isinstance(overrides_raw, dict) and day is not None:
+        market_state = _resolve_market_state_for_day(runtime, day)
+        state_bucket = _market_state_bucket_name(market_state)
+        override_payload = None
+        for key in (market_state, state_bucket, "DEFAULT"):
+            text = str(key or "").strip().upper()
+            if not text:
+                continue
+            candidate = overrides_raw.get(text)
+            if isinstance(candidate, dict):
+                override_payload = candidate
+                state_used = text
+                break
+        if isinstance(override_payload, dict):
+            for sleeve_key, raw_weight in override_payload.items():
+                sleeve_id = _normalized_text(sleeve_key)
+                if not sleeve_id:
+                    continue
+                weight = _safe_float(raw_weight, fallback=-1.0)
+                if weight < 0.0:
+                    continue
+                weights[sleeve_id] = float(weight)
+    return weights, state_used
 
 
 def _allocate_sleeve_caps(
@@ -198,7 +244,7 @@ def _apply_hard_sleeve_budget(
         debug_plan["sleeve_candidate_counts"] = {}
         return buy_signals, {}
 
-    sleeve_weights = _resolve_sleeve_weights(runtime)
+    sleeve_weights, market_state_weight_override_key = _resolve_sleeve_weights(runtime, day=day)
     after_sell_counts = _count_positions_after_sell_by_sleeve(runtime, sell_signals=list(day_signals.sell_signals or ()))
     active_sleeves = set(after_sell_counts)
     for signal in buy_signals:
@@ -238,6 +284,8 @@ def _apply_hard_sleeve_budget(
 
     debug_plan["sleeve_budget_mode"] = "hard_sleeve_budget"
     debug_plan["same_symbol_policy"] = str(getattr(runtime.provider, "_same_symbol_policy", "") or "")
+    debug_plan["market_state_weight_override_key"] = str(market_state_weight_override_key or "")
+    debug_plan["sleeve_weights_effective"] = dict(sorted((str(k), float(v)) for k, v in sleeve_weights.items()))
     debug_plan["sleeve_slot_caps"] = dict(sorted(caps.items()))
     debug_plan["sleeve_available_slots"] = dict(sorted(available_slots.items()))
     debug_plan["sleeve_positions_after_sell"] = dict(sorted(after_sell_counts.items()))
@@ -362,6 +410,11 @@ def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
         mf_concentrate_scale=float(runtime.request.mf_concentrate_scale),
         mf_gate_on_today=bool(mf_gate_on_today),
         mf_score_map=dict(day_signals.mf_score_map),
+        overlay_mode=str(getattr(day_signals, "overlay_mode", "off") or "off"),
+        overlay_gate_on_today=bool(getattr(day_signals, "overlay_gate_on_today", False)),
+        overlay_score_map=dict(getattr(day_signals, "overlay_score_map", {}) or {}),
+        overlay_observation_date=getattr(day_signals, "overlay_observation_date", None),
+        overlay_score_source=str(getattr(day_signals, "overlay_score_source", "") or ""),
         momentum_top_pct=float(runtime.request.momentum_top_pct),
         decision_date=day,
         candidate_audit=day_candidate_rows,
@@ -429,6 +482,12 @@ def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
         }
         for order in orders
     ]
+    next_day_orders = record_scheduled_orders(
+        runtime,
+        decision_date=day,
+        scheduled_date=runtime._current_day.get("next_trading_day"),
+        orders=next_day_orders,
+    )
     next_day_orders, deferred_sell_count = _merge_deferred_sell_orders(
         next_day_orders,
         list(getattr(runtime, "deferred_sell_orders", []) or ()),
@@ -444,6 +503,7 @@ def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
             for flag in (
                 "RISK_ON" if bool(controls.get("risk_on_today")) else "RISK_OFF",
                 "MF_GATE_ON" if bool(mf_gate_on_today) else "MF_GATE_OFF",
+                "MFO_GATE_ON" if bool(getattr(day_signals, "overlay_gate_on_today", False)) else "MFO_GATE_OFF",
                 "STRONG_RISK_ON" if bool(day_signals.strong_risk_on) else "",
             )
             if flag

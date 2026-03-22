@@ -9,6 +9,16 @@ import numpy as np
 import pandas as pd
 
 from backend.core.config.models import ExitConfig
+from backend.core.config.models import LegacyTurnWeakOverlayConfig
+from backend.core.config.models import MarketFilterConfig
+from backend.core.config.models import RegimeEngineBreadthBlockConfig
+from backend.core.config.models import RegimeEngineConfig
+from backend.core.config.models import RegimeEngineFallbackConfig
+from backend.core.config.models import RegimeEngineParticipationBlockConfig
+from backend.core.config.models import RegimeEnginePersistenceConfig
+from backend.core.config.models import RegimeEngineRiskBlockConfig
+from backend.core.config.models import RegimeEngineTrendBlockConfig
+from backend.core.config.models import WeeklyFiveStateRegimeConfig
 from backend.core.core.models import Signal
 from backend.core.engine_vector.breakout_provider_day_signals import (
     build_breakout_day_signals as _build_breakout_day_signals,
@@ -34,7 +44,320 @@ from backend.core.engine_vector.breakout_support import (
 )
 from backend.core.engine_vector.data_matrix import build_ohlc_matrices_from_history
 from backend.core.engine_vector.features import compute_feature_matrices
+from backend.core.engine_vector.regime_engine_evaluator import evaluate_formal_regime_engine
+from backend.core.engine_vector.regime_engine_inputs import build_formal_regime_feature_bundle
+from backend.core.engine_vector.regime_engine_inputs import resolve_required_regime_blocks
 from backend.core.engine_vector.signal_provider import DayContext, DaySignals, ExitCounts
+from backend.core.engine_vector.weekly_five_state_engine import evaluate_weekly_five_state_regime
+
+
+def _coerce_regime_engine_cfg(value: RegimeEngineConfig | dict[str, Any] | None) -> RegimeEngineConfig:
+    if isinstance(value, RegimeEngineConfig):
+        fields = {
+            key: getattr(value, key)
+            for key in RegimeEngineConfig.__dataclass_fields__
+            if hasattr(value, key)
+        }
+    elif isinstance(value, dict):
+        fields = {k: v for k, v in value.items() if k in RegimeEngineConfig.__dataclass_fields__}
+    else:
+        return RegimeEngineConfig()
+    trend_block = fields.get("trend_block")
+    if isinstance(trend_block, dict):
+        fields["trend_block"] = RegimeEngineTrendBlockConfig(**trend_block)
+    risk_block = fields.get("risk_block")
+    if isinstance(risk_block, dict):
+        fields["risk_block"] = RegimeEngineRiskBlockConfig(**risk_block)
+    breadth_block = fields.get("breadth_block")
+    if isinstance(breadth_block, dict):
+        fields["breadth_block"] = RegimeEngineBreadthBlockConfig(**breadth_block)
+    participation_block = fields.get("participation_block")
+    if isinstance(participation_block, dict):
+        fields["participation_block"] = RegimeEngineParticipationBlockConfig(**participation_block)
+    persistence = fields.get("persistence")
+    if isinstance(persistence, dict):
+        fields["persistence"] = RegimeEnginePersistenceConfig(**persistence)
+    fallback = fields.get("fallback")
+    if isinstance(fallback, dict):
+        fields["fallback"] = RegimeEngineFallbackConfig(**fallback)
+    weekly_five_state = fields.get("weekly_five_state")
+    if isinstance(weekly_five_state, dict):
+        fields["weekly_five_state"] = WeeklyFiveStateRegimeConfig(**weekly_five_state)
+    legacy_turn_weak_overlay = fields.get("legacy_turn_weak_overlay")
+    if isinstance(legacy_turn_weak_overlay, dict):
+        overlay_fields = {
+            k: v for k, v in legacy_turn_weak_overlay.items() if k in LegacyTurnWeakOverlayConfig.__dataclass_fields__
+        }
+        weekly_cfg = overlay_fields.get("weekly_cfg")
+        if isinstance(weekly_cfg, dict):
+            overlay_fields["weekly_cfg"] = WeeklyFiveStateRegimeConfig(**weekly_cfg)
+        fields["legacy_turn_weak_overlay"] = LegacyTurnWeakOverlayConfig(**overlay_fields)
+    return RegimeEngineConfig(**fields)
+
+
+def _coerce_market_filter_cfg(value: MarketFilterConfig | dict[str, Any] | None) -> MarketFilterConfig | None:
+    if isinstance(value, MarketFilterConfig):
+        return value
+    if isinstance(value, dict):
+        fields = {k: v for k, v in value.items() if k in MarketFilterConfig.__dataclass_fields__}
+        return MarketFilterConfig(**fields)
+    return None
+
+
+def _build_legacy_market_filter_state(
+    *,
+    benchmark: pd.DataFrame,
+    dates: np.ndarray,
+    market_filter_cfg: MarketFilterConfig | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    day_count = len(dates)
+    market_state = np.zeros(day_count, dtype=np.int8)
+    trade_mode = np.full(day_count, 2, dtype=np.int8)
+    if market_filter_cfg is None or not market_filter_cfg.enabled:
+        return market_state, trade_mode
+
+    day_index = pd.DatetimeIndex(pd.to_datetime(dates))
+    bench = benchmark.copy()
+    bench["date"] = pd.to_datetime(bench["date"]).dt.normalize()
+    bench = bench.sort_values("date")
+    bench_close = pd.Series(
+        pd.to_numeric(bench["close"], errors="coerce").to_numpy(dtype=float),
+        index=bench["date"],
+    ).reindex(day_index)
+    long_ma_window = max(2, int(getattr(market_filter_cfg, "long_ma_window", 200)))
+    slope_window = max(1, int(market_filter_cfg.slope_window))
+    slope_ma_period = max(2, int(getattr(market_filter_cfg, "slope_ma_period", 50)))
+    ema_series = bench_close.ewm(span=slope_ma_period, adjust=False).mean()
+    momentum = (ema_series - ema_series.shift(slope_window)) / ema_series.shift(slope_window)
+    ma200 = bench_close.rolling(long_ma_window, min_periods=long_ma_window).mean()
+    bench_ma20 = bench_close.rolling(20, min_periods=20).mean()
+    bench_ma60 = bench_close.rolling(60, min_periods=60).mean()
+    close_max20 = bench_close.rolling(20, min_periods=20).max()
+    bench_high = pd.Series(
+        pd.to_numeric(bench.get("high", bench["close"]), errors="coerce").to_numpy(dtype=float),
+        index=bench["date"],
+    ).reindex(day_index)
+    high_max60 = bench_high.rolling(60, min_periods=60).max()
+
+    bench_close_arr = bench_close.to_numpy(dtype=float)
+    momentum_arr = momentum.to_numpy(dtype=float)
+    ma200_arr = ma200.to_numpy(dtype=float)
+    valid = ~np.isnan(bench_close_arr) & ~np.isnan(momentum_arr) & ~np.isnan(ma200_arr)
+    above = bench_close_arr > ma200_arr
+    slope_pos = momentum_arr >= 0.0
+    market_state[valid & above & ~slope_pos] = 1
+    market_state[valid & ~above & slope_pos] = 2
+    market_state[valid & ~above & ~slope_pos] = 3
+
+    cond_a = (
+        (bench_ma20 > bench_ma60)
+        & (bench_close > bench_ma20)
+        & (bench_close > close_max20)
+    )
+    cond_b = (
+        (bench_close > high_max60)
+        & (bench_close > bench_ma60)
+        & (bench_ma20 > bench_ma60)
+    )
+    cond_a = cond_a.fillna(False).to_numpy(dtype=bool)
+    cond_b = cond_b.fillna(False).to_numpy(dtype=bool)
+    trade_mode[market_state == 0] = 0
+    trade_mode[(market_state == 1) & cond_a] = 1
+    trade_mode[(market_state == 2) & cond_b] = 1
+    return market_state, trade_mode
+
+
+def _legacy_market_state_names(market_state: np.ndarray) -> np.ndarray:
+    return np.array(
+        [
+            ("BULL" if int(state) == 0 else "TRANS_DOWN" if int(state) == 1 else "TRANS_UP" if int(state) == 2 else "BEAR")
+            for state in market_state
+        ],
+        dtype=object,
+    )
+
+
+def _legacy_trade_mode_names(trade_mode: np.ndarray) -> np.ndarray:
+    return np.array(
+        [
+            ("TREND_MAIN" if int(mode) == 0 else "TREND_LIGHT" if int(mode) == 1 else "NO_TRADE")
+            for mode in trade_mode
+        ],
+        dtype=object,
+    )
+
+
+def _build_runtime_legacy_trade_mode(market_state: np.ndarray) -> np.ndarray:
+    trade_mode = np.full(len(market_state), 2, dtype=np.int8)
+    trade_mode[market_state == 0] = 0
+    trade_mode[np.isin(market_state, np.array([1, 2], dtype=np.int8))] = 1
+    return trade_mode
+
+
+def _build_legacy_market_filter_multipliers(
+    *,
+    market_state: np.ndarray,
+    trade_mode: np.ndarray,
+    market_filter_cfg: MarketFilterConfig | None,
+) -> np.ndarray:
+    day_count = len(market_state)
+    bull_mult = float(getattr(market_filter_cfg, "bull_multiplier", 1.0) if market_filter_cfg is not None else 1.0)
+    light_mult_default = float(getattr(market_filter_cfg, "light_multiplier", 0.5) if market_filter_cfg is not None else 0.5)
+    trans_down_raw = getattr(market_filter_cfg, "trans_down_multiplier", light_mult_default) if market_filter_cfg is not None else light_mult_default
+    trans_up_raw = getattr(market_filter_cfg, "trans_up_multiplier", light_mult_default) if market_filter_cfg is not None else light_mult_default
+    bear_raw = getattr(market_filter_cfg, "bear_multiplier", 0.0) if market_filter_cfg is not None else 0.0
+    trans_down_mult = float(light_mult_default if trans_down_raw is None else trans_down_raw)
+    trans_up_mult = float(light_mult_default if trans_up_raw is None else trans_up_raw)
+    bear_mult = float(0.0 if bear_raw is None else bear_raw)
+
+    multipliers = np.ones(day_count, dtype=float)
+    multipliers[trade_mode == 0] = bull_mult
+    multipliers[(trade_mode == 1) & (market_state == 1)] = trans_down_mult
+    multipliers[(trade_mode == 1) & (market_state == 2)] = trans_up_mult
+    multipliers[(trade_mode == 1) & ~(np.isin(market_state, np.array([1, 2], dtype=np.int8)))] = light_mult_default
+    multipliers[trade_mode == 2] = bear_mult if bear_mult >= 0.0 else 0.0
+    return multipliers
+
+
+def _apply_formal_regime_runtime(
+    provider: Any,
+    *,
+    history: pd.DataFrame,
+    benchmark: pd.DataFrame,
+    mx: Any,
+    trading_days: list[date],
+    membership_history: pd.DataFrame | None,
+    market_filter_cfg: MarketFilterConfig | None,
+    regime_engine_cfg: RegimeEngineConfig,
+) -> None:
+    provider._regime_engine_name = str(regime_engine_cfg.engine or "ma200_legacy")
+    provider._legacy_turn_weak_overlay_active = False
+    provider._formal_regime_features = None
+    provider._required_feature_blocks_ready = np.array([], dtype=bool)
+    provider._regime_confidence_arr = np.array([], dtype=float)
+    provider._regime_duration_bars_arr = np.array([], dtype=np.int32)
+    provider._regime_transition_reason_arr = np.array([], dtype=object)
+    provider._feature_availability_arr = np.array([], dtype=object)
+    provider._fallback_active_arr = np.array([], dtype=bool)
+    provider._market_state = np.array([], dtype=np.int8)
+    provider._trade_mode = np.array([], dtype=np.int8)
+    provider._market_state_name_arr = np.array([], dtype=object)
+    provider._trade_mode_name_arr = np.array([], dtype=object)
+    provider._market_state_raw_name_arr = np.array([], dtype=object)
+    provider._market_state_smoothed_name_arr = np.array([], dtype=object)
+    provider._market_state_score_arr = np.array([], dtype=float)
+    provider._risk_budget_multiplier_arr = np.array([], dtype=float)
+    provider._weekly_observation_flag_arr = np.array([], dtype=bool)
+
+    engine_name = str(provider._regime_engine_name).strip().lower()
+    legacy_market_state, legacy_trade_mode = _build_legacy_market_filter_state(
+        benchmark=benchmark,
+        dates=np.array(mx.dates),
+        market_filter_cfg=market_filter_cfg,
+    )
+
+    if engine_name == "weekly_five_state":
+        weekly_eval = evaluate_weekly_five_state_regime(
+            benchmark=benchmark,
+            dates=np.array(mx.dates),
+            cfg=regime_engine_cfg.weekly_five_state,
+            legacy_market_state=np.array(legacy_market_state, dtype=np.int32),
+        )
+        provider._market_state = np.array(weekly_eval.market_state_codes, dtype=np.int8)
+        provider._trade_mode = np.array(weekly_eval.trade_mode_codes, dtype=np.int8)
+        provider._market_state_name_arr = np.array(weekly_eval.market_state_names, dtype=object)
+        provider._trade_mode_name_arr = np.array(weekly_eval.trade_mode_names, dtype=object)
+        provider._market_state_raw_name_arr = np.array(weekly_eval.market_state_raw_names, dtype=object)
+        provider._market_state_smoothed_name_arr = np.array(weekly_eval.market_state_smoothed_names, dtype=object)
+        provider._market_state_score_arr = np.array(weekly_eval.state_scores, dtype=float)
+        provider._risk_budget_multiplier_arr = np.array(weekly_eval.risk_budget_multipliers, dtype=float)
+        provider._weekly_observation_flag_arr = np.array(weekly_eval.weekly_observation_flags, dtype=bool)
+        provider._regime_confidence_arr = np.array(weekly_eval.regime_confidence, dtype=float)
+        provider._regime_duration_bars_arr = np.array(weekly_eval.regime_duration_bars, dtype=np.int32)
+        provider._regime_transition_reason_arr = np.array(weekly_eval.regime_transition_reason, dtype=object)
+        provider._feature_availability_arr = np.array(weekly_eval.feature_availability, dtype=object)
+        provider._fallback_active_arr = np.array(weekly_eval.fallback_active, dtype=bool)
+        return
+
+    overlay_cfg = getattr(regime_engine_cfg, "legacy_turn_weak_overlay", None)
+    if engine_name == "ma200_legacy" and bool(getattr(overlay_cfg, "enabled", False)):
+        overlay_weekly_cfg = getattr(overlay_cfg, "weekly_cfg", WeeklyFiveStateRegimeConfig())
+        weekly_eval = evaluate_weekly_five_state_regime(
+            benchmark=benchmark,
+            dates=np.array(mx.dates),
+            cfg=overlay_weekly_cfg,
+            legacy_market_state=np.array(legacy_market_state, dtype=np.int32),
+        )
+        overlay_mask = np.array(weekly_eval.market_state_smoothed_names == "TURN_WEAK", dtype=bool)
+        effective_trade_mode = _build_runtime_legacy_trade_mode(np.array(legacy_market_state, dtype=np.int8))
+        effective_trade_mode[overlay_mask] = 2
+        provider._legacy_turn_weak_overlay_active = True
+        provider._market_state = np.array(legacy_market_state, dtype=np.int8)
+        provider._trade_mode = np.array(effective_trade_mode, dtype=np.int8)
+        provider._market_state_name_arr = _legacy_market_state_names(provider._market_state)
+        provider._trade_mode_name_arr = _legacy_trade_mode_names(provider._trade_mode)
+        provider._market_state_raw_name_arr = np.array(weekly_eval.market_state_raw_names, dtype=object)
+        provider._market_state_smoothed_name_arr = np.array(weekly_eval.market_state_smoothed_names, dtype=object)
+        provider._market_state_score_arr = np.array(weekly_eval.state_scores, dtype=float)
+        provider._risk_budget_multiplier_arr = _build_legacy_market_filter_multipliers(
+            market_state=provider._market_state,
+            trade_mode=provider._trade_mode,
+            market_filter_cfg=market_filter_cfg,
+        )
+        provider._risk_budget_multiplier_arr[overlay_mask] = 0.0
+        provider._weekly_observation_flag_arr = np.array(weekly_eval.weekly_observation_flags, dtype=bool)
+        provider._regime_confidence_arr = np.array(weekly_eval.regime_confidence, dtype=float)
+        provider._regime_duration_bars_arr = np.array(weekly_eval.regime_duration_bars, dtype=np.int32)
+        provider._regime_transition_reason_arr = np.array(weekly_eval.regime_transition_reason, dtype=object)
+        provider._feature_availability_arr = np.array(weekly_eval.feature_availability, dtype=object)
+        provider._fallback_active_arr = np.array(weekly_eval.fallback_active, dtype=bool)
+        return
+
+    if engine_name != "market_regime_framework":
+        return
+
+    provider._market_state = np.array(legacy_market_state, dtype=np.int8)
+    provider._trade_mode = np.array(legacy_trade_mode, dtype=np.int8)
+
+    formal_bundle = build_formal_regime_feature_bundle(
+        benchmark=benchmark,
+        history=history,
+        mx=mx,
+        trading_days=trading_days,
+        regime_engine_cfg=regime_engine_cfg,
+        membership_history=membership_history,
+    )
+    provider._formal_regime_features = formal_bundle
+    provider._required_feature_blocks_ready = resolve_required_regime_blocks(
+        formal_bundle.feature_availability,
+        regime_engine_cfg.fallback.required_blocks,
+    )
+    formal_eval = evaluate_formal_regime_engine(
+        bundle=formal_bundle,
+        regime_engine_cfg=regime_engine_cfg,
+        legacy_market_state=np.array(legacy_market_state, dtype=np.int32),
+        legacy_trade_mode=np.array(legacy_trade_mode, dtype=np.int32),
+    )
+    provider._market_state = np.array(formal_eval.market_state, dtype=np.int8)
+    provider._trade_mode = np.array(formal_eval.trade_mode, dtype=np.int8)
+    provider._market_state_name_arr = np.array([
+        ("BULL" if int(state) == 0 else "TRANS_DOWN" if int(state) == 1 else "TRANS_UP" if int(state) == 2 else "BEAR")
+        for state in formal_eval.market_state
+    ], dtype=object)
+    provider._trade_mode_name_arr = np.array([
+        ("TREND_MAIN" if int(mode) == 0 else "TREND_LIGHT" if int(mode) == 1 else "NO_TRADE")
+        for mode in formal_eval.trade_mode
+    ], dtype=object)
+    provider._market_state_raw_name_arr = np.array(provider._market_state_name_arr, dtype=object)
+    provider._market_state_smoothed_name_arr = np.array(provider._market_state_name_arr, dtype=object)
+    provider._market_state_score_arr = np.array([], dtype=float)
+    provider._risk_budget_multiplier_arr = np.array([], dtype=float)
+    provider._weekly_observation_flag_arr = np.zeros(len(formal_eval.market_state), dtype=bool)
+    provider._regime_confidence_arr = np.array(formal_eval.regime_confidence, dtype=float)
+    provider._regime_duration_bars_arr = np.array(formal_eval.regime_duration_bars, dtype=np.int32)
+    provider._regime_transition_reason_arr = np.array(formal_eval.regime_transition_reason, dtype=object)
+    provider._feature_availability_arr = np.array(formal_eval.feature_availability, dtype=object)
+    provider._fallback_active_arr = np.array(formal_eval.fallback_active, dtype=bool)
 
 
 
@@ -120,6 +443,24 @@ class BreakoutTrendProvider:
         self._leadership_route_bucket: np.ndarray = np.array([], dtype=int)
         self._final_score: np.ndarray = np.array([])
         self._sym_to_col: dict[str, int] = {}
+        self._market_state: np.ndarray = np.array([], dtype=np.int8)
+        self._trade_mode: np.ndarray = np.array([], dtype=np.int8)
+        self._regime_engine_name: str = "ma200_legacy"
+        self._legacy_turn_weak_overlay_active: bool = False
+        self._formal_regime_features: Any = None
+        self._required_feature_blocks_ready: np.ndarray = np.array([], dtype=bool)
+        self._regime_confidence_arr: np.ndarray = np.array([], dtype=float)
+        self._regime_duration_bars_arr: np.ndarray = np.array([], dtype=np.int32)
+        self._regime_transition_reason_arr: np.ndarray = np.array([], dtype=object)
+        self._feature_availability_arr: np.ndarray = np.array([], dtype=object)
+        self._fallback_active_arr: np.ndarray = np.array([], dtype=bool)
+        self._market_state_name_arr: np.ndarray = np.array([], dtype=object)
+        self._trade_mode_name_arr: np.ndarray = np.array([], dtype=object)
+        self._market_state_raw_name_arr: np.ndarray = np.array([], dtype=object)
+        self._market_state_smoothed_name_arr: np.ndarray = np.array([], dtype=object)
+        self._market_state_score_arr: np.ndarray = np.array([], dtype=float)
+        self._risk_budget_multiplier_arr: np.ndarray = np.array([], dtype=float)
+        self._weekly_observation_flag_arr: np.ndarray = np.array([], dtype=bool)
         self._ec: ExitConfig = ExitConfig()
         self._peak_close_state: dict[str, float] = {}
         self._risk_off_partial_state: dict[str, bool] = {}
@@ -208,6 +549,9 @@ class BreakoutTrendProvider:
         self.cooldown_block_count: int = 0
         self.entry_above_slow_ma_block_count: int = 0
         self.entry_slope_block_count: int = 0
+        self.bull_breakout_quality_veto_block_count: int = 0
+        self.bull_breakout_quality_veto_residual_block_count: int = 0
+        self.bull_breakout_quality_veto_margin_block_count: int = 0
         self.precompute_seconds: float = 0.0
         self.diag_reason_counts: dict[str, int] = {}
 
@@ -248,6 +592,9 @@ class BreakoutTrendProvider:
         hist["date"] = pd.to_datetime(hist["date"])
         hist["symbol"] = hist["symbol"].astype(str).str.lower()
         hist = hist.sort_values(["date", "symbol"]).reset_index(drop=True)
+        membership_history = kwargs.get("membership_history")
+        regime_engine_cfg = _coerce_regime_engine_cfg(kwargs.get("regime_engine_cfg"))
+        market_filter_cfg = _coerce_market_filter_cfg(kwargs.get("market_filter_cfg"))
 
         self._mx = build_ohlc_matrices_from_history(
             hist,
@@ -298,6 +645,16 @@ class BreakoutTrendProvider:
         self._strong_risk_on = np.zeros(t, dtype=bool)
         valid_strong = ~np.isnan(bench_fast_ma) & ~np.isnan(bench_slow_ma)
         self._strong_risk_on[valid_strong] = bench_fast_ma[valid_strong] > bench_slow_ma[valid_strong]
+        _apply_formal_regime_runtime(
+            self,
+            history=hist,
+            benchmark=bench,
+            mx=mx,
+            trading_days=trading_days,
+            membership_history=membership_history if isinstance(membership_history, pd.DataFrame) else None,
+            market_filter_cfg=market_filter_cfg,
+            regime_engine_cfg=regime_engine_cfg,
+        )
 
         # -- breakout signal matrix: close[t] > high_max(window)[t-1] * (1+buffer) --
         def _rolling_high_max(arr: np.ndarray, window: int) -> np.ndarray:

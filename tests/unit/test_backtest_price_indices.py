@@ -5,7 +5,7 @@ from datetime import date
 import pandas as pd
 
 from backend.core.portfolio.nav_snapshot import compute_nav_snapshot
-from backend.core.portfolio.price_index import build_backtest_price_indices
+from backend.core.portfolio.price_index import build_backtest_hfq_indices, build_backtest_price_indices
 
 
 def test_build_backtest_price_indices_ffill_gaps_but_not_after_last_bar() -> None:
@@ -58,3 +58,50 @@ def test_compute_nav_snapshot_uses_carried_close_on_missing_trade_day() -> None:
     assert market_value == 1_000.0
     assert nav == 2_000.0
     assert pos_values == [("aaa", 1_000.0)]
+
+
+def test_compute_nav_snapshot_uses_hfq_close_and_entry_adj_to_smooth_ex_right_jump() -> None:
+    history = pd.DataFrame(
+        [
+            {
+                "date": pd.Timestamp("2015-03-31"),
+                "symbol": "AAA",
+                "open": 35.50,
+                "close": 35.78,
+                "adj_factor": 19.863,
+            },
+            {
+                "date": pd.Timestamp("2015-04-01"),
+                "symbol": "AAA",
+                "open": 14.50,
+                "close": 14.13,
+                "adj_factor": 49.944,
+            },
+        ]
+    )
+    trading_days = [
+        date(2015, 3, 31),
+        date(2015, 4, 1),
+    ]
+    _, close_idx = build_backtest_price_indices(history=history, trading_days=trading_days)
+    hfq_close_idx, _ = build_backtest_hfq_indices(history=history, trading_days=trading_days)
+
+    raw_nav, raw_market_value, _ = compute_nav_snapshot(
+        cash=0.0,
+        positions={"aaa": 17000},
+        close_idx=close_idx,
+        day=date(2015, 4, 1),
+    )
+    hfq_nav, hfq_market_value, _ = compute_nav_snapshot(
+        cash=0.0,
+        positions={"aaa": 17000},
+        close_idx=close_idx,
+        day=date(2015, 4, 1),
+        hfq_close_idx=hfq_close_idx,
+        position_entry_adj={"aaa": 19.863},
+    )
+
+    assert raw_market_value == 14.13 * 17000
+    assert raw_nav == raw_market_value
+    assert round(hfq_market_value, 2) == 603989.74
+    assert hfq_nav == hfq_market_value

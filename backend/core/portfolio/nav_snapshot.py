@@ -14,17 +14,20 @@ def compute_nav_snapshot(
 ) -> tuple[float, float, list[tuple[str, float]]]:
     """Compute NAV snapshot from cash, positions and valuation closes."""
     use_hfq = hfq_close_idx is not None and position_entry_adj is not None
-    val_idx = hfq_close_idx if use_hfq else close_idx
     entry_adj = position_entry_adj or {}
     market_value = 0.0
     pos_values: list[tuple[str, float]] = []
     for sym, qty in positions.items():
-        c = float(val_idx.get((day, sym), 0.0) or 0.0)
+        raw_close = float(close_idx.get((day, sym), 0.0) or 0.0)
         if use_hfq:
-            ea = entry_adj.get(sym, 1.0)
-            v = c / ea * qty if ea > 1e-8 else c * qty
+            hfq_close = float((hfq_close_idx or {}).get((day, sym), 0.0) or 0.0)
+            ea = float(entry_adj.get(sym, 0.0) or 0.0)
+            if hfq_close > 0.0 and ea > 1e-8:
+                v = hfq_close / ea * qty
+            else:
+                v = raw_close * qty
         else:
-            v = c * qty
+            v = raw_close * qty
         market_value += v
         pos_values.append((sym, v))
     nav = float(cash) + float(market_value)

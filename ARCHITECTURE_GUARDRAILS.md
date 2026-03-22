@@ -48,49 +48,46 @@
 - 严禁 NaN/Inf（必须清洗为 null）
 
 ### 2.2 标准产物协议（必须每次运行必出，缺一算失败）
-对每个 group 目录必须存在：
+对每个实验结果目录必须存在：
+- manifest.json
 - run_meta.json
 - perf.json
 - nav.csv
 - funnel.csv
-- reason_code_counts.csv
+- reason_codes.csv
 - config.json
 
-对实验根目录必须存在：
-- manifest.json
-- （可选）run_profile.json / click_report_md / report_summary 等增强产物，但不得代替必出文件
+可选增强产物：
+- audit.json
+- stage_summary.json
+- input_config.json
+- resolved_config.json
+- compiled_plan.json
+- portfolio_trades.csv
+- portfolio_daily.csv
+- symbol_performance.csv
+- execution_lineage_ledger.csv
+
+增强产物不得代替最小必出文件。
 
 ### 2.3 rows schema（必须稳定）
-`result.rows[i]` 必须至少包含（缺失用 null/0）：
+当前稳定的 row-shaped public payload 以 history rows 与 compare rows 为主，正式文档见：
+- `docs/SCHEMA_rows.json.md`
 
-- group_id: string
-- status: "OK"|"FAILED"|"CANCELED"
-- tier: "T0"|"T1"|"T2"|"T3"
-
-绩效 metrics（number|null）：
-- total_return, max_drawdown, cagr, sharpe, calmar, trades, turnover, top10_profit_concentration
-
-漏斗 funnel（number|null）：
-- raw_signal, blocked, orders, skipped, closed_trades
-
-触发 triggers（number|null）：
-- gate_on_rate, mf_rank_applied_rate, trend_slope_block_count
-- atr_stop_exit_count, atr_trail_exit_count, atr_trail_update_count
-
-文件定位：
-- group_dir: string（相对路径优先；若只能给绝对路径，则同时提供 group_dir_rel）
-- group_files: {run_meta, perf, nav, funnel, reason_codes, config}（相对路径优先；若只能绝对路径，则也提供 *_rel）
+硬约束：
+- `exp_id`、`label`、`perf` 不得无声删除
+- 数值字段必须保持 `number|null`
+- compare rows 的 `nav` 序列必须保持 `[{date, nav}]` 结构
 
 ### 2.4 run_meta.json schema（唯一真相，必须稳定）
-每个 group 的 run_meta.json 至少包含：
-- run_id / exp_id / group_id / preset
-- data: start/end, benchmark, compare_symbol, universe_mode, universe_size(if available), universe_limit(if used), filters（若可得）
-- code: git_commit(if available), engine_mode, execution_profile, fast_mode
-- pipeline: stage list（Universe→Signal→Filters/Gates→Rank→Sizing→Execution→Risk/Exit→Portfolio）
-  每 stage: {name, enabled, params, counters}
-- counters: funnel + triggers（与 rows 同口径）
-- artifacts: 必出文件的相对路径映射
-- missing_fields: string[]（缺失统计在此记录，但文件仍必须存在）
+当前正式 schema 见：
+- `docs/SCHEMA_run_meta.json.md`
+
+硬约束：
+- 顶层必须保持 `exp_id`、`tier`、`status`、`data`、`code`、`counters`、`missing_fields`
+- canonical funnel counters 必须保持：
+  `raw_signal`、`blocked`、`orders`、`skipped`、`closed_trades`
+- `missing_fields` 必须记录协议补齐缺口，不能靠省略文件掩盖
 
 ---
 
@@ -141,7 +138,7 @@ reason_code taxonomy 至少分层：
 ## 6) 变更规则（防返工）
 
 若触及 2.2/2.3/2.4（协议/rows/meta）：
-- 必须先更新 docs/SCHEMA_rows.json.md 与 docs/SCHEMA_run_meta.json.md
+- 必须先更新 `docs/SCHEMA_rows.json.md`、`docs/SCHEMA_run_meta.json.md`、`docs/SCHEMA_manifest.json.md`
 - 必须新增/更新 schema 校验测试
 - 只允许向后兼容新增；禁止改名/删字段
 
@@ -157,7 +154,10 @@ reason_code taxonomy 至少分层：
 
 ## 7) 必须长期存在的文件与测试
 
-- docs/SCHEMA_rows.json.md
-- docs/SCHEMA_run_meta.json.md
-- examples/（至少一个 exp 示例目录，含必出文件空壳）
-- tests/test_schema_and_artifacts.py（最小集成测试：检查文件存在+schema正确）
+- `ARCHITECTURE.md`
+- `docs/SCHEMA_rows.json.md`
+- `docs/SCHEMA_run_meta.json.md`
+- `docs/SCHEMA_manifest.json.md`
+- `docs/RUNBOOK_baseline_regression.md`
+- `examples/experiment_contract_minimal/`
+- `tests/integration/test_schema_and_artifacts.py`

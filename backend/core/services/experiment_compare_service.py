@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.api.backtest_v2 import history_impl
 from backend.api.shared.json_utils import sanitize_json
-from backend.core.services import experiment_query_service
+from backend.core.services import experiment_history_service, experiment_query_service
 from backend.core.tools import baseline_access
 
 
 def compare_experiments(body: dict[str, Any]) -> dict[str, Any]:
-    return sanitize_json(history_impl.compare_experiments(body))
+    return sanitize_json(experiment_history_service.compare_experiments(body))
 
 
 def compare_experiment_to_baseline(*, exp_id: str, baseline_id: str) -> dict[str, Any]:

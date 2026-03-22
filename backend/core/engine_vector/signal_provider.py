@@ -30,6 +30,10 @@ _STABLE_SIGNAL_DIAGNOSTIC_DEFAULTS: dict[str, Any] = {
     "conflict_resolution_count": 0,
     "source_only_exit_count": 0,
     "global_risk_override_count": 0,
+    "bull_breakout_quality_veto_applied": False,
+    "bull_breakout_quality_veto_block_count": 0,
+    "bull_breakout_quality_veto_residual_block_count": 0,
+    "bull_breakout_quality_veto_margin_block_count": 0,
 }
 
 
@@ -112,6 +116,11 @@ class DaySignals:
     strength_map: dict[str, float] = field(default_factory=dict)
     mf_score_map: dict[str, float] = field(default_factory=dict)
     mf_gate_on_today: bool = False
+    overlay_score_map: dict[str, float] = field(default_factory=dict)
+    overlay_gate_on_today: bool = False
+    overlay_mode: str = "off"
+    overlay_observation_date: date | None = None
+    overlay_score_source: str = ""
     strong_risk_on: bool = False
     exit_counts: ExitCounts = field(default_factory=ExitCounts)
     diagnostics: dict[str, Any] = field(default_factory=dict)

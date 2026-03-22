@@ -25,7 +25,7 @@ from backend.core.engine_vector.signal_matrix import build_signal_matrices
 from backend.core.portfolio.metrics import compute_backtest_metrics
 from backend.core.portfolio.nav_snapshot import compute_nav_snapshot
 from backend.core.portfolio.portfolio_runtime import build_rebalance_orders
-from backend.core.portfolio.price_index import build_backtest_price_indices
+from backend.core.portfolio.price_index import build_backtest_hfq_indices, build_backtest_price_indices
 from backend.core.portfolio.sizing import calc_buy_slots
 from backend.core.portfolio.types import PortfolioBacktestResult
 from backend.core.strategies.breakout_trend import BreakoutTrendStrategy
@@ -141,12 +141,13 @@ def _run_vector_portfolio_backtest_breakout(
         _bench_close = pd.Series(_bench_close_s.to_numpy(dtype=float), index=_bench_df["date"])
         _bench_close = _bench_close.reindex(day_ts_list)
 
+        _long_ma_window = max(2, int(getattr(_mf_cfg, "long_ma_window", 200)))
         _slope_window = max(1, int(_mf_cfg.slope_window))
         _slope_ma_period = max(2, int(getattr(_mf_cfg, "slope_ma_period", 50)))
         _ema_s = _bench_close.ewm(span=_slope_ma_period, adjust=False).mean()
         _prev = _ema_s.shift(_slope_window)
         _momentum = (_ema_s - _prev) / _prev
-        _ma200 = _bench_close.rolling(200, min_periods=200).mean()
+        _ma200 = _bench_close.rolling(_long_ma_window, min_periods=_long_ma_window).mean()
 
         _bc = _bench_close.to_numpy(dtype=float)
         _mom = _momentum.to_numpy(dtype=float)
@@ -221,6 +222,10 @@ def _run_vector_portfolio_backtest_breakout(
         history=_raw_hist,
         trading_days=day_list,
     )
+    hfq_close_idx, adj_factor_idx = build_backtest_hfq_indices(
+        history=_raw_hist,
+        trading_days=day_list,
+    )
     del _raw_hist
 
     _cc = cost_cfg if cost_cfg is not None else CostConfig()
@@ -232,6 +237,7 @@ def _run_vector_portfolio_backtest_breakout(
     pending: dict[date, list[dict[str, Any]]] = {}
     positions: dict[str, int] = {}
     position_avg_cost: dict[str, float] = {}
+    position_entry_adj: dict[str, float] = {}
     holding_sources: dict[str, dict[str, Any]] = {}
     cash = float(initial_cash)
     peak_nav = float(initial_cash)
@@ -274,6 +280,7 @@ def _run_vector_portfolio_backtest_breakout(
                 if positions[od["symbol"]] <= 0:
                     positions.pop(od["symbol"], None)
                     position_avg_cost.pop(od["symbol"], None)
+                    position_entry_adj.pop(od["symbol"], None)
                     # fill hook: last_sell_day
                     if provider.last_sell_day is not None:
                         provider.last_sell_day[od["symbol"]] = day
@@ -309,10 +316,14 @@ def _run_vector_portfolio_backtest_breakout(
                 traded_value += gross
                 prev_qty = int(positions.get(od["symbol"], 0))
                 prev_avg = float(position_avg_cost.get(od["symbol"], 0.0))
+                prev_entry_adj = float(position_entry_adj.get(od["symbol"], 1.0) or 1.0)
                 new_qty = prev_qty + qty
                 new_avg = ((prev_qty * prev_avg) + (qty * fill_px)) / float(new_qty) if new_qty > 0 else 0.0
                 positions[od["symbol"]] = new_qty
                 position_avg_cost[od["symbol"]] = float(new_avg)
+                buy_entry_adj = float(adj_factor_idx.get((day, od["symbol"]), 1.0) or 1.0)
+                denom = (float(prev_qty) / max(prev_entry_adj, 1e-8)) + (float(qty) / max(buy_entry_adj, 1e-8))
+                position_entry_adj[od["symbol"]] = (float(new_qty) / denom) if denom > 1e-8 else 1.0
                 risk_off_partial_state = getattr(provider, "_risk_off_partial_state", None)
                 if prev_qty <= 0 and isinstance(risk_off_partial_state, dict):
                     risk_off_partial_state.pop(od["symbol"], None)
@@ -348,7 +359,14 @@ def _run_vector_portfolio_backtest_breakout(
                 })
 
         # ── NAV snapshot ──
-        nav, market_value, pos_values = compute_nav_snapshot(cash=cash, positions=positions, close_idx=close_idx, day=day)
+        nav, market_value, pos_values = compute_nav_snapshot(
+            cash=cash,
+            positions=positions,
+            close_idx=close_idx,
+            day=day,
+            hfq_close_idx=hfq_close_idx,
+            position_entry_adj=position_entry_adj,
+        )
         peak_nav = max(peak_nav, nav)
         daily_ret = (nav / prev_nav - 1.0) if prev_nav > 0 else 0.0
         drawdown = (nav / peak_nav - 1.0) if peak_nav > 0 else 0.0

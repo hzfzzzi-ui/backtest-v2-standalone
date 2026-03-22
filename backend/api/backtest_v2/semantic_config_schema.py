@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-SEMANTIC_CONFIG_SCHEMA_VERSION = "2026-03-11"
-_SUPPORTED_MULTI_ALPHA_MODULES = frozenset({"breakout_55", "rsi_reversal"})
+SEMANTIC_CONFIG_SCHEMA_VERSION = "2026-03-20"
+_SUPPORTED_MULTI_ALPHA_MODULES = frozenset({"breakout_55", "rsi_reversal", "moneyflow_monthly"})
 _SUPPORTED_MULTI_ALPHA_COMPOSE_MODES = frozenset({"REGIME_ROUTE"})
 _SUPPORTED_MULTI_ALPHA_SAME_SYMBOL_POLICIES = frozenset({"PREFER_HIGHER_SCORE"})
 _SUPPORTED_MULTI_ALPHA_HOLDING_OWNERSHIP = frozenset({"SOURCE_ONLY"})
@@ -19,6 +19,7 @@ class UniverseFiltersConfig(StrictModel):
     exclude_st: bool | None = None
     exclude_delisted: bool | None = None
     exclude_suspended: bool | None = None
+    exclude_star_market: bool | None = None
     min_list_days: int | None = None
     min_avg_turnover_20d: float | None = None
     min_avg_turnover_rate_20d: float | None = None
@@ -123,6 +124,9 @@ class RankingConfig(StrictModel):
     breakout_quality_margin_cap_pct: float | None = None
     breakout_quality_fade_cap_pct: float | None = None
     breakout_quality_open_gap_cap_pct: float | None = None
+    bull_breakout_quality_veto_enabled: bool | None = None
+    bull_breakout_quality_veto_min_residual_strength_score: float | None = None
+    bull_breakout_quality_veto_min_breakout_margin_score: float | None = None
     residual_window_regime_mode: str | None = None
     residual_window_fallback: int | None = None
     residual_window_regime_fast_ma: int | None = None
@@ -197,6 +201,7 @@ class SignalCompositionConfig(StrictModel):
     compose_mode: str | None = None
     modules: list[SignalCompositionModuleConfig] | None = None
     regime_matrix: dict[str, list[str]] | None = None
+    market_state_weight_overrides: dict[str, dict[str, float]] | None = None
     same_symbol_policy: str | None = None
     holding_ownership: str | None = None
     score_threshold: float | None = None
@@ -295,6 +300,7 @@ class RiskBudgetConfig(StrictModel):
 
 class MarketFilterConfig(StrictModel):
     enabled: bool | None = None
+    long_ma_window: int | None = None
     slope_ma_period: int | None = None
     slope_window: int | None = None
     bull_multiplier: float | None = None
@@ -302,6 +308,7 @@ class MarketFilterConfig(StrictModel):
     trans_down_multiplier: float | None = None
     trans_up_multiplier: float | None = None
     bear_multiplier: float | None = None
+    freeze_trans_up_entries: bool | None = None
     ema_light_fast: int | None = None
     ema_light_slow: int | None = None
 
@@ -324,6 +331,83 @@ class BreadthConfig(StrictModel):
     gate_quantile_pct: float | None = None
     gate_persist_days: int | None = None
     size_scale_floor: float | None = None
+
+
+class RegimeEngineTrendBlockConfig(StrictModel):
+    enabled: bool | None = None
+    long_ma_window: int | None = None
+    slope_window: int | None = None
+    breakout_lookback: int | None = None
+
+
+class RegimeEngineRiskBlockConfig(StrictModel):
+    enabled: bool | None = None
+    realized_vol_window: int | None = None
+    atr_window: int | None = None
+    drawdown_window: int | None = None
+
+
+class RegimeEngineBreadthBlockConfig(StrictModel):
+    enabled: bool | None = None
+    universe: Literal["benchmark_constituents", "strategy_universe"] | None = None
+    above_ma_short_window: int | None = None
+    above_ma_long_window: int | None = None
+    new_high_low_window: int | None = None
+
+
+class RegimeEngineParticipationBlockConfig(StrictModel):
+    enabled: bool | None = None
+    turnover_window: int | None = None
+    amount_window: int | None = None
+    use_turnover_rate: bool | None = None
+
+
+class RegimeEnginePersistenceConfig(StrictModel):
+    entry_confirm_bars: int | None = None
+    exit_confirm_bars: int | None = None
+    min_state_duration: int | None = None
+    confidence_floor: float | None = None
+    transition_cooldown: int | None = None
+
+
+class RegimeEngineFallbackConfig(StrictModel):
+    on_feature_unavailable: Literal["ma200_legacy", "disabled"] | None = None
+    required_blocks: list[
+        Literal["trend_block", "risk_block", "breadth_block", "participation_block"]
+    ] | None = None
+    emit_feature_availability: bool | None = None
+
+
+class WeeklyFiveStateRegimeConfig(StrictModel):
+    benchmark: str | None = None
+    ma_window: int | None = None
+    ma_slope_lookback: int | None = None
+    ret_short_window: int | None = None
+    ret_long_window: int | None = None
+    adx_window: int | None = None
+    weekly_rule: str | None = None
+    upgrade_confirm_weeks: int | None = None
+    downgrade_confirm_weeks: int | None = None
+    turn_weak_budget: float | None = None
+    risk_budget_mode: Literal["five_state", "three_state", "asymmetric_budget"] | None = None
+
+
+class LegacyTurnWeakOverlayConfig(StrictModel):
+    enabled: bool | None = None
+    weekly_cfg: WeeklyFiveStateRegimeConfig | None = None
+
+
+class RegimeEngineConfig(StrictModel):
+    engine: Literal["ma200_legacy", "market_regime_framework", "weekly_five_state"] | None = None
+    benchmark: str | None = None
+    trend_block: RegimeEngineTrendBlockConfig | None = None
+    risk_block: RegimeEngineRiskBlockConfig | None = None
+    breadth_block: RegimeEngineBreadthBlockConfig | None = None
+    participation_block: RegimeEngineParticipationBlockConfig | None = None
+    persistence: RegimeEnginePersistenceConfig | None = None
+    fallback: RegimeEngineFallbackConfig | None = None
+    weekly_five_state: WeeklyFiveStateRegimeConfig | None = None
+    legacy_turn_weak_overlay: LegacyTurnWeakOverlayConfig | None = None
 
 
 class CostModelConfig(StrictModel):
@@ -370,6 +454,10 @@ class FlowScriptConfig(StrictModel):
     recommended_preset: str | None = None
 
 
+class DataSourceSemanticConfig(StrictModel):
+    data_role: str | None = None
+
+
 class FrontendSemanticConfig(StrictModel):
     asset_scope: str | None = None
     mode: str | None = None
@@ -388,6 +476,8 @@ class FrontendSemanticConfig(StrictModel):
     position_risk: PositionRiskConfig | None = None
     sizing: SizingConfig | None = None
     flow_script: FlowScriptConfig | None = None
+    data_source: DataSourceSemanticConfig | None = None
+    regime_engine: RegimeEngineConfig | None = None
     exit_priority: list[str] | None = None
 
 

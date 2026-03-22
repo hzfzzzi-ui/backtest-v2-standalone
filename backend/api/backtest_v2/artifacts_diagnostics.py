@@ -607,6 +607,15 @@ def _build_counters(
     counters["cap_hit_industry"] = int(diag.get("BLOCK_INDUSTRY_CAP", 0) or 0)
     counters["min_hold_block_count"] = int(diag.get("BLOCK_MIN_HOLD", 0) or 0)
     counters["cooldown_block_count"] = int(diag.get("BLOCK_COOLDOWN", 0) or 0)
+    counters["bull_breakout_quality_veto_block_count"] = int(
+        result.get("bull_breakout_quality_veto_block_count", 0) or 0
+    )
+    counters["bull_breakout_quality_veto_residual_block_count"] = int(
+        result.get("bull_breakout_quality_veto_residual_block_count", 0) or 0
+    )
+    counters["bull_breakout_quality_veto_margin_block_count"] = int(
+        result.get("bull_breakout_quality_veto_margin_block_count", 0) or 0
+    )
     counters["entry_above_slow_ma_block_count"] = int(result.get("entry_above_slow_ma_block_count", 0) or 0)
     counters["entry_slope_block_count"] = int(result.get("entry_slope_block_count", 0) or 0)
     counters["regime_trend_days"] = int(result.get("regime_trend_days", 0) or 0)

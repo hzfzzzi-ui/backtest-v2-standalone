@@ -237,6 +237,15 @@ def _apply_ranking_cfg(strategy: dict[str, Any], sig: dict[str, Any]) -> None:
     strategy["params"]["breakout_quality_open_gap_cap_pct"] = float(
         ranking.get("breakout_quality_open_gap_cap_pct", 0.04) or 0.04
     )
+    strategy["params"]["bull_breakout_quality_veto_enabled"] = bool(
+        ranking.get("bull_breakout_quality_veto_enabled", False)
+    )
+    strategy["params"]["bull_breakout_quality_veto_min_residual_strength_score"] = float(
+        ranking.get("bull_breakout_quality_veto_min_residual_strength_score", 0.0) or 0.0
+    )
+    strategy["params"]["bull_breakout_quality_veto_min_breakout_margin_score"] = float(
+        ranking.get("bull_breakout_quality_veto_min_breakout_margin_score", 0.0) or 0.0
+    )
     strategy["params"]["leadership_route_bucket_count"] = int(
         ranking.get("leadership_route_bucket_count", 3) or 3
     )
@@ -287,6 +296,7 @@ def _apply_market_filter_cfg(cfg: dict[str, Any], pos_risk: dict[str, Any]) -> N
         return
     market_filter = cfg.setdefault("market_filter", {})
     market_filter["enabled"] = bool(mf_cfg.get("enabled", False))
+    market_filter["long_ma_window"] = int(mf_cfg.get("long_ma_window", 200))
     market_filter["slope_window"] = int(mf_cfg.get("slope_window", 10))
     market_filter["slope_ma_period"] = int(mf_cfg.get("slope_ma_period", 50))
     market_filter["bull_multiplier"] = float(mf_cfg.get("bull_multiplier", 1.5))
@@ -297,6 +307,7 @@ def _apply_market_filter_cfg(cfg: dict[str, Any], pos_risk: dict[str, Any]) -> N
         market_filter["trans_up_multiplier"] = float(mf_cfg.get("trans_up_multiplier"))
     if mf_cfg.get("bear_multiplier") is not None:
         market_filter["bear_multiplier"] = float(mf_cfg.get("bear_multiplier"))
+    market_filter["freeze_trans_up_entries"] = bool(mf_cfg.get("freeze_trans_up_entries", False))
     market_filter["ema_light_fast"] = int(mf_cfg.get("ema_light_fast", 5))
     market_filter["ema_light_slow"] = int(mf_cfg.get("ema_light_slow", 20))
 

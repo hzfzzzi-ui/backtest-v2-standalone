@@ -61,8 +61,10 @@ def test_migrated_top_level_scripts_are_thin_wrappers() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     expected = {
         "baseline_regression_check.py": "backend.cli.managed.baseline_regression_check",
+        "fetch_csi1000_pit_by_calendar.py": "backend.cli.managed.fetch_csi1000_pit_by_calendar",
         "report_consistency_check.py": "backend.cli.managed.report_consistency_check",
         "refresh_csi1000_pit.py": "backend.cli.managed.refresh_csi1000_pit",
+        "refresh_csi800_pit.py": "backend.cli.managed.refresh_csi800_pit",
         "refresh_security_master.py": "backend.cli.managed.refresh_security_master",
         "update_pams_ohlcv_daily.py": "backend.cli.managed.update_pams_ohlcv_daily",
     }

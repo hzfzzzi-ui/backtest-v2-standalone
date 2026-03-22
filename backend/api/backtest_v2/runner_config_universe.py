@@ -43,7 +43,7 @@ def apply_universe_runtime_cfg(
         if getattr(body, "symbols", None):
             universe["symbols"] = list(getattr(body, "symbols"))
     if wb_filters:
-        universe["filters"] = {
+        filters = {
             "exclude_st": bool(wb_filters.get("exclude_st", True)),
             "exclude_delisted": bool(wb_filters.get("exclude_delisted", True)),
             "exclude_suspended": bool(wb_filters.get("exclude_suspended", True)),
@@ -56,3 +56,6 @@ def apply_universe_runtime_cfg(
             "atr_pct_range": str(wb_filters.get("atr_pct_range", "0,100")),
             "limit_rule": str(wb_filters.get("limit_rule", "ignore")),
         }
+        if "exclude_star_market" in wb_filters:
+            filters["exclude_star_market"] = bool(wb_filters.get("exclude_star_market"))
+        universe["filters"] = filters

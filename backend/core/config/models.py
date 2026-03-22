@@ -31,12 +31,36 @@ class UniverseConfig:
 
 @dataclass(slots=True)
 class DataSourceConfig:
+    data_role: str = "v1"
     stocks_table: str = "pams_ohlcv_daily"
+    v2_canonical_stocks_table: str = "pams_ohlcv_daily_v2"
+    v2_runtime_stocks_table: str = "pams_ohlcv_daily_v2_runtime"
+    v2_schema_mapping_table: str = "pams_ohlcv_daily_v2"
     index_table: str = "pit_index_daily"
     prefer_index_table: bool = True
     allow_cn_index_in_stocks_table: bool = False
     cn_index_filter_column: str = "market"
     cn_index_filter_value: str = "CN_INDEX"
+
+    def resolved_data_role(self) -> str:
+        role = str(self.data_role or "v1").strip().lower()
+        if role not in {"v1", "v2_canonical", "v2_runtime"}:
+            return "v1"
+        return role
+
+    def resolved_stocks_table(self) -> str:
+        role = self.resolved_data_role()
+        if role == "v2_canonical":
+            return str(self.v2_canonical_stocks_table or self.stocks_table)
+        if role == "v2_runtime":
+            return str(self.v2_runtime_stocks_table or self.v2_canonical_stocks_table or self.stocks_table)
+        return str(self.stocks_table)
+
+    def resolved_stocks_mapping_table(self) -> str:
+        role = self.resolved_data_role()
+        if role in {"v2_canonical", "v2_runtime"}:
+            return str(self.v2_schema_mapping_table or self.v2_canonical_stocks_table or self.stocks_table)
+        return str(self.stocks_table)
 
 
 @dataclass(slots=True)
@@ -169,6 +193,7 @@ class RiskBudgetConfig:
 @dataclass(slots=True)
 class MarketFilterConfig:
     enabled: bool = False
+    long_ma_window: int = 200
     slope_window: int = 10
     slope_ma_period: int = 50
     bull_multiplier: float = 1.5
@@ -177,6 +202,7 @@ class MarketFilterConfig:
     trans_down_multiplier: float | None = None
     trans_up_multiplier: float | None = None
     bear_multiplier: float | None = None
+    freeze_trans_up_entries: bool = False
     ema_light_fast: int = 5
     ema_light_slow: int = 20
 
@@ -211,6 +237,90 @@ class BreadthConfig:
 
 
 @dataclass(slots=True)
+class RegimeEngineTrendBlockConfig:
+    enabled: bool = True
+    long_ma_window: int = 200
+    slope_window: int = 20
+    breakout_lookback: int = 20
+
+
+@dataclass(slots=True)
+class RegimeEngineRiskBlockConfig:
+    enabled: bool = True
+    realized_vol_window: int = 20
+    atr_window: int = 14
+    drawdown_window: int = 60
+
+
+@dataclass(slots=True)
+class RegimeEngineBreadthBlockConfig:
+    enabled: bool = True
+    universe: str = "benchmark_constituents"
+    above_ma_short_window: int = 50
+    above_ma_long_window: int = 200
+    new_high_low_window: int = 20
+
+
+@dataclass(slots=True)
+class RegimeEngineParticipationBlockConfig:
+    enabled: bool = True
+    turnover_window: int = 20
+    amount_window: int = 20
+    use_turnover_rate: bool = True
+
+
+@dataclass(slots=True)
+class RegimeEnginePersistenceConfig:
+    entry_confirm_bars: int = 3
+    exit_confirm_bars: int = 2
+    min_state_duration: int = 5
+    confidence_floor: float = 0.55
+    transition_cooldown: int = 3
+
+
+@dataclass(slots=True)
+class RegimeEngineFallbackConfig:
+    on_feature_unavailable: str = "ma200_legacy"
+    required_blocks: list[str] = field(default_factory=lambda: ["trend_block", "risk_block"])
+    emit_feature_availability: bool = True
+
+
+@dataclass(slots=True)
+class WeeklyFiveStateRegimeConfig:
+    benchmark: str = "000001.SH"
+    ma_window: int = 120
+    ma_slope_lookback: int = 20
+    ret_short_window: int = 60
+    ret_long_window: int = 120
+    adx_window: int = 20
+    weekly_rule: str = "W-FRI"
+    upgrade_confirm_weeks: int = 2
+    downgrade_confirm_weeks: int = 1
+    turn_weak_budget: float = 0.15
+    risk_budget_mode: str = "five_state"
+
+
+@dataclass(slots=True)
+class LegacyTurnWeakOverlayConfig:
+    enabled: bool = False
+    weekly_cfg: WeeklyFiveStateRegimeConfig = field(default_factory=WeeklyFiveStateRegimeConfig)
+
+
+@dataclass(slots=True)
+class RegimeEngineConfig:
+    engine: str = "ma200_legacy"
+    benchmark: str = ""
+    trend_block: RegimeEngineTrendBlockConfig = field(default_factory=RegimeEngineTrendBlockConfig)
+    risk_block: RegimeEngineRiskBlockConfig = field(default_factory=RegimeEngineRiskBlockConfig)
+    breadth_block: RegimeEngineBreadthBlockConfig = field(default_factory=RegimeEngineBreadthBlockConfig)
+    participation_block: RegimeEngineParticipationBlockConfig = field(default_factory=RegimeEngineParticipationBlockConfig)
+    persistence: RegimeEnginePersistenceConfig = field(default_factory=RegimeEnginePersistenceConfig)
+    fallback: RegimeEngineFallbackConfig = field(default_factory=RegimeEngineFallbackConfig)
+    weekly_five_state: WeeklyFiveStateRegimeConfig = field(default_factory=WeeklyFiveStateRegimeConfig)
+    legacy_turn_weak_overlay: LegacyTurnWeakOverlayConfig = field(default_factory=LegacyTurnWeakOverlayConfig)
+
+
+@dataclass(slots=True)
 class BacktestConfig:
     db: DBConfig
     db_runtime: DBRuntimeConfig
@@ -224,6 +334,7 @@ class BacktestConfig:
     exit: ExitConfig = field(default_factory=ExitConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
     risk_budget: RiskBudgetConfig = field(default_factory=RiskBudgetConfig)
+    regime_engine: RegimeEngineConfig = field(default_factory=RegimeEngineConfig)
     market_filter: MarketFilterConfig = field(default_factory=MarketFilterConfig)
     benchmark_regime: BenchmarkRegimeConfig = field(default_factory=BenchmarkRegimeConfig)
     breadth: BreadthConfig = field(default_factory=BreadthConfig)

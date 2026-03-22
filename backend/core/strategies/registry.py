@@ -480,13 +480,20 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
             ),
             ranking_mode=str(params.get("ranking_mode", "none") or "none"),
             leadership_route_bucket_count=int(params.get("leadership_route_bucket_count", 3)),
-            breakout_quality_gate_min_score=float(params.get("breakout_quality_gate_min_score", 0.55)),
-            breakout_quality_margin_cap_pct=float(params.get("breakout_quality_margin_cap_pct", 0.08)),
-            breakout_quality_fade_cap_pct=float(params.get("breakout_quality_fade_cap_pct", 0.035)),
-            breakout_quality_open_gap_cap_pct=float(params.get("breakout_quality_open_gap_cap_pct", 0.04)),
-            residual_window_regime_mode=str(params.get("residual_window_regime_mode", "off")),
-            residual_window_fallback=int(params.get("residual_window_fallback", params.get("residual_window", 60))),
-            residual_window_regime_fast_ma=int(params.get("residual_window_regime_fast_ma", 120)),
+              breakout_quality_gate_min_score=float(params.get("breakout_quality_gate_min_score", 0.55)),
+              breakout_quality_margin_cap_pct=float(params.get("breakout_quality_margin_cap_pct", 0.08)),
+              breakout_quality_fade_cap_pct=float(params.get("breakout_quality_fade_cap_pct", 0.035)),
+              breakout_quality_open_gap_cap_pct=float(params.get("breakout_quality_open_gap_cap_pct", 0.04)),
+              bull_breakout_quality_veto_enabled=bool(params.get("bull_breakout_quality_veto_enabled", False)),
+              bull_breakout_quality_veto_min_residual_strength_score=float(
+                  params.get("bull_breakout_quality_veto_min_residual_strength_score", 0.0)
+              ),
+              bull_breakout_quality_veto_min_breakout_margin_score=float(
+                  params.get("bull_breakout_quality_veto_min_breakout_margin_score", 0.0)
+              ),
+              residual_window_regime_mode=str(params.get("residual_window_regime_mode", "off")),
+              residual_window_fallback=int(params.get("residual_window_fallback", params.get("residual_window", 60))),
+              residual_window_regime_fast_ma=int(params.get("residual_window_regime_fast_ma", 120)),
             residual_window_regime_slow_ma=int(params.get("residual_window_regime_slow_ma", 200)),
             source_aware_residual_mode=str(params.get("source_aware_residual_mode", "off")),
             residual_refine_mode=str(params.get("residual_refine_mode", "off")),

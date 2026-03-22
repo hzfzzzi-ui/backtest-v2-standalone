@@ -75,6 +75,8 @@ def test_apply_open_fills_buy_updates_avg_cost_and_buy_side_effects() -> None:
     runtime = SimpleNamespace(
         open_idx={(trading_day, "sh600001"): 10.0},
         close_idx={(trading_day, "sh600001"): 10.2},
+        hfq_close_idx={(trading_day, "sh600001"): 102.0},
+        adj_factor_idx={(trading_day, "sh600001"): 10.0},
         _slip_bps=0.001,
         _comm_rate=0.0005,
         _comm_min=1.0,
@@ -84,6 +86,7 @@ def test_apply_open_fills_buy_updates_avg_cost_and_buy_side_effects() -> None:
         _traded_value_today=0.0,
         positions={},
         position_avg_cost={},
+        position_entry_adj={},
         holding_sources={},
         provider=SimpleNamespace(
             entry_day={},
@@ -104,6 +107,7 @@ def test_apply_open_fills_buy_updates_avg_cost_and_buy_side_effects() -> None:
 
     assert runtime.positions == {"sh600001": 100}
     assert round(runtime.position_avg_cost["sh600001"], 2) == 10.01
+    assert runtime.position_entry_adj["sh600001"] == 10.0
     assert round(runtime.cash, 2) == 998.0
     assert round(runtime._traded_value_today, 2) == 1001.0
     assert runtime.provider.entry_day["sh600001"] == trading_day
@@ -112,6 +116,43 @@ def test_apply_open_fills_buy_updates_avg_cost_and_buy_side_effects() -> None:
     assert runtime.trade_rows[0]["side"] == "BUY"
     assert runtime.trade_rows[0]["reason_code"] == "ENTRY"
     assert runtime.trade_rows[0]["triggered_rule"] == "RULE_Y"
+
+
+def test_prepare_daily_snapshot_uses_hfq_valuation_when_entry_adj_present() -> None:
+    trading_day = date(2015, 4, 1)
+    runtime = SimpleNamespace(
+        cash=0.0,
+        positions={"sz000540": 17000},
+        position_entry_adj={"sz000540": 19.863},
+        close_idx={(trading_day, "sz000540"): 14.13},
+        hfq_close_idx={(trading_day, "sz000540"): 705.70872},
+        peak_nav=0.0,
+        prev_nav=608260.0,
+        _traded_value_today=0.0,
+        daily_rows=[],
+        _compute_day_controls=lambda *_args, **_kwargs: {
+            "effective_max_positions": 10,
+            "dd_state": "NORMAL",
+            "regime_engine": "weekly_five_state",
+            "market_state_5": "LIGHT_TREND",
+            "market_state_score": 3,
+            "market_state_raw": "LIGHT_TREND",
+            "market_state_smoothed": "LIGHT_TREND",
+            "risk_budget_multiplier": 0.4,
+            "weekly_observation_flag": False,
+            "market_state": "TRANS_UP",
+            "trade_mode": "TREND_LIGHT",
+            "benchmark_regime_on": True,
+            "feature_availability": {},
+            "risk_on_today": True,
+        },
+        _last_accounting_snapshot=None,
+    )
+
+    snapshot = prepare_daily_snapshot(runtime, day_index=0, day=trading_day)
+
+    assert round(snapshot.market_value, 2) == 603989.74
+    assert round(snapshot.nav, 2) == 603989.74
 
 
 def test_apply_open_fills_buy_persists_entry_source_fields() -> None:
@@ -617,6 +658,7 @@ def test_prepare_daily_snapshot_updates_nav_trackers_and_daily_row() -> None:
             "trade_mode": "",
             "benchmark_regime_on": True,
             "risk_on_today": True,
+            "regime_engine": "ma200_legacy",
         },
     )
 
@@ -630,6 +672,9 @@ def test_prepare_daily_snapshot_updates_nav_trackers_and_daily_row() -> None:
     assert runtime.daily_rows[0]["date"] == "2026-03-02"
     assert runtime.daily_rows[0]["positions_count"] == 1
     assert round(runtime.daily_rows[0]["turnover_pct"], 2) == 0.10
+    assert runtime.daily_rows[0]["regime_engine"] == "ma200_legacy"
+    assert runtime.daily_rows[0]["regime_transition_reason"] == ""
+    assert runtime.daily_rows[0]["feature_availability_json"] == "{}"
 
 
 def test_apply_daily_decision_diagnostics_populates_multifactor_sorting_fields() -> None:
@@ -918,6 +963,105 @@ def test_apply_daily_decision_diagnostics_keeps_breakout_counts_raw_for_artifact
     assert diagnostics_input["raw_after_slot_filter_count"] is None
 
 
+def test_apply_daily_decision_diagnostics_populates_moneyflow_overlay_fields() -> None:
+    runtime = SimpleNamespace(
+        daily_rows=[
+            {
+                "date": "2026-03-02",
+                "positions_count": 0,
+                "positions_count_end_of_day": 0,
+                "candidates_count": 0,
+                "selected_count": 0,
+                "buy_slots_before_buy": 0,
+                "buy_slots_after_sell": 0,
+                "buy_candidate_count": 0,
+                "after_held_filter_count": 0,
+                "positions_before_sell": 0,
+                "sells_executed_count": 0,
+                "positions_after_sell": 0,
+                "buy_slots_calculated": 0,
+                "raw_buy_signal_count": 0,
+                "raw_alpha_signal_count": 0,
+                "composed_buy_signal_count": 0,
+                "composed_sell_signal_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "candidates_after_held_filter_count": 0,
+                "sorting_triggered": False,
+                "mf_rank_triggered": 0,
+                "mf_rank_applied": 0,
+                "mf_candidates_when_triggered": 0,
+                "mf_topk_reject_count": 0,
+                "mf_concentrated_selected_count": 0,
+                "mf_gate_on": 0,
+                "moneyflow_overlay_enabled": 0,
+                "moneyflow_overlay_mode": "off",
+                "moneyflow_overlay_gate_on": 0,
+                "moneyflow_overlay_observation_date": "",
+                "moneyflow_overlay_score_source": "",
+                "strong_risk_on": 0,
+                "mf_rank_suppressed_by_strong_gate": 0,
+                "same_symbol_conflict_count": 0,
+                "sleeve_budget_reject_count": 0,
+                "source_only_exit_count": 0,
+                "global_risk_override_count": 0,
+            }
+        ],
+        route_id="strict_inline_runtime",
+        _current_day={"controls": {"effective_max_positions": 2}},
+        positions={},
+        composition_audit_rows=[],
+    )
+    buy_signal = SimpleNamespace(symbol="SH600001", meta={})
+    day_signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={"sh600001": 0.91},
+        mf_gate_on_today=False,
+        overlay_score_map={"sh600001": 0.73},
+        overlay_gate_on_today=True,
+        overlay_mode="tiebreak",
+        overlay_observation_date=date(2026, 2, 28),
+        overlay_score_source="LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY",
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={
+            "raw_buy_signal_count": 1,
+            "moneyflow_overlay_enabled": True,
+            "moneyflow_overlay_gate_on": True,
+            "moneyflow_overlay_mode": "tiebreak",
+            "moneyflow_overlay_observation_date": "2026-02-28",
+            "moneyflow_overlay_score_source": "LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY",
+            "composition_enabled": False,
+        },
+    )
+
+    apply_daily_decision_diagnostics(
+        runtime,
+        day_signals=day_signals,
+        debug_plan={
+            "buy_candidates_count": 1,
+            "buy_slots": 1,
+            "selected_symbols": ["sh600001"],
+            "selected_count": 1,
+            "moneyflow_overlay_enabled": True,
+            "moneyflow_overlay_mode": "tiebreak",
+            "moneyflow_overlay_gate_on": True,
+            "moneyflow_overlay_observation_date": "2026-02-28",
+            "moneyflow_overlay_score_source": "LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY",
+        },
+    )
+
+    daily_row = runtime.daily_rows[-1]
+    assert daily_row["moneyflow_overlay_enabled"] == 1
+    assert daily_row["moneyflow_overlay_mode"] == "tiebreak"
+    assert daily_row["moneyflow_overlay_gate_on"] == 1
+    assert daily_row["moneyflow_overlay_observation_date"] == "2026-02-28"
+    assert daily_row["moneyflow_overlay_score_source"] == "LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY"
+
+
 def test_build_portfolio_backtest_result_preserves_metrics_shape() -> None:
     captured: dict[str, object] = {}
 
@@ -934,10 +1078,30 @@ def test_build_portfolio_backtest_result_preserves_metrics_shape() -> None:
     )
     try:
         runtime = SimpleNamespace(
-            daily_rows=[{"date": "2026-03-02", "nav": 1.0, "drawdown": 0.0}],
+            daily_rows=[{
+                "date": "2026-03-02",
+                "nav": 1.0,
+                "drawdown": 0.0,
+                "market_state": "BULL",
+                "regime_confidence": 0.40,
+                "regime_transition_reason": "CONFIDENCE_FLOOR_HOLD",
+                "feature_availability_json": json.dumps(
+                    {
+                        "required_blocks_ready": False,
+                        "fallback_active": True,
+                    }
+                ),
+            }],
             trade_rows=[{"date": "2026-03-02", "symbol": "sh600000", "side": "BUY"}],
             candidate_rows=[{"date": "2026-03-02", "symbol": "sh600000"}],
-            request=SimpleNamespace(max_positions=5, enable_strength_rank=False, strength_ma=120),
+            request=SimpleNamespace(
+                max_positions=5,
+                enable_strength_rank=False,
+                strength_ma=120,
+                regime_engine_cfg=SimpleNamespace(
+                    persistence=SimpleNamespace(confidence_floor=0.55)
+                ),
+            ),
             provider=SimpleNamespace(
                 precompute_seconds=1.25,
                 blocked_by_trend_count=3,
@@ -968,3 +1132,8 @@ def test_build_portfolio_backtest_result_preserves_metrics_shape() -> None:
     assert result.metrics["exit_atr_stop_count"] == 2
     assert result.metrics["exit_ma20_count"] == 1
     assert result.metrics["trade_mode_notrade_days"] == 7
+    assert result.metrics["regime_confidence_mean"] == 0.4
+    assert result.metrics["regime_low_confidence_days"] == 1
+    assert result.metrics["regime_switch_count"] == 0
+    assert result.metrics["regime_transition_reason_counts"] == {"CONFIDENCE_FLOOR_HOLD": 1}
+    assert result.metrics["regime_feature_unavailable_days"] == 1

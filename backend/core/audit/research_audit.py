@@ -9,6 +9,7 @@ import pandas as pd
 from backend.core.data.price_limits import round_price_to_tick
 from backend.core.tools.runtime_data_access import load_runtime_data_access
 from backend.core.universe.lineage import get_universe_lineage, normalize_universe_mode
+from backend.api.backtest_v2.protocol import ARTIFACT_FILENAMES
 
 RESEARCH_AUDIT_CONTRACT_VERSION = "research_audit@1"
 RESEARCH_AUDIT_STATUSES = ("PASS", "WARN", "FAIL", "UNKNOWN")
@@ -210,6 +211,31 @@ def summarize_validation_audit_ref(raw: Any) -> dict[str, Any] | None:
     }
 
 
+def _extract_accounting_integrity_audit(
+    *,
+    result: Mapping[str, Any] | None,
+    run_meta: Mapping[str, Any] | None,
+    results_dir: Path | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    result_obj = dict(result or {})
+    run_meta_obj = dict(run_meta or {})
+    candidates = (
+        result_obj.get("accounting_integrity"),
+        (result_obj.get("metrics") or {}).get("audit", {}).get("accounting_integrity")
+        if isinstance((result_obj.get("metrics") or {}).get("audit"), Mapping)
+        else None,
+        run_meta_obj.get("accounting_integrity"),
+    )
+    for candidate in candidates:
+        if isinstance(candidate, Mapping):
+            return dict(candidate), "result"
+    if results_dir is not None:
+        audit_obj, _ = _read_json(results_dir / "audit.json")
+        if isinstance(audit_obj, Mapping) and isinstance(audit_obj.get("accounting_integrity"), Mapping):
+            return dict(audit_obj.get("accounting_integrity") or {}), "audit.json"
+    return None, None
+
+
 def aggregate_overall_status(gates: Mapping[str, Mapping[str, Any]] | None) -> str:
     statuses = [_normalize_status((gate or {}).get("status")) for gate in (gates or {}).values()]
     if any(status == "FAIL" for status in statuses):
@@ -222,7 +248,10 @@ def aggregate_overall_status(gates: Mapping[str, Mapping[str, Any]] | None) -> s
 
 def _merge_timing_meta(primary: Mapping[str, Any] | None, fallback: Mapping[str, Any] | None) -> dict[str, Any]:
     out = dict(fallback or {})
-    out.update(dict(primary or {}))
+    for key, value in dict(primary or {}).items():
+        if value in (None, "", [], {}):
+            continue
+        out[key] = value
     return out
 
 
@@ -322,6 +351,100 @@ def _infer_timing_meta_from_artifacts(
     }
 
 
+def _infer_timing_meta_from_lineage(
+    *,
+    results_dir: Path | None,
+    result: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    result_obj = dict(result or {})
+    lineage_rows_raw = (
+        (result_obj.get("metrics") or {}).get("execution_lineage_ledger")
+        if isinstance(result_obj.get("metrics"), Mapping)
+        else None
+    )
+    if isinstance(lineage_rows_raw, list):
+        lineage_rows = pd.DataFrame(lineage_rows_raw)
+    elif results_dir is not None:
+        lineage_rows, _ = _read_csv(results_dir / ARTIFACT_FILENAMES["execution_lineage_ledger"])
+    else:
+        lineage_rows = pd.DataFrame()
+    if lineage_rows.empty:
+        return {}
+    required_cols = {"signal_date", "scheduled_date", "terminal_status"}
+    if not required_cols.issubset(set(lineage_rows.columns)):
+        return {}
+
+    frame = lineage_rows.copy()
+    frame["signal_date"] = pd.to_datetime(frame["signal_date"], errors="coerce").dt.date
+    frame["scheduled_date"] = pd.to_datetime(frame["scheduled_date"], errors="coerce").dt.date
+    if "fill_date" in frame.columns:
+        frame["fill_date"] = pd.to_datetime(frame["fill_date"], errors="coerce").dt.date
+    else:
+        frame["fill_date"] = pd.NaT
+    frame["terminal_status"] = frame["terminal_status"].astype(str).str.lower().str.strip()
+    frame = frame.dropna(subset=["signal_date", "scheduled_date"])
+    if frame.empty:
+        return {}
+
+    same_day_fill_mask = (
+        frame["terminal_status"].eq("filled")
+        & frame["fill_date"].notna()
+        & (frame["fill_date"] <= frame["signal_date"])
+    )
+    schedule_drift_mask = frame["scheduled_date"] <= frame["signal_date"]
+    filled_count = int(frame["terminal_status"].eq("filled").sum())
+    if bool(same_day_fill_mask.any()):
+        return {
+            "status": "FAIL",
+            "contract_proved": False,
+            "pit_safe": None,
+            "same_day_close_fill": True,
+            "signal_observation_bar": "t_close",
+            "execution_bar": "same_day_or_earlier",
+            "proof_source": [ARTIFACT_FILENAMES["execution_lineage_ledger"]],
+            "reason": "Execution lineage ledger contains same-day or earlier fills.",
+            "lineage_metrics": {
+                "rows": int(len(frame.index)),
+                "filled_count": int(filled_count),
+                "same_day_fill_count": int(same_day_fill_mask.sum()),
+                "schedule_drift_count": int(schedule_drift_mask.sum()),
+            },
+        }
+    if bool(schedule_drift_mask.any()):
+        return {
+            "status": "FAIL",
+            "contract_proved": False,
+            "pit_safe": None,
+            "same_day_close_fill": False,
+            "signal_observation_bar": "t_close",
+            "execution_bar": "same_day_or_earlier",
+            "proof_source": [ARTIFACT_FILENAMES["execution_lineage_ledger"]],
+            "reason": "Execution lineage ledger contains same-day scheduling drift.",
+            "lineage_metrics": {
+                "rows": int(len(frame.index)),
+                "filled_count": int(filled_count),
+                "same_day_fill_count": 0,
+                "schedule_drift_count": int(schedule_drift_mask.sum()),
+            },
+        }
+    return {
+        "status": "PASS",
+        "contract_proved": True,
+        "pit_safe": None,
+        "same_day_close_fill": False,
+        "signal_observation_bar": "t_close",
+        "execution_bar": "t_plus_1_open",
+        "proof_source": [ARTIFACT_FILENAMES["execution_lineage_ledger"]],
+        "reason": "Derived from explicit signal/order/fill lineage evidence.",
+        "lineage_metrics": {
+            "rows": int(len(frame.index)),
+            "filled_count": int(filled_count),
+            "same_day_fill_count": 0,
+            "schedule_drift_count": 0,
+        },
+    }
+
+
 def evaluate_timing_alignment(
     *,
     stage_summary: Mapping[str, Any] | None,
@@ -350,7 +473,11 @@ def evaluate_timing_alignment(
         stage_summary=stage_summary,
         stage_pipeline=stage_pipeline,
     )
-    timing_meta = _merge_timing_meta(explicit_timing_meta, derived_timing_meta)
+    lineage_timing_meta = _infer_timing_meta_from_lineage(
+        results_dir=Path(results_dir) if results_dir is not None else None,
+        result=result_obj,
+    )
+    timing_meta = _merge_timing_meta(explicit_timing_meta, _merge_timing_meta(lineage_timing_meta, derived_timing_meta))
 
     mismatch_fields: list[str] = []
     summary_obj = dict(stage_summary or {})
@@ -402,6 +529,10 @@ def evaluate_timing_alignment(
         "pit_safe": bool(timing_meta.get("pit_safe")),
         "uses_fundamental_data": bool(timing_meta.get("uses_fundamental_data")),
         "uses_membership_signal": bool(timing_meta.get("uses_membership_signal")),
+        "lineage_rows": _safe_int((timing_meta.get("lineage_metrics") or {}).get("rows")),
+        "lineage_filled_count": _safe_int((timing_meta.get("lineage_metrics") or {}).get("filled_count")),
+        "lineage_same_day_fill_count": _safe_int((timing_meta.get("lineage_metrics") or {}).get("same_day_fill_count")),
+        "lineage_schedule_drift_count": _safe_int((timing_meta.get("lineage_metrics") or {}).get("schedule_drift_count")),
     }
     return {"status": status, "reason": reason, "evidence": evidence, "metrics": metrics}
 
@@ -794,6 +925,81 @@ def evaluate_result_sanity(
     return {"status": status, "reason": reason, "evidence": evidence, "metrics": metrics}
 
 
+def evaluate_accounting_integrity(
+    *,
+    result: Mapping[str, Any] | None = None,
+    run_meta: Mapping[str, Any] | None = None,
+    results_dir: Path | None = None,
+) -> dict[str, Any]:
+    payload, source = _extract_accounting_integrity_audit(
+        result=result,
+        run_meta=run_meta,
+        results_dir=results_dir,
+    )
+    if not isinstance(payload, Mapping):
+        return {
+            "status": "UNKNOWN",
+            "reason": "Missing canonical accounting integrity audit evidence.",
+            "evidence": {"source": source},
+            "metrics": {
+                "trading_days": 0,
+                "days_with_evidence": 0,
+                "missing_evidence_days": 0,
+                "cash_check_fail": 0,
+                "position_check_fail": 0,
+                "nav_check_fail": 0,
+                "negative_cash_days": 0,
+                "max_positions_breach_days": 0,
+            },
+        }
+
+    summary = dict(payload.get("summary") or {})
+    metrics = {
+        "trading_days": _safe_int(summary.get("trading_days")) or 0,
+        "days_with_evidence": _safe_int(summary.get("days_with_evidence")) or 0,
+        "missing_evidence_days": _safe_int(summary.get("missing_evidence_days")) or 0,
+        "cash_check_fail": _safe_int(summary.get("cash_check_fail")) or 0,
+        "position_check_fail": _safe_int(summary.get("position_check_fail")) or 0,
+        "nav_check_fail": _safe_int(summary.get("nav_check_fail")) or 0,
+        "invalid_nav_days": _safe_int(summary.get("invalid_nav_days")) or 0,
+        "negative_cash_days": _safe_int(summary.get("negative_cash_days")) or 0,
+        "max_positions_breach_days": _safe_int(summary.get("max_positions_breach_days")) or 0,
+    }
+    explicit_status = _normalize_status(payload.get("status"))
+    hard_fail_count = (
+        int(metrics["cash_check_fail"])
+        + int(metrics["position_check_fail"])
+        + int(metrics["nav_check_fail"])
+        + int(metrics["invalid_nav_days"])
+        + int(metrics["negative_cash_days"])
+        + int(metrics["max_positions_breach_days"])
+    )
+    if hard_fail_count > 0 or explicit_status == "FAIL":
+        status = "FAIL"
+        reason = str(payload.get("reason") or "Accounting integrity audit detected invariant violations.")
+    elif (
+        explicit_status == "PASS"
+        and int(metrics["trading_days"]) > 0
+        and int(metrics["missing_evidence_days"]) == 0
+        and int(metrics["days_with_evidence"]) == int(metrics["trading_days"])
+    ):
+        status = "PASS"
+        reason = str(payload.get("reason") or "Accounting integrity audit passed.")
+    else:
+        status = "UNKNOWN"
+        reason = str(payload.get("reason") or "Accounting integrity evidence is incomplete.")
+
+    samples = dict(payload.get("samples") or {})
+    evidence = {
+        "source": source,
+        "contract_version": payload.get("contract_version"),
+        "audit_status": explicit_status,
+        "sample_keys": [key for key, value in samples.items() if value],
+        "tolerances": dict(payload.get("tolerances") or {}),
+    }
+    return {"status": status, "reason": reason, "evidence": evidence, "metrics": metrics}
+
+
 def build_research_audit(
     *,
     results_dir: str | Path,
@@ -841,6 +1047,11 @@ def build_research_audit(
         read_errors["symbol_performance"] = symbol_perf_err
 
     gates = {
+        "accounting_integrity": evaluate_accounting_integrity(
+            result=result_obj,
+            run_meta=run_meta,
+            results_dir=root,
+        ),
         "timing_alignment": evaluate_timing_alignment(
             stage_summary=stage_summary,
             stage_pipeline=stage_pipeline,
@@ -875,9 +1086,11 @@ def build_research_audit(
         "overall_status": aggregate_overall_status(gates),
         "gates": gates,
         "evidence_refs": {
+            "audit": _clean_ref(root / "audit.json", root=root),
             "run_meta": _clean_ref(root / "run_meta.json", root=root),
             "manifest": _clean_ref(root / "manifest.json", root=root),
             "stage_summary": _clean_ref(root / "stage_summary.json", root=root),
+            "execution_lineage_ledger": _clean_ref(root / ARTIFACT_FILENAMES["execution_lineage_ledger"], root=root),
             "trades": _clean_ref(root / "portfolio_trades.csv", root=root),
             "symbol_performance": _clean_ref(root / "symbol_performance.csv", root=root),
             "validate_data": validation_ref,

@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime
 import threading
 
 import pandas as pd
+import pytest
 
 from backend.core.services import market_data_sync_service as mod
 
@@ -218,6 +219,9 @@ def test_build_market_data_sync_status_ignores_outdated_failed_run_for_current_t
 
 def test_run_cn_daily_sync_once_can_sync_when_live_target_exceeds_db_max(monkeypatch) -> None:
     updates = []
+    pit_index_calls = []
+    pit_calls = []
+    auto_sync_calls = []
 
     def _record_insert(**kwargs):
         return 1
@@ -244,14 +248,248 @@ def test_run_cn_daily_sync_once_can_sync_when_live_target_exceeds_db_max(monkeyp
             "upserted_rows": 128,
         },
     )
+    monkeypatch.setattr(
+        mod.pit_index_updater,
+        "run_update_to_target",
+        lambda **kwargs: pit_index_calls.append(kwargs) or {"status": "ok", "after_max": {"000001.SH": "2026-03-12"}},
+    )
+    monkeypatch.setattr(
+        mod.csi800_pit_refresher,
+        "run_refresh",
+        lambda **kwargs: pit_calls.append(kwargs) or {"status": "ok", "outputs": {"changes_csv": "csi800.csv"}},
+    )
+    monkeypatch.setattr(
+        mod.sim_account_auto_sync_service,
+        "run_auto_sync",
+        lambda *args, **kwargs: auto_sync_calls.append((args, kwargs)) or {"status": "disabled", "message": "not configured"},
+    )
 
     payload = mod.run_cn_daily_sync_once(force=True)
 
     assert payload["status"] == "success"
     assert payload["target_trade_date"] == "2026-03-12"
+    assert pit_index_calls
+    assert payload["pit_index_daily_refresh"]["status"] == "ok"
+    assert pit_calls
+    assert payload["csi800_pit_refresh"]["status"] == "ok"
+    assert auto_sync_calls
+    assert payload["sim_account_auto_sync"]["status"] == "disabled"
     assert updates
     assert updates[0]["status"] == "success"
     assert updates[0]["latest_trade_date_after"] == date(2026, 3, 12)
+
+
+def test_run_cn_daily_sync_once_fails_when_pit_index_refresh_raises(monkeypatch) -> None:
+    updates = []
+
+    def _record_insert(**kwargs):
+        return 1
+
+    def _record_update(**kwargs):
+        updates.append(kwargs)
+
+    monkeypatch.setenv("CN_DAILY_SYNC_ENABLED", "true")
+    monkeypatch.setattr(mod, "ensure_sync_runs_table", lambda: None)
+    monkeypatch.setattr(mod, "resolve_target_trade_date", lambda now=None: date(2026, 3, 12))
+    monkeypatch.setattr(mod, "_connect", lambda: _DummyConn())
+    monkeypatch.setattr(mod, "_advisory_lock", lambda conn, sync_key: True)
+    monkeypatch.setattr(mod, "_advisory_unlock", lambda conn, sync_key: None)
+    monkeypatch.setattr(mod, "_load_latest_records", lambda conn=None: (None, None))
+    monkeypatch.setattr(mod, "_latest_cn_a_trade_date", lambda conn=None: date(2026, 3, 10))
+    monkeypatch.setattr(mod, "_insert_run_record", _record_insert)
+    monkeypatch.setattr(mod, "_update_run_record", _record_update)
+    monkeypatch.setattr(
+        mod.daily_updater,
+        "run_update_to_target",
+        lambda **kwargs: {
+            "latest_cn_a_before": "2026-03-10",
+            "latest_cn_a_after": "2026-03-12",
+            "upserted_rows": 128,
+        },
+    )
+    monkeypatch.setattr(
+        mod.pit_index_updater,
+        "run_update_to_target",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("pit index sync failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="pit index sync failed"):
+        mod.run_cn_daily_sync_once(force=True)
+
+    assert updates
+    assert updates[0]["status"] == "failed"
+    assert updates[0]["error_text"] == "pit index sync failed"
+
+
+def test_run_cn_daily_sync_once_keeps_success_when_auto_sync_raises(monkeypatch) -> None:
+    updates = []
+
+    def _record_insert(**kwargs):
+        return 1
+
+    def _record_update(**kwargs):
+        updates.append(kwargs)
+
+    monkeypatch.setenv("CN_DAILY_SYNC_ENABLED", "true")
+    monkeypatch.setattr(mod, "ensure_sync_runs_table", lambda: None)
+    monkeypatch.setattr(mod, "resolve_target_trade_date", lambda now=None: date(2026, 3, 12))
+    monkeypatch.setattr(mod, "_connect", lambda: _DummyConn())
+    monkeypatch.setattr(mod, "_advisory_lock", lambda conn, sync_key: True)
+    monkeypatch.setattr(mod, "_advisory_unlock", lambda conn, sync_key: None)
+    monkeypatch.setattr(mod, "_load_latest_records", lambda conn=None: (None, None))
+    monkeypatch.setattr(mod, "_latest_cn_a_trade_date", lambda conn=None: date(2026, 3, 10))
+    monkeypatch.setattr(mod, "_insert_run_record", _record_insert)
+    monkeypatch.setattr(mod, "_update_run_record", _record_update)
+    monkeypatch.setattr(
+        mod.daily_updater,
+        "run_update_to_target",
+        lambda **kwargs: {
+            "latest_cn_a_before": "2026-03-10",
+            "latest_cn_a_after": "2026-03-12",
+            "upserted_rows": 128,
+        },
+    )
+    monkeypatch.setattr(
+        mod.pit_index_updater,
+        "run_update_to_target",
+        lambda **kwargs: {"status": "ok", "after_max": {"000001.SH": "2026-03-12"}},
+    )
+    monkeypatch.setattr(
+        mod.csi800_pit_refresher,
+        "run_refresh",
+        lambda **kwargs: {"status": "ok", "outputs": {"changes_csv": "csi800.csv"}},
+    )
+    monkeypatch.setattr(
+        mod.sim_account_auto_sync_service,
+        "run_auto_sync",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("auto sync crashed")),
+    )
+
+    payload = mod.run_cn_daily_sync_once(force=True)
+
+    assert payload["status"] == "success"
+    assert payload["sim_account_auto_sync"]["status"] == "failed"
+    assert payload["sim_account_auto_sync"]["error"] == "auto sync crashed"
+    assert updates
+    assert updates[0]["status"] == "success"
+
+
+def test_run_cn_daily_sync_once_treats_noop_daily_refresh_as_success_when_already_fresh(monkeypatch) -> None:
+    updates = []
+
+    def _record_insert(**kwargs):
+        return 1
+
+    def _record_update(**kwargs):
+        updates.append(kwargs)
+
+    monkeypatch.setenv("CN_DAILY_SYNC_ENABLED", "true")
+    monkeypatch.setattr(mod, "ensure_sync_runs_table", lambda: None)
+    monkeypatch.setattr(mod, "resolve_target_trade_date", lambda now=None: date(2026, 3, 16))
+    monkeypatch.setattr(mod, "_connect", lambda: _DummyConn())
+    monkeypatch.setattr(mod, "_advisory_lock", lambda conn, sync_key: True)
+    monkeypatch.setattr(mod, "_advisory_unlock", lambda conn, sync_key: None)
+    monkeypatch.setattr(mod, "_load_latest_records", lambda conn=None: (None, None))
+    monkeypatch.setattr(mod, "_latest_cn_a_trade_date", lambda conn=None: date(2026, 3, 16))
+    monkeypatch.setattr(mod, "_insert_run_record", _record_insert)
+    monkeypatch.setattr(mod, "_update_run_record", _record_update)
+    monkeypatch.setattr(
+        mod.daily_updater,
+        "run_update_to_target",
+        lambda **kwargs: {
+            "status": "noop",
+            "latest_cn_a_before": "2026-03-16",
+            "upserted_rows": 0,
+        },
+    )
+    monkeypatch.setattr(
+        mod.pit_index_updater,
+        "run_update_to_target",
+        lambda **kwargs: {"status": "noop", "after_max": {"000001.SH": "2026-03-16"}},
+    )
+    monkeypatch.setattr(
+        mod.csi800_pit_refresher,
+        "run_refresh",
+        lambda **kwargs: {"status": "ok", "outputs": {"changes_csv": "csi800.csv"}},
+    )
+    monkeypatch.setattr(
+        mod.sim_account_auto_sync_service,
+        "run_auto_sync",
+        lambda *args, **kwargs: {"status": "disabled", "message": "not configured"},
+    )
+
+    payload = mod.run_cn_daily_sync_once(force=True)
+
+    assert payload["status"] == "success"
+    assert updates
+    assert updates[0]["status"] == "success"
+    assert updates[0]["latest_trade_date_after"] == date(2026, 3, 16)
+
+
+def test_run_cn_daily_sync_once_fails_when_adj_factor_integrity_check_fails(monkeypatch) -> None:
+    updates = []
+    pit_index_calls = []
+    pit_calls = []
+    auto_sync_calls = []
+
+    def _record_insert(**kwargs):
+        return 1
+
+    def _record_update(**kwargs):
+        updates.append(kwargs)
+
+    monkeypatch.setenv("CN_DAILY_SYNC_ENABLED", "true")
+    monkeypatch.setattr(mod, "ensure_sync_runs_table", lambda: None)
+    monkeypatch.setattr(mod, "resolve_target_trade_date", lambda now=None: date(2026, 3, 12))
+    monkeypatch.setattr(mod, "_connect", lambda: _DummyConn())
+    monkeypatch.setattr(mod, "_advisory_lock", lambda conn, sync_key: True)
+    monkeypatch.setattr(mod, "_advisory_unlock", lambda conn, sync_key: None)
+    monkeypatch.setattr(mod, "_load_latest_records", lambda conn=None: (None, None))
+    monkeypatch.setattr(mod, "_latest_cn_a_trade_date", lambda conn=None: date(2026, 3, 10))
+    monkeypatch.setattr(mod, "_insert_run_record", _record_insert)
+    monkeypatch.setattr(mod, "_update_run_record", _record_update)
+    monkeypatch.setattr(
+        mod.daily_updater,
+        "run_update_to_target",
+        lambda **kwargs: {
+            "latest_cn_a_before": "2026-03-10",
+            "latest_cn_a_after": "2026-03-12",
+            "upserted_rows": 128,
+            "adj_factor_integrity": {
+                "before_dates": ["2026-03-12"],
+                "after_dates": ["2026-03-12"],
+                "before_rows": 1,
+                "remaining_rows": 1,
+                "ok": False,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        mod.pit_index_updater,
+        "run_update_to_target",
+        lambda **kwargs: pit_index_calls.append(kwargs) or {"status": "ok", "after_max": {"000001.SH": "2026-03-12"}},
+    )
+    monkeypatch.setattr(
+        mod.csi800_pit_refresher,
+        "run_refresh",
+        lambda **kwargs: pit_calls.append(kwargs) or {"status": "ok", "outputs": {"changes_csv": "csi800.csv"}},
+    )
+    monkeypatch.setattr(
+        mod.sim_account_auto_sync_service,
+        "run_auto_sync",
+        lambda *args, **kwargs: auto_sync_calls.append((args, kwargs)) or {"status": "disabled", "message": "not configured"},
+    )
+
+    payload = mod.run_cn_daily_sync_once(force=True)
+
+    assert payload["status"] == "failed"
+    assert pit_index_calls
+    assert pit_calls
+    assert auto_sync_calls
+    assert updates
+    assert updates[0]["status"] == "failed"
+    assert updates[0]["latest_trade_date_after"] == date(2026, 3, 12)
+    assert "adj_factor integrity failed after sync" in str(updates[0]["error_text"])
 
 
 def test_start_market_data_sync_scheduler_does_not_raise_when_init_fails(monkeypatch) -> None:

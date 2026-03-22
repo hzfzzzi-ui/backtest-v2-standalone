@@ -1,4 +1,5 @@
-/* artifacts.js: canonical experiment surface consumer */
+/* artifacts.js: canonical experiment surface consumer and bridge publisher only. */
+/* Visible DOM under #wbResultsWorkbenchMount belongs to the Vue results workbench. */
 /* Globals used: state, byId, esc, num, pct, fmtInt, setTextById, setHtmlById,
    apiRequestJson, setStatusItems, addLog, renderLoadingSkeleton,
    applyConfigToUI, refreshConfigPanels, publishResultsWorkbenchSnapshot */
@@ -51,19 +52,73 @@ function normalizeNavRows(rows) {
   return out;
 }
 
-function _parseMarketStates(dailyRows) {
+function _parseJsonObject(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'object') return value;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function _parseFiniteNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function _parseMarketStates(dailyRows, runMeta) {
   const out = [];
+  const runRegime = runMeta && typeof runMeta === 'object' ? (runMeta.regime || {}) : {};
+  const weeklyModes = new Set(['BULL_MAIN', 'TURN_STRONG', 'LIGHT_TREND', 'TURN_WEAK', 'DEFENSIVE']);
+  const defaultEngine = String(
+    runRegime.engine
+    || runMeta?.report_consistency?.regime_engine
+    || 'ma200_legacy',
+  ).trim().toLowerCase() || 'ma200_legacy';
+  const defaultSemantics = String(
+    runRegime.regime_semantics
+    || runMeta?.report_consistency?.regime_semantics
+    || (defaultEngine === 'market_regime_framework'
+      ? 'formal_framework'
+      : (defaultEngine === 'weekly_five_state' ? 'weekly_five_state_regime' : 'legacy_price_filter')),
+  ).trim().toLowerCase() || 'legacy_price_filter';
   for (const row of dailyRows || []) {
-    if (row?.market_state == null || row.market_state === '') continue;
     const date = String(row?.date ?? '').trim();
-    const marketState = String(row?.market_state ?? '').trim().toUpperCase();
+    const rawState = String(row?.market_state_raw ?? row?.market_state ?? '').trim().toUpperCase();
+    const smoothedState = String(row?.market_state_smoothed ?? row?.market_state_5 ?? row?.market_state ?? '').trim().toUpperCase();
+    const marketState = String(row?.market_state_5 ?? smoothedState ?? row?.market_state ?? '').trim().toUpperCase();
     const tradeMode = String(row?.trade_mode ?? '').trim().toUpperCase();
     if (!date || !marketState) continue;
-    let mode = 'NO_TRADE_TRANS';
-    if (tradeMode === 'TREND_MAIN') mode = 'TREND_MAIN';
-    else if (tradeMode === 'TREND_LIGHT') mode = 'TREND_LIGHT';
-    else if (marketState === 'BEAR') mode = 'BEAR';
-    out.push({ time: date, mode });
+    let mode = marketState || tradeMode || 'NO_TRADE_TRANS';
+    if (weeklyModes.has(marketState)) {
+      mode = marketState;
+    } else if (tradeMode === 'TREND_MAIN') {
+      mode = marketState === 'BULL' ? 'BULL' : 'TREND_MAIN';
+    } else if (tradeMode === 'TREND_LIGHT') {
+      if (marketState === 'TRANS_DOWN') mode = 'TRANS_DOWN';
+      else if (marketState === 'TRANS_UP') mode = 'TRANS_UP';
+      else mode = 'TREND_LIGHT';
+    } else if (tradeMode === 'NO_TRADE') {
+      mode = marketState === 'BEAR' ? 'BEAR' : 'NO_TRADE';
+    }
+    const engine = String(row?.regime_engine ?? defaultEngine).trim().toLowerCase() || defaultEngine;
+    const semantics = String(row?.regime_semantics ?? defaultSemantics).trim().toLowerCase() || defaultSemantics;
+    out.push({
+      time: date,
+      mode,
+      market_state: marketState,
+      market_state_raw: rawState || null,
+      market_state_smoothed: smoothedState || null,
+      trade_mode: tradeMode || null,
+      regime_engine: engine,
+      regime_semantics: semantics,
+      regime_confidence: _parseFiniteNumber(row?.regime_confidence),
+      regime_duration_bars: _parseFiniteNumber(row?.regime_duration_bars),
+      regime_transition_reason: String(row?.regime_transition_reason ?? '').trim() || null,
+      feature_availability: _parseJsonObject(row?.feature_availability_json ?? row?.feature_availability),
+    });
   }
   return out;
 }
@@ -116,13 +171,16 @@ function stockZh(symbol) {
   return names?.[symbol] ? String(names[symbol]) : String(symbol ?? '');
 }
 
-async function loadBenchmarkSeries(navPoints) {
-  const symbol = state.config_draft?.universe?.benchmark || '000300.SH';
+async function loadBenchmarkSeries(navPoints, options = {}) {
+  const requestedSymbol = String(options?.symbol || state.config_draft?.universe?.benchmark || '000300.SH').trim();
+  const symbol = requestedSymbol || '000300.SH';
+  const absolute = !!options?.absolute;
   const start = navPoints?.[0]?.date || state.config_draft?.universe?.start;
   const end = navPoints?.[navPoints.length - 1]?.date || state.config_draft?.universe?.end;
-  const url = `/api/backtest_v2/series/benchmark?symbol=${encodeURIComponent(symbol)}&start=${encodeURIComponent(start || '')}&end=${encodeURIComponent(end || '')}`;
+  const url = `/api/backtest_v2/series/benchmark?symbol=${encodeURIComponent(symbol)}&start=${encodeURIComponent(start || '')}&end=${encodeURIComponent(end || '')}&absolute=${absolute ? 'true' : 'false'}`;
+  const cacheKey = `series_benchmark_${symbol}_${start || ''}_${end || ''}_${absolute ? 'abs' : 'norm'}`;
   try {
-    const payload = await apiRequestJson('series_benchmark', url, {
+    const payload = await apiRequestJson(cacheKey, url, {
       retryCount: 0,
       suppressStatusOnError: true,
     });
@@ -135,9 +193,16 @@ async function loadBenchmarkSeries(navPoints) {
       low: item.low ?? item.nav,
       close: item.close ?? item.nav,
     }));
-    return { points, ohlc, source: 'api' };
+    return { points, ohlc, source: 'api', symbol, normalized: payload?.normalized !== false };
   } catch (error) {
-    return { points: [], ohlc: [], source: 'api_failed', error: String(error?.message || error) };
+    return {
+      points: [],
+      ohlc: [],
+      source: 'api_failed',
+      symbol,
+      error: String(error?.message || error),
+      normalized: !absolute,
+    };
   }
 }
 
@@ -190,6 +255,45 @@ async function loadSymbolSeries(symbol, navPoints) {
       error: String(error?.message || error),
     };
   }
+}
+
+function symbolTradeMarkers(symbol, tradesRows) {
+  const normalizedSymbol = String(symbol || '').trim().toLowerCase();
+  if (!normalizedSymbol) return [];
+  const rows = Array.isArray(tradesRows) ? tradesRows : [];
+  return rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => String(row?.symbol || '').trim().toLowerCase() === normalizedSymbol)
+    .filter(({ row }) => String(row?.date || '').trim())
+    .map(({ row, index }) => {
+      const side = String(row?.side || '').trim().toUpperCase();
+      const isBuy = side === 'BUY';
+      const isSell = side === 'SELL';
+      if (!isBuy && !isSell) return null;
+      const qty = _toFiniteNumber(row?.qty);
+      const price = _toFiniteNumber(row?.fill_price) ?? _toFiniteNumber(row?.price);
+      const labelParts = [isBuy ? 'B' : 'S'];
+      if (qty !== null) labelParts.push(String(Math.round(qty)));
+      if (price !== null) labelParts.push(num(price, 2));
+      return {
+        time: String(row.date).slice(0, 10),
+        position: isBuy ? 'belowBar' : 'aboveBar',
+        color: isBuy ? '#22c55e' : '#ef4444',
+        shape: isBuy ? 'arrowUp' : 'arrowDown',
+        text: labelParts.join(' '),
+        id: `${normalizedSymbol}_${String(row.date)}_${side}_${index}`,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftTime = String(left.time || '');
+      const rightTime = String(right.time || '');
+      if (leftTime !== rightTime) return leftTime < rightTime ? -1 : 1;
+      const leftIsBuy = left.position === 'belowBar';
+      const rightIsBuy = right.position === 'belowBar';
+      if (leftIsBuy !== rightIsBuy) return leftIsBuy ? -1 : 1;
+      return String(left.id || '').localeCompare(String(right.id || ''));
+    });
 }
 
 function reasonByPrefix(rows) {
@@ -375,7 +479,7 @@ async function loadActiveArtifacts() {
     config: sectionData.config && typeof sectionData.config === 'object' ? cloneJson(sectionData.config) : null,
     tradesRows: Array.isArray(sectionData.trades) ? sectionData.trades : [],
     dailyRows,
-    marketStates: _parseMarketStates(dailyRows),
+    marketStates: _parseMarketStates(dailyRows, normalizedRunMeta),
     symbolPerformanceRows: normalizeSymbolPerformanceRows(symbolStats),
     stockNames,
     surfaceSummary: surface?.summary && typeof surface.summary === 'object' ? cloneJson(surface.summary) || {} : {},

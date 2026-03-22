@@ -1,3 +1,4 @@
+/* desktop-research-page.js: page shell bridge owner for canonical surface fetch and snapshot merge. */
 (function initDesktopResearchPageShell(globalScope) {
   const ALLOWED_LAZY_SECTIONS = [
     'nav',
@@ -96,6 +97,8 @@
     if (snapshot?.active) {
       pushLazySection(resolved, 'nav');
       pushLazySection(resolved, 'config');
+      // Portfolio regime overlays depend on daily rows being present.
+      pushLazySection(resolved, 'daily');
     }
     if (String(view.chartMode || '').trim().toLowerCase() === 'symbol') {
       pushLazySection(resolved, 'symbol_stats');

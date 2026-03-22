@@ -106,6 +106,30 @@ def _validate_semantic_logic(raw: dict[str, Any]) -> list[dict[str, str]]:
                     "breakout_quality_gate_min_score must be within [0, 1]",
                 )
             )
+    if ranking.get("bull_breakout_quality_veto_min_residual_strength_score") is not None:
+        try:
+            bull_veto_residual = float(ranking.get("bull_breakout_quality_veto_min_residual_strength_score"))
+        except Exception:
+            bull_veto_residual = -1.0
+        if not (0.0 <= bull_veto_residual <= 1.0):
+            errors.append(
+                _build_error(
+                    "signal_generation.ranking.bull_breakout_quality_veto_min_residual_strength_score",
+                    "bull_breakout_quality_veto_min_residual_strength_score must be within [0, 1]",
+                )
+            )
+    if ranking.get("bull_breakout_quality_veto_min_breakout_margin_score") is not None:
+        try:
+            bull_veto_margin = float(ranking.get("bull_breakout_quality_veto_min_breakout_margin_score"))
+        except Exception:
+            bull_veto_margin = -1.0
+        if not (0.0 <= bull_veto_margin <= 1.0):
+            errors.append(
+                _build_error(
+                    "signal_generation.ranking.bull_breakout_quality_veto_min_breakout_margin_score",
+                    "bull_breakout_quality_veto_min_breakout_margin_score must be within [0, 1]",
+                )
+            )
     for cap_key in (
         "breakout_quality_margin_cap_pct",
         "breakout_quality_fade_cap_pct",
@@ -665,6 +689,49 @@ def _validate_semantic_logic(raw: dict[str, Any]) -> list[dict[str, str]]:
                     f"unsupported same_symbol_policy: {same_symbol_policy}",
                 )
             )
+
+        market_state_weight_overrides = signal_composition.get("market_state_weight_overrides")
+        if market_state_weight_overrides is not None:
+            if not isinstance(market_state_weight_overrides, dict):
+                errors.append(
+                    _build_error(
+                        "signal_composition.market_state_weight_overrides",
+                        "market_state_weight_overrides must be an object",
+                    )
+                )
+            else:
+                valid_states = {"DEFAULT", "RISK_ON", "RISK_OFF", "BULL", "TRANS_UP", "TRANS_DOWN", "BEAR"}
+                for state_key, override_payload in market_state_weight_overrides.items():
+                    state_name = _normalized_option(state_key)
+                    path_prefix = f"signal_composition.market_state_weight_overrides.{state_key}"
+                    if state_name not in valid_states:
+                        errors.append(
+                            _build_error(
+                                path_prefix,
+                                f"unsupported market state override key: {state_key}",
+                            )
+                        )
+                        continue
+                    if not isinstance(override_payload, dict):
+                        errors.append(
+                            _build_error(
+                                path_prefix,
+                                "state override must be an object keyed by sleeve_id",
+                            )
+                        )
+                        continue
+                    for sleeve_key, raw_weight in override_payload.items():
+                        try:
+                            parsed_weight = float(raw_weight)
+                        except Exception:
+                            parsed_weight = -1.0
+                        if parsed_weight < 0.0:
+                            errors.append(
+                                _build_error(
+                                    f"{path_prefix}.{sleeve_key}",
+                                    "sleeve weight override must be >= 0",
+                                )
+                            )
 
         holding_ownership = _normalized_option(signal_composition.get("holding_ownership"))
         if holding_ownership and holding_ownership not in _SUPPORTED_MULTI_ALPHA_HOLDING_OWNERSHIP:

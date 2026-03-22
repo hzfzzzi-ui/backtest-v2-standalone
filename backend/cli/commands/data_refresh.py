@@ -8,8 +8,18 @@ from typing import Any
 
 _TARGETS = {
     "pams_ohlcv_daily": "backend.cli.managed.update_pams_ohlcv_daily",
+    "pams_ohlcv_daily_v2_full_backfill": "backend.cli.managed.run_pams_ohlcv_daily_v2_full_backfill",
+    "pams_ohlcv_daily_v2_raw": "backend.cli.managed.update_pams_ohlcv_daily_v2_raw",
+    "pams_ohlcv_daily_v2": "backend.cli.managed.update_pams_ohlcv_daily_v2",
+    "pams_ohlcv_daily_v2_audit": "backend.cli.managed.audit_pams_ohlcv_daily_v2",
+    "pit_index_daily": "backend.cli.managed.update_pit_index_daily",
+    "pit_stock_daily_basic": "backend.cli.managed.update_pit_stock_daily_basic",
+    "pit_stock_moneyflow": "backend.cli.managed.update_pit_stock_moneyflow",
+    "pit_stock_moneyflow_v2": "backend.cli.managed.update_pit_stock_moneyflow_v2",
+    "pit_stock_feature_coverage": "backend.cli.managed.audit_pit_stock_feature_coverage",
     "security_master": "backend.cli.managed.refresh_security_master",
     "csi1000_pit": "backend.cli.managed.refresh_csi1000_pit",
+    "csi800_pit": "backend.cli.managed.refresh_csi800_pit",
 }
 
 

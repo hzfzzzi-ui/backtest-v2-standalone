@@ -1,3 +1,4 @@
+/* config-draft-core.js: sole owner of desktop config compile/validate truth. */
 (function initConfigDraftCore(globalScope) {
   function validateConfigDraftCore(draft) {
     const errors = [];
@@ -56,6 +57,14 @@
     const loadedBreadth = loadedPositionRisk.breadth || {};
     const loadedSizing = loadedBase.sizing || {};
     const loadedSignalComposition = loadedBase.signal_composition || {};
+    const loadedRegimeEngine = loadedBase.regime_engine || {};
+    const loadedRegimeTrendBlock = loadedRegimeEngine.trend_block || {};
+    const loadedRegimeRiskBlock = loadedRegimeEngine.risk_block || {};
+    const loadedRegimeBreadthBlock = loadedRegimeEngine.breadth_block || {};
+    const loadedRegimeParticipationBlock = loadedRegimeEngine.participation_block || {};
+    const loadedRegimePersistence = loadedRegimeEngine.persistence || {};
+    const loadedRegimeFallback = loadedRegimeEngine.fallback || {};
+    const loadedWeeklyFiveState = loadedRegimeEngine.weekly_five_state || {};
     const breadthEnabled = !!byId('wbBreadthEnabled')?.checked;
     const weightMode = byId('wbWeightMode')?.value || loadedSizing.weight_mode || 'equal';
     const minPositions = Number(byId('wbMinPositions')?.value || loadedSizing.min_positions || 10);
@@ -86,6 +95,8 @@
     const preProfitBreakoutFailureEnabled = !!byId('wbPreProfitBreakoutFailureEnabled')?.checked;
     const preProfitBreakoutFailureMaxBarsInput = readOptionalNumberInput('wbPreProfitBreakoutFailureMaxBars');
     const preProfitBreakoutFailureAtrBufferInput = readOptionalNumberInput('wbPreProfitBreakoutFailureAtrBufferK');
+    const selectedRegimeEngine = String(byId('wbRegimeEngine')?.value || loadedRegimeEngine.engine || 'ma200_legacy').trim().toLowerCase() || 'ma200_legacy';
+    const shouldEmitRegimeEngine = ['market_regime_framework', 'weekly_five_state'].includes(selectedRegimeEngine) || hasOwnConfigKey(loadedBase, 'regime_engine');
     if (multiAlphaEnabled) {
       if (byId('wbComposeMode')) byId('wbComposeMode').value = composeMode;
       if (byId('wbSameSymbolPolicy')) byId('wbSameSymbolPolicy').value = sameSymbolPolicy;
@@ -210,6 +221,8 @@
       }
       : (Object.keys(loadedSignalComposition).length ? cloneJson(loadedSignalComposition) : { enabled: false });
     const universeMode = byId('wbUniverseMode')?.value || 'ALL_A';
+    const excludeStarMarket = !!byId('wbExcludeStarMarket')?.checked;
+    const loadedHasExcludeStarMarket = Object.prototype.hasOwnProperty.call(loadedUniverseFilters, 'exclude_star_market');
     const universeDraft = {
       ...loadedUniverse,
       start: byId('wbStartDate')?.value || '2021-01-01',
@@ -230,6 +243,11 @@
         limit_rule: byId('wbLimitRule')?.value || 'ignore',
       },
     };
+    if (excludeStarMarket || loadedHasExcludeStarMarket) {
+      universeDraft.filters.exclude_star_market = excludeStarMarket;
+    } else {
+      delete universeDraft.filters.exclude_star_market;
+    }
     if (supportsMembershipMode(universeMode)) {
       universeDraft.membership_mode = membershipModeFromUiValue(byId('wbConstituent')?.value || 'dynamic');
     } else {
@@ -401,6 +419,85 @@
       draft.exit_rules.trailing.pre_profit_breakout_failure_atr_buffer_k = preProfitBreakoutFailureAtrBufferInput != null
         ? preProfitBreakoutFailureAtrBufferInput
         : (loadedTrailing.pre_profit_breakout_failure_atr_buffer_k ?? 0.5);
+    }
+    if (shouldEmitRegimeEngine) {
+      if (selectedRegimeEngine === 'weekly_five_state') {
+        draft.regime_engine = {
+          ...loadedRegimeEngine,
+          engine: 'weekly_five_state',
+          benchmark: '000001.SH',
+          weekly_five_state: {
+            ...loadedWeeklyFiveState,
+            benchmark: '000001.SH',
+            ma_window: Number(loadedWeeklyFiveState.ma_window || 120),
+            ma_slope_lookback: Number(loadedWeeklyFiveState.ma_slope_lookback || 20),
+            ret_short_window: Number(loadedWeeklyFiveState.ret_short_window || 60),
+            ret_long_window: Number(loadedWeeklyFiveState.ret_long_window || 120),
+            adx_window: Number(loadedWeeklyFiveState.adx_window || 20),
+            weekly_rule: String(loadedWeeklyFiveState.weekly_rule || 'W-FRI'),
+            upgrade_confirm_weeks: Number(loadedWeeklyFiveState.upgrade_confirm_weeks || 2),
+            downgrade_confirm_weeks: Number(loadedWeeklyFiveState.downgrade_confirm_weeks || 1),
+            turn_weak_budget: Number(byId('wbWeeklyTurnWeakBudget')?.value || loadedWeeklyFiveState.turn_weak_budget || 0.15),
+          },
+          fallback: {
+            ...loadedRegimeFallback,
+            on_feature_unavailable: String(loadedRegimeFallback.on_feature_unavailable || 'ma200_legacy').trim() || 'ma200_legacy',
+            required_blocks: [],
+            emit_feature_availability: loadedRegimeFallback.emit_feature_availability !== false,
+          },
+        };
+      } else {
+        draft.regime_engine = {
+          ...loadedRegimeEngine,
+          engine: selectedRegimeEngine,
+          benchmark: String(byId('wbFormalRegimeBenchmark')?.value || loadedRegimeEngine.benchmark || universeDraft.benchmark || '').trim(),
+          trend_block: {
+            ...loadedRegimeTrendBlock,
+            enabled: !!byId('wbRegimeTrendEnabled')?.checked,
+            long_ma_window: Number(byId('wbRegimeLongMaWindow')?.value || loadedRegimeTrendBlock.long_ma_window || 200),
+            slope_window: Number(byId('wbRegimeSlopeWindow')?.value || loadedRegimeTrendBlock.slope_window || 20),
+            breakout_lookback: Number(byId('wbRegimeBreakoutLookback')?.value || loadedRegimeTrendBlock.breakout_lookback || 20),
+          },
+          risk_block: {
+            ...loadedRegimeRiskBlock,
+            enabled: !!byId('wbRegimeRiskEnabled')?.checked,
+            realized_vol_window: Number(byId('wbRegimeRealizedVolWindow')?.value || loadedRegimeRiskBlock.realized_vol_window || 20),
+            atr_window: Number(byId('wbRegimeAtrWindow')?.value || loadedRegimeRiskBlock.atr_window || 14),
+            drawdown_window: Number(byId('wbRegimeDrawdownWindow')?.value || loadedRegimeRiskBlock.drawdown_window || 60),
+          },
+          breadth_block: {
+            ...loadedRegimeBreadthBlock,
+            enabled: !!byId('wbRegimeBreadthEnabledFormal')?.checked,
+            universe: String(byId('wbRegimeBreadthUniverse')?.value || loadedRegimeBreadthBlock.universe || 'benchmark_constituents').trim() || 'benchmark_constituents',
+            above_ma_short_window: Number(byId('wbRegimeAboveMaShort')?.value || loadedRegimeBreadthBlock.above_ma_short_window || 50),
+            above_ma_long_window: Number(byId('wbRegimeAboveMaLong')?.value || loadedRegimeBreadthBlock.above_ma_long_window || 200),
+            new_high_low_window: Number(byId('wbRegimeNewHighLowWindow')?.value || loadedRegimeBreadthBlock.new_high_low_window || 20),
+          },
+          participation_block: {
+            ...loadedRegimeParticipationBlock,
+            enabled: !!byId('wbRegimeParticipationEnabled')?.checked,
+            turnover_window: Number(byId('wbRegimeTurnoverWindow')?.value || loadedRegimeParticipationBlock.turnover_window || 20),
+            amount_window: Number(byId('wbRegimeAmountWindow')?.value || loadedRegimeParticipationBlock.amount_window || 20),
+            use_turnover_rate: !!byId('wbRegimeUseTurnoverRate')?.checked,
+          },
+          persistence: {
+            ...loadedRegimePersistence,
+            entry_confirm_bars: Number(byId('wbRegimeEntryConfirmBars')?.value || loadedRegimePersistence.entry_confirm_bars || 3),
+            exit_confirm_bars: Number(byId('wbRegimeExitConfirmBars')?.value || loadedRegimePersistence.exit_confirm_bars || 2),
+            min_state_duration: Number(byId('wbRegimeMinStateDuration')?.value || loadedRegimePersistence.min_state_duration || 5),
+            confidence_floor: Number(byId('wbRegimeConfidenceFloor')?.value || loadedRegimePersistence.confidence_floor || 0.55),
+            transition_cooldown: Number(byId('wbRegimeTransitionCooldown')?.value || loadedRegimePersistence.transition_cooldown || 3),
+          },
+          fallback: {
+            ...loadedRegimeFallback,
+            on_feature_unavailable: String(byId('wbRegimeFallbackMode')?.value || loadedRegimeFallback.on_feature_unavailable || (selectedRegimeEngine === 'market_regime_framework' ? 'ma200_legacy' : 'disabled')).trim() || 'ma200_legacy',
+            required_blocks: regimeRequiredBlocksFromUi(),
+            emit_feature_availability: !!byId('wbRegimeEmitFeatureAvailability')?.checked,
+          },
+        };
+      }
+    } else {
+      delete draft.regime_engine;
     }
     state.config_draft = draft;
     state.strategy_pack = draft.strategy_pack;

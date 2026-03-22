@@ -35,8 +35,11 @@ from backend.api.backtest_v2.protocol import ARTIFACT_FILENAMES, MISSING_FIELD_K
 from backend.api.shared.json_utils import sanitize_json
 from backend.core.analytics.symbol_performance import build_symbol_performance
 from backend.core.audit.experiment_audit import merge_experiment_audit
+from backend.core.audit.regime_audit import write_regime_audit_artifacts
 from backend.core.audit.research_audit import build_research_audit
 from backend.core.config.asset_profiles import build_asset_context
+from backend.core.config.models import DataSourceConfig
+from backend.core.stage_pipeline.adapters.lineage import LINEAGE_LEDGER_COLUMNS
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +94,41 @@ def _resolve_backtest_range(base_cfg: dict[str, Any], overrides: dict[str, Any])
     )
 
 
+def _resolve_regime_meta(base_cfg: dict[str, Any], runtime_cfg: dict[str, Any]) -> dict[str, Any]:
+    base_regime = dict(base_cfg.get("regime_engine") or {}) if isinstance(base_cfg.get("regime_engine"), dict) else {}
+    runtime_regime = dict(runtime_cfg.get("regime_engine") or {}) if isinstance(runtime_cfg.get("regime_engine"), dict) else {}
+    merged = sanitize_json({**base_regime, **runtime_regime})
+    fallback = dict(merged.get("fallback") or {})
+    engine = str(merged.get("engine") or "ma200_legacy").strip() or "ma200_legacy"
+    if engine == "ma200_legacy":
+        regime_semantics = "legacy_price_filter"
+    elif engine == "weekly_five_state":
+        regime_semantics = "weekly_five_state_regime"
+    else:
+        regime_semantics = "formal_multi_factor_regime"
+    required_blocks = fallback.get("required_blocks")
+    if not isinstance(required_blocks, list):
+        required_blocks = []
+    on_feature_unavailable = str(
+        fallback.get("on_feature_unavailable") or ("ma200_legacy" if engine in {"market_regime_framework", "weekly_five_state"} else "disabled")
+    ).strip()
+    emit_feature_availability = bool(
+        fallback.get("emit_feature_availability", engine in {"market_regime_framework", "weekly_five_state"})
+    )
+    return sanitize_json(
+        {
+            **dict(merged),
+            "engine": engine,
+            "regime_semantics": regime_semantics,
+            "feature_availability_contract": {
+                "required_blocks": [str(item) for item in required_blocks if str(item or "").strip()],
+                "on_feature_unavailable": on_feature_unavailable,
+                "emit_feature_availability": emit_feature_availability,
+            },
+        }
+    )
+
+
 def _load_runtime_universe(results_dir: Path) -> dict[str, Any]:
     path = results_dir / "run_config.json"
     if not path.exists():
@@ -101,6 +139,17 @@ def _load_runtime_universe(results_dir: Path) -> dict[str, Any]:
         return {}
     universe = obj.get("universe")
     return dict(universe) if isinstance(universe, dict) else {}
+
+
+def _load_runtime_config(results_dir: Path) -> dict[str, Any]:
+    path = results_dir / "run_config.json"
+    if not path.exists():
+        return {}
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    return dict(obj) if isinstance(obj, dict) else {}
 
 
 def _empty_close_history_frame() -> pd.DataFrame:
@@ -122,8 +171,10 @@ def _load_close_history_df(
 
         ds = dict(base_cfg.get("data_source") or {})
         sm = dict(base_cfg.get("schema_mapping") or {})
-        stocks_table = str(ds.get("stocks_table") or "pams_ohlcv_daily")
-        mp = dict(sm.get(stocks_table) or {})
+        ds_cfg = DataSourceConfig(**ds)
+        stocks_table = ds_cfg.resolved_stocks_table()
+        mapping_table = ds_cfg.resolved_stocks_mapping_table()
+        mp = dict(sm.get(mapping_table) or {})
         date_col = str(mp.get("date") or "trade_date")
         symbol_col = str(mp.get("symbol") or "symbol")
         close_col = str(mp.get("close") or "close")
@@ -385,10 +436,18 @@ def ensure_standard_artifacts(
     config_path = results_dir / ARTIFACT_FILENAMES["config"]
     config_path.write_text(json.dumps(sanitize_json({"base_config": base_cfg, "overrides": overrides}), ensure_ascii=False, indent=2), encoding="utf-8")
 
+    runtime_cfg = _load_runtime_config(results_dir)
     runtime_uni = _load_runtime_universe(results_dir)
+    regime_meta = _resolve_regime_meta(base_cfg, runtime_cfg)
     original_wb = dict((overrides.get("original_workbench_config") or {})) if isinstance(overrides.get("original_workbench_config"), dict) else {}
     wb_uni = dict(original_wb.get("universe") or {}) if isinstance(original_wb.get("universe"), dict) else {}
     base_uni = dict(base_cfg.get("universe") or {})
+    runtime_ds = dict(runtime_cfg.get("data_source") or {}) if isinstance(runtime_cfg.get("data_source"), dict) else {}
+    base_ds = dict(base_cfg.get("data_source") or {}) if isinstance(base_cfg.get("data_source"), dict) else {}
+    ds_cfg = DataSourceConfig(**{**base_ds, **runtime_ds})
+    resolved_data_role = str(runtime_ds.get("data_role") or overrides.get("data_role") or base_ds.get("data_role") or ds_cfg.resolved_data_role())
+    resolved_stocks_table = ds_cfg.resolved_stocks_table()
+    resolved_stocks_mapping_table = ds_cfg.resolved_stocks_mapping_table()
 
     def _pick_with_source(candidates: list[tuple[Any, str]]) -> tuple[Any, str]:
         for value, source in candidates:
@@ -412,6 +471,9 @@ def ensure_standard_artifacts(
     if resolved_config_meta is not None and resolved_universe_mode and not resolved_config_meta.get("universe_mode"):
         resolved_config_meta = dict(resolved_config_meta)
         resolved_config_meta["universe_mode"] = resolved_universe_mode
+    if resolved_config_meta is not None and resolved_data_role and not resolved_config_meta.get("data_role"):
+        resolved_config_meta = dict(resolved_config_meta)
+        resolved_config_meta["data_role"] = resolved_data_role
     asset_context = sanitize_json(
         build_asset_context(
             overrides.get("asset_scope"),
@@ -440,6 +502,9 @@ def ensure_standard_artifacts(
             "compare_symbol": overrides.get("compare_symbol") or base_cfg.get("universe", {}).get("benchmark_compare_symbol"),
             "universe_limit": _safe_int(overrides.get("universe_limit")),
             "asset_scope": str(asset_context.get("asset_scope") or "cn_a_equity"),
+            "data_role": resolved_data_role,
+            "stocks_table": resolved_stocks_table,
+            "stocks_mapping_table": resolved_stocks_mapping_table,
         },
         "code": {
             "engine_mode": str(overrides.get("engine_mode") or "VECTOR_FAST_STRICT"),
@@ -452,6 +517,7 @@ def ensure_standard_artifacts(
         "missing_fields": sorted(set(missing_fields)),
         "warmup": sanitize_json(result.get("warmup_analysis") or {}),
         "asset_context": asset_context,
+        "regime": regime_meta,
         "report_consistency": {
             "sources": {"start": start_src, "end": end_src, "benchmark": benchmark_src, "funnel": "funnel.csv"},
             "config_source": str(overrides.get("config_source") or "unknown"),
@@ -459,12 +525,17 @@ def ensure_standard_artifacts(
             "resolved_config_mode": resolved_config_mode,
             "resolved_config_id": str(resolved_config_id or "") or None,
             "resolved_config_hash": resolved_config_hash or None,
+            "data_role": resolved_data_role,
+            "stocks_table": resolved_stocks_table,
+            "stocks_mapping_table": resolved_stocks_mapping_table,
             "resolved_config_source_type": str((resolved_config_meta or {}).get("source_type") or ""),
             "resolved_config_owner": str((resolved_config_meta or {}).get("owner") or ""),
             "resolved_config_schema_version": str((resolved_config_meta or {}).get("schema_version") or ""),
             "resolved_config_source": str((resolved_config_meta or {}).get("config_source") or overrides.get("config_source") or ""),
             "resolved_config_compiler_hash": str((resolved_config_meta or {}).get("config_hash") or resolved_config_hash or ""),
             "resolved_config_meta": resolved_config_meta,
+            "regime_engine": str(regime_meta.get("engine") or "ma200_legacy"),
+            "regime_semantics": str(regime_meta.get("regime_semantics") or "legacy_price_filter"),
         },
     }
     if isinstance(result.get("universe_meta"), dict):
@@ -479,12 +550,65 @@ def ensure_standard_artifacts(
     run_meta_path = results_dir / ARTIFACT_FILENAMES["run_meta"]
     run_meta_path.write_text(json.dumps(sanitize_json(run_meta_obj), ensure_ascii=False, indent=2), encoding="utf-8")
 
+    regime_audit_rel = None
+    regime_transition_debug_rel = None
+    regime_audit_report_rel = None
+    regime_audit_summary_obj: dict[str, Any] | None = None
+    daily_path = results_dir / ARTIFACT_FILENAMES["daily"]
+    if daily_path.exists():
+        try:
+            daily_df_for_regime = pd.read_csv(daily_path)
+        except Exception:
+            daily_df_for_regime = pd.DataFrame()
+        if not daily_df_for_regime.empty:
+            try:
+                regime_artifacts = write_regime_audit_artifacts(
+                    results_dir=results_dir,
+                    daily_df=daily_df_for_regime,
+                    run_meta=run_meta_obj,
+                )
+            except Exception as exc:
+                logger.warning("build regime audit artifacts failed: %s", exc)
+                regime_artifacts = None
+            if isinstance(regime_artifacts, dict):
+                regime_audit_summary_obj = sanitize_json(regime_artifacts.get("summary") or {})
+                summary_path = regime_artifacts.get("summary_path")
+                debug_path = regime_artifacts.get("transition_debug_path")
+                report_path = regime_artifacts.get("report_path")
+                if isinstance(summary_path, Path) and summary_path.exists():
+                    regime_audit_rel = _to_rel(summary_path, results_dir)
+                if isinstance(debug_path, Path) and debug_path.exists():
+                    regime_transition_debug_rel = _to_rel(debug_path, results_dir)
+                if isinstance(report_path, Path) and report_path.exists():
+                    regime_audit_report_rel = _to_rel(report_path, results_dir)
+
+    lineage_rel = None
+    lineage_rows_raw = (
+        ((result.get("metrics") or {}) if isinstance(result.get("metrics"), dict) else {}).get("execution_lineage_ledger")
+    )
+    if isinstance(lineage_rows_raw, list):
+        lineage_path = results_dir / ARTIFACT_FILENAMES["execution_lineage_ledger"]
+        lineage_df = pd.DataFrame(lineage_rows_raw)
+        for column in LINEAGE_LEDGER_COLUMNS:
+            if column not in lineage_df.columns:
+                lineage_df[column] = None
+        lineage_df = lineage_df.loc[:, list(LINEAGE_LEDGER_COLUMNS)] if not lineage_df.empty else pd.DataFrame(columns=list(LINEAGE_LEDGER_COLUMNS))
+        lineage_df.to_csv(lineage_path, index=False)
+        lineage_rel = _to_rel(lineage_path, results_dir)
+
     audit_data = (result.get("metrics") or {}).get("audit")
     if not isinstance(audit_data, dict):
         audit_data = {}
+    execution_lineage_audit = audit_data.get("execution_lineage")
+    if isinstance(execution_lineage_audit, dict) and lineage_rel:
+        execution_lineage_audit = dict(execution_lineage_audit)
+        execution_lineage_audit["ledger_ref"] = lineage_rel
+        audit_data["execution_lineage"] = execution_lineage_audit
     audit_data = merge_experiment_audit(audit_data, stage_pipeline=stage_pipeline_obj if isinstance(stage_pipeline_obj, dict) else None, stage_summary=stage_summary_obj if isinstance(stage_summary_obj, dict) else None, exp_id=str(result.get("exp_id") or ""))
     audit_rel = None
     if isinstance(audit_data, dict) and audit_data:
+        if regime_audit_summary_obj:
+            audit_data["regime_audit"] = regime_audit_summary_obj
         try:
             audit_path = results_dir / "audit.json"
             audit_path.write_text(json.dumps(audit_data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -507,12 +631,15 @@ def ensure_standard_artifacts(
         "cash_blocked_buys_recent": _to_rel(cash_blocked_recent_path, results_dir),
         "alpha_funnel": _to_rel(alpha_funnel_path, results_dir),
         "score_diagnostics": _to_rel(score_diagnostics_path, results_dir),
+        "execution_lineage_ledger": lineage_rel,
         "audit": audit_rel,
         "stage_summary": stage_summary_rel,
+        "regime_audit_summary": regime_audit_rel,
+        "regime_transition_debug": regime_transition_debug_rel,
+        "regime_audit_report": regime_audit_report_rel,
     }
     if trades_path.exists():
         artifacts["trades"] = _to_rel(trades_path, results_dir)
-    daily_path = results_dir / ARTIFACT_FILENAMES["daily"]
     if daily_path.exists():
         artifacts["daily"] = _to_rel(daily_path, results_dir)
     for extra_name in ("input_config.json", "resolved_config.json", "compiled_plan.json", "baseline_compare.json"):

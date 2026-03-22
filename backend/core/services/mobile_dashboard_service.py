@@ -6,12 +6,21 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pandas as pd
+from backend.core.services.mobile_briefing_service import build_mobile_daily_briefing
+from backend.core.services.mobile_cash_pool_service import get_reconcile_refresh_status
+from backend.core.services.mobile_execution_service import list_execution_tickets
+from backend.core.services.mobile_notification_service import build_mobile_notification_feed
 from backend.core.services.mobile_ops_service import (
     build_suggestion_id,
     load_mobile_control_state,
     signal_staleness_threshold_days,
 )
 from backend.core.services.experiment_query_service import build_mobile_experiment_summary
+from backend.core.services.sim_account_reconcile_service import load_latest_reconcile_run
+from backend.core.services.sim_account_service import (
+    get_holdings_sync_status,
+    load_latest_holdings_snapshot,
+)
 
 PreviewLoader = Callable[[dict[str, Any], str, str | None], dict[str, Any]]
 
@@ -218,6 +227,25 @@ def _read_csv(path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _daily_nav_change(daily_frame: pd.DataFrame) -> tuple[float | None, float | None]:
+    if daily_frame.empty or "nav" not in daily_frame.columns:
+        return None, None
+    frame = daily_frame.copy()
+    frame["date"] = pd.to_datetime(frame.get("date"), errors="coerce")
+    frame["nav"] = pd.to_numeric(frame.get("nav"), errors="coerce")
+    frame = frame.dropna(subset=["nav"]).sort_values("date")
+    if len(frame.index) < 2:
+        return None, None
+    latest_nav = _safe_number(frame.iloc[-1]["nav"])
+    previous_nav = _safe_number(frame.iloc[-2]["nav"])
+    if latest_nav is None or previous_nav is None:
+        return None, None
+    change = float(latest_nav) - float(previous_nav)
+    if float(previous_nav) == 0:
+        return round(change, 6), None
+    return round(change, 6), round(change / float(previous_nav), 10)
+
+
 def _read_latest_market_snapshot(results_root: Path) -> tuple[dict[str, Any], dict[str, Any] | None]:
     snapshot_root = results_root / "market_snapshots"
     if not snapshot_root.exists():
@@ -337,6 +365,7 @@ def _load_latest_experiment(results_root: Path) -> tuple[dict[str, Any] | None, 
     stock_names = _load_stock_names(exp_dir, manifest)
 
     latest_daily = daily_frame.tail(1).to_dict(orient="records")[0] if not daily_frame.empty else {}
+    daily_pnl, daily_return = _daily_nav_change(daily_frame)
     current_positions = _rebuild_positions(trades_frame, stock_names)
     config_json = resolved_config.get("config_json") if isinstance(resolved_config.get("config_json"), dict) else None
     if config_json is None and input_config:
@@ -365,6 +394,8 @@ def _load_latest_experiment(results_root: Path) -> tuple[dict[str, Any] | None, 
         "latest_trade_date": str(latest_daily.get("date") or ""),
         "nav": _safe_number(latest_daily.get("nav")),
         "cash": _safe_number(latest_daily.get("cash")),
+        "daily_pnl": _safe_number(daily_pnl),
+        "daily_return": _safe_number(daily_return),
         "position_count": len(current_positions),
         "market_state": str(latest_daily.get("market_state") or ""),
         "trade_mode": str(latest_daily.get("trade_mode") or ""),
@@ -517,6 +548,408 @@ def _extract_exit_tags(experiment_summary: dict[str, Any]) -> list[str]:
         if ("ATR" in tag.upper()) or ("\u6b62\u635f" in tag) or ("\u9000\u51fa" in tag) or ("\u542f\u76c8" in tag)
     ]
     return out[:4]
+
+
+def _unique_warnings(values: list[Any]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _dedupe_blockers(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        key = (
+            str(item.get("code") or "").strip(),
+            str(item.get("message") or "").strip(),
+            str(item.get("ticket_id") or "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def _build_snapshot_positions(snapshot: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(snapshot, dict) or not snapshot:
+        return []
+    snapshot_id = str(snapshot.get("snapshot_id") or "")
+    trade_date = str(snapshot.get("trade_date") or "")
+    positions: list[dict[str, Any]] = []
+    for item in list(snapshot.get("positions") or []):
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").lower().strip()
+        if not symbol:
+            continue
+        avg_cost = _safe_number(item.get("avg_cost"))
+        positions.append(
+            {
+                "symbol": symbol,
+                "name": str(item.get("name") or symbol.upper()),
+                "qty": int(item.get("qty") or 0),
+                "sellable_qty": int(item.get("sellable_qty") or 0),
+                "avg_cost": avg_cost,
+                "avg_fill_price": avg_cost,
+                "entry_date": None,
+                "last_trade_date": trade_date,
+                "last_reason_code": "",
+                "snapshot_id": snapshot_id,
+                "trade_date": trade_date,
+            }
+        )
+    positions.sort(key=lambda item: str(item.get("symbol") or ""))
+    return positions
+
+
+def _build_risk_flags(ops_snapshot: dict[str, Any], holding_sync: dict[str, Any]) -> dict[str, Any]:
+    risk_lock = ops_snapshot.get("risk_lock") if isinstance(ops_snapshot.get("risk_lock"), dict) else {}
+    executor = ops_snapshot.get("executor") if isinstance(ops_snapshot.get("executor"), dict) else {}
+    drift_summary = holding_sync.get("drift_summary") if isinstance(holding_sync.get("drift_summary"), dict) else {}
+    return {
+        "holding_sync_status": str(holding_sync.get("status") or ""),
+        "pending_ticket_drift": bool(drift_summary.get("pending_ticket_drift")),
+        "risk_locked": bool(risk_lock.get("locked")),
+        "risk_lock_reason": str(risk_lock.get("reason") or ""),
+        "executor_declared": bool(executor.get("declared")),
+        "executor_available": bool(executor.get("available", True)),
+        "executor_reason": str(executor.get("reason") or ""),
+    }
+
+
+def _annotate_pending_tickets(
+    items: list[dict[str, Any]],
+    *,
+    source_mode: str,
+    snapshot_id: str,
+    reconcile_id: str,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for item in list(items or []):
+        if not isinstance(item, dict):
+            continue
+        is_current_surface = True
+        surface_status = "current"
+        if str(source_mode or "").strip().lower() == "position_aware_reconcile":
+            is_current_surface = (
+                str(item.get("snapshot_id") or "").strip() == str(snapshot_id or "").strip()
+                and str(item.get("reconcile_id") or "").strip() == str(reconcile_id or "").strip()
+            )
+            surface_status = "current" if is_current_surface else "stale_surface"
+        out.append(
+            {
+                **item,
+                "is_current_surface": is_current_surface,
+                "surface_status": surface_status,
+            }
+        )
+    return out
+
+
+def _build_reconcile_surface(
+    *,
+    results_root: Path,
+    market_summary: dict[str, Any],
+    experiment_summary: dict[str, Any] | None,
+    ops_snapshot: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    holding_sync = get_holdings_sync_status(results_root)
+    snapshot = load_latest_holdings_snapshot(results_root)
+    positions = _build_snapshot_positions(snapshot)
+    latest_reconcile = load_latest_reconcile_run(results_root)
+    latest_snapshot_id = str(holding_sync.get("latest_snapshot_id") or "")
+    reconcile_snapshot_id = str((latest_reconcile or {}).get("snapshot_id") or "")
+    has_matching_reconcile = bool(
+        latest_snapshot_id
+        and isinstance(snapshot, dict)
+        and snapshot
+        and isinstance(latest_reconcile, dict)
+        and latest_reconcile
+        and reconcile_snapshot_id == latest_snapshot_id
+    )
+
+    as_of_date = str(
+        ((latest_reconcile or {}).get("as_of_date") or "")
+        or ((latest_reconcile or {}).get("snapshot_trade_date") or "")
+        or str(holding_sync.get("trade_date") or "")
+    )
+    freshness = _build_freshness(as_of_date, market_summary)
+    if str(holding_sync.get("status") or "") == "stale" and str(freshness.get("status") or "") != "stale":
+        freshness = {**freshness, "status": "stale", "label": "stale"}
+
+    warnings: list[str] = list(holding_sync.get("warnings") or [])
+    if not snapshot:
+        warnings.append("latest holdings snapshot is missing")
+    elif not latest_reconcile:
+        warnings.append("latest reconcile run is missing")
+    elif not has_matching_reconcile:
+        warnings.append("latest reconcile run does not match latest holdings snapshot")
+
+    source_mode = "position_aware_reconcile" if has_matching_reconcile else "experiment_fallback"
+    status = "ok"
+    if source_mode != "position_aware_reconcile":
+        status = "unavailable"
+    elif str(freshness.get("status") or "") == "stale":
+        status = "stale"
+
+    action_sheet = list((latest_reconcile or {}).get("action_sheet") or []) if has_matching_reconcile else []
+    actions_payload = (latest_reconcile or {}).get("actions") if isinstance((latest_reconcile or {}).get("actions"), dict) else {}
+    risk_flags = _build_risk_flags(ops_snapshot, holding_sync)
+
+    surface = {
+        "status": status,
+        "source_mode": source_mode,
+        "account_id": str(holding_sync.get("account_id") or ""),
+        "holding_sync": holding_sync,
+        "cash": _safe_number((snapshot or {}).get("cash")),
+        "snapshot_id": latest_snapshot_id,
+        "reconcile_id": str((latest_reconcile or {}).get("reconcile_id") or "") if has_matching_reconcile else "",
+        "as_of_date": as_of_date,
+        "positions": positions,
+        "action_sheet": action_sheet,
+        "actions": {
+            "buy": list(actions_payload.get("buy") or []) if has_matching_reconcile else [],
+            "sell": list(actions_payload.get("sell") or []) if has_matching_reconcile else [],
+            "hold": list(actions_payload.get("hold") or []) if has_matching_reconcile else [],
+        },
+        "freshness": freshness,
+        "risk_flags": risk_flags,
+        "warnings": _unique_warnings(warnings),
+        "strategy_source": (
+            dict((latest_reconcile or {}).get("strategy_source") or {})
+            if has_matching_reconcile
+            else {
+                "exp_id": str((experiment_summary or {}).get("exp_id") or ""),
+                "created_at": str((experiment_summary or {}).get("created_at") or ""),
+                "config_hash": "",
+                "asset_scope": "",
+            }
+        ),
+        "generated_at": str((latest_reconcile or {}).get("generated_at") or ""),
+        "summary": dict((latest_reconcile or {}).get("summary") or {}) if has_matching_reconcile else {
+            "action_count": 0,
+            "buy_count": 0,
+            "sell_count": 0,
+            "hold_count": len(positions),
+            "blocked_count": 0,
+        },
+    }
+    return surface, holding_sync, positions
+
+
+def _blocked_reason_message(code: str) -> str:
+    mapping = {
+        "sellable_qty_zero": "sellable_qty is 0",
+        "fallback_read_only": "current dashboard is fallback read-only",
+        "holding_unsynced": "holdings are not synced",
+        "holding_stale": "holdings sync is stale",
+        "holding_drift": "holdings changed during pending tickets",
+    }
+    normalized = str(code or "").strip().lower()
+    return mapping.get(normalized, normalized or "action blocked")
+
+
+def _build_reconcile_card_extra_blockers(
+    *,
+    row: dict[str, Any],
+    holding_sync: dict[str, Any],
+    reconcile_surface: dict[str, Any],
+) -> list[dict[str, Any]]:
+    blockers: list[dict[str, Any]] = []
+    holding_status = str(holding_sync.get("status") or "").strip().lower()
+    if holding_status == "unsynced":
+        blockers.append({"code": "holding_unsynced", "message": _blocked_reason_message("holding_unsynced")})
+    elif holding_status == "stale":
+        blockers.append({"code": "holding_stale", "message": _blocked_reason_message("holding_stale")})
+
+    drift_summary = holding_sync.get("drift_summary") if isinstance(holding_sync.get("drift_summary"), dict) else {}
+    if bool(drift_summary.get("pending_ticket_drift")):
+        blockers.append({"code": "holding_drift", "message": _blocked_reason_message("holding_drift")})
+
+    if str(reconcile_surface.get("source_mode") or "").strip().lower() != "position_aware_reconcile":
+        blockers.append({"code": "fallback_read_only", "message": _blocked_reason_message("fallback_read_only")})
+
+    if bool(row.get("blocked")):
+        blocked_reason = str(row.get("blocked_reason") or row.get("reason_code") or "action_blocked").strip().lower()
+        blockers.append({"code": blocked_reason, "message": _blocked_reason_message(blocked_reason)})
+    return blockers
+
+
+def _build_reconcile_approval_cards(
+    *,
+    experiment_summary: dict[str, Any],
+    reconcile_surface: dict[str, Any],
+    holding_sync: dict[str, Any],
+    ops_snapshot: dict[str, Any],
+) -> list[dict[str, Any]]:
+    freshness = dict(reconcile_surface.get("freshness") or {})
+    exit_tags = _extract_exit_tags(experiment_summary)
+    strategy_source = reconcile_surface.get("strategy_source") if isinstance(reconcile_surface.get("strategy_source"), dict) else {}
+    exp_id = str(strategy_source.get("exp_id") or experiment_summary.get("exp_id") or "")
+    default_signal_date = str(reconcile_surface.get("as_of_date") or "")
+    snapshot_id = str(reconcile_surface.get("snapshot_id") or "")
+    reconcile_id = str(reconcile_surface.get("reconcile_id") or "")
+    source_mode = str(reconcile_surface.get("source_mode") or "")
+    cards: list[dict[str, Any]] = []
+    order_rank = {"buy": 0, "sell": 1, "hold": 2}
+    for item in list(reconcile_surface.get("action_sheet") or []):
+        if not isinstance(item, dict):
+            continue
+        action_type = str(item.get("action_type") or "").strip().lower()
+        symbol = str(item.get("symbol") or "").strip().lower()
+        if not symbol:
+            continue
+        signal_date = str(item.get("signal_date") or item.get("as_of_date") or default_signal_date or "")
+        as_of_date = str(item.get("as_of_date") or signal_date or default_signal_date or "")
+        suggestion_id = build_suggestion_id(
+            exp_id=exp_id,
+            signal_date=signal_date,
+            symbol=symbol,
+            action_type=action_type,
+            source_mode=source_mode,
+            snapshot_id=snapshot_id,
+            reconcile_id=reconcile_id,
+            as_of_date=as_of_date,
+        )
+        blockers = _build_blockers(
+            suggestion_id=suggestion_id,
+            freshness=freshness,
+            ops_snapshot=ops_snapshot,
+        )
+        blockers.extend(
+            _build_reconcile_card_extra_blockers(
+                row=item,
+                holding_sync=holding_sync,
+                reconcile_surface=reconcile_surface,
+            )
+        )
+        blockers = _dedupe_blockers(blockers)
+        user_decision = _build_user_decision(suggestion_id, ops_snapshot)
+        actionable = action_type in {"buy", "sell"} and source_mode == "position_aware_reconcile"
+        can_confirm = actionable and not blockers
+        can_reject = actionable and str(user_decision.get("status") or "") != "approved_pending"
+        cards.append(
+            {
+                "suggestion_id": suggestion_id,
+                "exp_id": exp_id,
+                "signal_date": signal_date,
+                "as_of_date": as_of_date,
+                "source_mode": source_mode,
+                "snapshot_id": snapshot_id,
+                "reconcile_id": reconcile_id,
+                "symbol": symbol,
+                "name": str(item.get("name") or symbol.upper()),
+                "bucket": action_type,
+                "action_type": action_type,
+                "system_suggestion": {
+                    "reference_price": _safe_number(item.get("reference_price")),
+                    "reference_price_basis": str(item.get("reference_price_basis") or ""),
+                    "target_weight": _safe_number(item.get("target_weight")),
+                    "suggested_qty": int(item.get("suggested_qty") or 0),
+                    "current_qty": int(item.get("current_qty") or 0),
+                    "target_qty": int(item.get("target_qty") or 0),
+                    "delta_qty": int(item.get("delta_qty") or 0),
+                    "sellable_qty": int(item.get("sellable_qty") or 0),
+                    "cap_reason": str(item.get("blocked_reason") or ""),
+                },
+                "reason_tags": list(item.get("reason_tags") or ([] if not item.get("reason_code") else [item.get("reason_code")])),
+                "exit_tags": exit_tags,
+                "freshness": freshness,
+                "blockers": blockers,
+                "user_decision": user_decision,
+                "can_confirm": can_confirm,
+                "can_reject": can_reject,
+                "can_edit": can_confirm,
+                "blocked_reason": str(item.get("blocked_reason") or ""),
+            }
+        )
+    cards.sort(key=lambda item: str(item.get("symbol") or ""))
+    cards.sort(key=lambda item: str(item.get("as_of_date") or ""), reverse=True)
+    cards.sort(key=lambda item: order_rank.get(str(item.get("bucket") or ""), 9))
+    return cards
+
+
+def _build_reconcile_guidance(
+    *,
+    experiment_summary: dict[str, Any],
+    reconcile_surface: dict[str, Any],
+    holding_sync: dict[str, Any],
+    ops_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    cards = _build_reconcile_approval_cards(
+        experiment_summary=experiment_summary,
+        reconcile_surface=reconcile_surface,
+        holding_sync=holding_sync,
+        ops_snapshot=ops_snapshot,
+    )
+    status = str(reconcile_surface.get("status") or "unavailable")
+    if str(reconcile_surface.get("source_mode") or "") != "position_aware_reconcile":
+        status = "fallback_read_only"
+    return {
+        "status": status,
+        "source_mode": str(reconcile_surface.get("source_mode") or ""),
+        "as_of_date_used": str(reconcile_surface.get("as_of_date") or ""),
+        "buy": list((reconcile_surface.get("actions") or {}).get("buy") or []),
+        "sell": list((reconcile_surface.get("actions") or {}).get("sell") or []),
+        "hold": list((reconcile_surface.get("actions") or {}).get("hold") or []),
+        "warnings": list(reconcile_surface.get("warnings") or []),
+        "freshness": dict(reconcile_surface.get("freshness") or {}),
+        "approval_cards": cards,
+    }
+
+
+def _apply_refresh_overlay(
+    guidance: dict[str, Any],
+    *,
+    refresh_status: dict[str, Any],
+    reconcile_surface: dict[str, Any],
+) -> dict[str, Any]:
+    payload = dict(guidance or {})
+    status = str((refresh_status or {}).get("status") or "").strip().lower()
+    requested_snapshot_id = str((refresh_status or {}).get("requested_snapshot_id") or "").strip()
+    latest_snapshot_id = str((reconcile_surface or {}).get("snapshot_id") or "").strip()
+    if status not in {"queued", "running"} or not requested_snapshot_id or requested_snapshot_id != latest_snapshot_id:
+        return payload
+    warnings = list(payload.get("warnings") or [])
+    warnings.insert(0, "cash pool update is recomputing current orders")
+    payload["warnings"] = _unique_warnings(warnings)
+    payload["status"] = "refreshing"
+    payload["approval_cards"] = []
+    payload["buy"] = []
+    payload["sell"] = []
+    payload["hold"] = list((reconcile_surface or {}).get("actions", {}).get("hold") or [])
+    return payload
+
+
+def _build_fallback_guidance(
+    *,
+    experiment_summary: dict[str, Any] | None,
+    reconcile_surface: dict[str, Any],
+) -> dict[str, Any]:
+    warnings = list(reconcile_surface.get("warnings") or [])
+    if not experiment_summary:
+        warnings.append("latest experiment is missing")
+    return {
+        "status": "fallback_read_only",
+        "source_mode": "experiment_fallback",
+        "as_of_date_used": str(reconcile_surface.get("as_of_date") or ""),
+        "buy": [],
+        "sell": [],
+        "hold": [],
+        "warnings": _unique_warnings(warnings),
+        "freshness": dict(reconcile_surface.get("freshness") or {}),
+        "approval_cards": [],
+    }
 
 
 def _decision_label(status: str) -> str:
@@ -751,3 +1184,92 @@ def build_mobile_dashboard(results_root: Path, preview_loader: PreviewLoader | N
         "warnings": errors + list(market_summary.get("warnings") or []) + list(guidance.get("warnings") or []),
         "errors": errors,
     }
+
+
+def _build_mobile_dashboard_v2(results_root: Path, preview_loader: PreviewLoader | None = None) -> dict[str, Any]:
+    del preview_loader
+    errors: list[str] = []
+    experiment_context, experiment_errors = _load_latest_experiment(results_root)
+    errors.extend(experiment_errors)
+    market_summary, _market_snapshot = _read_latest_market_snapshot(results_root)
+    ops_snapshot = load_mobile_control_state(results_root)
+    experiment_summary = dict(experiment_context.get("summary") or {}) if isinstance(experiment_context, dict) else None
+    reconcile_surface, holding_sync, positions = _build_reconcile_surface(
+        results_root=results_root,
+        market_summary=market_summary,
+        experiment_summary=experiment_summary,
+        ops_snapshot=ops_snapshot,
+    )
+    refresh_status = get_reconcile_refresh_status(results_root)
+
+    if str(reconcile_surface.get("source_mode") or "") == "position_aware_reconcile":
+        guidance = _build_reconcile_guidance(
+            experiment_summary=experiment_summary or {},
+            reconcile_surface=reconcile_surface,
+            holding_sync=holding_sync,
+            ops_snapshot=ops_snapshot,
+        )
+    else:
+        guidance = _build_fallback_guidance(
+            experiment_summary=experiment_summary,
+            reconcile_surface=reconcile_surface,
+        )
+    guidance = _apply_refresh_overlay(
+        guidance,
+        refresh_status=refresh_status,
+        reconcile_surface=reconcile_surface,
+    )
+
+    guidance["pending_tickets"] = _annotate_pending_tickets(
+        list(ops_snapshot.get("pending_tickets") or []),
+        source_mode=str(reconcile_surface.get("source_mode") or ""),
+        snapshot_id=str(reconcile_surface.get("snapshot_id") or ""),
+        reconcile_id=str(reconcile_surface.get("reconcile_id") or ""),
+    )
+    guidance["pending_count"] = len(guidance["pending_tickets"])
+    guidance["execution_tickets"] = _annotate_pending_tickets(
+        list_execution_tickets(results_root),
+        source_mode=str(reconcile_surface.get("source_mode") or ""),
+        snapshot_id=str(reconcile_surface.get("snapshot_id") or ""),
+        reconcile_id=str(reconcile_surface.get("reconcile_id") or ""),
+    )
+    guidance["execution_count"] = len(guidance["execution_tickets"])
+    warnings = _unique_warnings(
+        errors
+        + list(market_summary.get("warnings") or [])
+        + list(guidance.get("warnings") or [])
+        + list(holding_sync.get("warnings") or [])
+        + list(reconcile_surface.get("warnings") or [])
+    )
+    status = "ok" if experiment_context is not None or positions or str(holding_sync.get("status") or "") != "unsynced" else "empty"
+    briefing = build_mobile_daily_briefing(
+        results_root,
+        experiment_summary=experiment_summary,
+        guidance=guidance,
+        holding_sync=holding_sync,
+        reconcile_surface=reconcile_surface,
+        market_summary=market_summary,
+    )
+    notifications = build_mobile_notification_feed(results_root, briefing=briefing)
+
+    return {
+        "status": status,
+        "updated_at": _now_iso(),
+        "source_mode": str(reconcile_surface.get("source_mode") or ""),
+        "experiment": experiment_summary,
+        "holding_sync": holding_sync,
+        "reconcile": reconcile_surface,
+        "guidance": guidance,
+        "market": market_summary,
+        "positions": positions,
+        "briefing": briefing,
+        "notifications": notifications,
+        "reconcile_refresh": refresh_status,
+        "freshness": dict(reconcile_surface.get("freshness") or {}),
+        "risk_flags": dict(reconcile_surface.get("risk_flags") or {}),
+        "warnings": warnings,
+        "errors": errors,
+    }
+
+
+build_mobile_dashboard = _build_mobile_dashboard_v2

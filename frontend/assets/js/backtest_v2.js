@@ -1,3 +1,5 @@
+/* backtest_v2.js: desktop legacy shell bootstrap/controller only. */
+/* It must not own config compile truth or visible DOM under #wbResultsWorkbenchMount. */
 /* Inlined from ui.js to avoid ES-module scope isolation */
 function setActiveNav() {
   const path = (location.pathname || '/').split('/').pop() || 'index.html';
@@ -15,7 +17,17 @@ const state = {
   ...((window.createViewState && window.createViewState()) || {}),
 };
 
-const DEFAULT_BOOTSTRAP_BASELINE_ID = 'baseline_V10';
+const DEFAULT_BOOTSTRAP_BASELINE_ID = 'baseline_V10_2';
+const DEFAULT_BOOTSTRAP_SOURCE = {
+  kind: 'baseline',
+  id: 'baseline_V10_2',
+  label: 'V10.2 | 2012-2026',
+};
+const FALLBACK_BOOTSTRAP_SOURCE = {
+  kind: 'baseline',
+  id: 'baseline_V10_2',
+  label: 'V10.2 | 2012-2026',
+};
 
 const COMPOSE_MODULES = [
   {
@@ -558,15 +570,60 @@ function syncWorkbenchLoadedSourceToUrl(kind, sourceId) {
   }
 }
 
+async function resolveBootstrapSource(source) {
+  const normalizedKind = String(source?.kind || '').trim().toLowerCase();
+  const normalizedId = String(source?.id || '').trim();
+  if (!normalizedId) return null;
+  try {
+    if (normalizedKind === 'experiment') {
+      const payload = await apiRequestJson(
+        'bootstrap_experiments_index',
+        '/api/backtest_v2/experiments',
+        { suppressStatusOnError: true },
+      );
+      const rows = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload) ? payload : []);
+      if (rows.some((item) => String(item?.exp_id || '').trim() === normalizedId)) return source;
+    } else {
+      const payload = await apiRequestJson(
+        'bootstrap_baselines_index',
+        '/api/backtest_v2/baselines',
+        { suppressStatusOnError: true },
+      );
+      const rows = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload) ? payload : []);
+      if (rows.some((item) => String(item?.baseline_id || '').trim() === normalizedId)) return source;
+    }
+  } catch (_) {
+    return source;
+  }
+  if (String(FALLBACK_BOOTSTRAP_SOURCE?.id || '').trim() && normalizedId !== String(FALLBACK_BOOTSTRAP_SOURCE.id || '').trim()) {
+    return FALLBACK_BOOTSTRAP_SOURCE;
+  }
+  if (String(DEFAULT_BOOTSTRAP_BASELINE_ID || '').trim()) {
+    return { kind: 'baseline', id: DEFAULT_BOOTSTRAP_BASELINE_ID, label: `Baseline ${DEFAULT_BOOTSTRAP_BASELINE_ID}` };
+  }
+  return source;
+}
+
 async function bootstrapInitialExperiment() {
   const explicitSource = currentWorkbenchInputSourceFromUrl();
-  const source = explicitSource || { kind: 'baseline', id: DEFAULT_BOOTSTRAP_BASELINE_ID };
+  const source = await resolveBootstrapSource(explicitSource || DEFAULT_BOOTSTRAP_SOURCE);
   if (!source?.id || currentRuntimeSourceRef().id || state.loaded_source_id) return;
   try {
     if (source.kind === 'experiment') await loadExperimentBundle(source.id);
     else await loadBaselineToWorkbench(source.id, { loadLinkedResult: !!explicitSource });
   } catch (e) {
     addLog(`Load source failed: ${source?.id || '-'} | ${e?.message || e}`);
+    const fallback = FALLBACK_BOOTSTRAP_SOURCE;
+    const shouldFallback = !!fallback?.id
+      && String(source?.id || '').trim() !== String(fallback.id || '').trim();
+    if (!shouldFallback) return;
+    try {
+      addLog(`Fallback to preserved source: ${fallback.id}`);
+      if (fallback.kind === 'experiment') await loadExperimentBundle(fallback.id);
+      else await loadBaselineToWorkbench(fallback.id, { loadLinkedResult: true });
+    } catch (fallbackError) {
+      addLog(`Fallback source failed: ${fallback?.id || '-'} | ${fallbackError?.message || fallbackError}`);
+    }
   }
 }
 
@@ -592,7 +649,7 @@ function syncLoadHint(expId = '') {
         : (activeKind === 'baseline' ? `Current page baseline source: ${activeId}` : `Current page source: ${activeId}`));
     return;
   }
-  hint.textContent = `Baseline ${DEFAULT_BOOTSTRAP_BASELINE_ID}`;
+  hint.textContent = DEFAULT_BOOTSTRAP_SOURCE.label || `Baseline ${DEFAULT_BOOTSTRAP_BASELINE_ID}`;
   hint.title = 'Click load to import a baseline or experiment. Without a loaded source, the page uses the current draft.';
 }
 function normalizeLoadItems(baselines, experiments) {
@@ -813,6 +870,10 @@ function bindEvents() {
   });
   byId('wbTrendStrategy')?.addEventListener('change', () => { buildConfigDraft(); });
   byId('wbMrStrategy')?.addEventListener('change', () => { buildConfigDraft(); });
+  byId('wbRegimeEngine')?.addEventListener('change', () => {
+    if (typeof updateRegimeEngineUi === 'function') updateRegimeEngineUi(byId('wbRegimeEngine')?.value || 'ma200_legacy');
+    buildConfigDraft();
+  });
   byId('wbRegimeEnabled')?.addEventListener('change', () => {
     const on = !!byId('wbRegimeEnabled').checked;
     const regimeParams = byId('wbRegimeParams'); if (regimeParams) regimeParams.style.display = on ? '' : 'none';
@@ -1001,6 +1062,7 @@ function init() {
   setDrawerPanel('s1');
   switchMainTab('overview');
   updateUniverseInputVisibility();
+  if (typeof updateRegimeEngineUi === 'function') updateRegimeEngineUi();
   renderRunHints();
   buildConfigDraft();
   syncExitLinkage();

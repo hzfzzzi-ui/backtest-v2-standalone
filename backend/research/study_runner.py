@@ -13,6 +13,7 @@ from backend.core.services import (
     experiment_summary_service,
 )
 from backend.core.tools import experiment_runtime_access
+from backend.research.a_share_moneyflow_divergence import run_a_share_moneyflow_divergence_study
 from backend.research import study_gates
 from backend.research.study_definition import StudyDefinition, StudyPatch, StudyVariant, StudyWindow
 
@@ -28,11 +29,43 @@ def _resolve_config_path(path_text: str) -> Path:
     return (_repo_root() / raw).resolve()
 
 
+def _default_runtime_config_path() -> Path:
+    return (_repo_root() / "backend" / "configs" / "pams_cn_pg.json").resolve()
+
+
+def _looks_like_backend_runtime_config(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return isinstance(payload.get("db"), dict) and isinstance(payload.get("schema_mapping"), dict)
+
+
 def _ensure_patchable_config_json(request_payload: dict[str, Any]) -> dict[str, Any]:
     existing = request_payload.get("config_json")
     if isinstance(existing, dict):
         return dict(existing)
     config_path = str(request_payload.get("config_path") or "").strip()
+    if not config_path:
+        return {}
+    resolved = _resolve_config_path(config_path)
+    if not resolved.exists():
+        return {}
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _ensure_patchable_mapping_payload(
+    request_payload: dict[str, Any],
+    *,
+    payload_key: str,
+    path_key: str,
+) -> dict[str, Any]:
+    existing = request_payload.get(payload_key)
+    if isinstance(existing, dict):
+        return dict(existing)
+    config_path = str(request_payload.get(path_key) or "").strip()
     if not config_path:
         return {}
     resolved = _resolve_config_path(config_path)
@@ -66,6 +99,15 @@ def _apply_config_patches(request_payload: dict[str, Any], patches: tuple[StudyP
         _set_path(config_json, patch.path, patch.value)
 
 
+def _apply_window_bounds_to_mapping(mapping_payload: dict[str, Any], *, start: str, end: str) -> None:
+    universe = mapping_payload.get("universe")
+    if not isinstance(universe, dict):
+        universe = {}
+        mapping_payload["universe"] = universe
+    universe["start"] = start
+    universe["end"] = end
+
+
 def _merge_request_overrides(request_payload: dict[str, Any], overrides: dict[str, Any]) -> None:
     for key, value in dict(overrides or {}).items():
         if isinstance(value, dict) and isinstance(request_payload.get(key), dict):
@@ -87,6 +129,23 @@ def build_request_payload(study: StudyDefinition, window: StudyWindow, variant: 
     payload = deepcopy(study.request_template)
     payload.setdefault("preset", "single")
     payload["asset_scope"] = study.asset_scope
+    config_path = str(payload.get("config_path") or "").strip()
+    if config_path:
+        payload["config_path"] = str(_resolve_config_path(config_path))
+    workbench_config = _ensure_patchable_mapping_payload(
+        payload,
+        payload_key="workbench_config",
+        path_key="workbench_config_path",
+    )
+    if workbench_config:
+        payload["workbench_config"] = workbench_config
+    runtime_config_json = _ensure_patchable_mapping_payload(
+        payload,
+        payload_key="runtime_config_json",
+        path_key="runtime_config_path",
+    )
+    if runtime_config_json:
+        payload["runtime_config_json"] = runtime_config_json
     _merge_request_overrides(payload, window.request_overrides)
     _merge_request_overrides(payload, variant.request_overrides)
     if _requires_materialized_config_json(study):
@@ -96,12 +155,15 @@ def build_request_payload(study: StudyDefinition, window: StudyWindow, variant: 
     _apply_config_patches(payload, variant.config_patches)
     config_json = payload.get("config_json")
     if isinstance(config_json, dict):
-        universe = config_json.get("universe")
-        if not isinstance(universe, dict):
-            universe = {}
-            config_json["universe"] = universe
-        universe["start"] = window.start
-        universe["end"] = window.end
+        _apply_window_bounds_to_mapping(config_json, start=window.start, end=window.end)
+        if not _looks_like_backend_runtime_config(config_json):
+            payload["config_path"] = str(_default_runtime_config_path())
+    workbench_config = payload.get("workbench_config")
+    if isinstance(workbench_config, dict) and _looks_like_backend_runtime_config(workbench_config):
+        _apply_window_bounds_to_mapping(workbench_config, start=window.start, end=window.end)
+    runtime_config_json = payload.get("runtime_config_json")
+    if isinstance(runtime_config_json, dict) and _looks_like_backend_runtime_config(runtime_config_json):
+        _apply_window_bounds_to_mapping(runtime_config_json, start=window.start, end=window.end)
     payload["study_meta"] = sanitize_json(
         {
             "study_id": study.study_id,
@@ -186,6 +248,14 @@ def run_study(
         only_variant_names=only_variant_names,
         only_window_keys=only_window_keys,
     )
+    runner_mode = str(study.metadata.get("runner_mode") or "").strip().lower()
+    if runner_mode == "a_share_moneyflow_divergence":
+        return run_a_share_moneyflow_divergence_study(
+            study=study,
+            plan=plan,
+            write_dual_output=write_dual_output,
+            append_to_baseline=append_to_baseline,
+        )
     runs: list[dict[str, Any]] = []
     for item in plan:
         payload = dict(item.get("request_payload") or {})

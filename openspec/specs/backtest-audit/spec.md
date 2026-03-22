@@ -2,7 +2,6 @@
 
 ## Purpose
 定义回测审计产物、恒等式校验、T+1 执行验证，以及多 alpha 组合场景下的组合与归因审计要求。
-
 ## Requirements
 ### Requirement: 审计产物输出
 系统 SHALL 在每次回测完成后输出 `audit.json` 到实验目录，包含恒等式检查汇总和异常日详情。
@@ -222,3 +221,46 @@
 - **WHEN** `research_audit` 需要表达 execution shell、stage 顺序或警告摘要
 - **THEN** 系统 SHALL 优先复用现有 `stage_pipeline`、`stage_summary` 和 execution audit 内容
 - **THEN** 系统 SHALL NOT 再定义第二套等价字段保存同一事实
+
+### Requirement: audit.json 必须暴露 execution lineage 摘要与异常样本
+系统 MUST 在现有 execution audit 结构中新增 execution lineage 摘要，至少覆盖生成信号数、排程订单数、成交数、终止数以及 dropped/missing/same-day 等异常计数。
+
+#### Scenario: lineage 摘要写入 audit.json
+- **WHEN** 一次实验完成并具备 lineage ledger 产物
+- **THEN** `audit.json` SHALL 输出 execution lineage 摘要
+- **THEN** `audit.json` SHALL 同时提供台账引用和受控异常样本
+
+#### Scenario: 发现链路异常
+- **WHEN** 某次实验存在 same-day fill、已生成但未排程、已排程但无终态或等价链路异常
+- **THEN** execution audit SHALL 记录对应异常计数
+- **THEN** 主审计文件 SHALL 保留受控样本供人工复核
+
+### Requirement: lineage 明细不得污染主审计文件
+系统 SHALL NOT 在 `audit.json` 中内联全量生命周期台账。
+
+#### Scenario: 明细留在独立 artifact
+- **WHEN** 某次实验的订单和成交数量较多
+- **THEN** `audit.json` SHALL 仍保持摘要级结构
+- **THEN** 全量 lineage 明细 SHALL 留在独立 ledger artifact 中
+
+### Requirement: audit.json 必须承接主线会计完整性摘要
+系统 MUST 在现有 `audit.json` execution audit 结构中承接主线 `accounting_integrity` 审计摘要，使其与 `stage_pipeline`、`warnings` 和既有 execution audit 字段共存。
+
+#### Scenario: execution audit 与 accounting_integrity 共存
+- **WHEN** 一次实验通过标准 stabilize 流程写入 `audit.json`
+- **THEN** `audit.json` SHALL 同时保留现有 `stage_pipeline`、`warnings` 和 `days_with_fills` 等字段
+- **THEN** `audit.json` SHALL 额外包含 `accounting_integrity` 子树或等价 execution audit 摘要字段
+
+#### Scenario: 证据不足时保留审计结果
+- **WHEN** 当前正式执行路径未提供足够的会计快照证据
+- **THEN** `audit.json` SHALL 仍然正常写盘
+- **THEN** `accounting_integrity` SHALL 以 `UNKNOWN` 或等价状态表达证据不足，而不是缺失整份审计文件
+
+### Requirement: 主审计文件中的会计样本输出必须受控
+系统 MUST 在主审计文件中只保留有限会计失败样本与摘要计数，SHALL NOT 在 `audit.json` 中内联全量日级快照或全量持仓镜像。
+
+#### Scenario: bounded sample 输出
+- **WHEN** 某次实验存在多日会计失败样本
+- **THEN** `audit.json` SHALL 仅保留受控数量的代表性样本
+- **THEN** 审计摘要 SHALL 继续暴露总失败计数，避免样本截断改变总体判断
+

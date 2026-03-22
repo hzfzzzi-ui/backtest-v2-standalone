@@ -217,7 +217,7 @@ def test_get_experiment_surface_and_sections(tmp_path: Path, monkeypatch) -> Non
 
 def test_list_experiments_wraps_manifest_and_perf_summary(monkeypatch) -> None:
     monkeypatch.setattr(
-        experiment_query_service.history_impl,
+        experiment_query_service.experiment_history_service,
         "list_experiments",
         lambda: [
             {
@@ -264,6 +264,8 @@ def test_get_execution_regression_contract_counts_rows_and_date_bounds(tmp_path:
                 "run_meta": "run_meta.json",
                 "orders": "orders.csv",
                 "trades": "portfolio_trades.csv",
+                "audit": "audit.json",
+                "execution_lineage_ledger": "execution_lineage_ledger.csv",
             },
             "stage_pipeline": {
                 "route_id": "provider_breakout_runtime",
@@ -295,6 +297,19 @@ def test_get_execution_regression_contract_counts_rows_and_date_bounds(tmp_path:
             }
         },
     )
+    _write_json(
+        exp_dir / "audit.json",
+        {
+            "execution_lineage": {
+                "summary": {
+                    "generated_count": 2,
+                    "scheduled_count": 2,
+                    "filled_count": 2,
+                    "same_day_fill_count": 0,
+                }
+            }
+        },
+    )
     (exp_dir / "orders.csv").write_text(
         "date,symbol,side\n2024-01-03,sh600000,buy\n2024-01-08,sh600000,sell\n",
         encoding="utf-8",
@@ -305,6 +320,12 @@ def test_get_execution_regression_contract_counts_rows_and_date_bounds(tmp_path:
     )
     (exp_dir / "nav.csv").write_text(
         "as_of_date,nav\n2024-01-03,1.0\n2024-01-04,1.02\n2024-01-08,1.01\n",
+        encoding="utf-8",
+    )
+    (exp_dir / "execution_lineage_ledger.csv").write_text(
+        "signal_id,signal_date,order_id,scheduled_date,last_scheduled_date,schedule_attempts,fill_id,fill_date,symbol,side,qty,reason_code,terminal_status,terminal_reason,deferred_count\n"
+        "sig_1,2024-01-02,ord_1,2024-01-03,2024-01-03,1,fil_1,2024-01-03,sh600000,BUY,100,ENTRY,filled,,0\n"
+        "sig_2,2024-01-05,ord_2,2024-01-08,2024-01-08,1,fil_2,2024-01-08,sh600000,SELL,100,EXIT,filled,,0\n",
         encoding="utf-8",
     )
 
@@ -340,7 +361,9 @@ def test_get_execution_regression_contract_counts_rows_and_date_bounds(tmp_path:
         "orders": {"rows": 2, "first_date": "2024-01-03", "last_date": "2024-01-08"},
         "trades": {"rows": 2, "first_date": "2024-01-03", "last_date": "2024-01-08"},
         "nav": {"rows": 3, "first_date": "2024-01-03", "last_date": "2024-01-08"},
+        "execution_lineage_ledger": {"rows": 2, "first_date": "2024-01-02", "last_date": "2024-01-05"},
     }
+    assert contract["lineage"]["summary"]["filled_count"] == 2
 
 
 def test_get_execution_regression_contract_supports_generic_inline_runtime_golden(tmp_path: Path, monkeypatch) -> None:
@@ -417,6 +440,8 @@ def test_get_execution_regression_contract_supports_generic_inline_runtime_golde
                 "run_meta": "run_meta.json",
                 "orders": "orders.csv",
                 "trades": "portfolio_trades.csv",
+                "audit": "audit.json",
+                "execution_lineage_ledger": "execution_lineage_ledger.csv",
             },
             "stage_pipeline": {
                 "route_id": result.route_id,
@@ -439,9 +464,60 @@ def test_get_execution_regression_contract_supports_generic_inline_runtime_golde
             }
         },
     )
+    _write_json(
+        exp_dir / "audit.json",
+        {
+            "execution_lineage": {
+                "summary": {
+                    "generated_count": 2,
+                    "scheduled_count": 2,
+                    "filled_count": 2,
+                    "same_day_fill_count": 0,
+                }
+            }
+        },
+    )
     nav_rows.to_csv(exp_dir / "nav.csv", index=False)
     trade_rows.to_csv(exp_dir / "orders.csv", index=False)
     trade_rows.to_csv(exp_dir / "portfolio_trades.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "signal_id": "sig_1",
+                "signal_date": "2024-01-02",
+                "order_id": "ord_1",
+                "scheduled_date": "2024-01-03",
+                "last_scheduled_date": "2024-01-03",
+                "schedule_attempts": 1,
+                "fill_id": "fil_1",
+                "fill_date": "2024-01-03",
+                "symbol": "sh600000",
+                "side": "BUY",
+                "qty": 100,
+                "reason_code": "ENTRY",
+                "terminal_status": "filled",
+                "terminal_reason": "",
+                "deferred_count": 0,
+            },
+            {
+                "signal_id": "sig_2",
+                "signal_date": "2024-01-04",
+                "order_id": "ord_2",
+                "scheduled_date": "2024-01-05",
+                "last_scheduled_date": "2024-01-05",
+                "schedule_attempts": 1,
+                "fill_id": "fil_2",
+                "fill_date": "2024-01-05",
+                "symbol": "sh600000",
+                "side": "SELL",
+                "qty": 100,
+                "reason_code": "EXIT",
+                "terminal_status": "filled",
+                "terminal_reason": "",
+                "deferred_count": 0,
+            },
+        ]
+    ).to_csv(exp_dir / "execution_lineage_ledger.csv", index=False)
 
     monkeypatch.setattr(experiment_query_service, "resolve_experiment_dir_by_id", lambda exp_id: exp_dir)
 
@@ -474,7 +550,9 @@ def test_get_execution_regression_contract_supports_generic_inline_runtime_golde
         "orders": {"rows": 2, "first_date": "2024-01-03", "last_date": "2024-01-05"},
         "trades": {"rows": 2, "first_date": "2024-01-03", "last_date": "2024-01-05"},
         "nav": {"rows": 5, "first_date": "2024-01-02", "last_date": "2024-01-08"},
+        "execution_lineage_ledger": {"rows": 2, "first_date": "2024-01-02", "last_date": "2024-01-04"},
     }
+    assert contract["lineage"]["summary"]["scheduled_count"] == 2
 
 
 def test_get_execution_regression_contract_supports_locked_candidate_preset_golden(tmp_path: Path, monkeypatch) -> None:
@@ -542,6 +620,7 @@ def test_get_execution_regression_contract_supports_locked_candidate_preset_gold
                 "orders": "orders.csv",
                 "trades": "portfolio_trades.csv",
                 "audit": "audit.json",
+                "execution_lineage_ledger": "execution_lineage_ledger.csv",
             },
             "stage_pipeline": {
                 "route_id": "provider_breakout_runtime",
@@ -574,7 +653,20 @@ def test_get_execution_regression_contract_supports_locked_candidate_preset_gold
             }
         },
     )
-    _write_json(exp_dir / "audit.json", {"summary": {"t1_check_fail": 0}})
+    _write_json(
+        exp_dir / "audit.json",
+        {
+            "summary": {"t1_check_fail": 0},
+            "execution_lineage": {
+                "summary": {
+                    "generated_count": 3,
+                    "scheduled_count": 3,
+                    "filled_count": 3,
+                    "same_day_fill_count": 0,
+                }
+            },
+        },
+    )
     (exp_dir / "orders.csv").write_text(
         "date,symbol,side\n2024-02-05,sh600000,buy\n2024-02-08,sh600000,sell\n2024-02-09,sh600001,buy\n",
         encoding="utf-8",
@@ -585,6 +677,13 @@ def test_get_execution_regression_contract_supports_locked_candidate_preset_gold
     )
     (exp_dir / "nav.csv").write_text(
         "as_of_date,nav\n2024-02-05,1.0\n2024-02-06,1.03\n2024-02-08,1.05\n2024-02-09,1.04\n",
+        encoding="utf-8",
+    )
+    (exp_dir / "execution_lineage_ledger.csv").write_text(
+        "signal_id,signal_date,order_id,scheduled_date,last_scheduled_date,schedule_attempts,fill_id,fill_date,symbol,side,qty,reason_code,terminal_status,terminal_reason,deferred_count\n"
+        "sig_1,2024-02-02,ord_1,2024-02-05,2024-02-05,1,fil_1,2024-02-05,sh600000,BUY,100,ENTRY,filled,,0\n"
+        "sig_2,2024-02-07,ord_2,2024-02-08,2024-02-08,1,fil_2,2024-02-08,sh600000,SELL,100,EXIT,filled,,0\n"
+        "sig_3,2024-02-08,ord_3,2024-02-09,2024-02-09,1,fil_3,2024-02-09,sh600001,BUY,100,ENTRY,filled,,0\n",
         encoding="utf-8",
     )
 
@@ -623,4 +722,6 @@ def test_get_execution_regression_contract_supports_locked_candidate_preset_gold
         "orders": {"rows": 3, "first_date": "2024-02-05", "last_date": "2024-02-09"},
         "trades": {"rows": 3, "first_date": "2024-02-05", "last_date": "2024-02-09"},
         "nav": {"rows": 4, "first_date": "2024-02-05", "last_date": "2024-02-09"},
+        "execution_lineage_ledger": {"rows": 3, "first_date": "2024-02-02", "last_date": "2024-02-08"},
     }
+    assert contract["lineage"]["summary"]["generated_count"] == 3

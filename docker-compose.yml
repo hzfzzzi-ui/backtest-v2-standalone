@@ -30,12 +30,59 @@ services:
       MOBILE_SESSION_TTL_SECONDS: ${MOBILE_SESSION_TTL_SECONDS:-43200}
       MOBILE_PRIVATE_ACCESS_ENABLED: ${MOBILE_PRIVATE_ACCESS_ENABLED:-true}
       MOBILE_ALLOWED_HOSTS: ${MOBILE_ALLOWED_HOSTS:-}
+      SIM_ACCOUNT_AUTO_SYNC_ENABLED: ${SIM_ACCOUNT_AUTO_SYNC_ENABLED:-false}
+      SIM_ACCOUNT_AUTO_SYNC_ACCOUNT_ID: ${SIM_ACCOUNT_AUTO_SYNC_ACCOUNT_ID:-paper_a_share_main}
+      SIM_ACCOUNT_AUTO_SYNC_SOURCE_PATH: ${SIM_ACCOUNT_AUTO_SYNC_SOURCE_PATH:-}
     ports:
       - "8091:8000"
     volumes:
       - ./outputs:/app/outputs
       - ./frontend:/app/frontend
       - ./backend:/app/backend
+      - ./research:/app/research
+    networks:
+      - pams_default
+  backtest-v2-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    profiles:
+      - worker
+    command: ["sleep", "infinity"]
+    environment:
+      PGHOST: pams-postgres
+      PGPORT: 5432
+      PGDATABASE: pams
+      PGUSER: pams
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PAMS_PG_HOST: pams-postgres
+      PAMS_PG_PORT: 5432
+      PAMS_PG_DBNAME: pams
+      PAMS_PG_USER: pams
+      PAMS_PG_PASSWORD: ${POSTGRES_PASSWORD}
+      BACKTEST_V2_ROOT: /app/backend/core
+      RESULTS_ROOT: /app/outputs
+      PAMS_REPORTS_DIR: /app/outputs/report
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN:-}
+      CN_DAILY_SYNC_ENABLED: ${CN_DAILY_SYNC_ENABLED:-true}
+      CN_DAILY_SYNC_TIME: ${CN_DAILY_SYNC_TIME:-18:30}
+      CN_DAILY_SYNC_TIMEZONE: ${CN_DAILY_SYNC_TIMEZONE:-Asia/Shanghai}
+      CN_DAILY_SYNC_POLL_SECONDS: ${CN_DAILY_SYNC_POLL_SECONDS:-300}
+      CN_DAILY_SYNC_RETRY_SECONDS: ${CN_DAILY_SYNC_RETRY_SECONDS:-3600}
+      MOBILE_DASHBOARD_PASSWORD: ${MOBILE_DASHBOARD_PASSWORD:-}
+      MOBILE_AUTH_SECRET: ${MOBILE_AUTH_SECRET:-}
+      MOBILE_SESSION_TTL_SECONDS: ${MOBILE_SESSION_TTL_SECONDS:-43200}
+      MOBILE_PRIVATE_ACCESS_ENABLED: ${MOBILE_PRIVATE_ACCESS_ENABLED:-true}
+      MOBILE_ALLOWED_HOSTS: ${MOBILE_ALLOWED_HOSTS:-}
+      SIM_ACCOUNT_AUTO_SYNC_ENABLED: ${SIM_ACCOUNT_AUTO_SYNC_ENABLED:-false}
+      SIM_ACCOUNT_AUTO_SYNC_ACCOUNT_ID: ${SIM_ACCOUNT_AUTO_SYNC_ACCOUNT_ID:-paper_a_share_main}
+      SIM_ACCOUNT_AUTO_SYNC_SOURCE_PATH: ${SIM_ACCOUNT_AUTO_SYNC_SOURCE_PATH:-}
+    volumes:
+      - ./outputs:/app/outputs
+      - ./frontend:/app/frontend
+      - ./backend:/app/backend
+      - ./research:/app/research
     networks:
       - pams_default
 

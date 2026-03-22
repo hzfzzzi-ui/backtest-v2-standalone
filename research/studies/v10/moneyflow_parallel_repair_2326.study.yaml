@@ -1,0 +1,568 @@
+study_id: v10/moneyflow_parallel_repair_2326
+title: V10 Moneyflow Parallel Repair 23-26
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: 将主力分歧率作为反转/修复型 sleeve，与 V10.1 趋势 sleeve 在 CSI800 股票池内 50/50 并列接入，用于比较两类 alpha 在不同市场状态下的盈利来源。
+change_scope:
+  modules_modified:
+    - backend/api/backtest_v2/semantic_config_schema.py
+    - backend/core/engine_vector/multi_alpha_signal_provider.py
+variants:
+  - name: PARITY_50_50
+    description: 趋势 breakout 与主力分歧率月频 repair sleeve 各占一半槽位预算，并统一使用 V10.1 退出逻辑。
+  - name: PARITY_50_50_REPAIR_MONTHLY_EXIT
+    description: 保持 50/50 并列不变，repair sleeve 改用自身月频换仓退出，trend sleeve 继续使用 V10.1 退出。
+    config_patches:
+      - path: signal_generation.modules
+        value:
+          - name: breakout_55
+            alpha_id: trend_breakout_v10_1
+            family: trend
+            params:
+              breakout_window: 45
+              enable_dual_breakout: false
+              breakout_window_short: 20
+              breakout_window_long: 55
+              dual_breakout_mode: or
+              dual_breakout_gate_ma_window: 120
+              dual_breakout_gate_slope_lookback: 10
+              breakout_entry_buffer_pct: 0.0
+              entry_confirm_mode: none
+              entry_delay_mode: none
+              enable_entry_gap_guard: false
+              entry_gap_guard_pct: 0.04
+              enable_pullback_candidates: false
+              pullback_variant_mode: pb_reclaim_ma20
+              pullback_touch_lookback: 12
+              pullback_reclaim_window: 3
+              pullback_ma20_touch_band_pct: 0.01
+              pullback_low_lookback: 10
+              pullback_low_band_pct: 0.02
+              pullback_box_window: 5
+              pullback_box_range_pct_max: 0.08
+              enable_entry_above_slow_ma: false
+              enable_entry_slow_ma_slope: false
+              entry_slope_lookback: 5
+              enable_v2_trend_filter: false
+              enable_atr_stop: true
+              atr_stop_k: 1.2
+              enable_atr_trail: true
+              atr_trail_k: 3.0
+              trailing_activate_profit_pct: 0.15
+              enable_pre_profit_breakout_failure_exit: true
+              pre_profit_breakout_failure_max_bars: 5
+              pre_profit_breakout_failure_atr_buffer_k: 0.5
+              enable_profit_decay_exit: false
+              profit_decay_exit_profit_pct: 0.15
+              profit_decay_exit_min_hold_bars: 10
+              profit_decay_exit_residual_score_threshold: 0.35
+              max_hold_days: 0
+              min_hold_days: 5
+              cooldown_days: 5
+              enable_take_profit: false
+              take_profit_mode: pct
+              take_profit_pct: 0.2
+              take_profit_atr_k: 3.0
+              enable_fixed_stop_loss: false
+              fixed_stop_loss_pct: 0.05
+              enable_ma20_exit: false
+              enable_low10_exit: true
+              enable_risk_off_exit: true
+              risk_off_exit_mode: trans_down_or_bear
+              min_price: 5.0
+              regime_ma: 60
+              momentum_top_pct: 0.0
+              ranking_mode: residual_only
+              enable_residual_ranking: true
+              residual_window: 40
+              residual_benchmark_weight: 0.0
+              residual_industry_weight: 1.0
+              industry_relative_mode: sector_proxy
+              industry_relative_regime_mode: "off"
+              residual_weight_regime_mode: "off"
+              residual_benchmark_weight_fallback: 0.0
+              residual_industry_weight_fallback: 1.0
+              breakout_quality_gate_min_score: 0.55
+              breakout_quality_margin_cap_pct: 0.08
+              breakout_quality_fade_cap_pct: 0.035
+              breakout_quality_open_gap_cap_pct: 0.04
+              leadership_route_bucket_count: 3
+              residual_window_regime_mode: "off"
+              residual_window_fallback: 40
+              residual_window_regime_fast_ma: 120
+              residual_window_regime_slow_ma: 200
+              source_aware_residual_mode: "off"
+              residual_refine_mode: "off"
+              residual_refine_weight: 0.0
+              residual_weight: 0.5
+              sector_weight: 0.3
+              quality_weight: 0.2
+              v2_trend_short_ma: 20
+              v2_trend_long_ma: 60
+              enable_sector_gate: false
+              sector_rank_window: 60
+              sector_top_pct: 0.3
+          - name: moneyflow_monthly
+            alpha_id: repair_moneyflow_monthly
+            family: mean_revert
+            params:
+              selection_path: outputs/studies/a_share_moneyflow_divergence_legacy_csi800_t10/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_CSI800_T10/monthly_selection.csv
+              top_n: 10
+              order_size: 1000
+              exit_mode: monthly_rebalance
+              breakout_window: 45
+              enable_dual_breakout: false
+              breakout_window_short: 20
+              breakout_window_long: 55
+              dual_breakout_mode: or
+              dual_breakout_gate_ma_window: 120
+              dual_breakout_gate_slope_lookback: 10
+              breakout_entry_buffer_pct: 0.0
+              entry_confirm_mode: none
+              entry_delay_mode: none
+              enable_entry_gap_guard: false
+              entry_gap_guard_pct: 0.04
+              enable_v2_trend_filter: false
+              enable_atr_stop: true
+              atr_stop_k: 1.2
+              enable_atr_trail: true
+              atr_trail_k: 3.0
+              trailing_activate_profit_pct: 0.15
+              enable_pre_profit_breakout_failure_exit: true
+              pre_profit_breakout_failure_max_bars: 5
+              pre_profit_breakout_failure_atr_buffer_k: 0.5
+              enable_profit_decay_exit: false
+              profit_decay_exit_profit_pct: 0.15
+              profit_decay_exit_min_hold_bars: 10
+              profit_decay_exit_residual_score_threshold: 0.35
+              max_hold_days: 0
+              min_hold_days: 5
+              cooldown_days: 5
+              enable_take_profit: false
+              take_profit_mode: pct
+              take_profit_pct: 0.2
+              take_profit_atr_k: 3.0
+              enable_fixed_stop_loss: false
+              fixed_stop_loss_pct: 0.05
+              enable_ma20_exit: false
+              enable_low10_exit: true
+              enable_risk_off_exit: true
+              risk_off_exit_mode: trans_down_or_bear
+              min_price: 5.0
+              regime_ma: 60
+  - name: DYNAMIC_MARKET_STATE_REPAIR_MONTHLY_EXIT
+    description: 保持并列双 sleeve，不改 repair 月频退出与 trend V10.1 退出，只按市场状态动态切换 sleeve 预算权重。
+    config_patches:
+      - path: signal_generation.modules
+        value:
+          - name: breakout_55
+            alpha_id: trend_breakout_v10_1
+            family: trend
+            params:
+              breakout_window: 45
+              enable_dual_breakout: false
+              breakout_window_short: 20
+              breakout_window_long: 55
+              dual_breakout_mode: or
+              dual_breakout_gate_ma_window: 120
+              dual_breakout_gate_slope_lookback: 10
+              breakout_entry_buffer_pct: 0.0
+              entry_confirm_mode: none
+              entry_delay_mode: none
+              enable_entry_gap_guard: false
+              entry_gap_guard_pct: 0.04
+              enable_pullback_candidates: false
+              pullback_variant_mode: pb_reclaim_ma20
+              pullback_touch_lookback: 12
+              pullback_reclaim_window: 3
+              pullback_ma20_touch_band_pct: 0.01
+              pullback_low_lookback: 10
+              pullback_low_band_pct: 0.02
+              pullback_box_window: 5
+              pullback_box_range_pct_max: 0.08
+              enable_entry_above_slow_ma: false
+              enable_entry_slow_ma_slope: false
+              entry_slope_lookback: 5
+              enable_v2_trend_filter: false
+              enable_atr_stop: true
+              atr_stop_k: 1.2
+              enable_atr_trail: true
+              atr_trail_k: 3.0
+              trailing_activate_profit_pct: 0.15
+              enable_pre_profit_breakout_failure_exit: true
+              pre_profit_breakout_failure_max_bars: 5
+              pre_profit_breakout_failure_atr_buffer_k: 0.5
+              enable_profit_decay_exit: false
+              profit_decay_exit_profit_pct: 0.15
+              profit_decay_exit_min_hold_bars: 10
+              profit_decay_exit_residual_score_threshold: 0.35
+              max_hold_days: 0
+              min_hold_days: 5
+              cooldown_days: 5
+              enable_take_profit: false
+              take_profit_mode: pct
+              take_profit_pct: 0.2
+              take_profit_atr_k: 3.0
+              enable_fixed_stop_loss: false
+              fixed_stop_loss_pct: 0.05
+              enable_ma20_exit: false
+              enable_low10_exit: true
+              enable_risk_off_exit: true
+              risk_off_exit_mode: trans_down_or_bear
+              min_price: 5.0
+              regime_ma: 60
+              momentum_top_pct: 0.0
+              ranking_mode: residual_only
+              enable_residual_ranking: true
+              residual_window: 40
+              residual_benchmark_weight: 0.0
+              residual_industry_weight: 1.0
+              industry_relative_mode: sector_proxy
+              industry_relative_regime_mode: "off"
+              residual_weight_regime_mode: "off"
+              residual_benchmark_weight_fallback: 0.0
+              residual_industry_weight_fallback: 1.0
+              breakout_quality_gate_min_score: 0.55
+              breakout_quality_margin_cap_pct: 0.08
+              breakout_quality_fade_cap_pct: 0.035
+              breakout_quality_open_gap_cap_pct: 0.04
+              leadership_route_bucket_count: 3
+              residual_window_regime_mode: "off"
+              residual_window_fallback: 40
+              residual_window_regime_fast_ma: 120
+              residual_window_regime_slow_ma: 200
+              source_aware_residual_mode: "off"
+              residual_refine_mode: "off"
+              residual_refine_weight: 0.0
+              residual_weight: 0.5
+              sector_weight: 0.3
+              quality_weight: 0.2
+              v2_trend_short_ma: 20
+              v2_trend_long_ma: 60
+              enable_sector_gate: false
+              sector_rank_window: 60
+              sector_top_pct: 0.3
+          - name: moneyflow_monthly
+            alpha_id: repair_moneyflow_monthly
+            family: mean_revert
+            params:
+              selection_path: outputs/studies/a_share_moneyflow_divergence_legacy_csi800_t10/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_CSI800_T10/monthly_selection.csv
+              top_n: 10
+              order_size: 1000
+              exit_mode: monthly_rebalance
+              breakout_window: 45
+              enable_dual_breakout: false
+              breakout_window_short: 20
+              breakout_window_long: 55
+              dual_breakout_mode: or
+              dual_breakout_gate_ma_window: 120
+              dual_breakout_gate_slope_lookback: 10
+              breakout_entry_buffer_pct: 0.0
+              entry_confirm_mode: none
+              entry_delay_mode: none
+              enable_entry_gap_guard: false
+              entry_gap_guard_pct: 0.04
+              enable_v2_trend_filter: false
+              enable_atr_stop: true
+              atr_stop_k: 1.2
+              enable_atr_trail: true
+              atr_trail_k: 3.0
+              trailing_activate_profit_pct: 0.15
+              enable_pre_profit_breakout_failure_exit: true
+              pre_profit_breakout_failure_max_bars: 5
+              pre_profit_breakout_failure_atr_buffer_k: 0.5
+              enable_profit_decay_exit: false
+              profit_decay_exit_profit_pct: 0.15
+              profit_decay_exit_min_hold_bars: 10
+              profit_decay_exit_residual_score_threshold: 0.35
+              max_hold_days: 0
+              min_hold_days: 5
+              cooldown_days: 5
+              enable_take_profit: false
+              take_profit_mode: pct
+              take_profit_pct: 0.2
+              take_profit_atr_k: 3.0
+              enable_fixed_stop_loss: false
+              fixed_stop_loss_pct: 0.05
+              enable_ma20_exit: false
+              enable_low10_exit: true
+              enable_risk_off_exit: true
+              risk_off_exit_mode: trans_down_or_bear
+              min_price: 5.0
+              regime_ma: 60
+      - path: signal_composition.market_state_weight_overrides
+        value:
+          BULL:
+            trend: 0.7
+            mr: 0.3
+          TRANS_UP:
+            trend: 0.6
+            mr: 0.4
+          TRANS_DOWN:
+            trend: 0.4
+            mr: 0.6
+          BEAR:
+            trend: 0.3
+            mr: 0.7
+windows:
+  - key: "2326_HC"
+    role: high_coverage
+    start: "2023-07-03"
+    end: "2026-03-16"
+    periods:
+      phase_2023_h2: ["2023-07-03", "2023-12-29"]
+      phase_2024_full_year: ["2024-01-02", "2024-12-31"]
+      phase_2025_2026_ytd: ["2025-01-02", "2026-03-16"]
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  fast_mode: true
+  universe_mode: HS300_ZZ500
+  price_adj: hfq
+  config_json:
+    mode: experiment
+    initial_capital: 1000000.0
+    universe_mode: HS300_ZZ500
+    industries: []
+    universe:
+      start: "2023-07-03"
+      end: "2026-03-16"
+      benchmark: "000300.SH"
+      symbols: []
+      limit: 0
+      price_adj: hfq
+      membership_mode: PIT_DYNAMIC
+      filters:
+        exclude_st: true
+        exclude_suspended: true
+        min_list_days: 120
+        min_avg_turnover_20d: 100000000.0
+        min_avg_turnover_rate_20d: 0.0
+        turnover_rate_field: turnover_rate_f
+        price_min: 5.0
+        price_max: 99999.0
+        atr_pct_range: "0,100"
+        limit_rule: ignore
+    signal_generation:
+      enabled: true
+      modules:
+        - name: breakout_55
+          alpha_id: trend_breakout_v10_1
+          family: trend
+          params:
+            breakout_window: 45
+            enable_dual_breakout: false
+            breakout_window_short: 20
+            breakout_window_long: 55
+            dual_breakout_mode: or
+            dual_breakout_gate_ma_window: 120
+            dual_breakout_gate_slope_lookback: 10
+            breakout_entry_buffer_pct: 0.0
+            entry_confirm_mode: none
+            entry_delay_mode: none
+            enable_entry_gap_guard: false
+            entry_gap_guard_pct: 0.04
+            enable_pullback_candidates: false
+            pullback_variant_mode: pb_reclaim_ma20
+            pullback_touch_lookback: 12
+            pullback_reclaim_window: 3
+            pullback_ma20_touch_band_pct: 0.01
+            pullback_low_lookback: 10
+            pullback_low_band_pct: 0.02
+            pullback_box_window: 5
+            pullback_box_range_pct_max: 0.08
+            enable_entry_above_slow_ma: false
+            enable_entry_slow_ma_slope: false
+            entry_slope_lookback: 5
+            enable_v2_trend_filter: false
+            enable_atr_stop: true
+            atr_stop_k: 1.2
+            enable_atr_trail: true
+            atr_trail_k: 3.0
+            trailing_activate_profit_pct: 0.15
+            enable_pre_profit_breakout_failure_exit: true
+            pre_profit_breakout_failure_max_bars: 5
+            pre_profit_breakout_failure_atr_buffer_k: 0.5
+            enable_profit_decay_exit: false
+            profit_decay_exit_profit_pct: 0.15
+            profit_decay_exit_min_hold_bars: 10
+            profit_decay_exit_residual_score_threshold: 0.35
+            max_hold_days: 0
+            min_hold_days: 5
+            cooldown_days: 5
+            enable_take_profit: false
+            take_profit_mode: pct
+            take_profit_pct: 0.2
+            take_profit_atr_k: 3.0
+            enable_fixed_stop_loss: false
+            fixed_stop_loss_pct: 0.05
+            enable_ma20_exit: false
+            enable_low10_exit: true
+            enable_risk_off_exit: true
+            risk_off_exit_mode: trans_down_or_bear
+            min_price: 5.0
+            regime_ma: 60
+            momentum_top_pct: 0.0
+            ranking_mode: residual_only
+            enable_residual_ranking: true
+            residual_window: 40
+            residual_benchmark_weight: 0.0
+            residual_industry_weight: 1.0
+            industry_relative_mode: sector_proxy
+            industry_relative_regime_mode: "off"
+            residual_weight_regime_mode: "off"
+            residual_benchmark_weight_fallback: 0.0
+            residual_industry_weight_fallback: 1.0
+            breakout_quality_gate_min_score: 0.55
+            breakout_quality_margin_cap_pct: 0.08
+            breakout_quality_fade_cap_pct: 0.035
+            breakout_quality_open_gap_cap_pct: 0.04
+            leadership_route_bucket_count: 3
+            residual_window_regime_mode: "off"
+            residual_window_fallback: 40
+            residual_window_regime_fast_ma: 120
+            residual_window_regime_slow_ma: 200
+            source_aware_residual_mode: "off"
+            residual_refine_mode: "off"
+            residual_refine_weight: 0.0
+            residual_weight: 0.5
+            sector_weight: 0.3
+            quality_weight: 0.2
+            v2_trend_short_ma: 20
+            v2_trend_long_ma: 60
+            enable_sector_gate: false
+            sector_rank_window: 60
+            sector_top_pct: 0.3
+        - name: moneyflow_monthly
+          alpha_id: repair_moneyflow_monthly
+          family: mean_revert
+          params:
+            selection_path: outputs/studies/a_share_moneyflow_divergence_legacy_csi800_t10/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_CSI800_T10/monthly_selection.csv
+            top_n: 10
+            order_size: 1000
+            breakout_window: 45
+            enable_dual_breakout: false
+            breakout_window_short: 20
+            breakout_window_long: 55
+            dual_breakout_mode: or
+            dual_breakout_gate_ma_window: 120
+            dual_breakout_gate_slope_lookback: 10
+            breakout_entry_buffer_pct: 0.0
+            entry_confirm_mode: none
+            entry_delay_mode: none
+            enable_entry_gap_guard: false
+            entry_gap_guard_pct: 0.04
+            enable_v2_trend_filter: false
+            enable_atr_stop: true
+            atr_stop_k: 1.2
+            enable_atr_trail: true
+            atr_trail_k: 3.0
+            trailing_activate_profit_pct: 0.15
+            enable_pre_profit_breakout_failure_exit: true
+            pre_profit_breakout_failure_max_bars: 5
+            pre_profit_breakout_failure_atr_buffer_k: 0.5
+            enable_profit_decay_exit: false
+            profit_decay_exit_profit_pct: 0.15
+            profit_decay_exit_min_hold_bars: 10
+            profit_decay_exit_residual_score_threshold: 0.35
+            max_hold_days: 0
+            min_hold_days: 5
+            cooldown_days: 5
+            enable_take_profit: false
+            take_profit_mode: pct
+            take_profit_pct: 0.2
+            take_profit_atr_k: 3.0
+            enable_fixed_stop_loss: false
+            fixed_stop_loss_pct: 0.05
+            enable_ma20_exit: false
+            enable_low10_exit: true
+            enable_risk_off_exit: true
+            risk_off_exit_mode: trans_down_or_bear
+            min_price: 5.0
+            regime_ma: 60
+    signal_composition:
+      enabled: true
+      compose_mode: REGIME_ROUTE
+      same_symbol_policy: PREFER_HIGHER_SCORE
+      holding_ownership: SOURCE_ONLY
+      modules:
+        - name: breakout_55
+          role: trend
+          weight: 0.5
+          priority: 100
+        - name: moneyflow_monthly
+          role: repair
+          weight: 0.5
+          priority: 90
+      regime_matrix:
+        TREND_UP: [breakout_55, moneyflow_monthly]
+        RANGE: [breakout_55, moneyflow_monthly]
+        WEAK_DOWN: [breakout_55, moneyflow_monthly]
+    benchmark_regime:
+      enabled: true
+      fast_period: 20
+      slow_period: 120
+      slope_window: 5
+    exit_rules:
+      enabled: true
+      signal_reverse: true
+      atr_stop:
+        enabled: true
+        k: 1.2
+      trailing:
+        enabled: true
+        k: 3.0
+        activate_profit_pct: 0.15
+        pre_profit_breakout_failure_enabled: true
+        pre_profit_breakout_failure_max_bars: 5
+        pre_profit_breakout_failure_atr_buffer_k: 0.5
+      time_exit:
+        enabled: false
+        n_days: 20
+      hold_constraint:
+        min_hold_days: 5
+        cooldown_days: 5
+      take_profit:
+        enabled: false
+        mode: pct
+        pct: 0.2
+        atr_k: 3.0
+      fixed_stop:
+        enabled: false
+        pct: 0.05
+      ma20_exit:
+        enabled: false
+      low10_exit:
+        enabled: true
+      risk_off_exit:
+        enabled: true
+        mode: trans_down_or_bear
+    position_risk:
+      enabled: true
+      max_positions: 10
+      single_stock_cap: 0.1
+      industry_cap: 0.3
+      lot: 100
+      cash_shortage_policy: skip
+      portfolio_mode: hard_sleeve_budget
+      risk_budget:
+        enabled: false
+      market_filter:
+        enabled: true
+        slope_window: 10
+        slope_ma_period: 50
+        bull_multiplier: 1.8
+        light_multiplier: 0.6
+        trans_up_multiplier: 1.6
+        ema_light_fast: 5
+        ema_light_slow: 20
+      cost_model:
+        commission: fixed_assumption
+        stamp_tax: fixed_assumption
+        slippage: fixed_assumption
+        matching: next_open
+metadata:
+  materialize_config_json: true

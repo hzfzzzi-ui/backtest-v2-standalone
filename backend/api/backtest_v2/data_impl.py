@@ -348,6 +348,7 @@ def get_benchmark_series(
     symbol: str = Query(...),
     start: str = Query(...),
     end: str = Query(...),
+    absolute: bool = Query(False),
 ):
     try:
         start_d = date.fromisoformat(start)
@@ -370,13 +371,32 @@ def get_benchmark_series(
         return _sanitize_for_json({"points": [], "source": "empty"})
 
     df = df.sort_values("date").reset_index(drop=True)
+    has_ohlc = all(c in df.columns for c in ("open", "high", "low"))
+    points = []
+    if absolute:
+        for _, row in df.iterrows():
+            close_abs = round(float(row["close"]), 6)
+            p = {
+                "date": str(row["date"])[:10],
+                "nav": close_abs,
+                "close": close_abs,
+            }
+            if has_ohlc:
+                p["open"] = round(float(row["open"]), 6)
+                p["high"] = round(float(row["high"]), 6)
+                p["low"] = round(float(row["low"]), 6)
+            else:
+                p["open"] = close_abs
+                p["high"] = close_abs
+                p["low"] = close_abs
+            points.append(p)
+        return _sanitize_for_json({"points": points, "source": "api", "normalized": False})
+
     first_close = df["close"].iloc[0]
     if first_close == 0 or pd.isna(first_close):
         return _sanitize_for_json({"points": [], "source": "empty"})
 
     fc = float(first_close)
-    has_ohlc = all(c in df.columns for c in ("open", "high", "low"))
-    points = []
     for _, row in df.iterrows():
         p = {
             "date": str(row["date"])[:10],
@@ -392,7 +412,7 @@ def get_benchmark_series(
             p["high"] = p["close"]
             p["low"] = p["close"]
         points.append(p)
-    return _sanitize_for_json({"points": points, "source": "api"})
+    return _sanitize_for_json({"points": points, "source": "api", "normalized": True})
 
 
 @router.get("/api/backtest_v2/series/symbol")
@@ -535,6 +555,7 @@ def validate_backtest_v2_data(
     universe_limit = universe_limit_raw if universe_limit_raw > 0 else None
     exclude_st = _parse_bool_from_query(request, "exclude_st", True)
     exclude_suspended = _parse_bool_from_query(request, "exclude_suspended", True)
+    exclude_star_market = _parse_bool_from_query(request, "exclude_star_market", False)
     min_list_days = _parse_int_from_query(request, "min_list_days", 120)
     min_avg_turnover_20d = _parse_float_from_query(request, "min_avg_turnover_20d", 1e8)
     min_avg_turnover_rate_20d = _parse_float_from_query(request, "min_avg_turnover_rate_20d", 0.0)
@@ -564,6 +585,7 @@ def validate_backtest_v2_data(
             price_min=price_min,
             price_max=price_max,
             limit_rule=limit_rule,
+            exclude_star_market=exclude_star_market,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -667,6 +689,7 @@ def validate_backtest_v2_data(
         meta["universe_limit"] = universe_limit
         meta["resolve_asof"] = str(resolve_asof)
         meta["dynamic_all_a_entry"] = bool(dynamic_all_a_entry)
+        meta["exclude_star_market"] = bool(exclude_star_market)
         meta["min_avg_turnover_rate_20d"] = float(min_avg_turnover_rate_20d)
         meta["turnover_rate_field"] = turnover_rate_field
         result["meta"] = meta

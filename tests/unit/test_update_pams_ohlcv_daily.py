@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 import pandas as pd
+import pytest
 
 from backend.cli.managed import update_pams_ohlcv_daily as managed_updater
 from backend.scripts.update_pams_ohlcv_daily import (
@@ -150,6 +151,211 @@ def test_build_update_args_exposes_reusable_apply_entry() -> None:
     assert args.end == "2026-03-14"
     assert args.output_dir == "tmp-sync"
     assert args.apply is True
+    assert args.repair_null_adj_factor is False
+
+
+def test_run_update_requires_explicit_start_in_repair_mode(tmp_path) -> None:
+    args = build_update_args(
+        end="2026-03-11",
+        output_dir=str(tmp_path),
+        apply=False,
+        repair_null_adj_factor=True,
+    )
+
+    with pytest.raises(RuntimeError, match="--start is required when --repair-null-adj-factor is enabled"):
+        managed_updater.run_update(args)
+
+
+def test_run_update_repair_mode_only_processes_gap_trade_dates(monkeypatch, tmp_path) -> None:
+    class _DummyPro:
+        def __init__(self) -> None:
+            self.daily_calls: list[str] = []
+            self.adj_calls: list[str] = []
+            self.index_calls = 0
+
+        def daily(self, **kwargs):
+            trade_date = str(kwargs["trade_date"])
+            self.daily_calls.append(trade_date)
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": "600519.SH",
+                        "trade_date": trade_date,
+                        "open": 100.0,
+                        "high": 101.0,
+                        "low": 99.0,
+                        "close": 100.5,
+                        "pre_close": 100.0,
+                        "vol": 10.0,
+                        "amount": 20.0,
+                    }
+                ]
+            )
+
+        def adj_factor(self, **kwargs):
+            trade_date = str(kwargs["trade_date"])
+            self.adj_calls.append(trade_date)
+            return pd.DataFrame([{"ts_code": "600519.SH", "trade_date": trade_date, "adj_factor": 1.0}])
+
+        def daily_basic(self, **kwargs):
+            return pd.DataFrame()
+
+        def index_daily(self, **kwargs):
+            self.index_calls += 1
+            return pd.DataFrame()
+
+    class _DummyConn:
+        def cursor(self):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, *args, **kwargs):
+            return None
+
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+    pro = _DummyPro()
+    monkeypatch.setattr(managed_updater, "_load_tushare_client", lambda token: pro)
+    monkeypatch.setattr(managed_updater, "_load_existing_prev_close_map", lambda table, start: {"sh600519": 100.0})
+    monkeypatch.setattr(managed_updater, "_load_st_periods", lambda start, end: {})
+    monkeypatch.setattr(managed_updater, "_load_index_symbols", lambda table: ["sh000001"])
+    monkeypatch.setattr(managed_updater, "_get_latest_trade_date", lambda table, market: None)
+    monkeypatch.setattr(
+        managed_updater,
+        "_load_cn_a_null_adj_factor_audit",
+        lambda table, start, end: {
+            "dates": ["2026-03-11"],
+            "rows": 1,
+            "per_trade_date": [{"trade_date": "2026-03-11", "rows": 1}],
+            "ok": False,
+        },
+    )
+    monkeypatch.setattr(managed_updater, "_init_temp_table", lambda cur: None)
+    monkeypatch.setattr(managed_updater, "_load_batch_into_temp", lambda cur, batch: None)
+    monkeypatch.setattr(managed_updater, "_count_batch_state", lambda cur, table: (1, 0))
+    monkeypatch.setattr(managed_updater, "_upsert_batch", lambda cur, table: 1)
+    monkeypatch.setattr(managed_updater, "_connect", lambda: _DummyConn())
+
+    args = build_update_args(
+        start="2026-03-10",
+        end="2026-03-12",
+        output_dir=str(tmp_path),
+        apply=False,
+        token="dummy-token",
+        repair_null_adj_factor=True,
+    )
+    summary = managed_updater.run_update(args)
+
+    assert pro.daily_calls == ["20260311"]
+    assert pro.adj_calls == ["20260311"]
+    assert pro.index_calls == 0
+    assert summary["repair_null_adj_factor"] is True
+    assert summary["repair_target_trade_dates"] == ["2026-03-11"]
+    assert summary["open_trade_dates"] == ["2026-03-11"]
+    assert summary["cn_index_rows"] == 0
+    assert summary["adj_factor_integrity"]["before_dates"] == ["2026-03-11"]
+    assert "CN_INDEX refresh is skipped in repair_null_adj_factor mode." in summary["notes"]
+
+
+def test_run_update_summary_reports_remaining_adj_factor_gaps_after_apply(monkeypatch, tmp_path) -> None:
+    class _DummyPro:
+        def daily(self, **kwargs):
+            trade_date = str(kwargs["trade_date"])
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": "600519.SH",
+                        "trade_date": trade_date,
+                        "open": 100.0,
+                        "high": 101.0,
+                        "low": 99.0,
+                        "close": 100.5,
+                        "pre_close": 100.0,
+                        "vol": 10.0,
+                        "amount": 20.0,
+                    }
+                ]
+            )
+
+        def adj_factor(self, **kwargs):
+            trade_date = str(kwargs["trade_date"])
+            return pd.DataFrame([{"ts_code": "600519.SH", "trade_date": trade_date, "adj_factor": 1.0}])
+
+        def daily_basic(self, **kwargs):
+            return pd.DataFrame()
+
+    class _DummyConn:
+        def cursor(self):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, *args, **kwargs):
+            return None
+
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+    audit_results = [
+        {
+            "dates": ["2026-03-11", "2026-03-12"],
+            "rows": 2,
+            "per_trade_date": [
+                {"trade_date": "2026-03-11", "rows": 1},
+                {"trade_date": "2026-03-12", "rows": 1},
+            ],
+            "ok": False,
+        },
+        {
+            "dates": ["2026-03-12"],
+            "rows": 1,
+            "per_trade_date": [{"trade_date": "2026-03-12", "rows": 1}],
+            "ok": False,
+        },
+    ]
+
+    monkeypatch.setattr(managed_updater, "_load_tushare_client", lambda token: _DummyPro())
+    monkeypatch.setattr(managed_updater, "_load_existing_prev_close_map", lambda table, start: {"sh600519": 100.0})
+    monkeypatch.setattr(managed_updater, "_load_st_periods", lambda start, end: {})
+    monkeypatch.setattr(managed_updater, "_load_index_symbols", lambda table: [])
+    monkeypatch.setattr(managed_updater, "_get_latest_trade_date", lambda table, market: date(2026, 3, 12) if market == "CN_A" else None)
+    monkeypatch.setattr(managed_updater, "_load_cn_a_null_adj_factor_audit", lambda table, start, end: audit_results.pop(0))
+    monkeypatch.setattr(managed_updater, "_init_temp_table", lambda cur: None)
+    monkeypatch.setattr(managed_updater, "_load_batch_into_temp", lambda cur, batch: None)
+    monkeypatch.setattr(managed_updater, "_count_batch_state", lambda cur, table: (1, 0))
+    monkeypatch.setattr(managed_updater, "_upsert_batch", lambda cur, table: 1)
+    monkeypatch.setattr(managed_updater, "_connect", lambda: _DummyConn())
+
+    args = build_update_args(
+        start="2026-03-11",
+        end="2026-03-12",
+        output_dir=str(tmp_path),
+        apply=True,
+        token="dummy-token",
+    )
+    summary = managed_updater.run_update(args)
+
+    assert summary["adj_factor_integrity"]["before_dates"] == ["2026-03-11", "2026-03-12"]
+    assert summary["adj_factor_integrity"]["after_dates"] == ["2026-03-12"]
+    assert summary["adj_factor_integrity"]["before_rows"] == 2
+    assert summary["adj_factor_integrity"]["remaining_rows"] == 1
+    assert summary["adj_factor_integrity"]["ok"] is False
 
 
 def test_run_update_keeps_cn_a_sync_when_cn_index_fetch_fails(monkeypatch, tmp_path) -> None:
@@ -188,6 +394,11 @@ def test_run_update_keeps_cn_a_sync_when_cn_index_fetch_fails(monkeypatch, tmp_p
     monkeypatch.setattr(managed_updater, "_load_st_periods", lambda start, end: {})
     monkeypatch.setattr(managed_updater, "_load_index_symbols", lambda table: ["sh000001"])
     monkeypatch.setattr(managed_updater, "_get_latest_trade_date", lambda table, market: None)
+    monkeypatch.setattr(
+        managed_updater,
+        "_load_cn_a_null_adj_factor_audit",
+        lambda table, start, end: {"dates": [], "rows": 0, "per_trade_date": [], "ok": True},
+    )
     monkeypatch.setattr(managed_updater, "_init_temp_table", lambda cur: None)
     monkeypatch.setattr(managed_updater, "_load_batch_into_temp", lambda cur, batch: None)
     monkeypatch.setattr(managed_updater, "_count_batch_state", lambda cur, table: (1, 0))

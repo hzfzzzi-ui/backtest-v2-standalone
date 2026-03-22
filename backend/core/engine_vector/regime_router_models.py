@@ -49,6 +49,14 @@ class RegimeRouterRuntimeState:
     risk_on_exits: np.ndarray = field(default_factory=_empty_bool_array)
     strong_risk_on: np.ndarray = field(default_factory=_empty_bool_array)
     sym_to_col: dict[str, int] = field(default_factory=dict)
+    regime_engine: str = "ma200_legacy"
+    formal_regime_features: Any = None
+    required_feature_blocks_ready: np.ndarray = field(default_factory=_empty_bool_array)
+    regime_confidence: np.ndarray = field(default_factory=_empty_float_array)
+    regime_duration_bars: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.int32))
+    regime_transition_reason: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    feature_availability: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    fallback_active: np.ndarray = field(default_factory=_empty_bool_array)
 
 
 def build_regime_router_config(
@@ -120,6 +128,32 @@ def capture_regime_router_runtime_state(provider: Any) -> RegimeRouterRuntimeSta
         risk_on_exits=provider._risk_on_exits,
         strong_risk_on=provider._strong_risk_on,
         sym_to_col=dict(provider._sym_to_col),
+        regime_engine=str(getattr(provider, "_regime_engine_name", "ma200_legacy") or "ma200_legacy"),
+        formal_regime_features=getattr(provider, "_formal_regime_features", None),
+        required_feature_blocks_ready=np.array(
+            getattr(provider, "_required_feature_blocks_ready", np.array([], dtype=bool)),
+            dtype=bool,
+        ),
+        regime_confidence=np.array(
+            getattr(provider, "_regime_confidence_arr", np.array([], dtype=float)),
+            dtype=float,
+        ),
+        regime_duration_bars=np.array(
+            getattr(provider, "_regime_duration_bars_arr", np.array([], dtype=np.int32)),
+            dtype=np.int32,
+        ),
+        regime_transition_reason=np.array(
+            getattr(provider, "_regime_transition_reason_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        feature_availability=np.array(
+            getattr(provider, "_feature_availability_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        fallback_active=np.array(
+            getattr(provider, "_fallback_active_arr", np.array([], dtype=bool)),
+            dtype=bool,
+        ),
     )
     provider._runtime_state = state
     return state

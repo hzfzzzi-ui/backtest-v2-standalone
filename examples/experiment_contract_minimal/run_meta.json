@@ -1,0 +1,56 @@
+{
+  "exp_id": "exp_example_minimal",
+  "tier": "T0",
+  "status": "OK",
+  "created_at": "2026-03-17T12:00:00",
+  "data": {
+    "start": "2024-01-01",
+    "end": "2024-01-31",
+    "benchmark": "000300.SH",
+    "compare_symbol": null,
+    "universe_limit": null,
+    "asset_scope": "cn_a_equity",
+    "universe_mode": "CUSTOM"
+  },
+  "code": {
+    "engine_mode": "VECTOR_FAST_STRICT",
+    "execution_profile": "tradable",
+    "fast_mode": true
+  },
+  "counters": {
+    "raw_signal": 2,
+    "blocked": 0,
+    "orders": 2,
+    "skipped": 0,
+    "closed_trades": 1
+  },
+  "price_adj_mode": "hfq",
+  "adj_factor_stats": {},
+  "missing_fields": [],
+  "warmup": {},
+  "asset_context": {
+    "asset_scope": "cn_a_equity",
+    "asset_profile_id": "cn_a_equity_mainline",
+    "market_profile_id": "cn_a_mainland_equity_market",
+    "execution_profile_id": "cn_a_tplus1_next_open"
+  },
+  "report_consistency": {
+    "sources": {
+      "start": "run_config.universe.start",
+      "end": "run_config.universe.end",
+      "benchmark": "run_config.universe.benchmark",
+      "funnel": "funnel.csv"
+    },
+    "config_source": "config_json",
+    "config_conflict_policy": "config_json_preferred",
+    "resolved_config_mode": "semantic_config_run",
+    "resolved_config_id": null,
+    "resolved_config_hash": "examplehash",
+    "resolved_config_meta": {
+      "source_type": "frontend_semantic",
+      "owner": "manual",
+      "schema_version": "2026-03-11",
+      "config_source": "config_json"
+    }
+  }
+}

@@ -8,6 +8,7 @@ import pandas as pd
 
 from backend.core.config.models import BenchmarkRegimeConfig, CostConfig, MarketFilterConfig, RiskBudgetConfig, SizingConfig
 from backend.core.portfolio.portfolio_runtime import build_backtest_price_indices
+from backend.core.portfolio.price_index import build_backtest_hfq_indices
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,8 @@ class RuntimeBootstrap:
     min_trade_price: float
     open_idx: dict[tuple[Any, str], float]
     close_idx: dict[tuple[Any, str], float]
+    hfq_close_idx: dict[tuple[Any, str], float]
+    adj_factor_idx: dict[tuple[Any, str], float]
     volume_idx: dict[tuple[Any, str], float]
     amount_idx: dict[tuple[Any, str], float]
     suspended_idx: dict[tuple[Any, str], bool]
@@ -45,8 +48,11 @@ class RuntimeLedger:
     cash: float
     positions: dict[str, int] = field(default_factory=dict)
     position_avg_cost: dict[str, float] = field(default_factory=dict)
+    position_entry_adj: dict[str, float] = field(default_factory=dict)
     holding_sources: dict[str, dict[str, Any]] = field(default_factory=dict)
     composition_audit_rows: list[dict[str, Any]] = field(default_factory=list)
+    accounting_audit_rows: list[dict[str, Any]] = field(default_factory=list)
+    execution_lineage_records: dict[str, dict[str, Any]] = field(default_factory=dict)
     order_reject_reason_counts: dict[str, int] = field(default_factory=dict)
     peak_nav: float = 0.0
     prev_nav: float = 0.0
@@ -138,6 +144,10 @@ def build_runtime_bootstrap(
         history=request.data_bundle.raw_history,
         trading_days=request.data_bundle.trading_days,
     )
+    hfq_close_idx, adj_factor_idx = build_backtest_hfq_indices(
+        history=request.data_bundle.raw_history,
+        trading_days=request.data_bundle.trading_days,
+    )
     volume_idx, amount_idx, suspended_idx, limit_up_idx, limit_down_idx = build_execution_guard_indices(request.data_bundle.raw_history)
     return RuntimeBootstrap(
         cost_cfg=cost_cfg,
@@ -161,6 +171,8 @@ def build_runtime_bootstrap(
         min_trade_price=min_trade_price,
         open_idx=open_idx,
         close_idx=close_idx,
+        hfq_close_idx=hfq_close_idx,
+        adj_factor_idx=adj_factor_idx,
         volume_idx=volume_idx,
         amount_idx=amount_idx,
         suspended_idx=suspended_idx,

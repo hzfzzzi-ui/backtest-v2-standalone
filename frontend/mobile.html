@@ -5,161 +5,329 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
-  <title>回测手机看板</title>
-  <link rel="stylesheet" href="/assets/css/mobile-dashboard.css?v=20260315_runtimeboundary01" />
+  <meta name="theme-color" content="#1c212b" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="交易助手" />
+  <title>交易助手</title>
+  <link rel="manifest" href="/assets/manifest.webmanifest?v=20260316_mobileapp15" />
+  <link rel="icon" type="image/svg+xml" href="/assets/icons/trading-assistant.svg?v=20260316_mobileapp15" />
+  <link rel="apple-touch-icon" href="/assets/icons/trading-assistant-180.png?v=20260316_mobileapp15" />
+  <link rel="stylesheet" href="/assets/css/mobile-dashboard.css?v=20260316_mobileapp15" />
 </head>
 <body>
   <div class="md-app">
-    <div class="md-bg-orb md-bg-orb-a"></div>
-    <div class="md-bg-orb md-bg-orb-b"></div>
+    <div class="md-bg-grid"></div>
+    <div class="md-bg-glow md-bg-glow-a"></div>
+    <div class="md-bg-glow md-bg-glow-b"></div>
 
-    <header class="md-topbar">
-      <div>
-        <div class="md-kicker">Semi-Auto Guide</div>
-        <h1>回测手机看板</h1>
+    <div id="mdBootSplash" class="md-boot-splash" aria-hidden="true">
+      <div class="md-brand-mark md-brand-mark-lg" aria-hidden="true">
+        <svg viewBox="0 0 96 96" role="presentation">
+          <path d="M48 10 77 20v22c0 22-10 35-29 44C29 77 19 64 19 42V20l29-10Z" />
+          <path class="md-brand-line" d="M31 58l13-14 10 8 13-17" />
+          <circle class="md-brand-dot" cx="31" cy="58" r="3.5" />
+          <circle class="md-brand-dot" cx="44" cy="44" r="3.5" />
+          <circle class="md-brand-dot" cx="54" cy="52" r="3.5" />
+          <circle class="md-brand-dot" cx="67" cy="35" r="3.5" />
+        </svg>
       </div>
-      <div class="md-topbar-actions">
-        <span id="mdSessionBadge" class="md-badge md-badge-soft">未连接</span>
-        <button id="mdLogoutBtn" class="md-ghost-btn" type="button" hidden>退出</button>
+      <div class="md-boot-copy">
+          <div class="md-kicker">移动端助手</div>
+        <strong>交易助手</strong>
+        <span>读取持仓与今日动作</span>
       </div>
-    </header>
+    </div>
 
-    <main class="md-main">
-      <section id="mdAuthView" class="md-auth-card">
+    <div id="mdViewHost" class="md-view-host"></div>
+
+    <template id="mdAuthTemplate">
+    <section id="mdAuthView" class="md-auth-screen">
+      <div class="md-auth-card md-auth-card-terminal">
         <div class="md-auth-copy">
-          <div class="md-auth-eyebrow">私网访问</div>
-          <h2>输入手机看板口令</h2>
-          <p>建议仅在可信局域网或私有网络中通过 HTTP 访问。</p>
+          <div class="md-brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 96 96" role="presentation">
+              <path d="M48 10 77 20v22c0 22-10 35-29 44C29 77 19 64 19 42V20l29-10Z" />
+              <path class="md-brand-line" d="M31 58l13-14 10 8 13-17" />
+              <circle class="md-brand-dot" cx="31" cy="58" r="3.5" />
+              <circle class="md-brand-dot" cx="44" cy="44" r="3.5" />
+              <circle class="md-brand-dot" cx="54" cy="52" r="3.5" />
+              <circle class="md-brand-dot" cx="67" cy="35" r="3.5" />
+            </svg>
+          </div>
+          <div class="md-kicker">私有访问</div>
+          <h1>交易助手</h1>
+          <p>查看真实持仓、今日信号与人工确认动作。仅建议在私有网络或 Tailscale 网络中访问。</p>
         </div>
+
         <form id="mdLoginForm" class="md-auth-form">
-          <label class="md-field">
+          <label class="md-field" for="mdPasswordInput">
             <span>访问口令</span>
-            <input id="mdPasswordInput" type="password" autocomplete="current-password" placeholder="请输入口令" />
+            <input id="mdPasswordInput" type="password" autocomplete="current-password" placeholder="输入口令后进入" />
           </label>
+          <div id="mdAuthMessage" class="md-inline-alert" aria-live="polite"></div>
           <button id="mdLoginBtn" class="md-primary-btn" type="submit">进入看板</button>
-          <div id="mdAuthMessage" class="md-inline-message" aria-live="polite"></div>
         </form>
-      </section>
 
-      <section id="mdDashboardView" class="md-dashboard" hidden>
-        <section class="md-hero-card">
-          <div class="md-hero-head">
-            <div class="md-hero-copy">
-              <div class="md-section-eyebrow">最新实验</div>
-              <h2 id="mdExperimentTitle">暂无实验</h2>
-              <div id="mdExperimentSubtitle" class="md-hero-subtitle">--</div>
-              <div id="mdExperimentTags" class="md-chip-row" hidden></div>
+        <div class="md-auth-footnote">添加到主屏幕后，将以独立 Web App 方式打开。</div>
+      </div>
+    </section>
+    </template>
+
+    <template id="mdDashboardTemplate">
+    <section id="mdDashboardView" class="md-shell">
+      <header class="md-shell-header">
+        <div class="md-header-copy">
+          <div class="md-kicker">个人多资产趋势配置系统</div>
+          <h1>交易助手</h1>
+          <p id="mdHeaderStatus">--</p>
+        </div>
+        <div class="md-header-actions">
+          <span id="mdSessionBadge" class="md-status-pill">未登录</span>
+          <button id="mdRefreshBtn" class="md-icon-btn" type="button" aria-label="刷新">
+            <svg viewBox="0 0 24 24" role="presentation">
+              <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+              <path d="M20 4v6h-6" />
+            </svg>
+          </button>
+          <button id="mdLogoutBtn" class="md-icon-btn" type="button" aria-label="退出">
+            <svg viewBox="0 0 24 24" role="presentation">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <path d="M16 17l5-5-5-5" />
+              <path d="M21 12H9" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div id="mdDashboardMessage" class="md-inline-alert" hidden></div>
+
+      <main class="md-shell-main">
+        <section id="mdHomePage" class="md-page is-active" data-page="home">
+          <section class="md-panel md-home-hero">
+            <div class="md-home-balance">
+              <div class="md-section-eyebrow">当前 NAV</div>
+              <div class="md-home-balance-main">
+                <div class="md-home-balance-row">
+                  <strong id="mdHomeNavValue">--</strong>
+                  <span class="md-home-unit">CNY</span>
+                </div>
+                <button id="mdDepositBtn" class="md-inline-btn md-home-deposit-btn" type="button">存入资金</button>
+              </div>
+              <div id="mdHomeNavApprox" class="md-home-secondary">--</div>
+              <div class="md-home-pnl-line">
+                <span>今日盈亏</span>
+                <strong id="mdHomeDailyPnl">--</strong>
+              </div>
             </div>
-            <div id="mdUpdatedAt" class="md-updated-at">--</div>
-          </div>
-          <div class="md-kpi-grid">
-            <article class="md-kpi-card">
-              <span>年化</span>
-              <strong id="mdCagr">--</strong>
+          </section>
+
+          <section class="md-home-metric-grid">
+            <article class="md-stat-card">
+              <span>年化收益</span>
+              <strong id="mdHomeCagr">--</strong>
             </article>
-            <article class="md-kpi-card">
-              <span>回撤</span>
-              <strong id="mdDrawdown">--</strong>
+            <article class="md-stat-card">
+              <span>总收益</span>
+              <strong id="mdHomeTotalReturn">--</strong>
             </article>
-            <article class="md-kpi-card">
+            <article class="md-stat-card">
               <span>夏普</span>
-              <strong id="mdSharpe">--</strong>
+              <strong id="mdHomeSharpe">--</strong>
             </article>
-            <article class="md-kpi-card">
-              <span>持仓数</span>
-              <strong id="mdPositionCount">--</strong>
+            <article class="md-stat-card">
+              <span>最大回撤</span>
+              <strong id="mdHomeDrawdown">--</strong>
             </article>
-          </div>
-          <div class="md-meta-grid">
-            <div class="md-meta-item">
-              <span>交易模式</span>
-              <strong id="mdTradeMode">--</strong>
-            </div>
-            <div class="md-meta-item">
-              <span>市场状态</span>
-              <strong id="mdMarketState">--</strong>
-            </div>
-            <div class="md-meta-item">
+            <article class="md-stat-card">
+              <span>交易笔数</span>
+              <strong id="mdHomeTrades">--</strong>
+            </article>
+            <article class="md-stat-card">
               <span>信号日期</span>
-              <strong id="mdSignalDate">--</strong>
-            </div>
-          </div>
-        </section>
+              <strong id="mdHomeSignalDate">--</strong>
+            </article>
+          </section>
 
-        <section class="md-grid-section">
-          <article class="md-panel md-panel-buy">
+          <section class="md-panel md-home-brief-panel">
             <div class="md-panel-head">
               <div>
-                <div class="md-section-eyebrow">建议动作</div>
-                <h3>买入候选</h3>
+                <div class="md-section-eyebrow">开盘摘要</div>
+                <h3>待办与复盘</h3>
               </div>
-              <span id="mdBuyCount" class="md-badge md-badge-buy">0</span>
             </div>
-            <div id="mdBuyList" class="md-list"></div>
-          </article>
+            <div class="md-brief-grid">
+              <article class="md-brief-block">
+                <div class="md-section-eyebrow">开盘前待办</div>
+                <strong id="mdPreOpenHeadline" class="md-brief-headline">--</strong>
+                <div id="mdPreOpenMeta" class="md-brief-meta">--</div>
+                <div id="mdPreOpenList" class="md-brief-list"></div>
+              </article>
+              <article class="md-brief-block">
+                <div class="md-section-eyebrow">收盘后复盘</div>
+                <strong id="mdPostCloseHeadline" class="md-brief-headline">--</strong>
+                <div id="mdPostCloseMeta" class="md-brief-meta">--</div>
+                <div id="mdPostCloseList" class="md-brief-list"></div>
+              </article>
+            </div>
+          </section>
 
-          <article class="md-panel md-panel-sell">
+          <section class="md-panel md-home-context-panel">
+            <div class="md-meta-grid">
+              <div class="md-meta-item">
+                <span>持仓同步</span>
+                <strong id="mdHoldingSync">--</strong>
+              </div>
+              <div class="md-meta-item">
+                <span>动作来源</span>
+                <strong id="mdSourceMode">--</strong>
+              </div>
+              <div class="md-meta-item">
+                <span>市场状态</span>
+                <strong id="mdMarketState">--</strong>
+              </div>
+              <div class="md-meta-item">
+                <span>交易节奏</span>
+                <strong id="mdTradeMode">--</strong>
+              </div>
+              <div class="md-meta-item">
+                <span>最近同步</span>
+                <strong id="mdSyncedAt">--</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="md-panel md-home-market-panel">
             <div class="md-panel-head">
               <div>
-                <div class="md-section-eyebrow">调仓动作</div>
-                <h3>卖出候选</h3>
+                <div class="md-section-eyebrow">市场快照</div>
+                <h3>环境概览</h3>
               </div>
-              <span id="mdSellCount" class="md-badge md-badge-sell">0</span>
+              <span id="mdMarketBadge" class="md-note-pill">--</span>
             </div>
-            <div id="mdSellList" class="md-list"></div>
-          </article>
+            <div id="mdMarketSummary" class="md-market-summary md-market-table"></div>
+          </section>
         </section>
 
-        <section class="md-grid-section">
-          <article class="md-panel">
+        <section id="mdTradePage" class="md-page" data-page="trade" hidden>
+          <section class="md-panel md-trade-terminal">
+            <div class="md-trade-header">
+              <div>
+                <h2>A股 / CN-A</h2>
+              </div>
+            </div>
+          </section>
+
+          <section class="md-panel md-trade-detail-panel">
+            <div class="md-trade-tab-row" role="tablist" aria-label="交易视图">
+              <button class="md-trade-tab-btn is-active" type="button" data-md-trade-pane="orders" aria-selected="true">
+                <span>当前委托</span>
+                <strong id="mdTradeOrdersCount">0</strong>
+              </button>
+              <button class="md-trade-tab-btn" type="button" data-md-trade-pane="confirmed" aria-selected="false">
+                <span>已生效交易</span>
+                <strong id="mdTradeConfirmedCount">0</strong>
+              </button>
+              <button class="md-trade-tab-btn" type="button" data-md-trade-pane="ineffective" aria-selected="false">
+                <span>未生效交易</span>
+                <strong id="mdTradeIneffectiveCount">0</strong>
+              </button>
+              <button class="md-trade-tab-btn" type="button" data-md-trade-pane="robot" aria-selected="false">
+                <span>交易机器人</span>
+                <strong id="mdTradeRobotCount">0</strong>
+              </button>
+            </div>
+
+            <section id="mdTradeOrdersPane" class="md-trade-pane is-active">
+              <div id="mdTradeOrdersList" class="md-list md-list-trade-orders"></div>
+            </section>
+            <section id="mdTradeConfirmedPane" class="md-trade-pane" hidden>
+              <div id="mdTradeConfirmedList" class="md-list md-list-pending"></div>
+            </section>
+            <section id="mdTradeIneffectivePane" class="md-trade-pane" hidden>
+              <div id="mdTradeIneffectiveList" class="md-list md-list-pending"></div>
+            </section>
+            <section id="mdTradeRobotPane" class="md-trade-pane" hidden>
+              <div id="mdWarningsList" class="md-warning-list md-warning-list-stack"></div>
+            </section>
+          </section>
+        </section>
+
+        <section id="mdAssetsPage" class="md-page" data-page="assets" hidden>
+          <section class="md-panel md-assets-hero">
+            <div class="md-home-balance">
+              <div class="md-section-eyebrow">当前总资产</div>
+              <div class="md-home-balance-row">
+                <strong id="mdAssetTotalValue">--</strong>
+                <span class="md-home-unit">CNY</span>
+              </div>
+              <div id="mdAssetApprox" class="md-home-secondary">--</div>
+              <div class="md-home-pnl-line">
+                <span>今日盈亏</span>
+                <strong id="mdAssetDailyPnl">--</strong>
+              </div>
+            </div>
+            <div class="md-asset-quick-metrics">
+              <article class="md-asset-quick-card">
+                <span>可用现金</span>
+                <strong id="mdCashBalance">--</strong>
+              </article>
+              <article class="md-asset-quick-card">
+                <span>持仓市值</span>
+                <strong id="mdPositionMarketValue">--</strong>
+              </article>
+              <article class="md-asset-quick-card">
+                <span>持仓数量</span>
+                <strong id="mdPositionCount">--</strong>
+              </article>
+            </div>
+          </section>
+
+          <section class="md-panel md-assets-panel">
             <div class="md-panel-head">
               <div>
-                <div class="md-section-eyebrow">当前仓位</div>
-                <h3>持仓概览</h3>
+                <div class="md-section-eyebrow">当前持仓</div>
+                <h3>资产列表</h3>
               </div>
-              <span id="mdHoldCount" class="md-badge md-badge-soft">0</span>
+              <span id="mdPositionCountBadge" class="md-note-pill">0</span>
             </div>
-            <div id="mdPositionList" class="md-list"></div>
-          </article>
-
-          <article class="md-panel">
-            <div class="md-panel-head">
-              <div>
-                <div class="md-section-eyebrow">市场摘要</div>
-                <h3>风险环境</h3>
-              </div>
-              <span id="mdMarketBadge" class="md-badge md-badge-soft">--</span>
-            </div>
-            <div id="mdMarketSummary" class="md-market-summary"></div>
-          </article>
+            <div id="mdPositionList" class="md-list md-list-assets"></div>
+          </section>
         </section>
+      </main>
 
-        <section class="md-panel">
-          <div class="md-panel-head">
-            <div>
-              <div class="md-section-eyebrow">Approval Queue</div>
-              <h3>Pending Tickets</h3>
-            </div>
-            <span id="mdPendingCount" class="md-badge md-badge-soft">0</span>
-          </div>
-          <div id="mdPendingList" class="md-list"></div>
-        </section>
-
-        <section class="md-panel">
-          <div class="md-panel-head">
-            <div>
-              <div class="md-section-eyebrow">系统提示</div>
-              <h3>告警与降级</h3>
-            </div>
-          </div>
-          <div id="mdWarningsList" class="md-warning-list"></div>
-        </section>
-      </section>
-    </main>
+      <nav class="md-bottom-nav" aria-label="页面导航">
+        <button class="md-nav-btn is-active" type="button" data-md-page="home">
+          <svg viewBox="0 0 24 24" role="presentation">
+            <path d="M4 11.5 12 5l8 6.5" />
+            <path d="M6 10.5V19h12v-8.5" />
+          </svg>
+          <span>首页</span>
+        </button>
+        <button class="md-nav-btn" type="button" data-md-page="trade">
+          <svg viewBox="0 0 24 24" role="presentation">
+            <path d="M4 16h8" />
+            <path d="M4 8h6" />
+            <path d="M14 16l2 2 4-4" />
+            <path d="M12 8h8" />
+          </svg>
+          <span>交易</span>
+        </button>
+        <button class="md-nav-btn" type="button" data-md-page="assets">
+          <svg viewBox="0 0 24 24" role="presentation">
+            <path d="M4 7.5h16v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z" />
+            <path d="M4 9.5h16" />
+            <path d="M16 14h2" />
+          </svg>
+          <span>资产</span>
+        </button>
+      </nav>
+    </section>
+    </template>
   </div>
 
-  <script src="/assets/js/state/mobile-state.js?v=20260315_runtimeboundary01"></script>
-  <script src="/assets/js/pages/mobile-dashboard-page.js?v=20260315_runtimeboundary01"></script>
-  <script src="/assets/js/mobile-dashboard.js?v=20260315_runtimeboundary01"></script>
+  <script src="/assets/js/state/mobile-state.js?v=20260316_mobileapp15"></script>
+  <script src="/assets/js/pages/mobile-dashboard-page.js?v=20260316_mobileapp15"></script>
+  <script src="/assets/js/mobile-dashboard.js?v=20260316_mobileapp15"></script>
 </body>
 </html>

@@ -18,12 +18,13 @@ def test_load_study_definition_from_explicit_path(tmp_path: Path) -> None:
     _write_text(
         study_path,
         "\n".join(
-            [
-                "study_id: v10/demo",
-                "title: Demo",
-                "baseline_id: baseline_V10",
-                "hypothesis: hypothesis",
-                "change_scope: {}",
+                [
+                    "study_id: v10/demo",
+                    "title: Demo",
+                    "asset_scope: cn_a_equity",
+                    "baseline_id: baseline_V10",
+                    "hypothesis: hypothesis",
+                    "change_scope: {}",
                 "variants:",
                 "  - name: B0",
                 "    config_patches:",

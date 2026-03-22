@@ -63,6 +63,11 @@ STANDARD_DAILY_COLUMNS = [
     "mf_topk_reject_count",
     "mf_concentrated_selected_count",
     "mf_gate_on",
+    "moneyflow_overlay_enabled",
+    "moneyflow_overlay_mode",
+    "moneyflow_overlay_gate_on",
+    "moneyflow_overlay_observation_date",
+    "moneyflow_overlay_score_source",
     "strong_risk_on",
     "mf_rank_suppressed_by_strong_gate",
     "same_symbol_conflict_count",
@@ -78,6 +83,17 @@ STANDARD_DAILY_COLUMNS = [
     "market_state",
     "trade_mode",
     "benchmark_regime_on",
+    "regime_engine",
+    "regime_confidence",
+    "regime_duration_bars",
+    "regime_transition_reason",
+    "feature_availability_json",
+    "market_state_5",
+    "market_state_score",
+    "market_state_raw",
+    "market_state_smoothed",
+    "risk_budget_multiplier",
+    "weekly_observation_flag",
 ]
 STANDARD_TRADE_COLUMNS = [
     "date",
@@ -410,6 +426,7 @@ def _apply_overrides(raw_cfg: dict[str, Any], overrides: dict[str, Any]) -> dict
     out.setdefault("universe", {})
     out.setdefault("execution", {})
     out.setdefault("sizing", {})
+    out.setdefault("data_source", {})
 
     if overrides.get("symbols"):
         out["universe"]["symbols"] = list(overrides["symbols"])
@@ -448,6 +465,18 @@ def _apply_overrides(raw_cfg: dict[str, Any], overrides: dict[str, Any]) -> dict
                 out["universe"]["end"] = str(wb_uni["end"])
             if wb_uni.get("benchmark"):
                 out["universe"]["benchmark"] = str(wb_uni["benchmark"])
+
+    if overrides.get("universe_mode"):
+        out["universe_mode"] = str(overrides["universe_mode"])
+    if overrides.get("industries") is not None:
+        out["industries"] = list(overrides["industries"] or [])
+    if overrides.get("price_adj"):
+        out.setdefault("universe", {})
+        out["universe"]["price_adj"] = str(overrides["price_adj"])
+    if isinstance(overrides.get("asset_context"), dict):
+        out["asset_context"] = dict(overrides["asset_context"])
+    if overrides.get("data_role"):
+        out["data_source"]["data_role"] = str(overrides["data_role"])
 
     _inject_db_credentials_from_env(out)
     return out
@@ -504,6 +533,7 @@ def run_experiment(
         "min_avg_turnover_20d": float(bundle.universe_filters_raw.get("min_avg_turnover_20d", 0.0) or 0.0),
         "min_avg_turnover_rate_20d": float(bundle.universe_filters_raw.get("min_avg_turnover_rate_20d", 0.0) or 0.0),
         "turnover_rate_field": str(bundle.universe_filters_raw.get("turnover_rate_field", "turnover_rate_f") or "turnover_rate_f"),
+        "exclude_star_market": bool(bundle.universe_filters_raw.get("exclude_star_market", False)),
         "dynamic_all_a_entry": bool(bundle.dynamic_all_a_entry),
     }
     strategy.state["membership_history"] = bundle.membership_history

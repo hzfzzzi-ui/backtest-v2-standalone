@@ -4,7 +4,7 @@ import csv
 from datetime import date
 from pathlib import Path
 
-from backend.scripts.csi1000_rebalance_calendar import (
+from backend.cli.managed.csi1000_rebalance_calendar import (
     load_rebalance_calendar,
     validate_rebalance_calendar,
 )

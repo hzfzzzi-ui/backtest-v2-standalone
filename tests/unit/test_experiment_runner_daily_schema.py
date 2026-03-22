@@ -78,6 +78,19 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
                     "market_state": "BULL",
                     "trade_mode": "MAIN",
                     "benchmark_regime_on": True,
+                    "regime_engine": "market_regime_framework",
+                    "regime_confidence": 0.82,
+                    "regime_duration_bars": 12,
+                    "regime_transition_reason": "TREND_BLOCK_CONFIRMED",
+                    "feature_availability_json": json.dumps(
+                        {
+                            "trend_block": True,
+                            "risk_block": True,
+                            "breadth_block": True,
+                            "participation_block": True,
+                        },
+                        ensure_ascii=False,
+                    ),
                 }
             ]
         )
@@ -97,3 +110,8 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
     assert row["after_cash_lot_count"] == 2
     assert row["candidates_after_held_filter_count"] == 3
     assert json.loads(row["diagnostics_input_json"])["raw_after_slot_filter_count"] == 2
+    assert row["regime_engine"] == "market_regime_framework"
+    assert row["regime_confidence"] == 0.82
+    assert row["regime_duration_bars"] == 12
+    assert row["regime_transition_reason"] == "TREND_BLOCK_CONFIRMED"
+    assert json.loads(row["feature_availability_json"])["risk_block"] is True

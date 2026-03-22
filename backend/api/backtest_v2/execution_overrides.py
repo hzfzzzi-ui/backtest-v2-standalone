@@ -194,6 +194,18 @@ def compile_multi_alpha_runtime_payload(wb_cfg: dict[str, Any]) -> dict[str, Any
                 if isinstance(values, list)
             }
         )
+    if isinstance(signal_composition.get("market_state_weight_overrides"), dict):
+        signal_composition_payload["market_state_weight_overrides"] = sanitize_json(
+            {
+                str(state).strip().upper(): {
+                    str(sleeve_id).strip(): float(weight)
+                    for sleeve_id, weight in weights.items()
+                    if str(sleeve_id).strip()
+                }
+                for state, weights in signal_composition.get("market_state_weight_overrides", {}).items()
+                if isinstance(weights, dict)
+            }
+        )
 
     return sanitize_json(
         {

@@ -13,8 +13,13 @@ const props = defineProps({
   },
 });
 
-const chartRef = ref(null);
+const SHANGHAI_INDEX_SYMBOL = '000001.SH';
+
+const singleChartRef = ref(null);
+const portfolioTopChartRef = ref(null);
+const portfolioBottomChartRef = ref(null);
 const symbolSeriesCache = ref({});
+const portfolioBenchmarkCache = ref({});
 
 const artifacts = computed(() => props.snapshot?.artifacts || {});
 const view = computed(() => props.snapshot?.view || {});
@@ -27,6 +32,127 @@ const selectedSymbol = computed(() => {
 });
 
 const isSymbolMode = computed(() => view.value.chartMode === 'symbol' && !!selectedSymbol.value);
+const benchmarkToggleLabel = computed(() => (isSymbolMode.value ? '对比基准' : '对比上证'));
+const showPortfolioBenchmark = computed(() => !isSymbolMode.value && !!view.value.showBenchmark);
+
+const REGIME_MODE_LABELS = {
+  BULL: '牛市 / 主趋势',
+  BULL_MAIN: '牛市 / 主趋势',
+  TRANS_UP: '转强',
+  TURN_STRONG: '转强',
+  TREND_LIGHT: '轻仓趋势',
+  TRANS_DOWN: '转弱',
+  TURN_WEAK: '转弱',
+  BEAR: '熊市',
+  DEFENSIVE: '空仓防守',
+  NO_TRADE: '空仓防守',
+  TREND_MAIN: '主趋势',
+  NO_TRADE_TRANS: '过渡空仓',
+};
+
+const REGIME_MODE_SWATCH = {
+  BULL: 'rgba(239, 68, 68, 0.18)',
+  BULL_MAIN: 'rgba(239, 68, 68, 0.18)',
+  TRANS_UP: 'rgba(249, 115, 22, 0.18)',
+  TURN_STRONG: 'rgba(249, 115, 22, 0.18)',
+  TREND_LIGHT: 'rgba(251, 191, 36, 0.18)',
+  TRANS_DOWN: 'rgba(59, 130, 246, 0.18)',
+  TURN_WEAK: 'rgba(59, 130, 246, 0.18)',
+  BEAR: 'rgba(34, 197, 94, 0.18)',
+  DEFENSIVE: 'rgba(148, 163, 184, 0.18)',
+  NO_TRADE: 'rgba(148, 163, 184, 0.18)',
+  TREND_MAIN: 'rgba(239, 68, 68, 0.18)',
+  NO_TRADE_TRANS: 'rgba(100, 116, 139, 0.18)',
+};
+
+const portfolioRegimeMeta = computed(() => {
+  const states = Array.isArray(artifacts.value.marketStates) ? artifacts.value.marketStates : [];
+  const latest = states[states.length - 1] || {};
+  const runMeta = artifacts.value.run_meta && typeof artifacts.value.run_meta === 'object'
+    ? artifacts.value.run_meta
+    : {};
+  const regime = runMeta.regime && typeof runMeta.regime === 'object' ? runMeta.regime : {};
+  const engine = String(
+    latest.regime_engine
+    || regime.engine
+    || runMeta?.report_consistency?.regime_engine
+    || 'ma200_legacy',
+  ).trim().toLowerCase() || 'ma200_legacy';
+  const semantics = String(
+    latest.regime_semantics
+    || regime.regime_semantics
+    || runMeta?.report_consistency?.regime_semantics
+    || (engine === 'market_regime_framework'
+      ? 'formal_framework'
+      : (engine === 'weekly_five_state' ? 'weekly_five_state_regime' : 'legacy_price_filter')),
+  ).trim().toLowerCase() || 'legacy_price_filter';
+  const confidence = Number.isFinite(Number(latest.regime_confidence)) ? Number(latest.regime_confidence) : null;
+  const duration = Number.isFinite(Number(latest.regime_duration_bars)) ? Number(latest.regime_duration_bars) : null;
+  const reason = String(latest.regime_transition_reason || '').trim();
+  return {
+    engine,
+    semantics,
+    confidence,
+    duration,
+    reason: reason || null,
+  };
+});
+
+const portfolioRegimeLegend = computed(() => {
+  const states = Array.isArray(artifacts.value.marketStates) ? artifacts.value.marketStates : [];
+  const seen = new Set();
+  states.forEach((row) => {
+    const mode = String(row?.mode || '').trim().toUpperCase();
+    if (mode) seen.add(mode);
+  });
+  return ['BULL_MAIN', 'TURN_STRONG', 'LIGHT_TREND', 'TURN_WEAK', 'DEFENSIVE', 'BULL', 'TRANS_UP', 'TREND_LIGHT', 'TRANS_DOWN', 'BEAR', 'NO_TRADE', 'NO_TRADE_TRANS']
+    .filter((mode) => seen.has(mode))
+    .map((mode) => ({
+      mode,
+      label: REGIME_MODE_LABELS[mode] || mode,
+      color: REGIME_MODE_SWATCH[mode] || 'rgba(148, 163, 184, 0.18)',
+    }));
+});
+
+const portfolioRegimeSummary = computed(() => {
+  const meta = portfolioRegimeMeta.value;
+  const engineLabel = meta.engine === 'market_regime_framework'
+    ? '正式 Regime Framework'
+    : (meta.engine === 'weekly_five_state' ? '周度五态状态机' : 'Legacy MA200 状态机');
+  const semanticsLabel = meta.semantics === 'formal_framework'
+    ? '正式框架语义'
+    : (meta.semantics === 'weekly_five_state_regime' ? '周度五态语义' : 'legacy 价格过滤语义');
+  const parts = [engineLabel, semanticsLabel];
+  if (meta.confidence != null) parts.push(`置信度 ${fmtNum(meta.confidence, 2)}`);
+  if (meta.duration != null) parts.push(`已持续 ${fmtNum(meta.duration, 0)} bars`);
+  if (meta.reason) parts.push(`最近切换: ${meta.reason}`);
+  return parts.join(' | ');
+});
+
+function aggregateMarketStates(rows, period) {
+  const input = Array.isArray(rows) ? rows : [];
+  if (!input.length || !period || period === 'D') return input;
+  const buckets = new Map();
+  for (const row of input) {
+    const d = String(row?.time || '').trim();
+    const mode = String(row?.mode || '').trim();
+    if (!d || !mode) continue;
+    let key = d;
+    if (period === 'W') {
+      const dt = new Date(`${d}T00:00:00`);
+      const day = dt.getDay();
+      const mon = new Date(dt);
+      mon.setDate(dt.getDate() - ((day + 6) % 7));
+      key = mon.toISOString().slice(0, 10);
+    } else if (period === 'M') {
+      key = `${d.slice(0, 7)}-01`;
+    } else if (period === 'Y') {
+      key = `${d.slice(0, 4)}-01-01`;
+    }
+    buckets.set(key, { ...row, time: key, mode });
+  }
+  return [...buckets.values()];
+}
 
 const ensureSymbolSeries = async () => {
   if (!isSymbolMode.value) return null;
@@ -40,13 +166,29 @@ const ensureSymbolSeries = async () => {
   return symbolSeriesCache.value[selectedSymbol.value];
 };
 
+const ensurePortfolioBenchmarkSeries = async () => {
+  if (isSymbolMode.value) return null;
+  const navSeries = Array.isArray(artifacts.value.navSeries) ? artifacts.value.navSeries : [];
+  const start = String(navSeries[0]?.date || '').trim();
+  const end = String(navSeries[navSeries.length - 1]?.date || '').trim();
+  const cacheKey = `${SHANGHAI_INDEX_SYMBOL}:${start}:${end}`;
+  if (portfolioBenchmarkCache.value[cacheKey]) return portfolioBenchmarkCache.value[cacheKey];
+  if (typeof window.loadBenchmarkSeries !== 'function') return null;
+  const loaded = await window.loadBenchmarkSeries(navSeries, { symbol: SHANGHAI_INDEX_SYMBOL, absolute: true });
+  portfolioBenchmarkCache.value = {
+    ...portfolioBenchmarkCache.value,
+    [cacheKey]: loaded || { points: [], ohlc: [], symbol: SHANGHAI_INDEX_SYMBOL },
+  };
+  return portfolioBenchmarkCache.value[cacheKey];
+};
+
 const chartFooter = computed(() => {
-  const benchmarkOhlc = Array.isArray(artifacts.value.benchmarkOhlc) ? artifacts.value.benchmarkOhlc : [];
   if (isSymbolMode.value) {
     const cache = symbolSeriesCache.value[selectedSymbol.value] || {};
     const ohlc = Array.isArray(cache.ohlc) ? cache.ohlc : [];
     const firstClose = Number(ohlc[0]?.close);
     const lastClose = Number(ohlc[ohlc.length - 1]?.close);
+    const benchmarkOhlc = Array.isArray(artifacts.value.benchmarkOhlc) ? artifacts.value.benchmarkOhlc : [];
     const firstBench = Number(benchmarkOhlc[0]?.close);
     const lastBench = Number(benchmarkOhlc[benchmarkOhlc.length - 1]?.close);
     const symbolRel = Number.isFinite(firstClose) && firstClose > 0 && Number.isFinite(lastClose) ? lastClose / firstClose : Number.NaN;
@@ -59,8 +201,7 @@ const chartFooter = computed(() => {
     ].filter(Boolean).join(' | ');
   }
   const navSeries = Array.isArray(artifacts.value.navSeries) ? artifacts.value.navSeries : [];
-  const benchmarkSource = artifacts.value.benchmarkSource || 'api';
-  return `净值 ${String(navSeries.length || 0)} 点 | 基准来源 ${benchmarkSource}`;
+  return `净值 ${String(navSeries.length || 0)} 点 | 上图 NAV + 上证归一化 | 下图 ${SHANGHAI_INDEX_SYMBOL} 绝对价格`;
 });
 
 const groupLoadStatus = computed(() => {
@@ -68,38 +209,79 @@ const groupLoadStatus = computed(() => {
   return missing.length ? `缺少 ${missing.length} 个产物，请查看状态中心` : '产物已加载';
 });
 
+function destroyInactiveCharts(forSymbolMode) {
+  if (forSymbolMode) {
+    if (typeof window.destroyPortfolioDualChartLW === 'function') {
+      try { window.destroyPortfolioDualChartLW(); } catch (_) {}
+    }
+    return;
+  }
+  if (typeof window.destroyNavChartState === 'function') {
+    try { window.destroyNavChartState(); } catch (_) {}
+  }
+}
+
 async function redrawChart() {
-  if (!chartRef.value || typeof window.renderNavChartLW !== 'function') return;
-  if (isSymbolMode.value) await ensureSymbolSeries();
+  if (isSymbolMode.value) {
+    destroyInactiveCharts(true);
+    if (!singleChartRef.value || typeof window.renderNavChartLW !== 'function') return;
+    await ensureSymbolSeries();
+    await nextTick();
+
+    const benchmarkOhlc = Array.isArray(artifacts.value.benchmarkOhlc) ? artifacts.value.benchmarkOhlc : [];
+    const chartRange = String(view.value.chartRange || 'D');
+    const aggregateNav = typeof window.aggregateNav === 'function' ? window.aggregateNav : ((rows) => rows || []);
+    const aggregateOhlc = typeof window.aggregateOhlc === 'function' ? window.aggregateOhlc : ((rows) => rows || []);
+    const cache = symbolSeriesCache.value[selectedSymbol.value] || {};
+    const rawSeries = Array.isArray(cache.ohlc) ? cache.ohlc.map((item) => ({ date: item.time, value: Number(item.close) })) : [];
+    const ohlc = Array.isArray(cache.ohlc) ? cache.ohlc : [];
+    const lastClose = Number(ohlc[ohlc.length - 1]?.close);
+    const markers = typeof window.symbolTradeMarkers === 'function'
+      ? window.symbolTradeMarkers(selectedSymbol.value, artifacts.value.tradesRows || [])
+      : [];
+    const suspensionRanges = Array.isArray(cache.suspensionRanges) ? cache.suspensionRanges : [];
+
+    window.renderNavChartLW(
+      singleChartRef.value.id,
+      aggregateOhlc(benchmarkOhlc, chartRange),
+      aggregateNav(rawSeries, chartRange),
+      !!view.value.showBenchmark,
+      {
+        mode: 'symbol',
+        markers,
+        marketStates: [],
+        suspensionRanges,
+        symbolLastClose: lastClose,
+      },
+    );
+    return;
+  }
+
+  destroyInactiveCharts(false);
+  if (!portfolioTopChartRef.value) return;
+  const portfolioBenchmark = await ensurePortfolioBenchmarkSeries();
   await nextTick();
-  const benchmarkOhlc = Array.isArray(artifacts.value.benchmarkOhlc) ? artifacts.value.benchmarkOhlc : [];
-  const navSeries = Array.isArray(artifacts.value.navSeries) ? artifacts.value.navSeries : [];
+  if (typeof window.renderPortfolioDualChartLW !== 'function') return;
+
   const chartRange = String(view.value.chartRange || 'D');
+  const benchmarkOhlc = Array.isArray(portfolioBenchmark?.ohlc) ? portfolioBenchmark.ohlc : [];
+  const navSeries = Array.isArray(artifacts.value.navSeries) ? artifacts.value.navSeries : [];
+  const marketStates = aggregateMarketStates(
+    Array.isArray(artifacts.value.marketStates) ? artifacts.value.marketStates : [],
+    chartRange,
+  );
   const aggregateNav = typeof window.aggregateNav === 'function' ? window.aggregateNav : ((rows) => rows || []);
   const aggregateOhlc = typeof window.aggregateOhlc === 'function' ? window.aggregateOhlc : ((rows) => rows || []);
-  const cache = symbolSeriesCache.value[selectedSymbol.value] || {};
-  const rawSeries = isSymbolMode.value
-    ? (Array.isArray(cache.ohlc) ? cache.ohlc.map((item) => ({ date: item.time, value: Number(item.close) })) : [])
-    : navSeries;
-  const ohlc = isSymbolMode.value ? (cache.ohlc || []) : [];
-  const lastClose = Number(ohlc[ohlc.length - 1]?.close);
-  const markers = isSymbolMode.value && typeof window.symbolTradeMarkers === 'function'
-    ? window.symbolTradeMarkers(selectedSymbol.value, artifacts.value.tradesRows || [])
-    : [];
-  const marketStates = !isSymbolMode.value ? (artifacts.value.marketStates || []) : [];
-  const suspensionRanges = isSymbolMode.value ? (cache.suspensionRanges || []) : [];
 
-  window.renderNavChartLW(
-    chartRef.value.id,
+  window.renderPortfolioDualChartLW(
+    portfolioTopChartRef.value.id,
+    portfolioBottomChartRef.value?.id || '',
     aggregateOhlc(benchmarkOhlc, chartRange),
-    aggregateNav(rawSeries, chartRange),
-    !!view.value.showBenchmark,
+    aggregateNav(navSeries, chartRange),
     {
-      mode: isSymbolMode.value ? 'symbol' : 'portfolio',
-      markers,
+      showBenchmark: !!view.value.showBenchmark,
+      benchmarkSymbol: SHANGHAI_INDEX_SYMBOL,
       marketStates,
-      suspensionRanges,
-      symbolLastClose: lastClose,
     },
   );
 }
@@ -145,7 +327,7 @@ watch(
         </select>
         <label class="wb-check-label">
           <input :checked="!!view.showBenchmark" type="checkbox" @change="onShowBenchmarkChange" />
-          对比基准
+          {{ benchmarkToggleLabel }}
         </label>
         <select :value="view.chartRange || 'D'" class="formInput wb-input-sm" @change="onChartRangeChange">
           <option value="D">日K</option>
@@ -156,14 +338,76 @@ watch(
       </div>
     </div>
 
-    <div id="wbResultsWorkbenchChart" ref="chartRef" class="wb-chart wb-chart-main">
-      <div class="wb-empty">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-        </svg>
-        <span>运行实验后，在这里查看净值与基准走势。</span>
-      </div>
+    <div
+      v-if="!isSymbolMode"
+      class="wb-mini"
+      style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-bottom:10px;align-items:center;"
+    >
+      <span>{{ portfolioRegimeSummary }}</span>
+      <span
+        v-for="item in portfolioRegimeLegend"
+        :key="item.mode"
+        style="display:inline-flex;align-items:center;gap:6px;"
+      >
+        <span
+          :style="{
+            width: '12px',
+            height: '12px',
+            borderRadius: '3px',
+            background: item.color,
+            border: '1px solid rgba(148,163,184,0.35)',
+          }"
+        ></span>
+        <span>{{ item.label }}</span>
+      </span>
     </div>
+
+    <template v-if="isSymbolMode">
+      <div id="wbResultsWorkbenchChart" ref="singleChartRef" class="wb-chart wb-chart-main">
+        <div class="wb-empty">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
+          <span>运行实验后，在这里查看个股净值与基准走势。</span>
+        </div>
+      </div>
+    </template>
+
+    <template v-else>
+      <div
+        class="wb-chart-stack"
+        :style="{
+          display: 'grid',
+          gridTemplateRows: showPortfolioBenchmark ? '344px 244px' : '520px',
+          gap: showPortfolioBenchmark ? '12px' : '0',
+          height: 'auto',
+          minHeight: '0',
+        }"
+      >
+        <div class="wb-chart-stack-panel" :style="{ minHeight: showPortfolioBenchmark ? '344px' : '520px' }">
+          <div class="wb-mini" style="margin-bottom: 6px;">上图：NAV + 上证归一化收益曲线</div>
+          <div id="wbResultsWorkbenchChartTop" ref="portfolioTopChartRef" class="wb-chart wb-chart-main" :style="{ height: showPortfolioBenchmark ? '320px' : '496px' }">
+            <div class="wb-empty">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+              <span>运行实验后，在这里查看 NAV 与上证归一化收益曲线。</span>
+            </div>
+          </div>
+        </div>
+        <div v-show="showPortfolioBenchmark" class="wb-chart-stack-panel" style="min-height: 244px;">
+          <div class="wb-mini" style="margin-bottom: 6px;">下图：上证指数绝对价格</div>
+          <div id="wbResultsWorkbenchChartBottom" ref="portfolioBottomChartRef" class="wb-chart wb-chart-main" style="height: 220px;">
+            <div class="wb-empty">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+              <span>运行实验后，在这里查看上证指数 K 线。</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
 
     <div class="wb-canvas-footer">
       <div class="wb-mini">{{ chartFooter }}</div>

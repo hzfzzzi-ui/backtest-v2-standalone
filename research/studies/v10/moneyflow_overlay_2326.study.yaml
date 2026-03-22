@@ -1,0 +1,233 @@
+study_id: v10/moneyflow_overlay_2326
+title: V10 Moneyflow Overlay 23-26
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: Add the monthly moneyflow divergence overlay on top of baseline_V10.1 for 2023-07-03 to 2026-03-16 without rewriting the main ranking shell.
+change_scope:
+  modules_modified:
+    - backend/core/engine_vector/moneyflow_overlay.py
+    - backend/core/portfolio/portfolio_runtime.py
+    - backend/core/stage_pipeline/adapters/daily_accounting.py
+    - backend/research/study_runner.py
+variants:
+  - name: B0
+    description: Baseline control with no moneyflow overlay.
+  - name: SHADOW
+    description: Load the overlay and diagnostics only, but keep baseline behavior unchanged.
+    request_overrides:
+      workbench_config:
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: shadow
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+  - name: TIEBREAK
+    description: Keep baseline rank primary and use moneyflow overlay as the secondary sort key.
+    request_overrides:
+      workbench_config:
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: tiebreak
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+  - name: SOFT_WEIGHT
+    description: Keep baseline ordering and let moneyflow overlay only adjust score-weighted sizing.
+    request_overrides:
+      workbench_config:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.9
+          score_weight_max_scale: 1.1
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+  - name: SOFT_WEIGHT_NARROW
+    description: Keep baseline ordering and use a narrow score-weighted sizing band.
+    request_overrides:
+      workbench_config:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.95
+          score_weight_max_scale: 1.05
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+  - name: SOFT_WEIGHT_WIDE
+    description: Keep baseline ordering and use a wide score-weighted sizing band.
+    request_overrides:
+      workbench_config:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.85
+          score_weight_max_scale: 1.15
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+  - name: SOFT_WEIGHT_080_120
+    description: Keep baseline ordering and use score-weighted sizing band 0.80 to 1.20.
+    request_overrides:
+      workbench_config:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.80
+          score_weight_max_scale: 1.20
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+  - name: SOFT_WEIGHT_070_130
+    description: Keep baseline ordering and use score-weighted sizing band 0.70 to 1.30.
+    request_overrides:
+      workbench_config:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.70
+          score_weight_max_scale: 1.30
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+  - name: SOFT_WEIGHT_075_125
+    description: Keep baseline ordering and use score-weighted sizing band 0.75 to 1.25.
+    request_overrides:
+      workbench_config:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.75
+          score_weight_max_scale: 1.25
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+  - name: SOFT_WEIGHT_072_128
+    description: Keep baseline ordering and use score-weighted sizing band 0.72 to 1.28.
+    request_overrides:
+      workbench_config:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.72
+          score_weight_max_scale: 1.28
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+  - name: SOFT_WEIGHT_068_132
+    description: Keep baseline ordering and use score-weighted sizing band 0.68 to 1.32.
+    request_overrides:
+      workbench_config:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.68
+          score_weight_max_scale: 1.32
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+  - name: SOFT_WEIGHT_060_140
+    description: Keep baseline ordering and use score-weighted sizing band 0.60 to 1.40.
+    request_overrides:
+      workbench_config:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.60
+          score_weight_max_scale: 1.40
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+  - name: SOFT_WEIGHT_050_150
+    description: Keep baseline ordering and use score-weighted sizing band 0.50 to 1.50.
+    request_overrides:
+      workbench_config:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.50
+          score_weight_max_scale: 1.50
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_panel_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_factor_panel.csv
+            coverage_ledger_path: outputs/studies/a_share_moneyflow_divergence_legacy_no_growth_boards_t10_decay/factors_a_share_moneyflow_divergence_min10/2326_HC/LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY/monthly_coverage_ledger.csv
+            score_field: monthly_divergence_rate
+            score_source: LEGACY_PIT_NO_GROWTH_BOARDS_T10_DECAY_2326_HC
+            lower_is_better: true
+windows:
+  - key: "2326_HC"
+    role: high_coverage
+    start: "2023-07-03"
+    end: "2026-03-16"
+    periods:
+      phase_2023_h2: ["2023-07-03", "2023-12-29"]
+      phase_2024_full_year: ["2024-01-02", "2024-12-31"]
+      phase_2025_2026_ytd: ["2025-01-02", "2026-03-16"]
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  workbench_config_path: outputs/experiments/exp_20260314_144548534_7db9/run_config.json
+  fast_mode: true
+  max_positions: 10
+  universe_mode: HS300_ZZ500
+  price_adj: hfq
+  enable_multifactor_rank: true
+  momentum_top_pct: 0.0

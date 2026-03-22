@@ -140,10 +140,17 @@ def test_main_mounts_transactions_from_new_surface_only() -> None:
     assert "backend.api.endpoints.transactions" not in source
 
 
-def test_experiment_history_services_depend_on_new_history_impl_only() -> None:
+def test_experiment_history_services_depend_on_core_history_service() -> None:
     query_source = _read_repo_file("backend", "core", "services", "experiment_query_service.py")
     compare_source = _read_repo_file("backend", "core", "services", "experiment_compare_service.py")
-    assert "from backend.api.backtest_v2 import history_impl" in query_source
-    assert "from backend.api.backtest_v2 import history_impl" in compare_source
+    history_api_source = _read_repo_file("backend", "api", "backtest_v2", "history_impl.py")
+    history_service_source = _read_repo_file("backend", "core", "services", "experiment_history_service.py")
+    assert "from backend.core.services import experiment_history_service" in query_source
+    assert "from backend.core.services import experiment_history_service" in compare_source
+    assert "from backend.api.backtest_v2 import history_impl" not in query_source
+    assert "from backend.api.backtest_v2 import history_impl" not in compare_source
+    assert "from backend.core.services import experiment_history_service" in history_api_source
+    assert "def list_experiments(*, experiments_root: Path | None = None)" in history_service_source
+    assert "def compare_experiments(body: dict[str, Any], *, experiments_root: Path | None = None)" in history_service_source
     assert "_experiment_history" not in query_source
     assert "_experiment_history" not in compare_source

@@ -19,6 +19,12 @@ def test_canonical_artifact_contract_and_missing_fields(tmp_path: Path) -> None:
 
     base_cfg = {
         "universe": {"start": "2024-01-01", "end": "2024-12-31", "benchmark": "000300.SH"},
+        "data_source": {
+            "data_role": "v2_runtime",
+            "stocks_table": "pams_ohlcv_daily",
+            "v2_runtime_stocks_table": "pams_ohlcv_daily_v2_runtime",
+            "v2_schema_mapping_table": "pams_ohlcv_daily_v2",
+        },
         "signal": {"strategy": "EMA_CROSS"},
     }
     result = {
@@ -142,6 +148,12 @@ def test_run_meta_report_consistency_includes_resolved_config_details(tmp_path: 
 
     base_cfg = {
         "universe": {"start": "2024-01-01", "end": "2024-12-31", "benchmark": "000300.SH"},
+        "data_source": {
+            "data_role": "v2_runtime",
+            "stocks_table": "pams_ohlcv_daily",
+            "v2_runtime_stocks_table": "pams_ohlcv_daily_v2_runtime",
+            "v2_schema_mapping_table": "pams_ohlcv_daily_v2",
+        },
         "signal": {"strategy": "EMA_CROSS"},
     }
     result = {
@@ -182,8 +194,12 @@ def test_run_meta_report_consistency_includes_resolved_config_details(tmp_path: 
     assert consistency.get("resolved_config_mode") == "saved_config_run"
     assert consistency.get("resolved_config_id") == "cfg_br35_atr10_csi800_10y"
     assert consistency.get("resolved_config_hash") == "abc123"
+    assert consistency.get("data_role") == "v2_runtime"
+    assert consistency.get("stocks_table") == "pams_ohlcv_daily_v2_runtime"
+    assert consistency.get("stocks_mapping_table") == "pams_ohlcv_daily_v2"
     assert (consistency.get("resolved_config_meta") or {}).get("display_name") == "BR35+ATR1.0+HS300+ZZ500+10Y"
     assert (consistency.get("resolved_config_meta") or {}).get("universe_mode") == "HS300_ZZ500"
+    assert (consistency.get("resolved_config_meta") or {}).get("data_role") == "v2_runtime"
     assert "fallbacks" not in consistency
 
 
@@ -234,8 +250,73 @@ def test_stage_summary_artifact_is_written_and_indexed(tmp_path: Path) -> None:
             "trading_days": 2,
         },
         "metrics": {
+            "execution_lineage_ledger": [
+                {
+                    "signal_id": "sig_1",
+                    "signal_date": "2024-01-02",
+                    "order_id": "ord_1",
+                    "scheduled_date": "2024-01-03",
+                    "last_scheduled_date": "2024-01-03",
+                    "schedule_attempts": 1,
+                    "fill_id": "fil_1",
+                    "fill_date": "2024-01-03",
+                    "symbol": "sh600000",
+                    "side": "BUY",
+                    "qty": 100,
+                    "reason_code": "ENTRY",
+                    "signal_alpha_id": "breakout_55",
+                    "signal_sleeve_id": "trend",
+                    "entry_alpha_id": "breakout_55",
+                    "entry_sleeve_id": "trend",
+                    "terminal_status": "filled",
+                    "terminal_reason": "",
+                    "deferred_count": 0,
+                }
+            ],
             "audit": {
                 "legacy_kernel": "strict_core",
+                "accounting_integrity": {
+                    "contract_version": "accounting_integrity_audit@1",
+                    "status": "PASS",
+                    "reason": "Canonical accounting snapshots satisfy cash, position, and NAV invariants.",
+                    "summary": {
+                        "trading_days": 2,
+                        "days_with_evidence": 2,
+                        "missing_evidence_days": 0,
+                        "cash_check_pass": 2,
+                        "cash_check_fail": 0,
+                        "position_check_pass": 2,
+                        "position_check_fail": 0,
+                        "nav_check_pass": 2,
+                        "nav_check_fail": 0,
+                        "invalid_nav_days": 0,
+                        "negative_cash_days": 0,
+                        "max_positions_breach_days": 0,
+                    },
+                    "samples": {},
+                    "tolerances": {"cash_abs": 0.015, "nav_abs": 0.01},
+                },
+                "execution_lineage": {
+                    "contract_version": "execution_lineage_audit@1",
+                    "status": "PASS",
+                    "reason": "Execution lineage ledger is internally consistent.",
+                    "summary": {
+                        "generated_count": 1,
+                        "scheduled_count": 1,
+                        "filled_count": 1,
+                        "expired_count": 0,
+                        "rejected_count": 0,
+                        "canceled_count": 0,
+                        "missing_fill_count": 0,
+                        "same_day_fill_count": 0,
+                        "open_count": 0,
+                    },
+                    "samples": {
+                        "same_day_fill": [],
+                        "dropped_order": [],
+                        "missing_fill": [],
+                    },
+                },
             },
         },
     }
@@ -261,12 +342,20 @@ def test_stage_summary_artifact_is_written_and_indexed(tmp_path: Path) -> None:
 
     audit = json.loads((effective_results_dir / "audit.json").read_text(encoding="utf-8"))
     assert audit.get("legacy_kernel") == "strict_core"
+    assert (audit.get("accounting_integrity") or {}).get("status") == "PASS"
+    assert (audit.get("execution_lineage") or {}).get("status") == "PASS"
+    assert (audit.get("execution_lineage") or {}).get("ledger_ref") == "execution_lineage_ledger.csv"
     assert (audit.get("stage_pipeline") or {}).get("stage_order") == ["S1", "S2", "S3", "S4", "S5", "S6", "S9", "S8", "S7"]
     assert (audit.get("research_audit") or {}).get("contract_version") == "research_audit@1"
+    assert (audit.get("research_audit") or {}).get("gates", {}).get("accounting_integrity", {}).get("status") == "PASS"
+    assert (audit.get("research_audit") or {}).get("evidence_refs", {}).get("execution_lineage_ledger") == "execution_lineage_ledger.csv"
+    assert (audit.get("research_audit") or {}).get("evidence_refs", {}).get("audit") == "audit.json"
     assert (audit.get("research_audit") or {}).get("evidence_refs", {}).get("run_meta") == "run_meta.json"
     assert (audit.get("research_audit") or {}).get("evidence_refs", {}).get("manifest") == "manifest.json"
 
     manifest = json.loads((effective_results_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["artifacts"]["execution_lineage_ledger"] == "execution_lineage_ledger.csv"
+    assert manifest["core_artifacts"]["execution_lineage_ledger"] == "execution_lineage_ledger.csv"
     assert manifest["artifacts"]["stage_summary"] == "stage_summary.json"
     assert (manifest.get("stage_pipeline") or {}).get("route_id") == "provider_breakout_runtime"
 

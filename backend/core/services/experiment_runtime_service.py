@@ -18,11 +18,34 @@ from backend.core.services.experiment_artifact_service import stabilize_experime
 from backend.core.tools.locked_candidate_presets import is_locked_candidate_preset
 from backend.core.tools.saved_config_access import resolve_runtime_config_source
 
+_CANONICAL_ASSET_CONTEXT_KEYS = {
+    "asset_scope",
+    "asset_profile_id",
+    "asset_class",
+    "market_profile_id",
+    "execution_profile_id",
+    "market_profile",
+    "execution_profile",
+    "tags",
+}
+
 
 def _api_module():
     from backend.api.backtest_v2 import impl as api_module
 
     return api_module
+
+
+def _resolve_data_role_from_cfg(cfg: dict[str, Any] | None) -> str | None:
+    if not isinstance(cfg, dict):
+        return None
+    data_source = cfg.get("data_source")
+    if isinstance(data_source, dict):
+        role = str(data_source.get("data_role") or "").strip()
+        if role:
+            return role
+    role = str(cfg.get("data_role") or "").strip()
+    return role or None
 
 
 def build_runtime_cfg_from_workbench(
@@ -181,6 +204,9 @@ def run_experiment_request_body(
         overrides["workbench_mode"] = str(body.workbench_mode)
     if isinstance(effective_wb_cfg, dict):
         wb_cfg = effective_wb_cfg
+        wb_data_role = _resolve_data_role_from_cfg(wb_cfg)
+        if wb_data_role:
+            overrides["data_role"] = wb_data_role
         if not api_module._looks_like_backend_runtime_config(wb_cfg):
             overrides.update(api_module._semantic_ranking_execution_overrides(wb_cfg))
             overrides.update(api_module._semantic_sizing_execution_overrides(wb_cfg))
@@ -205,6 +231,8 @@ def run_experiment_request_body(
             resolved_config_meta_payload.setdefault("schema_version", SEMANTIC_CONFIG_SCHEMA_VERSION)
             resolved_config_meta_payload.setdefault("config_source", config_source)
             resolved_config_meta_payload["config_hash"] = resolved_config_hash or resolved_config_meta_payload.get("config_hash")
+            if wb_data_role:
+                resolved_config_meta_payload["data_role"] = wb_data_role
             resolved_config_meta = sanitize_json(resolved_config_meta_payload)
             overrides["resolved_config_meta"] = resolved_config_meta
         if body.initial_capital is None and wb_cfg.get("initial_capital") is not None:
@@ -219,13 +247,22 @@ def run_experiment_request_body(
             overrides["workbench_config"] = wb_cfg
             overrides["original_workbench_config"] = semantic_cfg_input if isinstance(semantic_cfg_input, dict) else wb_cfg
     effective_wb_cfg_dict = effective_wb_cfg if isinstance(effective_wb_cfg, dict) else {}
-    overrides["asset_context"] = sanitize_json(
-        build_asset_context(
-            canonical_scope,
-            config_json=effective_wb_cfg_dict if effective_wb_cfg_dict else base_cfg,
-            metadata_scope=(effective_wb_cfg_dict.get("asset_context") or {}).get("asset_scope") if isinstance(effective_wb_cfg_dict.get("asset_context"), dict) else None,
-        )
+    base_asset_context = build_asset_context(
+        canonical_scope,
+        config_json=effective_wb_cfg_dict if effective_wb_cfg_dict else base_cfg,
+        metadata_scope=(effective_wb_cfg_dict.get("asset_context") or {}).get("asset_scope") if isinstance(effective_wb_cfg_dict.get("asset_context"), dict) else None,
     )
+    extra_asset_context = (
+        dict(effective_wb_cfg_dict.get("asset_context") or {})
+        if isinstance(effective_wb_cfg_dict.get("asset_context"), dict)
+        else {}
+    )
+    merged_asset_context = dict(base_asset_context)
+    for key, value in extra_asset_context.items():
+        if key in _CANONICAL_ASSET_CONTEXT_KEYS:
+            continue
+        merged_asset_context[key] = value
+    overrides["asset_context"] = sanitize_json(merged_asset_context)
     if use_script_cfg or runtime_config_supplied:
         wb_uni = effective_wb_cfg_dict.get("universe") if isinstance(effective_wb_cfg_dict.get("universe"), dict) else {}
         overrides["universe_mode"] = str(effective_wb_cfg_dict.get("universe_mode") or body.universe_mode or "CUSTOM")
@@ -339,6 +376,8 @@ def run_experiment_request_body(
     result["resolved_config_id"] = resolved_config_id or None
     result["resolved_config_hash"] = resolved_config_hash or None
     result["config_conflict_policy"] = conflict_policy
+    if overrides.get("data_role"):
+        result["data_role"] = str(overrides.get("data_role"))
     if resolved_config_meta is not None:
         result["resolved_config_meta"] = sanitize_json(dict(resolved_config_meta))
         result["resolved_config_source_type"] = str(resolved_config_meta.get("source_type") or "")

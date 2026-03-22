@@ -44,11 +44,17 @@ Backend universe resolver that supports 4 modes (ALL_A, HS300_ZZ500, INDUSTRY, C
 - **THEN** resolver SHALL 原样返回该列表（经过 normalize_stock_symbol 标准化）
 
 ### Requirement: resolver 返回元数据
-resolver SHALL 返回 `(symbols, meta)` 元组，其中 `meta` 包含 `symbols_source`（模式名）、`raw_count`（原始数量）、`universe_mode`。该元数据 SHALL 写入 `run_meta.json` 供可观测性验证。
+resolver SHALL 返回 `(symbols, meta)` 元组，其中 `meta` 除了原有 `symbols_source`、`raw_count` 和 `universe_mode` 外，在 `PIT_DYNAMIC` 指数股票池场景下还 MUST 暴露足够的 lineage 质量字段，用于区分正式单源历史链与低保真 fallback。
 
-#### Scenario: run_meta 记录 universe 来源
-- **WHEN** 回测使用 `INDUSTRY` 模式，选择"银行"行业，结果 42 只股票
-- **THEN** `run_meta.json` 的 `universe` 字段 SHALL 包含 `{"mode": "INDUSTRY", "industries": ["银行"], "symbols_count": 42, "source": "pit_industry_history"}`
+#### Scenario: HS300_ZZ500 暴露正式 lineage 元数据
+- **WHEN** 回测使用 `universe_mode='HS300_ZZ500'` 且 membership mode 为 `PIT_DYNAMIC`
+- **THEN** `meta` 或其后续落盘的等价元信息 MUST 包含 `index_code='000906.SH'`
+- **THEN** `meta` 或其后续落盘的等价元信息 MUST 包含 `membership_source`、`membership_data_quality`、`membership_history_rows` 和 `distinct_start_dates`
+
+#### Scenario: 正式入口不得继续引用月度链为 formal lineage
+- **WHEN** 系统对外暴露 `HS300_ZZ500` 的正式导入资产或 lineage 说明
+- **THEN** 正式入口 MUST 指向新的 `Tushare` 历史链
+- **THEN** 旧月度脚本只能作为 fallback/approximate 说明存在，MUST NOT 再被标注为 formal lineage
 
 ### Requirement: experiment_runner 集成
 `experiment_runner.run_experiment()` SHALL 在加载配置后、执行回测前，调用 universe resolver 解析 symbols 列表，替代当前直接使用 `cfg_obj.universe.symbols` 的逻辑。

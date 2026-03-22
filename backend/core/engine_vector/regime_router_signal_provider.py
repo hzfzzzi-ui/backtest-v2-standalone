@@ -63,6 +63,14 @@ class RegimeRouterSignalProvider:
         self._ema_light_buy_ok: np.ndarray = np.array([])
         self._ema_light_sell_ok: np.ndarray = np.array([])
         self._ema_light_cand_idx: list[np.ndarray] = []
+        self._regime_engine_name: str = "ma200_legacy"
+        self._formal_regime_features: Any = None
+        self._required_feature_blocks_ready: np.ndarray = np.array([], dtype=bool)
+        self._regime_confidence_arr: np.ndarray = np.array([], dtype=float)
+        self._regime_duration_bars_arr: np.ndarray = np.array([], dtype=np.int32)
+        self._regime_transition_reason_arr: np.ndarray = np.array([], dtype=object)
+        self._feature_availability_arr: np.ndarray = np.array([], dtype=object)
+        self._fallback_active_arr: np.ndarray = np.array([], dtype=bool)
 
         self._atr_lookup: dict[str, dict[date, float]] = {}
         self._need_atr: bool = False
@@ -270,6 +278,32 @@ class RegimeRouterSignalProvider:
             "market_state": market_state_name,
             "trade_mode": trade_mode_name,
         }
+        if i < len(self._regime_confidence_arr):
+            diagnostics["regime_engine"] = str(self._regime_engine_name or "ma200_legacy")
+            diagnostics["regime_confidence"] = float(self._regime_confidence_arr[i])
+            diagnostics["regime_duration_bars"] = int(self._regime_duration_bars_arr[i]) if i < len(self._regime_duration_bars_arr) else 0
+            diagnostics["regime_transition_reason"] = str(self._regime_transition_reason_arr[i] or "")
+            diagnostics["feature_availability"] = self._feature_availability_arr[i] if i < len(self._feature_availability_arr) else {}
+            diagnostics["fallback_active"] = bool(self._fallback_active_arr[i]) if i < len(self._fallback_active_arr) else False
+
+        if self._use_market_filter and market_state_name:
+            for sig in buy_sigs:
+                sig.meta["market_state"] = market_state_name
+                sig.meta["trade_mode"] = trade_mode_name
+                sig.meta["regime_engine"] = str(self._regime_engine_name or "ma200_legacy")
+                if i < len(self._regime_confidence_arr):
+                    sig.meta["regime_confidence"] = float(self._regime_confidence_arr[i])
+                    sig.meta["regime_duration_bars"] = int(self._regime_duration_bars_arr[i])
+                    sig.meta["regime_transition_reason"] = str(self._regime_transition_reason_arr[i] or "")
+            for sig in sell_sigs:
+                if "market_state" not in sig.meta:
+                    sig.meta["market_state"] = market_state_name
+                    sig.meta["trade_mode"] = trade_mode_name
+                sig.meta["regime_engine"] = str(self._regime_engine_name or "ma200_legacy")
+                if i < len(self._regime_confidence_arr):
+                    sig.meta["regime_confidence"] = float(self._regime_confidence_arr[i])
+                    sig.meta["regime_duration_bars"] = int(self._regime_duration_bars_arr[i])
+                    sig.meta["regime_transition_reason"] = str(self._regime_transition_reason_arr[i] or "")
 
         return DaySignals(
             sell_signals=sell_sigs,

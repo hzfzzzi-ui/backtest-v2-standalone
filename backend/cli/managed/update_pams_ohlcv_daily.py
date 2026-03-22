@@ -503,6 +503,38 @@ def _get_latest_trade_date(table: str, market: str) -> date | None:
     return pd.Timestamp(row[0]).date()
 
 
+def _load_cn_a_null_adj_factor_audit(table: str, *, start: date, end: date) -> dict[str, Any]:
+    if start > end:
+        return {"dates": [], "rows": 0, "per_trade_date": [], "ok": True}
+    table_name = _safe_ident(table)
+    query = f"""
+        SELECT trade_date, COUNT(*) AS missing_rows
+        FROM public.{table_name}
+        WHERE market = 'CN_A'
+          AND trade_date >= %s
+          AND trade_date <= %s
+          AND adj_factor IS NULL
+        GROUP BY trade_date
+        ORDER BY trade_date
+    """
+    per_trade_date: list[dict[str, Any]] = []
+    missing_rows = 0
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, (start, end))
+            for trade_date, row_count in cur.fetchall():
+                trade_dt = pd.Timestamp(trade_date).date()
+                count = int(row_count or 0)
+                per_trade_date.append({"trade_date": trade_dt.isoformat(), "rows": count})
+                missing_rows += count
+    return {
+        "dates": [item["trade_date"] for item in per_trade_date],
+        "rows": missing_rows,
+        "per_trade_date": per_trade_date,
+        "ok": missing_rows == 0,
+    }
+
+
 def _fetch_daily_basic_safe(pro: Any, trade_date: date) -> tuple[pd.DataFrame | None, str | None]:
     try:
         return pro.daily_basic(
@@ -705,16 +737,22 @@ def _infer_start_date(args_start: str, table: str, end: date) -> tuple[date, dat
 
 
 def run_update(args: argparse.Namespace) -> dict[str, Any]:
+    requested_start = str(args.start or "").strip()
+    repair_null_adj_factor = bool(getattr(args, "repair_null_adj_factor", False))
+    if repair_null_adj_factor and not requested_start:
+        raise RuntimeError("--start is required when --repair-null-adj-factor is enabled")
     end = date.fromisoformat(args.end)
-    start, latest_cn_a, latest_cn_index = _infer_start_date(str(args.start or "").strip(), str(args.table), end)
+    start, latest_cn_a, latest_cn_index = _infer_start_date(requested_start, str(args.table), end)
     ts_label = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) if str(args.output_dir).strip() else (DEFAULT_OUTPUT_ROOT / f"ohlcv_update_{ts_label}")
     output_dir.mkdir(parents=True, exist_ok=True)
+    before_adj_factor_audit = _load_cn_a_null_adj_factor_audit(str(args.table), start=start, end=end)
 
     summary: dict[str, Any] = {
         "status": "ok",
         "apply": bool(args.apply),
         "table": str(args.table),
+        "repair_null_adj_factor": repair_null_adj_factor,
         "date_range": {"start": start.isoformat(), "end": end.isoformat()},
         "latest_cn_a_before": latest_cn_a.isoformat() if latest_cn_a else None,
         "latest_cn_index_before": latest_cn_index.isoformat() if latest_cn_index else None,
@@ -727,6 +765,14 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
         "upserted_rows": 0,
         "batch_size": int(args.batch_size),
         "daily_basic_status": {"available": True, "message": None},
+        "repair_target_trade_dates": [],
+        "adj_factor_integrity": {
+            "before_dates": list(before_adj_factor_audit["dates"]),
+            "after_dates": list(before_adj_factor_audit["dates"]),
+            "before_rows": int(before_adj_factor_audit["rows"]),
+            "remaining_rows": int(before_adj_factor_audit["rows"]),
+            "ok": bool(before_adj_factor_audit["ok"]),
+        },
         "per_trade_date": [],
         "index_symbol_stats": [],
         "notes": [
@@ -735,8 +781,22 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
             "limit_up/limit_down are computed from previous close only; if previous close is unavailable they remain null.",
         ],
     }
-    if start > end:
+    target_trade_dates: list[date] = []
+    if repair_null_adj_factor:
+        target_trade_dates = [date.fromisoformat(item) for item in before_adj_factor_audit["dates"]]
+        summary["repair_target_trade_dates"] = [item.isoformat() for item in target_trade_dates]
+        summary["notes"].append(
+            "repair_null_adj_factor mode only refetches CN_A trade dates that still have raw adj_factor gaps in the requested range."
+        )
+    elif start <= end:
+        target_trade_dates = list(_iter_dates(start, end))
+
+    if not target_trade_dates:
         summary["status"] = "noop"
+        summary["latest_cn_a_after"] = latest_cn_a.isoformat() if latest_cn_a else None
+        summary["latest_cn_index_after"] = latest_cn_index.isoformat() if latest_cn_index else None
+        if repair_null_adj_factor:
+            summary["notes"].append("repair_null_adj_factor found no CN_A rows with adj_factor gaps in the requested range.")
         _write_json(output_dir / "summary.json", summary)
         return summary
 
@@ -747,7 +807,7 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
     daily_basic_enabled = True
 
     stock_frames: list[pd.DataFrame] = []
-    for trade_date in _iter_dates(start, end):
+    for trade_date in target_trade_dates:
         daily_raw = pro.daily(
             trade_date=trade_date.strftime("%Y%m%d"),
             fields="ts_code,trade_date,open,high,low,close,pre_close,vol,amount",
@@ -758,15 +818,12 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
         )
         basic_raw = pd.DataFrame()
         if daily_basic_enabled:
-            try:
-                basic_raw = pro.daily_basic(
-                    trade_date=trade_date.strftime("%Y%m%d"),
-                    fields="ts_code,trade_date," + ",".join(DAILY_BASIC_FIELDS),
-                )
-            except Exception as exc:
+            basic_raw, basic_error = _fetch_daily_basic_safe(pro, trade_date)
+            if basic_error:
                 daily_basic_enabled = False
-                summary["daily_basic_status"] = {"available": False, "message": str(exc)}
+                summary["daily_basic_status"] = {"available": False, "message": basic_error}
                 summary["notes"].append("daily_basic unavailable; turnover_rate/volume_ratio/circ_mv fields are left null.")
+                basic_raw = pd.DataFrame()
         normalized, per_day = _normalize_cn_a_rows(
             trade_date=trade_date,
             daily_raw=daily_raw,
@@ -783,17 +840,20 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
         summary["cn_a_rows"] += int(len(normalized))
 
     index_frames: list[pd.DataFrame] = []
-    for symbol in _load_index_symbols(str(args.table)):
-        try:
-            raw = _load_cn_index_daily_tushare(pro, symbol, start=start, end=end)
-            normalized, per_symbol = _normalize_cn_index_rows(symbol, raw, start=start, end=end)
-            if not normalized.empty:
-                index_frames.append(normalized)
-                summary["cn_index_rows"] += int(len(normalized))
-            summary["index_symbol_stats"].append(per_symbol)
-        except Exception as exc:
-            summary["index_symbol_stats"].append({"symbol": str(symbol).lower(), "rows": 0, "error": str(exc)})
-            summary["notes"].append(f"CN_INDEX fetch failed for {symbol}; skipped index backfill for this run.")
+    if repair_null_adj_factor:
+        summary["notes"].append("CN_INDEX refresh is skipped in repair_null_adj_factor mode.")
+    else:
+        for symbol in _load_index_symbols(str(args.table)):
+            try:
+                raw = _load_cn_index_daily_tushare(pro, symbol, start=start, end=end)
+                normalized, per_symbol = _normalize_cn_index_rows(symbol, raw, start=start, end=end)
+                if not normalized.empty:
+                    index_frames.append(normalized)
+                    summary["cn_index_rows"] += int(len(normalized))
+                summary["index_symbol_stats"].append(per_symbol)
+            except Exception as exc:
+                summary["index_symbol_stats"].append({"symbol": str(symbol).lower(), "rows": 0, "error": str(exc)})
+                summary["notes"].append(f"CN_INDEX fetch failed for {symbol}; skipped index backfill for this run.")
 
     combined = pd.concat([*(stock_frames or []), *(index_frames or [])], ignore_index=True) if (stock_frames or index_frames) else pd.DataFrame(columns=UPSERT_COLUMNS)
     combined = combined.drop_duplicates(subset=["symbol", "market", "trade_date"], keep="last").sort_values(["trade_date", "market", "symbol"]).reset_index(drop=True)
@@ -824,16 +884,22 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
     else:
         summary["status"] = "noop"
 
-    summary["latest_cn_a_after"] = (
-        _get_latest_trade_date(str(args.table), "CN_A").isoformat()
+    latest_cn_a_after = _get_latest_trade_date(str(args.table), "CN_A") if args.apply else latest_cn_a
+    latest_cn_index_after = _get_latest_trade_date(str(args.table), "CN_INDEX") if args.apply else latest_cn_index
+    summary["latest_cn_a_after"] = latest_cn_a_after.isoformat() if latest_cn_a_after else None
+    summary["latest_cn_index_after"] = latest_cn_index_after.isoformat() if latest_cn_index_after else None
+    after_adj_factor_audit = (
+        _load_cn_a_null_adj_factor_audit(str(args.table), start=start, end=end)
         if args.apply
-        else latest_cn_a.isoformat() if latest_cn_a else None
+        else before_adj_factor_audit
     )
-    summary["latest_cn_index_after"] = (
-        _get_latest_trade_date(str(args.table), "CN_INDEX").isoformat()
-        if args.apply
-        else latest_cn_index.isoformat() if latest_cn_index else None
-    )
+    summary["adj_factor_integrity"] = {
+        "before_dates": list(before_adj_factor_audit["dates"]),
+        "after_dates": list(after_adj_factor_audit["dates"]),
+        "before_rows": int(before_adj_factor_audit["rows"]),
+        "remaining_rows": int(after_adj_factor_audit["rows"]),
+        "ok": bool(after_adj_factor_audit["ok"]),
+    }
     return summary
 
 
@@ -846,6 +912,7 @@ def build_update_args(
     batch_size: int = 5000,
     output_dir: str = "",
     apply: bool = True,
+    repair_null_adj_factor: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         start=str(start or ""),
@@ -855,6 +922,7 @@ def build_update_args(
         batch_size=int(batch_size),
         output_dir=str(output_dir or ""),
         apply=bool(apply),
+        repair_null_adj_factor=bool(repair_null_adj_factor),
     )
 
 
@@ -867,6 +935,7 @@ def run_update_to_target(
     batch_size: int = 5000,
     output_dir: str = "",
     apply: bool = True,
+    repair_null_adj_factor: bool = False,
 ) -> dict[str, Any]:
     return run_update(
         build_update_args(
@@ -877,6 +946,7 @@ def run_update_to_target(
             batch_size=batch_size,
             output_dir=output_dir,
             apply=apply,
+            repair_null_adj_factor=repair_null_adj_factor,
         )
     )
 
@@ -890,6 +960,11 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=5000, help="DB upsert batch size")
     parser.add_argument("--output-dir", default="", help="output directory for summary/sample artifacts")
     parser.add_argument("--apply", action="store_true", help="commit DB writes; default is dry-run rollback")
+    parser.add_argument(
+        "--repair-null-adj-factor",
+        action="store_true",
+        help="only refetch CN_A trade dates in the requested range that still have adj_factor NULL gaps",
+    )
     args = parser.parse_args()
 
     summary = run_update(args)

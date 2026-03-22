@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from fastapi import HTTPException
+import pytest
 
 from backend.api.backtest_v2.semantic_config_compiler import (
     SEMANTIC_CONFIG_SCHEMA_VERSION,
@@ -88,6 +89,12 @@ def _valid_multi_alpha_config() -> dict:
             "modules": [
                 {"name": "breakout_55", "alpha_id": "breakout_55", "family": "trend"},
                 {"name": "rsi_reversal", "alpha_id": "rsi_rev_6_20_80", "family": "mean_revert"},
+                {
+                    "name": "moneyflow_monthly",
+                    "alpha_id": "moneyflow_monthly",
+                    "family": "mean_revert",
+                    "params": {"selection_path": "outputs/demo/monthly_selection.csv"},
+                },
             ],
         },
         "signal_composition": {
@@ -98,10 +105,11 @@ def _valid_multi_alpha_config() -> dict:
             "modules": [
                 {"name": "breakout_55", "role": "trend", "priority": 100},
                 {"name": "rsi_reversal", "role": "mean_revert", "priority": 80},
+                {"name": "moneyflow_monthly", "role": "repair", "priority": 70},
             ],
             "regime_matrix": {
-                "TREND_UP": ["breakout_55"],
-                "RANGE": ["breakout_55", "rsi_reversal"],
+                "TREND_UP": ["breakout_55", "moneyflow_monthly"],
+                "RANGE": ["breakout_55", "rsi_reversal", "moneyflow_monthly"],
             },
         },
         "position_risk": {
@@ -132,11 +140,267 @@ def test_validate_semantic_config_json_accepts_turnover_rate_filter_fields() -> 
     assert out["universe"]["filters"]["turnover_rate_field"] == "turnover_rate_f"
 
 
+def test_validate_semantic_config_json_accepts_star_market_filter_field() -> None:
+    payload = _valid_config()
+    payload["universe"]["filters"]["exclude_star_market"] = True
+
+    out = validate_semantic_config_json(payload)
+
+    assert out["universe"]["filters"]["exclude_star_market"] is True
+
+
 def test_validate_semantic_config_json_accepts_membership_mode() -> None:
     payload = _valid_config()
     payload["universe"]["membership_mode"] = "PIT_DYNAMIC"
     out = validate_semantic_config_json(payload)
     assert out["universe"]["membership_mode"] == "PIT_DYNAMIC"
+
+
+def test_validate_semantic_config_json_accepts_data_source_data_role() -> None:
+    payload = _valid_config()
+    payload["data_source"] = {"data_role": "v2_canonical"}
+
+    out = validate_semantic_config_json(payload)
+
+    assert out["data_source"]["data_role"] == "v2_canonical"
+
+
+def test_validate_semantic_config_json_accepts_regime_engine_fields() -> None:
+    payload = _valid_config()
+    payload["regime_engine"] = {
+        "engine": "market_regime_framework",
+        "benchmark": "000300.SH",
+        "trend_block": {"enabled": True, "long_ma_window": 200, "slope_window": 20},
+        "risk_block": {"enabled": True, "realized_vol_window": 20, "atr_window": 14},
+        "breadth_block": {"enabled": True, "universe": "benchmark_constituents", "above_ma_long_window": 200},
+        "participation_block": {"enabled": True, "turnover_window": 20, "use_turnover_rate": True},
+        "persistence": {"entry_confirm_bars": 3, "exit_confirm_bars": 2, "confidence_floor": 0.55},
+        "fallback": {
+            "on_feature_unavailable": "ma200_legacy",
+            "required_blocks": ["trend_block", "risk_block"],
+            "emit_feature_availability": True,
+        },
+    }
+
+    out = validate_semantic_config_json(payload)
+
+    regime_engine = out["regime_engine"]
+    assert regime_engine["engine"] == "market_regime_framework"
+    assert regime_engine["trend_block"]["long_ma_window"] == 200
+    assert regime_engine["breadth_block"]["universe"] == "benchmark_constituents"
+    assert regime_engine["fallback"]["required_blocks"] == ["trend_block", "risk_block"]
+
+
+def test_validate_semantic_config_json_accepts_market_filter_ab_sequence_fields() -> None:
+    payload = _valid_config()
+    payload["position_risk"]["market_filter"] = {
+        "enabled": True,
+        "long_ma_window": 160,
+        "slope_ma_period": 50,
+        "slope_window": 10,
+        "bull_multiplier": 1.8,
+        "light_multiplier": 0.6,
+        "trans_down_multiplier": 0.5,
+        "trans_up_multiplier": 0.25,
+        "freeze_trans_up_entries": True,
+    }
+
+    out = validate_semantic_config_json(payload)
+
+    market_filter = out["position_risk"]["market_filter"]
+    assert market_filter["long_ma_window"] == 160
+    assert market_filter["trans_down_multiplier"] == 0.5
+    assert market_filter["trans_up_multiplier"] == 0.25
+    assert market_filter["freeze_trans_up_entries"] is True
+
+
+def test_compile_semantic_config_json_preserves_market_filter_ab_sequence_fields() -> None:
+    payload = _valid_config()
+    payload["position_risk"]["market_filter"] = {
+        "enabled": True,
+        "long_ma_window": 160,
+        "slope_ma_period": 50,
+        "slope_window": 10,
+        "bull_multiplier": 1.8,
+        "light_multiplier": 0.6,
+        "trans_down_multiplier": 0.5,
+        "trans_up_multiplier": 0.25,
+        "freeze_trans_up_entries": True,
+    }
+
+    compiled = compile_semantic_config_json(
+        payload,
+        compiled_plan_payload={"runtime_config": {"strategy": {"name": "breakout_trend"}}},
+        config_source="config_json",
+    )
+
+    resolved_json = compiled["resolved_config"]["config_json"]
+    market_filter = resolved_json["position_risk"]["market_filter"]
+    assert market_filter["long_ma_window"] == 160
+    assert market_filter["trans_down_multiplier"] == 0.5
+    assert market_filter["trans_up_multiplier"] == 0.25
+    assert market_filter["freeze_trans_up_entries"] is True
+
+
+def test_validate_semantic_config_json_accepts_bull_breakout_quality_veto_fields() -> None:
+    payload = _valid_config()
+    payload["signal_generation"]["ranking"] = {
+        "score_source_mode": "residual_only",
+        "residual_window": 40,
+        "residual_benchmark_weight": 0.0,
+        "residual_industry_weight": 1.0,
+        "bull_breakout_quality_veto_enabled": True,
+        "bull_breakout_quality_veto_min_residual_strength_score": 0.94,
+        "bull_breakout_quality_veto_min_breakout_margin_score": 0.55,
+    }
+
+    out = validate_semantic_config_json(payload)
+
+    ranking = out["signal_generation"]["ranking"]
+    assert ranking["bull_breakout_quality_veto_enabled"] is True
+    assert ranking["bull_breakout_quality_veto_min_residual_strength_score"] == 0.94
+    assert ranking["bull_breakout_quality_veto_min_breakout_margin_score"] == 0.55
+
+
+def test_validate_semantic_config_json_rejects_invalid_bull_breakout_quality_veto_thresholds() -> None:
+    payload = _valid_config()
+    payload["signal_generation"]["ranking"] = {
+        "bull_breakout_quality_veto_enabled": True,
+        "bull_breakout_quality_veto_min_residual_strength_score": 1.2,
+    }
+
+    with pytest.raises(HTTPException) as exc_info:
+        validate_semantic_config_json(payload)
+
+    detail = exc_info.value.detail
+    assert any(
+        item.get("path") == "signal_generation.ranking.bull_breakout_quality_veto_min_residual_strength_score"
+        for item in detail.get("errors", [])
+    )
+
+
+def test_compile_semantic_config_json_preserves_bull_breakout_quality_veto_fields() -> None:
+    payload = _valid_config()
+    payload["signal_generation"]["ranking"] = {
+        "score_source_mode": "residual_only",
+        "residual_window": 40,
+        "residual_benchmark_weight": 0.0,
+        "residual_industry_weight": 1.0,
+        "bull_breakout_quality_veto_enabled": True,
+        "bull_breakout_quality_veto_min_residual_strength_score": 0.94,
+        "bull_breakout_quality_veto_min_breakout_margin_score": 0.55,
+    }
+
+    compiled = compile_semantic_config_json(
+        payload,
+        compiled_plan_payload={"runtime_config": {"strategy": {"name": "breakout_trend"}}},
+        config_source="config_json",
+    )
+
+    ranking = compiled["resolved_config"]["config_json"]["signal_generation"]["ranking"]
+    assert ranking["bull_breakout_quality_veto_enabled"] is True
+    assert ranking["bull_breakout_quality_veto_min_residual_strength_score"] == 0.94
+    assert ranking["bull_breakout_quality_veto_min_breakout_margin_score"] == 0.55
+
+
+def test_validate_semantic_config_json_accepts_weekly_five_state_regime_fields() -> None:
+    payload = _valid_config()
+    payload["regime_engine"] = {
+        "engine": "weekly_five_state",
+        "benchmark": "000001.SH",
+        "weekly_five_state": {
+            "benchmark": "000001.SH",
+            "ma_window": 120,
+            "ma_slope_lookback": 20,
+            "ret_short_window": 60,
+            "ret_long_window": 120,
+            "adx_window": 20,
+            "weekly_rule": "W-FRI",
+            "upgrade_confirm_weeks": 2,
+            "downgrade_confirm_weeks": 1,
+            "turn_weak_budget": 0.15,
+            "risk_budget_mode": "asymmetric_budget",
+        },
+    }
+
+    out = validate_semantic_config_json(payload)
+
+    regime_engine = out["regime_engine"]
+    assert regime_engine["engine"] == "weekly_five_state"
+    assert regime_engine["benchmark"] == "000001.SH"
+    assert regime_engine["weekly_five_state"]["ma_window"] == 120
+    assert regime_engine["weekly_five_state"]["turn_weak_budget"] == 0.15
+    assert regime_engine["weekly_five_state"]["risk_budget_mode"] == "asymmetric_budget"
+
+
+def test_compile_semantic_config_json_preserves_weekly_five_state_regime_fields() -> None:
+    payload = _valid_config()
+    payload["regime_engine"] = {
+        "engine": "weekly_five_state",
+        "benchmark": "000001.SH",
+        "weekly_five_state": {
+            "benchmark": "000001.SH",
+            "turn_weak_budget": 0.2,
+            "risk_budget_mode": "asymmetric_budget",
+        },
+    }
+
+    compiled = compile_semantic_config_json(
+        payload,
+        compiled_plan_payload={"runtime_config": {"strategy": {"name": "breakout_trend"}}},
+        config_source="config_json",
+    )
+
+    resolved_json = compiled["resolved_config"]["config_json"]
+    assert resolved_json["regime_engine"]["engine"] == "weekly_five_state"
+    assert resolved_json["regime_engine"]["weekly_five_state"]["turn_weak_budget"] == 0.2
+    assert resolved_json["regime_engine"]["weekly_five_state"]["risk_budget_mode"] == "asymmetric_budget"
+
+
+def test_validate_semantic_config_json_accepts_legacy_turn_weak_overlay() -> None:
+    payload = _valid_config()
+    payload["regime_engine"] = {
+        "engine": "ma200_legacy",
+        "legacy_turn_weak_overlay": {
+            "enabled": True,
+            "weekly_cfg": {
+                "benchmark": "000001.SH",
+                "turn_weak_budget": 0.15,
+            },
+        },
+    }
+
+    out = validate_semantic_config_json(payload)
+
+    regime_engine = out["regime_engine"]
+    assert regime_engine["engine"] == "ma200_legacy"
+    assert regime_engine["legacy_turn_weak_overlay"]["enabled"] is True
+    assert regime_engine["legacy_turn_weak_overlay"]["weekly_cfg"]["benchmark"] == "000001.SH"
+
+
+def test_compile_semantic_config_json_preserves_legacy_turn_weak_overlay() -> None:
+    payload = _valid_config()
+    payload["regime_engine"] = {
+        "engine": "ma200_legacy",
+        "legacy_turn_weak_overlay": {
+            "enabled": True,
+            "weekly_cfg": {
+                "benchmark": "000001.SH",
+                "turn_weak_budget": 0.15,
+            },
+        },
+    }
+
+    compiled = compile_semantic_config_json(
+        payload,
+        compiled_plan_payload={"runtime_config": {"strategy": {"name": "breakout_trend"}}},
+        config_source="config_json",
+    )
+
+    resolved_json = compiled["resolved_config"]["config_json"]
+    assert resolved_json["regime_engine"]["engine"] == "ma200_legacy"
+    assert resolved_json["regime_engine"]["legacy_turn_weak_overlay"]["enabled"] is True
+    assert resolved_json["regime_engine"]["legacy_turn_weak_overlay"]["weekly_cfg"]["turn_weak_budget"] == 0.15
 
 
 def test_validate_semantic_config_json_accepts_sizing_fields() -> None:
@@ -449,7 +713,11 @@ def test_validate_semantic_config_json_accepts_segmented_trend_exit_fields() -> 
 
 def test_validate_semantic_config_json_accepts_multi_alpha_fields() -> None:
     out = validate_semantic_config_json(_valid_multi_alpha_config())
-    assert [item["name"] for item in out["signal_generation"]["modules"]] == ["breakout_55", "rsi_reversal"]
+    assert [item["name"] for item in out["signal_generation"]["modules"]] == [
+        "breakout_55",
+        "rsi_reversal",
+        "moneyflow_monthly",
+    ]
     assert out["signal_composition"]["compose_mode"] == "REGIME_ROUTE"
 
 

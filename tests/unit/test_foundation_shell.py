@@ -70,7 +70,27 @@ def test_run_foundation_execution_shell_delegates_to_stage_pipeline_adapter(monk
                 daily=pd.DataFrame([{"date": "2026-03-02", "nav": 1.0}]),
                 trades=pd.DataFrame(columns=["date", "symbol", "side"]),
                 candidates=pd.DataFrame(columns=["date", "symbol"]),
-                metrics={"total_return": 0.1},
+                metrics={
+                    "total_return": 0.1,
+                    "audit": {
+                        "accounting_integrity": {
+                            "contract_version": "accounting_integrity_audit@1",
+                            "status": "PASS",
+                            "summary": {
+                                "trading_days": 2,
+                                "days_with_evidence": 2,
+                                "missing_evidence_days": 0,
+                                "cash_check_fail": 0,
+                                "position_check_fail": 0,
+                                "nav_check_fail": 0,
+                                "invalid_nav_days": 0,
+                                "negative_cash_days": 0,
+                                "max_positions_breach_days": 0,
+                            },
+                            "samples": {},
+                        }
+                    },
+                },
             ),
             pipeline_result=pipeline_result,
             route_id="provider_breakout_runtime",
@@ -139,3 +159,4 @@ def test_run_foundation_execution_shell_delegates_to_stage_pipeline_adapter(monk
     assert stage_pipeline["execution_shell"] == "stage_pipeline_shell_bridge"
     assert stage_pipeline["enabled_stages"] == ["S1", "S2", "S4", "S5", "S6", "S9", "S8", "S7"]
     assert result.metrics["audit"]["stage_pipeline"]["route_id"] == "provider_breakout_runtime"
+    assert result.metrics["audit"]["accounting_integrity"]["status"] == "PASS"

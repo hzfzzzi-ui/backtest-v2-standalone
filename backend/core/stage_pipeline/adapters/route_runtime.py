@@ -6,7 +6,7 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from backend.core.config.models import BenchmarkRegimeConfig, BreadthConfig, ExitConfig, MarketFilterConfig, RiskBudgetConfig, SizingConfig
+from backend.core.config.models import BenchmarkRegimeConfig, BreadthConfig, ExitConfig, MarketFilterConfig, RegimeEngineConfig, RiskBudgetConfig, SizingConfig
 from backend.core.engine_vector.breadth import compute_breadth_scores, compute_dynamic_maxpos
 from backend.core.engine_vector.route_registry import build_signal_provider_for_strategy
 from backend.core.engine_vector.signal_provider import SignalProvider
@@ -17,6 +17,7 @@ from backend.core.tools.data_bundle_builder import DataBundle
 class RouteControls:
     mf_enabled: bool
     mf_state_arr: np.ndarray
+    mf_trade_mode_arr: np.ndarray
     mf_mult_arr: np.ndarray
     br_enabled: bool
     br_gate_arr: np.ndarray
@@ -60,6 +61,7 @@ def initialize_route_controls(
 ) -> RouteControls:
     day_count = len(data_bundle.trading_days)
     mf_state_arr = np.zeros(day_count, dtype=np.int8)
+    mf_trade_mode_arr = np.full(day_count, 2, dtype=np.int8)
     mf_mult_arr = np.ones(day_count, dtype=float)
     br_gate_arr = np.ones(day_count, dtype=bool)
     breadth_score_arr = np.full(day_count, np.nan, dtype=float)
@@ -72,6 +74,7 @@ def initialize_route_controls(
         return RouteControls(
             mf_enabled=mf_enabled,
             mf_state_arr=mf_state_arr,
+            mf_trade_mode_arr=mf_trade_mode_arr,
             mf_mult_arr=mf_mult_arr,
             br_enabled=br_enabled,
             br_gate_arr=br_gate_arr,
@@ -83,38 +86,83 @@ def initialize_route_controls(
     benchmark = data_bundle.benchmark
     day_ts_list = [pd.Timestamp(d).normalize() for d in data_bundle.trading_days]
 
-    mf_enabled = bool(market_filter_cfg is not None and market_filter_cfg.enabled)
+    active_regime_engine = str(getattr(provider, "_regime_engine_name", "ma200_legacy") or "ma200_legacy").strip().lower()
+    formal_engine_active = bool(
+        active_regime_engine in {"market_regime_framework", "weekly_five_state"}
+        and isinstance(getattr(provider, "_market_state", None), np.ndarray)
+        and isinstance(getattr(provider, "_trade_mode", None), np.ndarray)
+        and len(getattr(provider, "_market_state", ())) == day_count
+        and len(getattr(provider, "_trade_mode", ())) == day_count
+    )
+    legacy_overlay_active = bool(
+        active_regime_engine == "ma200_legacy"
+        and bool(getattr(provider, "_legacy_turn_weak_overlay_active", False))
+        and isinstance(getattr(provider, "_market_state", None), np.ndarray)
+        and isinstance(getattr(provider, "_trade_mode", None), np.ndarray)
+        and len(getattr(provider, "_market_state", ())) == day_count
+        and len(getattr(provider, "_trade_mode", ())) == day_count
+    )
+    provider_runtime_regime_active = bool(formal_engine_active or legacy_overlay_active)
+    mf_enabled = bool(provider_runtime_regime_active or (market_filter_cfg is not None and market_filter_cfg.enabled))
+    if provider_runtime_regime_active:
+        mf_state_arr = np.array(getattr(provider, "_market_state", np.zeros(day_count, dtype=np.int8)), dtype=np.int8)
+        mf_trade_mode_arr = np.array(getattr(provider, "_trade_mode", np.full(day_count, 2, dtype=np.int8)), dtype=np.int8)
+        if isinstance(getattr(provider, "_risk_budget_multiplier_arr", None), np.ndarray) and len(getattr(provider, "_risk_budget_multiplier_arr", ())) == day_count:
+            mf_mult_arr = np.array(getattr(provider, "_risk_budget_multiplier_arr"), dtype=float)
+        else:
+            mf_mult_arr = np.ones(day_count, dtype=float)
+            bull_mult = float(getattr(market_filter_cfg, "bull_multiplier", 1.0) if market_filter_cfg is not None else 1.0)
+            light_mult_default = float(getattr(market_filter_cfg, "light_multiplier", 0.5) if market_filter_cfg is not None else 0.5)
+            trans_down_raw = getattr(market_filter_cfg, "trans_down_multiplier", light_mult_default) if market_filter_cfg is not None else light_mult_default
+            trans_up_raw = getattr(market_filter_cfg, "trans_up_multiplier", light_mult_default) if market_filter_cfg is not None else light_mult_default
+            bear_raw = getattr(market_filter_cfg, "bear_multiplier", 0.0) if market_filter_cfg is not None else 0.0
+            trans_down_mult = float(light_mult_default if trans_down_raw is None else trans_down_raw)
+            trans_up_mult = float(light_mult_default if trans_up_raw is None else trans_up_raw)
+            bear_mult = float(0.0 if bear_raw is None else bear_raw)
+            mf_mult_arr[mf_trade_mode_arr == 0] = bull_mult
+            mf_mult_arr[(mf_trade_mode_arr == 1) & (mf_state_arr == 1)] = trans_down_mult
+            mf_mult_arr[(mf_trade_mode_arr == 1) & (mf_state_arr == 2)] = trans_up_mult
+            mf_mult_arr[(mf_trade_mode_arr == 1) & ~(np.isin(mf_state_arr, np.array([1, 2], dtype=np.int8)))] = light_mult_default
+            mf_mult_arr[mf_trade_mode_arr == 2] = bear_mult if bear_mult >= 0.0 else 0.0
+
     if mf_enabled and not benchmark.empty:
-        bench_df = benchmark.copy()
-        bench_df["date"] = pd.to_datetime(bench_df["date"]).dt.normalize()
-        bench_df = bench_df.sort_values("date")
-        bench_close = pd.Series(
-            pd.to_numeric(bench_df["close"], errors="coerce").to_numpy(dtype=float),
-            index=bench_df["date"],
-        ).reindex(day_ts_list)
-        slope_window = max(1, int(market_filter_cfg.slope_window))
-        slope_ma_period = max(2, int(getattr(market_filter_cfg, "slope_ma_period", 50)))
-        ema_series = bench_close.ewm(span=slope_ma_period, adjust=False).mean()
-        momentum = (ema_series - ema_series.shift(slope_window)) / ema_series.shift(slope_window)
-        ma200 = bench_close.rolling(200, min_periods=200).mean()
-        bench_close_arr = bench_close.to_numpy(dtype=float)
-        momentum_arr = momentum.to_numpy(dtype=float)
-        ma200_arr = ma200.to_numpy(dtype=float)
-        valid = ~np.isnan(bench_close_arr) & ~np.isnan(momentum_arr) & ~np.isnan(ma200_arr)
-        above = bench_close_arr > ma200_arr
-        slope_pos = momentum_arr >= 0.0
-        mf_state_arr = np.zeros(day_count, dtype=np.int8)
-        mf_mult_arr = np.ones(day_count, dtype=float)
-        mf_state_arr[valid & above & ~slope_pos] = 1
-        mf_state_arr[valid & ~above & slope_pos] = 2
-        mf_state_arr[valid & ~above & ~slope_pos] = 3
-        mf_mult_arr[mf_state_arr == 0] = float(market_filter_cfg.bull_multiplier)
-        td_mult = getattr(market_filter_cfg, "trans_down_multiplier", None)
-        tu_mult = getattr(market_filter_cfg, "trans_up_multiplier", None)
-        bear_mult = getattr(market_filter_cfg, "bear_multiplier", None)
-        mf_mult_arr[mf_state_arr == 1] = float(td_mult if td_mult is not None else market_filter_cfg.light_multiplier)
-        mf_mult_arr[mf_state_arr == 2] = float(tu_mult if tu_mult is not None else market_filter_cfg.light_multiplier)
-        mf_mult_arr[mf_state_arr == 3] = float(bear_mult if bear_mult is not None else 0.0)
+        if provider_runtime_regime_active:
+            pass
+        else:
+            bench_df = benchmark.copy()
+            bench_df["date"] = pd.to_datetime(bench_df["date"]).dt.normalize()
+            bench_df = bench_df.sort_values("date")
+            bench_close = pd.Series(
+                pd.to_numeric(bench_df["close"], errors="coerce").to_numpy(dtype=float),
+                index=bench_df["date"],
+            ).reindex(day_ts_list)
+            long_ma_window = max(2, int(getattr(market_filter_cfg, "long_ma_window", 200)))
+            slope_window = max(1, int(market_filter_cfg.slope_window))
+            slope_ma_period = max(2, int(getattr(market_filter_cfg, "slope_ma_period", 50)))
+            ema_series = bench_close.ewm(span=slope_ma_period, adjust=False).mean()
+            momentum = (ema_series - ema_series.shift(slope_window)) / ema_series.shift(slope_window)
+            ma200 = bench_close.rolling(long_ma_window, min_periods=long_ma_window).mean()
+            bench_close_arr = bench_close.to_numpy(dtype=float)
+            momentum_arr = momentum.to_numpy(dtype=float)
+            ma200_arr = ma200.to_numpy(dtype=float)
+            valid = ~np.isnan(bench_close_arr) & ~np.isnan(momentum_arr) & ~np.isnan(ma200_arr)
+            above = bench_close_arr > ma200_arr
+            slope_pos = momentum_arr >= 0.0
+            mf_state_arr = np.zeros(day_count, dtype=np.int8)
+            mf_trade_mode_arr = np.full(day_count, 2, dtype=np.int8)
+            mf_mult_arr = np.ones(day_count, dtype=float)
+            mf_state_arr[valid & above & ~slope_pos] = 1
+            mf_state_arr[valid & ~above & slope_pos] = 2
+            mf_state_arr[valid & ~above & ~slope_pos] = 3
+            mf_trade_mode_arr[mf_state_arr == 0] = 0
+            mf_trade_mode_arr[np.isin(mf_state_arr, np.array([1, 2], dtype=np.int8))] = 1
+            mf_mult_arr[mf_state_arr == 0] = float(market_filter_cfg.bull_multiplier)
+            td_mult = getattr(market_filter_cfg, "trans_down_multiplier", None)
+            tu_mult = getattr(market_filter_cfg, "trans_up_multiplier", None)
+            bear_mult = getattr(market_filter_cfg, "bear_multiplier", None)
+            mf_mult_arr[mf_state_arr == 1] = float(td_mult if td_mult is not None else market_filter_cfg.light_multiplier)
+            mf_mult_arr[mf_state_arr == 2] = float(tu_mult if tu_mult is not None else market_filter_cfg.light_multiplier)
+            mf_mult_arr[mf_state_arr == 3] = float(bear_mult if bear_mult is not None else 0.0)
 
     br_enabled = bool(benchmark_regime_cfg is not None and benchmark_regime_cfg.enabled)
     if br_enabled and not benchmark.empty:
@@ -170,6 +218,7 @@ def initialize_route_controls(
     return RouteControls(
         mf_enabled=mf_enabled,
         mf_state_arr=mf_state_arr,
+        mf_trade_mode_arr=mf_trade_mode_arr,
         mf_mult_arr=mf_mult_arr,
         br_enabled=br_enabled,
         br_gate_arr=br_gate_arr,
@@ -193,8 +242,9 @@ def precompute_signal_provider(
     mf_rank_gate_mode: str,
     market_filter_cfg: MarketFilterConfig | None,
     benchmark_regime_cfg: BenchmarkRegimeConfig | None,
-    sizing_cfg: SizingConfig | None,
-    risk_budget_cfg: RiskBudgetConfig | None,
+    regime_engine_cfg: RegimeEngineConfig | None = None,
+    sizing_cfg: SizingConfig | None = None,
+    risk_budget_cfg: RiskBudgetConfig | None = None,
 ) -> None:
     provider.precompute(
         history=data_bundle.signal_history,
@@ -215,6 +265,7 @@ def precompute_signal_provider(
         mf_rank_gate_mode=str(mf_rank_gate_mode or "ALWAYS_ON"),
         market_filter_cfg=market_filter_cfg,
         benchmark_regime_cfg=benchmark_regime_cfg,
+        regime_engine_cfg=regime_engine_cfg,
         sizing_cfg=sizing_cfg,
         risk_budget_cfg=risk_budget_cfg,
         regime_filter_cfg=getattr(strategy, "regime_filter_cfg", None),

@@ -114,6 +114,53 @@ def test_resolve_validation_universe_requires_turnover_rate_field_when_filter_en
         raise AssertionError("expected ValueError when turnover rate filter field is missing")
 
 
+def test_resolve_validation_universe_filters_star_market_for_dynamic_all_a(monkeypatch) -> None:
+    provider = SimpleNamespace(
+        load_ohlcv_daily=lambda symbols, start, end, source="stocks": pd.DataFrame(),
+        load_st_history=lambda symbols, start, end: pd.DataFrame(columns=["ts_code", "start_date", "end_date", "st_type"]),
+        load_security_master=lambda symbols: pd.DataFrame(columns=["symbol", "list_date", "delist_date"]),
+    )
+    access = runtime_data_access.RuntimeDataAccess(
+        bt_root=Path("C:/tmp"),
+        cfg_obj=SimpleNamespace(db="db", db_runtime="runtime"),
+        cfg_path=Path("C:/tmp/config.json"),
+        provider=provider,
+    )
+
+    monkeypatch.setattr(runtime_data_access, "load_runtime_data_access", lambda bt_root=None: access)
+    monkeypatch.setattr(runtime_data_access, "resolve_universe_timing", lambda mode, start, end: (start, True))
+    monkeypatch.setattr(
+        runtime_data_access,
+        "resolve_universe_by_mode",
+        lambda **kwargs: (["600000.SH", "688001.SH"], {"raw_count": 2}),
+    )
+
+    snapshot = runtime_data_access.resolve_validation_universe(
+        bt_root=Path("C:/tmp"),
+        universe_mode="ALL_A",
+        symbols=[],
+        industries=[],
+        universe_limit=None,
+        start=pd.Timestamp("2024-01-02").date(),
+        end=pd.Timestamp("2024-01-31").date(),
+        exclude_st=True,
+        exclude_suspended=True,
+        min_list_days=120,
+        min_avg_turnover_20d=1e8,
+        min_avg_turnover_rate_20d=0.0,
+        turnover_rate_field="turnover_rate_f",
+        price_min=0.0,
+        price_max=99999.0,
+        limit_rule="ignore",
+        exclude_star_market=True,
+    )
+
+    assert snapshot.resolved_symbols == ["600000.SH"]
+    assert snapshot.resolved_meta["excluded_counts"] == {"EXCLUDE_STAR_MARKET": 1}
+    assert snapshot.resolved_meta["tradable_symbols"] == 1
+    assert snapshot.resolved_meta["filters_config"]["exclude_star_market"] is True
+
+
 def test_resolve_trade_st_flags_uses_ts_symbols_and_skips_current_name_fallback(monkeypatch) -> None:
     trades_df = pd.DataFrame(
         [

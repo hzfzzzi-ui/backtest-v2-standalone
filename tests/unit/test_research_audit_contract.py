@@ -7,6 +7,7 @@ import pandas as pd
 from backend.core.audit.research_audit import (
     aggregate_overall_status,
     build_research_audit,
+    evaluate_accounting_integrity,
     evaluate_execution_realism,
     evaluate_result_sanity,
     evaluate_timing_alignment,
@@ -204,6 +205,45 @@ def test_evaluate_execution_realism_normalizes_four_decimal_limit_prices_to_tick
     assert gate["evidence"]["samples"]["limit_down_sell"][0]["limit_down"] == 6.24
 
 
+def test_evaluate_accounting_integrity_fails_on_execution_audit_violations() -> None:
+    gate = evaluate_accounting_integrity(
+        result={
+            "metrics": {
+                "audit": {
+                    "accounting_integrity": {
+                        "contract_version": "accounting_integrity_audit@1",
+                        "status": "FAIL",
+                        "reason": "Detected invariant violations.",
+                        "summary": {
+                            "trading_days": 2,
+                            "days_with_evidence": 2,
+                            "missing_evidence_days": 0,
+                            "cash_check_fail": 1,
+                            "position_check_fail": 0,
+                            "nav_check_fail": 0,
+                            "invalid_nav_days": 0,
+                            "negative_cash_days": 0,
+                            "max_positions_breach_days": 0,
+                        },
+                        "samples": {"cash_check_fail": [{"day": "2026-03-02"}]},
+                    }
+                }
+            }
+        }
+    )
+
+    assert gate["status"] == "FAIL"
+    assert gate["metrics"]["cash_check_fail"] == 1
+    assert gate["evidence"]["source"] == "result"
+
+
+def test_evaluate_accounting_integrity_returns_unknown_when_evidence_missing() -> None:
+    gate = evaluate_accounting_integrity(result={})
+
+    assert gate["status"] == "UNKNOWN"
+    assert gate["metrics"]["trading_days"] == 0
+
+
 def test_evaluate_timing_alignment_derives_pass_from_price_only_next_day_artifacts(tmp_path) -> None:
     results_dir = tmp_path / "exp_timing_pass"
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -299,6 +339,120 @@ def test_evaluate_timing_alignment_keeps_unknown_when_membership_signal_is_enabl
     assert gate["metrics"]["contract_proved"] is True
     assert gate["metrics"]["pit_safe"] is False
 
+
+def test_evaluate_timing_alignment_fails_on_same_day_fill_from_lineage_ledger(tmp_path) -> None:
+    results_dir = tmp_path / "exp_timing_same_day_fill"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "signal_id": "sig_1",
+                "signal_date": "2024-01-02",
+                "order_id": "ord_1",
+                "scheduled_date": "2024-01-03",
+                "last_scheduled_date": "2024-01-03",
+                "schedule_attempts": 1,
+                "fill_id": "fil_1",
+                "fill_date": "2024-01-02",
+                "symbol": "sh600000",
+                "side": "BUY",
+                "qty": 100,
+                "reason_code": "ENTRY",
+                "terminal_status": "filled",
+                "terminal_reason": "",
+                "deferred_count": 0,
+            }
+        ]
+    ).to_csv(results_dir / "execution_lineage_ledger.csv", index=False)
+    (results_dir / "audit.json").write_text("{}", encoding="utf-8")
+
+    gate = evaluate_timing_alignment(
+        stage_summary={
+            "execution_shell": "stage_pipeline_shell_bridge",
+            "daily_loop_mode": "single_day_loop",
+            "route_id": "provider_breakout_runtime",
+        },
+        stage_pipeline={
+            "execution_shell": "stage_pipeline_shell_bridge",
+            "daily_loop_mode": "single_day_loop",
+            "route_id": "provider_breakout_runtime",
+        },
+        results_dir=results_dir,
+    )
+
+    assert gate["status"] == "FAIL"
+    assert gate["metrics"]["lineage_same_day_fill_count"] == 1
+
+
+def test_evaluate_timing_alignment_prefers_lineage_evidence_when_available(tmp_path) -> None:
+    results_dir = tmp_path / "exp_timing_lineage_pass"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    (results_dir / "compiled_plan.json").write_text(
+        json.dumps(
+            {
+                "runtime_config": {
+                    "execution": {"t_plus_one": True},
+                    "strategy": {"name": "breakout_trend", "params": {"enable_sector_gate": False}},
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (results_dir / "input_config.json").write_text(
+        json.dumps(
+            {
+                "strategy_pack": "BREAKOUT_TREND",
+                "sector_gate": {"enabled": False},
+                "position_risk": {"cost_model": {"matching": "next_open"}},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        [
+            {
+                "signal_id": "sig_1",
+                "signal_date": "2024-01-02",
+                "order_id": "ord_1",
+                "scheduled_date": "2024-01-03",
+                "last_scheduled_date": "2024-01-03",
+                "schedule_attempts": 1,
+                "fill_id": "fil_1",
+                "fill_date": "2024-01-03",
+                "symbol": "sh600000",
+                "side": "BUY",
+                "qty": 100,
+                "reason_code": "ENTRY",
+                "terminal_status": "filled",
+                "terminal_reason": "",
+                "deferred_count": 0,
+            }
+        ]
+    ).to_csv(results_dir / "execution_lineage_ledger.csv", index=False)
+    (results_dir / "audit.json").write_text("{}", encoding="utf-8")
+
+    gate = evaluate_timing_alignment(
+        stage_summary={
+            "execution_shell": "stage_pipeline_shell_bridge",
+            "daily_loop_mode": "single_day_loop",
+            "route_id": "provider_breakout_runtime",
+        },
+        stage_pipeline={
+            "execution_shell": "stage_pipeline_shell_bridge",
+            "daily_loop_mode": "single_day_loop",
+            "route_id": "provider_breakout_runtime",
+        },
+        results_dir=results_dir,
+    )
+
+    assert gate["status"] == "PASS"
+    assert gate["metrics"]["lineage_rows"] == 1
+    assert gate["metrics"]["lineage_same_day_fill_count"] == 0
+
 def test_evaluate_result_sanity_returns_unknown_when_sample_too_small() -> None:
     gate = evaluate_result_sanity(
         perf={"total_return": 0.2, "sharpe": 8.0, "cagr": 2.0, "trades": 5},
@@ -380,6 +534,9 @@ def test_build_research_audit_reuses_evidence_refs_instead_of_embedding_payload(
     audit = build_research_audit(results_dir=results_dir)
 
     assert audit["contract_version"] == "research_audit@1"
+    assert audit["gates"]["accounting_integrity"]["status"] == "UNKNOWN"
+    assert audit["evidence_refs"]["audit"] == "audit.json"
+    assert audit["evidence_refs"]["execution_lineage_ledger"] is None
     assert audit["evidence_refs"]["run_meta"] == "run_meta.json"
     assert audit["evidence_refs"]["manifest"] == "manifest.json"
     assert audit["evidence_refs"]["stage_summary"] == "stage_summary.json"

@@ -1,0 +1,16 @@
+{
+  "base_config": {
+    "universe": {
+      "start": "2024-01-01",
+      "end": "2024-01-31",
+      "benchmark": "000300.SH"
+    },
+    "signal": {
+      "strategy": "EMA_CROSS"
+    }
+  },
+  "overrides": {
+    "config_source": "config_json",
+    "asset_scope": "cn_a_equity"
+  }
+}

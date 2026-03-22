@@ -29,6 +29,8 @@ class UniverseFilterConfig:
     exclude_st: bool = True
     exclude_delisted: bool = True
     exclude_suspended: bool = True
+    exclude_star_market: bool = False
+    exclude_chinext: bool = False
     min_list_days: int = 120
     min_avg_turnover_20d: float = 1e8
     min_avg_turnover_rate_20d: float = 0.0
@@ -192,6 +194,8 @@ def apply_universe_filters(
         ("is_st", False),
         ("is_delisted", False),
         ("is_suspended", False),
+        ("is_star_market", False),
+        ("is_chinext", False),
         ("list_days", 9999),
         ("avg_turnover_20d", 0.0),
         ("avg_turnover_rate_20d", pd.NA),
@@ -211,6 +215,10 @@ def apply_universe_filters(
             reason = "EXCLUDE_DELISTED"
         elif cfg.exclude_suspended and bool(r.get("is_suspended", False)):
             reason = "EXCLUDE_SUSPENDED"
+        elif cfg.exclude_star_market and bool(r.get("is_star_market", False)):
+            reason = "EXCLUDE_STAR_MARKET"
+        elif cfg.exclude_chinext and bool(r.get("is_chinext", False)):
+            reason = "EXCLUDE_CHINEXT"
         elif int(r.get("list_days", 0) or 0) < int(cfg.min_list_days):
             reason = "EXCLUDE_LIST_DAYS"
         elif float(r.get("avg_turnover_20d", 0.0) or 0.0) < float(cfg.min_avg_turnover_20d):
@@ -257,6 +265,37 @@ def _to_internal_symbol(raw: Any) -> str:
         return normalize_stock_symbol(s)
     except Exception:
         return s
+
+
+def is_star_market_symbol(raw: Any) -> bool:
+    symbol = _to_internal_symbol(raw)
+    return bool(symbol) and symbol.startswith(("sh688", "sh689"))
+
+
+def is_chinext_symbol(raw: Any) -> bool:
+    symbol = _to_internal_symbol(raw)
+    return bool(symbol) and symbol.startswith(("sz300", "sz301"))
+
+
+def apply_symbol_level_universe_filters(
+    symbols: list[str],
+    cfg: UniverseFilterConfig | None = None,
+) -> tuple[list[str], dict[str, int]]:
+    cfg = cfg or UniverseFilterConfig()
+    if not symbols:
+        return [], {}
+
+    kept_symbols: list[str] = []
+    excluded_counts: dict[str, int] = {}
+    for symbol in symbols:
+        if cfg.exclude_star_market and is_star_market_symbol(symbol):
+            excluded_counts["EXCLUDE_STAR_MARKET"] = int(excluded_counts.get("EXCLUDE_STAR_MARKET", 0)) + 1
+            continue
+        if cfg.exclude_chinext and is_chinext_symbol(symbol):
+            excluded_counts["EXCLUDE_CHINEXT"] = int(excluded_counts.get("EXCLUDE_CHINEXT", 0)) + 1
+            continue
+        kept_symbols.append(symbol)
+    return kept_symbols, excluded_counts
 
 
 def _build_active_st_symbols(st_history: pd.DataFrame, as_of: pd.Timestamp) -> set[str]:
@@ -363,6 +402,7 @@ def build_candidates_from_ohlcv(
                 "in_csi500": True,
                 "is_st": is_st,
                 "is_delisted": is_delisted,
+                "is_star_market": is_star_market_symbol(symbol),
                 "security_name": sec_name,
                 "is_suspended": is_suspended,
                 "list_days": list_days,

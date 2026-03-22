@@ -9,14 +9,56 @@ import numpy as np
 import pandas as pd
 
 from backend.core.config.models import MarketFilterConfig
+from backend.core.config.models import RegimeEngineBreadthBlockConfig
+from backend.core.config.models import RegimeEngineConfig
+from backend.core.config.models import RegimeEngineFallbackConfig
+from backend.core.config.models import RegimeEngineParticipationBlockConfig
+from backend.core.config.models import RegimeEnginePersistenceConfig
+from backend.core.config.models import RegimeEngineRiskBlockConfig
+from backend.core.config.models import RegimeEngineTrendBlockConfig
 from backend.core.engine_vector.candidate_index import build_daily_candidate_index
 from backend.core.engine_vector.data_matrix import build_ohlc_matrices_from_history
 from backend.core.engine_vector.features import compute_feature_matrices
+from backend.core.engine_vector.regime_engine_evaluator import evaluate_formal_regime_engine
+from backend.core.engine_vector.regime_engine_inputs import build_formal_regime_feature_bundle
+from backend.core.engine_vector.regime_engine_inputs import resolve_required_regime_blocks
 from backend.core.engine_vector.regime_filter import RegimeFilter
 from backend.core.engine_vector.regime_filter import RegimeFilterConfig
 from backend.core.engine_vector.regime_router_models import apply_regime_router_config
 from backend.core.engine_vector.regime_router_models import build_regime_router_config
 from backend.core.engine_vector.regime_router_models import capture_regime_router_runtime_state
+
+
+def _coerce_regime_engine_cfg(value: RegimeEngineConfig | dict[str, Any] | None) -> RegimeEngineConfig:
+    if isinstance(value, RegimeEngineConfig):
+        fields = {
+            key: getattr(value, key)
+            for key in RegimeEngineConfig.__dataclass_fields__
+            if hasattr(value, key)
+        }
+    elif isinstance(value, dict):
+        fields = {k: v for k, v in value.items() if k in RegimeEngineConfig.__dataclass_fields__}
+    else:
+        return RegimeEngineConfig()
+    trend_block = fields.get("trend_block")
+    if isinstance(trend_block, dict):
+        fields["trend_block"] = RegimeEngineTrendBlockConfig(**trend_block)
+    risk_block = fields.get("risk_block")
+    if isinstance(risk_block, dict):
+        fields["risk_block"] = RegimeEngineRiskBlockConfig(**risk_block)
+    breadth_block = fields.get("breadth_block")
+    if isinstance(breadth_block, dict):
+        fields["breadth_block"] = RegimeEngineBreadthBlockConfig(**breadth_block)
+    participation_block = fields.get("participation_block")
+    if isinstance(participation_block, dict):
+        fields["participation_block"] = RegimeEngineParticipationBlockConfig(**participation_block)
+    persistence = fields.get("persistence")
+    if isinstance(persistence, dict):
+        fields["persistence"] = RegimeEnginePersistenceConfig(**persistence)
+    fallback = fields.get("fallback")
+    if isinstance(fallback, dict):
+        fields["fallback"] = RegimeEngineFallbackConfig(**fallback)
+    return RegimeEngineConfig(**fields)
 
 
 def precompute_regime_router_provider(
@@ -37,6 +79,15 @@ def precompute_regime_router_provider(
     apply_regime_router_config(provider, config, exit_cfg=exit_cfg)
     st_history = kwargs.get("st_history")
     membership_history = kwargs.get("membership_history")
+    regime_engine_cfg = _coerce_regime_engine_cfg(kwargs.get("regime_engine_cfg"))
+    provider._regime_engine_name = str(regime_engine_cfg.engine or "ma200_legacy")
+    provider._formal_regime_features = None
+    provider._required_feature_blocks_ready = np.array([], dtype=bool)
+    provider._regime_confidence_arr = np.array([], dtype=float)
+    provider._regime_duration_bars_arr = np.array([], dtype=np.int32)
+    provider._regime_transition_reason_arr = np.array([], dtype=object)
+    provider._feature_availability_arr = np.array([], dtype=object)
+    provider._fallback_active_arr = np.array([], dtype=bool)
 
     hist = history.copy()
     hist["date"] = pd.to_datetime(hist["date"])
@@ -73,6 +124,21 @@ def precompute_regime_router_provider(
         rsi_period=int(config.mr_rsi_period),
     )
     feats = provider._feats
+
+    if str(provider._regime_engine_name).strip().lower() == "market_regime_framework":
+        formal_bundle = build_formal_regime_feature_bundle(
+            benchmark=benchmark,
+            history=hist,
+            mx=mx,
+            trading_days=trading_days,
+            regime_engine_cfg=regime_engine_cfg,
+            membership_history=membership_history,
+        )
+        provider._formal_regime_features = formal_bundle
+        provider._required_feature_blocks_ready = resolve_required_regime_blocks(
+            formal_bundle.feature_availability,
+            regime_engine_cfg.fallback.required_blocks,
+        )
 
     bench = benchmark.copy()
     bench["date"] = pd.to_datetime(bench["date"])
@@ -201,9 +267,10 @@ def precompute_regime_router_provider(
 
     if mf_config is not None and mf_config.enabled:
         provider._use_market_filter = True
+        long_ma_window = max(2, int(getattr(mf_config, "long_ma_window", 200)))
         slope_window = mf_config.slope_window
         slope_period = getattr(mf_config, "slope_ma_period", 50)
-        ma200_arr = bench_ma200
+        ma200_arr = pd.Series(provider._bench_close).rolling(long_ma_window, min_periods=long_ma_window).mean().to_numpy(dtype=float)
 
         slope_ema_s = bench_close_s.ewm(span=slope_period, adjust=False).mean()
         bmap_slope_ema = {
@@ -291,6 +358,24 @@ def precompute_regime_router_provider(
         provider._ema_light_buy_ok = valid_ema & (ema_fast_ma > ema_slow_ma)
         provider._ema_light_sell_ok = valid_ema & (ema_fast_ma < ema_slow_ma)
         provider._ema_light_cand_idx = build_daily_candidate_index(provider._ema_light_buy_ok)
+
+    legacy_market_state = np.array(getattr(provider, "_market_state", np.zeros(t, dtype=np.int8)), dtype=np.int32)
+    legacy_trade_mode = np.array(getattr(provider, "_trade_mode", np.full(t, 2, dtype=np.int8)), dtype=np.int32)
+    if str(provider._regime_engine_name).strip().lower() == "market_regime_framework" and provider._formal_regime_features is not None:
+        formal_eval = evaluate_formal_regime_engine(
+            bundle=provider._formal_regime_features,
+            regime_engine_cfg=regime_engine_cfg,
+            legacy_market_state=legacy_market_state,
+            legacy_trade_mode=legacy_trade_mode,
+        )
+        provider._market_state = np.array(formal_eval.market_state, dtype=np.int8)
+        provider._trade_mode = np.array(formal_eval.trade_mode, dtype=np.int8)
+        provider._regime_confidence_arr = np.array(formal_eval.regime_confidence, dtype=float)
+        provider._regime_duration_bars_arr = np.array(formal_eval.regime_duration_bars, dtype=np.int32)
+        provider._regime_transition_reason_arr = np.array(formal_eval.regime_transition_reason, dtype=object)
+        provider._feature_availability_arr = np.array(formal_eval.feature_availability, dtype=object)
+        provider._fallback_active_arr = np.array(formal_eval.fallback_active, dtype=bool)
+        provider._use_market_filter = True
 
     close_filled = pd.DataFrame(mx.close).ffill().to_numpy(dtype=float)
     if str(config.ma_type) == "EMA":

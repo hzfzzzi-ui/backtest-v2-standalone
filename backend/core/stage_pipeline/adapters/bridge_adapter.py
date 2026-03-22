@@ -18,6 +18,7 @@ from backend.core.config.models import (
     CostConfig,
     ExitConfig,
     MarketFilterConfig,
+    RegimeEngineConfig,
     RiskBudgetConfig,
     SizingConfig,
 )
@@ -31,6 +32,7 @@ from backend.core.stage_pipeline.adapters.fill_accounting import apply_open_fill
 from backend.core.stage_pipeline.adapters.holding_flow import build_holding_stage_output, is_holding_flow_stage
 from backend.core.stage_pipeline.adapters.order_planning import build_s7_order_stage_output
 from backend.core.stage_pipeline.adapters.result_bridge import build_portfolio_backtest_result
+from backend.core.stage_pipeline.adapters.lineage import attach_signal_lineage
 from backend.core.stage_pipeline.adapters.route_runtime import (
     build_signal_provider,
     coerce_benchmark_regime_cfg,
@@ -77,6 +79,7 @@ class StagePipelineBridgeRequest:
     market_filter_cfg: MarketFilterConfig | None = None
     benchmark_regime_cfg: BenchmarkRegimeConfig | None = None
     breadth_cfg: BreadthConfig | None = None
+    regime_engine_cfg: RegimeEngineConfig | None = None
     asset_context: Mapping[str, Any] = field(default_factory=dict)
     disabled_stages: tuple[str, ...] = ()
 
@@ -138,6 +141,8 @@ class StagePipelineBridgeRuntime:
         self._min_trade_price = float(bootstrap.min_trade_price)
         self.open_idx = bootstrap.open_idx
         self.close_idx = bootstrap.close_idx
+        self.hfq_close_idx = bootstrap.hfq_close_idx
+        self.adj_factor_idx = bootstrap.adj_factor_idx
         self.volume_idx = bootstrap.volume_idx
         self.amount_idx = bootstrap.amount_idx
         self.suspended_idx = bootstrap.suspended_idx
@@ -148,8 +153,11 @@ class StagePipelineBridgeRuntime:
         self.cash = float(ledger.cash)
         self.positions = ledger.positions
         self.position_avg_cost = ledger.position_avg_cost
+        self.position_entry_adj = ledger.position_entry_adj
         self.holding_sources = ledger.holding_sources
         self.composition_audit_rows = ledger.composition_audit_rows
+        self.accounting_audit_rows = ledger.accounting_audit_rows
+        self.execution_lineage_records = ledger.execution_lineage_records
         self.order_reject_reason_counts = ledger.order_reject_reason_counts
         self.peak_nav = float(ledger.peak_nav)
         self.prev_nav = float(ledger.prev_nav)
@@ -161,6 +169,8 @@ class StagePipelineBridgeRuntime:
         self._current_day = ledger.current_day
         self._traded_value_today = float(ledger.traded_value_today)
         self._simulation_t0 = float(ledger.simulation_t0)
+        self._last_accounting_snapshot = None
+        self._last_trade_rows_today: tuple[dict[str, Any], ...] = ()
 
         counters = initialize_runtime_counters()
         self.market_filter_bull_days = int(counters.market_filter_bull_days)
@@ -182,12 +192,18 @@ class StagePipelineBridgeRuntime:
         )
         self._mf_enabled = bool(route_controls.mf_enabled)
         self._mf_state_arr = route_controls.mf_state_arr
+        self._mf_trade_mode_arr = route_controls.mf_trade_mode_arr
         self._mf_mult_arr = route_controls.mf_mult_arr
         self._br_enabled = bool(route_controls.br_enabled)
         self._br_gate_arr = route_controls.br_gate_arr
         self._breadth_enabled = bool(route_controls.breadth_enabled)
         self._breadth_score_arr = route_controls.breadth_score_arr
         self._breadth_maxpos_arr = route_controls.breadth_maxpos_arr
+        self._regime_engine_name = str(getattr(self.provider, "_regime_engine_name", "ma200_legacy") or "ma200_legacy")
+        self._regime_confidence_arr = getattr(self.provider, "_regime_confidence_arr", [])
+        self._regime_duration_bars_arr = getattr(self.provider, "_regime_duration_bars_arr", [])
+        self._regime_transition_reason_arr = getattr(self.provider, "_regime_transition_reason_arr", [])
+        self._feature_availability_arr = getattr(self.provider, "_feature_availability_arr", [])
 
     def is_stage_disabled(self, stage_key: str) -> bool:
         return is_stage_disabled(self.request.disabled_stages, stage_key)
@@ -236,6 +252,7 @@ class StagePipelineBridgeRuntime:
             )
             next_open: dict[str, float] = {}
         else:
+            request_asset_context = dict(getattr(getattr(self, "request", None), "asset_context", {}) or {})
             provider_ctx = ProviderDayContext(
                 positions=self.positions,
                 position_avg_cost=self.position_avg_cost,
@@ -247,12 +264,13 @@ class StagePipelineBridgeRuntime:
                 open_idx=self.open_idx,
                 next_day=day_context.next_trading_day,
                 holding_sources=self.holding_sources,
-                asset_context=self.request.asset_context,
+                asset_context=request_asset_context,
                 risk_on=bool(controls["risk_on_today"]),
                 market_state=str(controls.get("market_state", "") or ""),
             )
             day_signals = self.provider.day_signals(day_context.trading_day, day_context.day_index, provider_ctx)
             day_signals = self._postprocess_day_signals(day_context.day_index, day_signals, controls)
+            attach_signal_lineage(day_signals)
             next_open = {
                 symbol: float(self.open_idx.get((day_context.next_trading_day, symbol), 0.0) or 0.0)
                 for symbol in set(
@@ -269,8 +287,33 @@ class StagePipelineBridgeRuntime:
             "accounting_snapshot": getattr(snapshot, "accounting_snapshot", None),
             "day_signals": day_signals,
             "next_open": next_open,
+            "next_trading_day": day_context.next_trading_day,
             "holding_symbols": tuple(sorted(sym for sym, qty in self.positions.items() if int(qty) > 0)),
         }
+        if not hasattr(self, "accounting_audit_rows") or self.accounting_audit_rows is None:
+            self.accounting_audit_rows = []
+        request_max_positions = int(
+            getattr(getattr(self, "request", None), "max_positions", controls["effective_max_positions"])
+        )
+        snapshot_accounting = getattr(snapshot, "accounting_snapshot", None)
+        self.accounting_audit_rows.append(
+            {
+                "day": day_context.trading_day.isoformat(),
+                "cash_after": float(getattr(snapshot_accounting, "cash", self.cash)),
+                "positions_after": {
+                    str(symbol).lower(): int(qty)
+                    for symbol, qty in dict(getattr(snapshot_accounting, "positions", {}) or {}).items()
+                    if int(qty or 0) > 0
+                },
+                "filled_orders": [dict(item) for item in list(getattr(snapshot_accounting, "filled_orders", ()) or ())],
+                "trade_rows": [dict(item) for item in list(getattr(snapshot_accounting, "trade_rows", ()) or ())],
+                "nav": float(nav),
+                "market_value": float(market_value),
+                "max_positions": request_max_positions,
+                "hard_max_positions": request_max_positions,
+                "effective_max_positions": int(controls["effective_max_positions"]),
+            }
+        )
         self._prepared_day_index = day_context.day_index
 
     def stage_output(self, stage_key: str, stage_inputs: StageInputs) -> StageOutputs:
@@ -319,6 +362,7 @@ class StagePipelineBridgeRuntime:
             mf_rank_gate_mode=str(self.request.mf_rank_gate_mode or "ALWAYS_ON"),
             market_filter_cfg=self._market_filter_cfg,
             benchmark_regime_cfg=self._benchmark_regime_cfg,
+            regime_engine_cfg=self.request.regime_engine_cfg,
             sizing_cfg=self.request.sizing_cfg,
             risk_budget_cfg=self.request.risk_budget_cfg,
         )

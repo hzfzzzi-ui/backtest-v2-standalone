@@ -41,6 +41,15 @@ class PostgresDataProvider(DataProvider):
         self._audit: list[dict[str, Any]] = []
         self._table_columns_cache: dict[str, set[str]] = {}
 
+    def _resolved_stocks_table(self) -> str:
+        return self._source.resolved_stocks_table()
+
+    def _resolved_stocks_mapping_key(self) -> str:
+        return self._source.resolved_stocks_mapping_table()
+
+    def _resolved_stocks_mapping(self) -> dict[str, str]:
+        return self._schema[self._resolved_stocks_mapping_key()]
+
     @property
     def query_audit(self) -> list[dict]:
         return list(self._audit)
@@ -131,9 +140,10 @@ class PostgresDataProvider(DataProvider):
         return cols
 
     def load_ohlcv_daily(self, symbols: list[str], start: date, end: date, source: str) -> pd.DataFrame:
-        table = safe_ident(self._source.stocks_table)
-        mapping = self._schema[self._source.stocks_table]
-        existing_cols = self._get_table_columns(self._source.stocks_table)
+        resolved_table = self._resolved_stocks_table()
+        table = safe_ident(resolved_table)
+        mapping = self._resolved_stocks_mapping()
+        existing_cols = self._get_table_columns(resolved_table)
         ohlcv_keys = [
             "date", "symbol", "open", "high", "low", "close", "volume", "amount",
             "limit_up", "limit_down", "is_suspended", "adj_factor",
@@ -161,7 +171,7 @@ class PostgresDataProvider(DataProvider):
             {
                 "provider": "postgres",
                 "source": source,
-                "table": self._source.stocks_table,
+                "table": resolved_table,
                 "symbols": sorted(db_symbols),
                 "start": start.isoformat(),
                 "end": end.isoformat(),
@@ -218,9 +228,10 @@ class PostgresDataProvider(DataProvider):
                 f"benchmark {benchmark_symbol} not found in {self._source.index_table} and fallback is disabled"
             )
 
-        stock_table = safe_ident(self._source.stocks_table)
-        stock_map = self._schema[self._source.stocks_table]
-        stock_existing_cols = self._get_table_columns(self._source.stocks_table)
+        resolved_stocks_table = self._resolved_stocks_table()
+        stock_table = safe_ident(resolved_stocks_table)
+        stock_map = self._resolved_stocks_mapping()
+        stock_existing_cols = self._get_table_columns(resolved_stocks_table)
         cols = self._filter_existing_cols(
             stock_map,
             ["date", "symbol", "open", "high", "low", "close", "volume", "amount"],
@@ -243,7 +254,7 @@ class PostgresDataProvider(DataProvider):
             {
                 "provider": "postgres",
                 "source": "benchmark_fallback",
-                "table": self._source.stocks_table,
+                "table": resolved_stocks_table,
                 "symbols": [internal_symbol],
                 "start": start.isoformat(),
                 "end": end.isoformat(),
@@ -257,8 +268,9 @@ class PostgresDataProvider(DataProvider):
         return can
 
     def load_trading_calendar_cn(self, start: date, end: date) -> pd.DatetimeIndex:
-        table = safe_ident(self._source.stocks_table)
-        date_col = safe_ident(self._schema[self._source.stocks_table]["date"])
+        resolved_table = self._resolved_stocks_table()
+        table = safe_ident(resolved_table)
+        date_col = safe_ident(self._resolved_stocks_mapping()["date"])
         q = f"SELECT DISTINCT {date_col} AS date FROM {table} WHERE {date_col} >= %s AND {date_col} <= %s ORDER BY {date_col}"
         raw = self._exec_df(
             q,
@@ -266,7 +278,7 @@ class PostgresDataProvider(DataProvider):
             {
                 "provider": "postgres",
                 "source": "calendar",
-                "table": self._source.stocks_table,
+                "table": resolved_table,
                 "symbols": [],
                 "start": start.isoformat(),
                 "end": end.isoformat(),
@@ -297,8 +309,9 @@ class PostgresDataProvider(DataProvider):
         if not raw_idx.empty and raw_idx.iloc[0]["prev_day"] is not None:
             return pd.Timestamp(raw_idx.iloc[0]["prev_day"]).date()
 
-        stocks_table = safe_ident(self._source.stocks_table)
-        stocks_date_col = safe_ident(self._schema[self._source.stocks_table]["date"])
+        resolved_stocks_table = self._resolved_stocks_table()
+        stocks_table = safe_ident(resolved_stocks_table)
+        stocks_date_col = safe_ident(self._resolved_stocks_mapping()["date"])
         q_stk = (
             f"SELECT MAX({stocks_date_col}) AS prev_day "
             f"FROM {stocks_table} "
@@ -310,7 +323,7 @@ class PostgresDataProvider(DataProvider):
             {
                 "provider": "postgres",
                 "source": "prev_day_fallback",
-                "table": self._source.stocks_table,
+                "table": resolved_stocks_table,
                 "symbols": [],
                 "start": start.isoformat(),
                 "end": start.isoformat(),
@@ -514,6 +527,159 @@ class PostgresDataProvider(DataProvider):
                 "end": "",
             },
         )
+        return raw
+
+    def load_stock_moneyflow(
+        self,
+        symbols: list[str],
+        start: date,
+        end: date,
+        table: str = "pit_stock_moneyflow_v2",
+    ) -> pd.DataFrame:
+        try:
+            existing = self._get_table_columns(table)
+        except Exception:
+            return pd.DataFrame(
+                columns=[
+                    "symbol",
+                    "trade_date",
+                    "net_mf_amount",
+                    "net_mf_vol",
+                    "source_moneyflow_present",
+                    "net_fields_present",
+                ]
+            )
+        if not existing:
+            return pd.DataFrame(
+                columns=[
+                    "symbol",
+                    "trade_date",
+                    "net_mf_amount",
+                    "net_mf_vol",
+                    "source_moneyflow_present",
+                    "net_fields_present",
+                ]
+            )
+
+        base_cols = [
+            col
+            for col in (
+                "symbol",
+                "trade_date",
+                "net_mf_amount",
+                "net_mf_vol",
+                "source_moneyflow_present",
+                "net_fields_present",
+            )
+            if col in existing
+        ]
+        if "symbol" not in base_cols or "trade_date" not in base_cols:
+            return pd.DataFrame(columns=base_cols or ["symbol", "trade_date"])
+
+        q = (
+            f"SELECT {', '.join(safe_ident(col) for col in base_cols)} "
+            f"FROM {safe_ident(table)} "
+            "WHERE trade_date >= %s "
+            "AND trade_date <= %s "
+        )
+        params: tuple[Any, ...]
+        if symbols:
+            q += "AND LOWER(symbol) = ANY(%s) "
+            params = (
+                start,
+                end,
+                sorted({normalize_stock_symbol(str(symbol)) for symbol in symbols if str(symbol).strip()}),
+            )
+        else:
+            params = (start, end)
+        q += "ORDER BY trade_date, symbol"
+        raw = self._exec_df(
+            q,
+            params,
+            {
+                "provider": "postgres",
+                "source": "stock_moneyflow",
+                "table": table,
+                "symbols": sorted({normalize_stock_symbol(str(symbol)) for symbol in symbols if str(symbol).strip()}),
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+        )
+        if raw.empty:
+            return pd.DataFrame(columns=base_cols)
+        raw = raw.copy()
+        raw["symbol"] = raw["symbol"].astype(str).str.lower()
+        raw["trade_date"] = pd.to_datetime(raw["trade_date"], errors="coerce").dt.normalize()
+        return raw
+
+    def load_moneyflow_whitelist(
+        self,
+        start: date,
+        end: date,
+        table: str = "pit_stock_moneyflow_v2_whitelist_daily",
+    ) -> pd.DataFrame:
+        try:
+            existing = self._get_table_columns(table)
+        except Exception:
+            return pd.DataFrame(
+                columns=[
+                    "trade_date",
+                    "row_coverage_ratio",
+                    "net_amount_coverage_ratio",
+                    "required_row_coverage_ratio",
+                    "required_net_coverage_ratio",
+                    "allow_in_research",
+                ]
+            )
+        if not existing:
+            return pd.DataFrame(
+                columns=[
+                    "trade_date",
+                    "row_coverage_ratio",
+                    "net_amount_coverage_ratio",
+                    "required_row_coverage_ratio",
+                    "required_net_coverage_ratio",
+                    "allow_in_research",
+                ]
+            )
+        cols = [
+            col
+            for col in (
+                "trade_date",
+                "row_coverage_ratio",
+                "net_amount_coverage_ratio",
+                "required_row_coverage_ratio",
+                "required_net_coverage_ratio",
+                "allow_in_research",
+            )
+            if col in existing
+        ]
+        if "trade_date" not in cols:
+            return pd.DataFrame(columns=cols or ["trade_date"])
+
+        q = (
+            f"SELECT {', '.join(safe_ident(col) for col in cols)} "
+            f"FROM {safe_ident(table)} "
+            "WHERE trade_date >= %s "
+            "AND trade_date <= %s "
+            "ORDER BY trade_date"
+        )
+        raw = self._exec_df(
+            q,
+            (start, end),
+            {
+                "provider": "postgres",
+                "source": "moneyflow_whitelist",
+                "table": table,
+                "symbols": [],
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+        )
+        if raw.empty:
+            return pd.DataFrame(columns=cols)
+        raw = raw.copy()
+        raw["trade_date"] = pd.to_datetime(raw["trade_date"], errors="coerce").dt.normalize()
         return raw
 
     def load_index_constituent_history(self, index_code: str, start: date, end: date) -> pd.DataFrame:

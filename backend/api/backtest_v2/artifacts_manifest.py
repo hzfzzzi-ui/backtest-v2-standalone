@@ -92,6 +92,10 @@ def write_manifest(results_dir: Path, result: dict[str, Any]) -> tuple[Path, dic
         "baseline_compare",
         "audit",
         "stage_summary",
+        "execution_lineage_ledger",
+        "regime_audit_summary",
+        "regime_transition_debug",
+        "regime_audit_report",
     )
     core_artifacts = {
         key: str(artifacts.get(key) or "")

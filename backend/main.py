@@ -97,6 +97,15 @@ def mobile_page() -> FileResponse:
     return FileResponse(str(FRONTEND_DIR / "mobile.html"), headers=_NO_CACHE)
 
 
+@app.get("/mobile-service-worker.js")
+def mobile_service_worker() -> FileResponse:
+    return FileResponse(
+        str(FRONTEND_DIR / "mobile-service-worker.js"),
+        headers={**_NO_CACHE, "Service-Worker-Allowed": "/"},
+        media_type="application/javascript",
+    )
+
+
 @app.on_event("startup")
 def startup_market_data_sync_scheduler() -> None:
     start_market_data_sync_scheduler()

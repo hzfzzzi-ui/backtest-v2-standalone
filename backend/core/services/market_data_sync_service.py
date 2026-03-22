@@ -11,7 +11,10 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backend.cli.managed import refresh_csi800_pit as csi800_pit_refresher
 from backend.cli.managed import update_pams_ohlcv_daily as daily_updater
+from backend.cli.managed import update_pit_index_daily as pit_index_updater
+from backend.core.services import sim_account_auto_sync_service
 
 
 LOGGER = logging.getLogger(__name__)
@@ -502,6 +505,38 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
                 output_dir=str(output_dir),
                 apply=True,
             )
+            pit_index_summary = pit_index_updater.run_update_to_target(
+                end=target_trade_date.isoformat(),
+                output_dir=str(output_dir / "pit_index_daily"),
+                apply=True,
+            )
+            summary["pit_index_daily_refresh"] = pit_index_summary
+            pit_summary = csi800_pit_refresher.run_refresh(
+                out_dir=csi800_pit_refresher.DEFAULT_OUT_DIR,
+                ops_dir=output_dir / "csi800_pit",
+            )
+            summary["csi800_pit_refresh"] = pit_summary
+            try:
+                auto_sync_summary = sim_account_auto_sync_service.run_auto_sync(
+                    daily_updater.DEFAULT_OUTPUT_ROOT,
+                    target_trade_date=target_trade_date,
+                )
+            except Exception as exc:
+                LOGGER.exception("sim account auto sync failed")
+                auto_sync_summary = {
+                    "status": "failed",
+                    "account_id": sim_account_auto_sync_service._configured_account_id(),
+                    "source_path": sim_account_auto_sync_service._source_path_text(),
+                    "target_trade_date": target_trade_date.isoformat(),
+                    "snapshot_id": "",
+                    "trade_date": "",
+                    "reconcile_id": "",
+                    "synced_at": "",
+                    "updated_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
+                    "message": "sim account auto sync crashed",
+                    "error": str(exc),
+                }
+            summary["sim_account_auto_sync"] = auto_sync_summary
         except Exception as exc:
             with _connect() as record_conn:
                 _update_run_record(
@@ -519,9 +554,29 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
             raise
 
         latest_after = _normalize_date(summary.get("latest_cn_a_after"))
-        success = latest_after is not None and latest_after >= target_trade_date
+        if latest_after is None:
+            latest_after = _normalize_date(summary.get("latest_cn_a_before")) or latest_available_before
+        integrity_summary = summary.get("adj_factor_integrity") if isinstance(summary.get("adj_factor_integrity"), dict) else {}
+        integrity_ok = bool(integrity_summary.get("ok", True))
+        success = latest_after is not None and latest_after >= target_trade_date and integrity_ok
         final_status = "success" if success else "failed"
-        error_text = None if success else f"sync finished without reaching target trade date {target_trade_date.isoformat()}"
+        if success:
+            error_text = None
+        elif latest_after is None or latest_after < target_trade_date:
+            error_text = f"sync finished without reaching target trade date {target_trade_date.isoformat()}"
+        else:
+            remaining_rows = int(integrity_summary.get("remaining_rows") or 0)
+            remaining_dates = integrity_summary.get("after_dates")
+            if isinstance(remaining_dates, list) and remaining_dates:
+                preview = ", ".join(str(item) for item in remaining_dates[:3])
+                if len(remaining_dates) > 3:
+                    preview += ", ..."
+                error_text = (
+                    f"adj_factor integrity failed after sync: remaining_rows={remaining_rows}, "
+                    f"trade_dates={preview}"
+                )
+            else:
+                error_text = f"adj_factor integrity failed after sync: remaining_rows={remaining_rows}"
         with _connect() as record_conn:
             _update_run_record(
                 conn=record_conn,

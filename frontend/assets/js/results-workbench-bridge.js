@@ -1,3 +1,4 @@
+/* results-workbench-bridge.js: transition bridge between desktop shell and Vue workbench. */
 (function initResultsWorkbenchBridge(globalScope) {
   const listeners = new Set();
 

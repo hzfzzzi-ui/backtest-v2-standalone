@@ -165,6 +165,92 @@ def test_build_data_bundle_supports_pit_dynamic_membership() -> None:
     assert sorted(bundle.membership_history["symbol"].astype(str).tolist()) == ["sh600000", "sz000001"]
 
 
+class _StarMarketDynamicProvider(_FakeProvider):
+    def load_ohlcv_daily(self, symbols: list[str], start: date, end: date, source: str) -> pd.DataFrame:
+        rows = []
+        normalized = {str(symbol).strip().lower() for symbol in symbols}
+        if "sh600000" in normalized:
+            rows.extend(
+                [
+                    {"date": pd.Timestamp("2024-01-02"), "symbol": "sh600000", "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2, "volume": 1000, "amount": 10000, "adj_factor": 1.0},
+                    {"date": pd.Timestamp("2024-01-03"), "symbol": "sh600000", "open": 10.3, "high": 10.7, "low": 10.0, "close": 10.4, "volume": 1100, "amount": 11000, "adj_factor": 1.1},
+                ]
+            )
+        if "sh688001" in normalized:
+            rows.extend(
+                [
+                    {"date": pd.Timestamp("2024-01-02"), "symbol": "sh688001", "open": 20.0, "high": 20.5, "low": 19.8, "close": 20.2, "volume": 1000, "amount": 20000, "adj_factor": 1.0},
+                    {"date": pd.Timestamp("2024-01-03"), "symbol": "sh688001", "open": 20.3, "high": 20.7, "low": 20.0, "close": 20.4, "volume": 1100, "amount": 22000, "adj_factor": 1.1},
+                ]
+            )
+        return pd.DataFrame(rows)
+
+    def load_security_master(self, symbols: list[str]) -> pd.DataFrame:
+        rows = []
+        normalized = {str(symbol).strip().lower() for symbol in symbols}
+        if "sh600000" in normalized:
+            rows.append({"symbol": "sh600000", "list_date": "2010-01-01", "delist_date": None})
+        if "sh688001" in normalized:
+            rows.append({"symbol": "sh688001", "list_date": "2020-01-01", "delist_date": None})
+        return pd.DataFrame(rows)
+
+    def load_industry_mapping(self, symbols: list[str]) -> dict[str, str]:
+        return {str(symbol).strip().lower(): "Bank" for symbol in symbols}
+
+    def load_industry_history(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"ts_code": str(symbol).strip().lower(), "start_date": pd.Timestamp(start), "end_date": None, "industry_l1": "Bank"}
+                for symbol in symbols
+            ]
+        )
+
+    def load_index_constituent_history(self, index_code: str, start: date, end: date) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "index_code": index_code,
+                    "symbol": "sh600000",
+                    "start_date": "2024-01-01",
+                    "end_date": None,
+                    "source": "tushare_csi1000_calendar",
+                    "event_type": "scheduled",
+                    "rebalance_calendar_version": "seed-v1",
+                    "rebalance_calendar_source": "csindex_seed_schedule",
+                    "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
+                },
+                {
+                    "index_code": index_code,
+                    "symbol": "sh688001",
+                    "start_date": "2024-01-01",
+                    "end_date": None,
+                    "source": "tushare_csi1000_calendar",
+                    "event_type": "scheduled",
+                    "rebalance_calendar_version": "seed-v1",
+                    "rebalance_calendar_source": "csindex_seed_schedule",
+                    "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
+                },
+            ]
+        )
+
+
+def test_build_data_bundle_filters_star_market_symbols_for_dynamic_membership() -> None:
+    bundle = build_data_bundle(
+        cfg_obj=_cfg(),
+        cfg_merged={"universe": {"membership_mode": "PIT_DYNAMIC", "filters": {"exclude_star_market": True, "price_min": 0.0}}},
+        overrides={"universe_mode": "HS300_ZZ500", "price_adj": "hfq"},
+        rules_path=Path("instrument_rules_cn.csv"),
+        provider=_StarMarketDynamicProvider(),
+        default_experiment_symbols=["600000.SH"],
+    )
+
+    assert bundle.symbols == ["sh600000"]
+    assert bundle.universe_meta["excluded_counts"] == {"EXCLUDE_STAR_MARKET": 1}
+    assert bundle.universe_meta["tradable_symbols"] == 1
+    assert sorted(bundle.membership_history["symbol"].astype(str).tolist()) == ["sh600000"]
+    assert sorted(bundle.raw_history["symbol"].astype(str).unique().tolist()) == ["sh600000"]
+
+
 def test_build_data_bundle_exposes_csi1000_calendar_lineage_metadata() -> None:
     bundle = build_data_bundle(
         cfg_obj=_cfg(),

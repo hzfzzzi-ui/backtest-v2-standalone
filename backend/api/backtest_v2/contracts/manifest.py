@@ -18,12 +18,12 @@ class ExperimentManifest(BaseModel):
     market_profile_id: str | None = None
     execution_profile_id: str | None = None
     asset_context: dict[str, Any] = Field(default_factory=dict)
-    artifacts: dict[str, str] = Field(default_factory=dict)
-    config_snapshots: dict[str, str] = Field(default_factory=dict)
-    core_artifacts: dict[str, str] = Field(default_factory=dict)
+    artifacts: dict[str, str | None] = Field(default_factory=dict)
+    config_snapshots: dict[str, str | None] = Field(default_factory=dict)
+    core_artifacts: dict[str, str | None] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
     stage_pipeline: dict[str, Any] | None = None
     stage_summary: dict[str, Any] | None = None
     compare_refs: dict[str, Any] = Field(default_factory=dict)
-    machine_outputs: dict[str, str] = Field(default_factory=dict)
-    human_outputs: dict[str, str] = Field(default_factory=dict)
+    machine_outputs: dict[str, str | None] = Field(default_factory=dict)
+    human_outputs: dict[str, str | None] = Field(default_factory=dict)

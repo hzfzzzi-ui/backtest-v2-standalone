@@ -17,6 +17,7 @@ from backend.api.backtest_v2.runner_config_asset import apply_asset_runtime_cfg
 from backend.api.backtest_v2.runner_config_risk_exit import apply_risk_exit_runtime_cfg
 from backend.api.backtest_v2.runner_config_signal import compile_signal_runtime
 from backend.api.backtest_v2.runner_config_universe import apply_universe_runtime_cfg
+from backend.core.config.models import DataSourceConfig
 
 
 @dataclass(slots=True)
@@ -27,6 +28,51 @@ class _EmptyExperimentRequest:
     symbols: list[str] | None = None
     signal_generation: dict[str, Any] | None = None
     signal_composition: dict[str, Any] | None = None
+
+
+def _merge_nested_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if value is None:
+            continue
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_nested_dict(dict(merged.get(key) or {}), value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _apply_regime_engine_cfg(cfg: dict[str, Any], wb_cfg: dict[str, Any]) -> None:
+    wb_regime_engine = wb_cfg.get("regime_engine") if isinstance(wb_cfg.get("regime_engine"), dict) else {}
+    runtime_regime_engine = dict(cfg.get("regime_engine") or {})
+    merged = _merge_nested_dict(runtime_regime_engine, wb_regime_engine)
+
+    engine = str(merged.get("engine") or "ma200_legacy").strip() or "ma200_legacy"
+    benchmark = str(
+        merged.get("benchmark")
+        or (wb_cfg.get("universe") or {}).get("benchmark")
+        or (cfg.get("universe") or {}).get("benchmark")
+        or ""
+    ).strip()
+
+    fallback = dict(merged.get("fallback") or {})
+    required_blocks = fallback.get("required_blocks")
+    if not isinstance(required_blocks, list) or not required_blocks:
+        required_blocks = ["trend_block", "risk_block"] if engine == "market_regime_framework" else []
+    fallback["required_blocks"] = [str(item) for item in required_blocks if str(item or "").strip()]
+    fallback["on_feature_unavailable"] = str(
+        fallback.get("on_feature_unavailable")
+        or ("ma200_legacy" if engine in {"market_regime_framework", "weekly_five_state"} else "disabled")
+    ).strip()
+    fallback["emit_feature_availability"] = bool(
+        fallback.get("emit_feature_availability", engine in {"market_regime_framework", "weekly_five_state"})
+    )
+
+    merged["engine"] = engine
+    if benchmark:
+        merged["benchmark"] = benchmark
+    merged["fallback"] = fallback
+    cfg["regime_engine"] = sanitize_json(merged)
 
 
 def build_runtime_cfg_from_workbench(
@@ -46,6 +92,25 @@ def build_runtime_cfg_from_workbench(
     )
     signal_context = compile_signal_runtime(cfg, wb_cfg)
     apply_risk_exit_runtime_cfg(cfg, wb_cfg, signal_context=signal_context)
+    _apply_regime_engine_cfg(cfg, wb_cfg)
+    wb_data_source = wb_cfg.get("data_source") if isinstance(wb_cfg.get("data_source"), dict) else {}
+    wb_data_role = str(wb_data_source.get("data_role") or "").strip()
+    if wb_data_role:
+        runtime_data_source = dict(cfg.get("data_source") or {})
+        runtime_data_source["data_role"] = wb_data_role
+        cfg["data_source"] = sanitize_json(runtime_data_source)
+        ds_cfg = DataSourceConfig(**cfg["data_source"])
+        schema_mapping = dict(cfg.get("schema_mapping") or {})
+        base_mapping = dict(schema_mapping.get(ds_cfg.stocks_table) or {})
+        resolved_mapping_table = str(ds_cfg.resolved_stocks_mapping_table() or "")
+        resolved_stocks_table = str(ds_cfg.resolved_stocks_table() or "")
+        if resolved_mapping_table and resolved_mapping_table not in schema_mapping and base_mapping:
+            schema_mapping[resolved_mapping_table] = dict(base_mapping)
+        if resolved_stocks_table and resolved_stocks_table not in schema_mapping:
+            mapping_for_runtime = dict(schema_mapping.get(resolved_mapping_table) or base_mapping)
+            if mapping_for_runtime:
+                schema_mapping[resolved_stocks_table] = mapping_for_runtime
+        cfg["schema_mapping"] = sanitize_json(schema_mapping)
     return cfg
 
 

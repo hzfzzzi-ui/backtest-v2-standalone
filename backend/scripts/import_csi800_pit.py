@@ -1,30 +1,21 @@
-"""将聚宽采集的 CSI800 PIT 变动表导入 pit_index_constituents。
+"""Import CSI800 PIT CSV into pit_index_constituents.
 
-用法（在 Docker 内执行）:
-  python backend/scripts/import_csi800_pit.py --from-csv /app/data_cache/csi800_pit_changes.csv
+Usage:
+  python backend/scripts/import_csi800_pit.py --from-csv data_cache/csi800_pit_history_changes.csv --replace-existing
 
-或从宿主机两步式:
-  1. 宿主机: python backend/scripts/fetch_csi800_pit.py   # 生成 data_cache/csi800_pit_changes.csv
-  2. docker cp data_cache/csi800_pit_changes.csv backtest-v2-standalone:/app/data_cache/
-  3. docker exec: python backend/scripts/import_csi800_pit.py --from-csv /app/data_cache/csi800_pit_changes.csv
-
-功能:
-  - TRUNCATE pit_index_constituents（清除旧 AKShare 数据）
-  - 插入聚宽重建的 in_date/out_date 记录
-  - 打印统计对比
+Behavior:
+- Formal mode can replace all 000906.SH rows with a single-source history chain.
+- Legacy patch mode preserves older history and trims overlap at the patch boundary.
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
-import sys
-from datetime import date
+from dataclasses import dataclass, replace
 from pathlib import Path
-
-_root = Path(__file__).resolve().parents[2]
-if str(_root) not in sys.path:
-    sys.path.insert(0, str(_root))
+from typing import Any
 
 try:
     import psycopg
@@ -32,143 +23,315 @@ except ImportError:
     psycopg = None
 
 
+INDEX_CODE = "000906.SH"
+ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG_PATH = ROOT / "backend" / "configs" / "pams_cn_pg.json"
+
+
+@dataclass(frozen=True, slots=True)
+class PITRow:
+    index_code: str
+    symbol: str
+    start_date: str
+    end_date: str | None
+    source: str
+
+
+def _load_env_file() -> dict[str, str]:
+    env_path = ROOT / ".env"
+    out: dict[str, str] = {}
+    if not env_path.exists():
+        return out
+    for raw in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        out[key.strip()] = value.strip()
+    return out
+
+
 def _get_db_conn():
     if psycopg is None:
-        raise RuntimeError("psycopg 未安装")
+        raise RuntimeError("psycopg is not installed")
+    file_env = _load_env_file()
+    cfg = {}
+    if DEFAULT_CONFIG_PATH.exists():
+        cfg = json.loads(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8-sig"))
+    db_cfg = dict(cfg.get("db") or {})
     return psycopg.connect(
-        host=os.environ.get("PGHOST", os.environ.get("PAMS_PG_HOST", "pams-postgres")),
-        port=int(os.environ.get("PGPORT", os.environ.get("PAMS_PG_PORT", "5432"))),
-        dbname=os.environ.get("PGDATABASE", os.environ.get("PAMS_PG_DBNAME", "pams")),
-        user=os.environ.get("PGUSER", os.environ.get("PAMS_PG_USER", "pams")),
-        password=os.environ.get("PGPASSWORD", os.environ.get("PAMS_PG_PASSWORD", "")),
+        host=str(os.environ.get("PGHOST") or os.environ.get("PAMS_PG_HOST") or db_cfg.get("host") or "pams-postgres"),
+        port=int(os.environ.get("PGPORT") or os.environ.get("PAMS_PG_PORT") or db_cfg.get("port") or 5432),
+        dbname=str(os.environ.get("PGDATABASE") or os.environ.get("PAMS_PG_DBNAME") or db_cfg.get("dbname") or "pams"),
+        user=str(os.environ.get("PGUSER") or os.environ.get("PAMS_PG_USER") or db_cfg.get("user") or "pams"),
+        password=str(
+            os.environ.get("PGPASSWORD")
+            or os.environ.get("PAMS_PG_PASSWORD")
+            or file_env.get("POSTGRES_PASSWORD")
+            or db_cfg.get("password")
+            or ""
+        ),
         autocommit=False,
     )
 
 
-def _query_old_stats(conn) -> dict:
-    """查询导入前的旧数据统计。"""
-    with conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) FROM public.pit_index_constituents WHERE index_code = '000906.SH'")
-        total = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM public.pit_index_constituents WHERE index_code = '000906.SH' AND end_date IS NULL")
-        active = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM public.pit_index_constituents WHERE index_code = '000906.SH' AND end_date IS NOT NULL")
-        removed = cur.fetchone()[0]
-        cur.execute("SELECT source FROM public.pit_index_constituents WHERE index_code = '000906.SH' LIMIT 1")
-        row = cur.fetchone()
-        source = row[0] if row else "N/A"
-    return {"total": total, "active": active, "removed": removed, "source": source}
+def _normalize_nullable_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
-def _query_pit_check(conn, check_date: str) -> int:
-    """查询指定日期的成分股数量。"""
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT COUNT(DISTINCT symbol)
-            FROM public.pit_index_constituents
-            WHERE index_code = '000906.SH'
-              AND start_date <= %s
-              AND (end_date IS NULL OR end_date > %s)
-        """, (check_date, check_date))
-        return cur.fetchone()[0]
+def _default_source_label(csv_path: Path, explicit: str | None) -> str:
+    if explicit and str(explicit).strip():
+        return str(explicit).strip()
+    name = csv_path.name.lower()
+    if "history" in name or "trade_date" in name:
+        return "tushare_csi800_history"
+    if "monthly" in name:
+        return "tushare_csi800_monthly"
+    return "tushare_csi800_monthly"
 
 
-def import_changes(conn, csv_path: str) -> int:
-    """读取 CSV，TRUNCATE + INSERT。"""
-    records = []
-    with open(csv_path, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
+def _read_csv(csv_path: Path, source_label: str | None = None) -> list[PITRow]:
+    rows_out: list[PITRow] = []
+    fallback_source = _default_source_label(csv_path, source_label)
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
         for row in reader:
-            out_date = row["out_date"].strip() if row["out_date"].strip() else None
-            records.append((
-                row["index_code"],
-                row["symbol"],
-                row["in_date"],
-                out_date,
-                "baostock_pit_snapshot",
-            ))
+            idx = str(row.get("index_code") or "").strip().upper()
+            symbol = str(row.get("symbol") or "").strip().upper()
+            start_date = str(row.get("in_date") or row.get("start_date") or "").strip()
+            end_date = _normalize_nullable_text(row.get("out_date") or row.get("end_date"))
+            source = str(row.get("source") or "").strip() or fallback_source
+            if idx != INDEX_CODE or not symbol or not start_date:
+                continue
+            rows_out.append(
+                PITRow(
+                    index_code=idx,
+                    symbol=symbol,
+                    start_date=start_date,
+                    end_date=end_date,
+                    source=source,
+                )
+            )
+    rows_out.sort(key=lambda row: (row.symbol, row.start_date, row.end_date or ""))
+    return rows_out
 
+
+def summarize_rows(rows: list[PITRow]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "rows": 0,
+            "distinct_symbols": 0,
+            "distinct_start_dates": 0,
+            "open_rows": 0,
+            "closed_rows": 0,
+            "min_start_date": None,
+            "max_start_date": None,
+            "min_end_date": None,
+            "max_end_date": None,
+            "membership_source": None,
+            "membership_sources": [],
+        }
+    start_dates = sorted({row.start_date for row in rows if row.start_date})
+    end_dates = sorted({row.end_date for row in rows if row.end_date})
+    sources = sorted({row.source for row in rows if row.source})
+    return {
+        "rows": int(len(rows)),
+        "distinct_symbols": int(len({row.symbol for row in rows})),
+        "distinct_start_dates": int(len(start_dates)),
+        "open_rows": int(sum(1 for row in rows if not row.end_date)),
+        "closed_rows": int(sum(1 for row in rows if row.end_date)),
+        "min_start_date": start_dates[0] if start_dates else None,
+        "max_start_date": start_dates[-1] if start_dates else None,
+        "min_end_date": end_dates[0] if end_dates else None,
+        "max_end_date": end_dates[-1] if end_dates else None,
+        "membership_source": sources[0] if len(sources) == 1 else ("mixed" if sources else None),
+        "membership_sources": sources,
+    }
+
+
+def _load_existing_rows(conn) -> list[PITRow]:
     with conn.cursor() as cur:
-        # Preserve other index_code datasets such as CSI1000.
-        cur.execute("DELETE FROM public.pit_index_constituents WHERE index_code = '000906.SH'")
-        insert_sql = """
+        cur.execute(
+            """
+            SELECT index_code, symbol, start_date::text, end_date::text, COALESCE(source, '')
+            FROM public.pit_index_constituents
+            WHERE index_code = %s
+            ORDER BY symbol, start_date, end_date NULLS LAST
+            """,
+            (INDEX_CODE,),
+        )
+        fetched = cur.fetchall()
+    return [
+        PITRow(
+            index_code=str(row[0]),
+            symbol=str(row[1]),
+            start_date=str(row[2]),
+            end_date=_normalize_nullable_text(row[3]),
+            source=str(row[4] or "").strip() or "unknown",
+        )
+        for row in fetched
+    ]
+
+
+def _merge_rows(existing_rows: list[PITRow], patch_rows: list[PITRow]) -> tuple[list[PITRow], str | None]:
+    if not patch_rows:
+        return sorted(existing_rows, key=lambda row: (row.symbol, row.start_date, row.end_date or "")), None
+
+    patch_start = min(row.start_date for row in patch_rows)
+    merged: list[PITRow] = []
+    for row in existing_rows:
+        if row.start_date >= patch_start:
+            continue
+        if row.end_date is None or row.end_date > patch_start:
+            merged.append(replace(row, end_date=patch_start))
+        else:
+            merged.append(row)
+    merged.extend(patch_rows)
+    merged.sort(key=lambda row: (row.symbol, row.start_date, row.end_date or ""))
+    return merged, patch_start
+
+
+def _select_rows_for_write(
+    existing_rows: list[PITRow],
+    patch_rows: list[PITRow],
+    *,
+    replace_existing: bool,
+) -> tuple[list[PITRow], str | None, str]:
+    if replace_existing:
+        rows = sorted(patch_rows, key=lambda row: (row.symbol, row.start_date, row.end_date or ""))
+        patch_start = min((row.start_date for row in rows), default=None)
+        return rows, patch_start, "replace_existing"
+    merged_rows, patch_start = _merge_rows(existing_rows, patch_rows)
+    return merged_rows, patch_start, "merge_patch"
+
+
+def _replace_rows(conn, rows: list[PITRow]) -> int:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM public.pit_index_constituents WHERE index_code = %s", (INDEX_CODE,))
+        cur.executemany(
+            """
             INSERT INTO public.pit_index_constituents
                 (index_code, symbol, start_date, end_date, source, created_at)
             VALUES (%s, %s, %s, %s, %s, NOW())
-        """
-        cur.executemany(insert_sql, records)
+            """,
+            [
+                (row.index_code, row.symbol, row.start_date, row.end_date, row.source)
+                for row in rows
+            ],
+        )
     conn.commit()
-    return len(records)
+    return len(rows)
+
+
+def _query_pit_check(conn, check_date: str) -> int:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT COUNT(DISTINCT symbol)
+            FROM public.pit_index_constituents
+            WHERE index_code = %s
+              AND start_date <= %s
+              AND (end_date IS NULL OR end_date > %s)
+            """,
+            (INDEX_CODE, check_date, check_date),
+        )
+        row = cur.fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+def _write_summary(summary_out: Path, payload: dict[str, Any]) -> None:
+    summary_out.parent.mkdir(parents=True, exist_ok=True)
+    summary_out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="导入聚宽 CSI800 PIT 数据")
-    parser.add_argument("--from-csv", required=True, help="csi800_pit_changes.csv 路径")
-    parser.add_argument("--dry-run", action="store_true", help="只打印统计，不写入")
+    parser = argparse.ArgumentParser(description="Import CSI800 PIT CSV")
+    parser.add_argument("--from-csv", required=True, help="path to csi800 PIT changes csv")
+    parser.add_argument("--source-label", default="", help="override source label when CSV has no source column")
+    parser.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="replace all existing 000906.SH rows instead of merge-patching from the earliest start date",
+    )
+    parser.add_argument("--summary-out", default="", help="optional JSON summary output path")
     args = parser.parse_args()
 
-    csv_path = args.from_csv
-    if not Path(csv_path).exists():
-        print(f"ERROR: 文件不存在: {csv_path}")
-        sys.exit(1)
+    csv_path = Path(args.from_csv).resolve()
+    if not csv_path.exists():
+        raise FileNotFoundError(f"csv not found: {csv_path}")
 
-    # 读 CSV 统计
-    with open(csv_path, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-    new_total = len(rows)
-    new_active = sum(1 for r in rows if not r["out_date"].strip())
-    new_removed = sum(1 for r in rows if r["out_date"].strip())
-    new_symbols = len(set(r["symbol"] for r in rows))
+    patch_rows = _read_csv(csv_path, source_label=args.source_label)
+    if not patch_rows:
+        raise RuntimeError(f"no valid {INDEX_CODE} rows found in csv")
 
-    print(f"{'=' * 60}")
-    print(f"  CSI800 PIT 数据导入")
-    print(f"{'=' * 60}")
-    print(f"\n  新数据 ({csv_path}):")
-    print(f"    总记录:       {new_total}")
-    print(f"    当前成分:     {new_active}")
-    print(f"    历史移出记录: {new_removed}")
-    print(f"    不重复股票:   {new_symbols}")
+    patch_summary = summarize_rows(patch_rows)
+    summary_payload: dict[str, Any] | None = None
+    with _get_db_conn() as conn:
+        existing_rows = _load_existing_rows(conn)
+        old_summary = summarize_rows(existing_rows)
+        rows_to_write, patch_start, mode = _select_rows_for_write(
+            existing_rows,
+            patch_rows,
+            replace_existing=bool(args.replace_existing),
+        )
+        final_summary = summarize_rows(rows_to_write)
 
-    conn = _get_db_conn()
-    try:
-        # 旧数据统计
-        old = _query_old_stats(conn)
-        print(f"\n  旧数据 (pit_index_constituents):")
-        print(f"    总记录:       {old['total']}")
-        print(f"    当前成分:     {old['active']} (end_date IS NULL)")
-        print(f"    历史移出记录: {old['removed']} (end_date IS NOT NULL)")
-        print(f"    数据来源:     {old['source']}")
+        print("=" * 60)
+        print("  CSI800 PIT 数据导入")
+        print("=" * 60)
+        print(f"\n  输入文件: {csv_path}")
+        print(f"    记录数:       {patch_summary['rows']}")
+        print(f"    当前成分:     {patch_summary['open_rows']}")
+        print(f"    历史移出记录: {patch_summary['closed_rows']}")
+        print(f"    source:       {patch_summary['membership_source']}")
+        print(f"    patch_start:  {patch_start}")
+        print(f"    mode:         {mode}")
 
-        # PIT 检查点
-        check_dates = ["2010-01-01", "2016-03-01", "2020-01-01", "2025-01-01"]
-        print(f"\n  PIT 对比（旧数据）:")
-        for d in check_dates:
-            cnt = _query_pit_check(conn, d)
-            print(f"    {d}: {cnt} 只")
+        print("\n  导入前数据库摘要:")
+        print(f"    记录数:       {old_summary['rows']}")
+        print(f"    当前成分:     {old_summary['open_rows']}")
+        print(f"    历史移出记录: {old_summary['closed_rows']}")
+        print(f"    source:       {old_summary['membership_source']}")
 
-        if args.dry_run:
-            print(f"\n  [DRY RUN] 不写入数据库")
-            return
+        check_dates = ["2010-01-01", "2016-03-01", "2020-01-01", "2025-01-01", "2025-08-01", "2026-03-01"]
+        pre_counts: dict[str, int] = {}
+        print("\n  PIT 对比（导入前）:")
+        for check_date in check_dates:
+            count = _query_pit_check(conn, check_date)
+            pre_counts[check_date] = count
+            print(f"    {check_date}: {count} 只")
 
-        # 导入
-        print(f"\n  正在导入...")
-        count = import_changes(conn, csv_path)
+        print("\n  正在写入...")
+        count = _replace_rows(conn, rows_to_write)
         print(f"  写入 {count} 条记录")
 
-        # 导入后 PIT 检查
-        print(f"\n  PIT 对比（新数据）:")
-        for d in check_dates:
-            cnt = _query_pit_check(conn, d)
-            print(f"    {d}: {cnt} 只")
+        post_counts: dict[str, int] = {}
+        print("\n  PIT 对比（导入后）:")
+        for check_date in check_dates:
+            checked = _query_pit_check(conn, check_date)
+            post_counts[check_date] = checked
+            print(f"    {check_date}: {checked} 只")
 
-    finally:
-        conn.close()
+        summary_payload = {
+            "status": "ok",
+            "mode": mode,
+            "csv_path": str(csv_path),
+            "patch_start": patch_start,
+            "input_summary": patch_summary,
+            "existing_summary": old_summary,
+            "final_summary": final_summary,
+            "pit_check_before": pre_counts,
+            "pit_check_after": post_counts,
+        }
 
     print(f"\n{'=' * 60}")
-    print(f"  导入完成！")
-    print(f"  数据来源已从 akshare_index_stock_cons → jqdatasdk_pit_snapshot")
+    print("  导入完成")
+    print(f"  导入模式: {summary_payload['mode'] if summary_payload else 'unknown'}")
     print(f"{'=' * 60}")
+
+    if summary_payload is not None and str(args.summary_out or "").strip():
+        _write_summary(Path(args.summary_out).resolve(), summary_payload)
 
 
 if __name__ == "__main__":

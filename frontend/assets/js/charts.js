@@ -97,9 +97,18 @@ function aggregateDrawdown(dailyDd, period) {
 // ── MarketStateOverlay — LWC v4 Series Primitive for market state color bands ──
 // A 股惯例: 红=涨/牛, 绿=跌/熊
 const MARKET_STATE_COLORS = {
+  BULL:        'rgba(220, 38, 38, 0.08)',
+  BULL_MAIN:   'rgba(220, 38, 38, 0.08)',
   TREND_MAIN:  'rgba(220, 38, 38, 0.08)',
-  TREND_LIGHT: 'rgba(220, 38, 38, 0.05)',
+  TRANS_UP:    'rgba(245, 158, 11, 0.08)',
+  TURN_STRONG: 'rgba(245, 158, 11, 0.08)',
+  TREND_LIGHT: 'rgba(245, 158, 11, 0.06)',
+  TRANS_DOWN:  'rgba(59, 130, 246, 0.08)',
+  TURN_WEAK:   'rgba(59, 130, 246, 0.08)',
   BEAR:        'rgba(22, 163, 74, 0.08)',
+  DEFENSIVE:   'rgba(148, 163, 184, 0.08)',
+  NO_TRADE:    'rgba(148, 163, 184, 0.08)',
+  NO_TRADE_TRANS: 'rgba(148, 163, 184, 0.08)',
 };
 
 class MarketStatePaneRenderer {

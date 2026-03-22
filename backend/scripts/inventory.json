@@ -163,6 +163,11 @@
                      "target":  "backend.cli data_refresh"
                  },
                  {
+                     "path":  "backend/scripts/build_csi800_formal_history.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh --target csi800_pit"
+                 },
+                 {
                      "path":  "backend/scripts/build_csi1000_pit_from_manual_snapshots.py",
                      "tag":  "official-command",
                      "target":  "backend.cli data_refresh"
@@ -185,7 +190,7 @@
                  {
                      "path":  "backend/scripts/fetch_csi1000_pit_by_calendar.py",
                      "tag":  "official-command",
-                     "target":  "backend.cli data_refresh"
+                     "target":  "backend.cli.managed.fetch_csi1000_pit_by_calendar"
                  },
                  {
                      "path":  "backend/scripts/fetch_csi1000_pit_monthly.py",
@@ -194,6 +199,11 @@
                  },
                  {
                      "path":  "backend/scripts/fetch_csi800_pit.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh"
+                 },
+                 {
+                     "path":  "backend/scripts/fetch_csi800_pit_history.py",
                      "tag":  "official-command",
                      "target":  "backend.cli data_refresh"
                  },
@@ -226,6 +236,11 @@
                      "path":  "backend/scripts/refresh_csi1000_pit.py",
                      "tag":  "official-command",
                      "target":  "backend.cli data_refresh --target csi1000_pit"
+                 },
+                 {
+                     "path":  "backend/scripts/refresh_csi800_pit.py",
+                     "tag":  "official-command",
+                     "target":  "backend.cli data_refresh --target csi800_pit"
                  },
                  {
                      "path":  "backend/scripts/refresh_security_master.py",

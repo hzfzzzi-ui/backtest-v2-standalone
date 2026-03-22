@@ -314,11 +314,22 @@ def postprocess_day_signals(
     provider = getattr(runtime, "provider", None)
     risk_off_mode = str(getattr(provider, "_risk_off_exit_mode", "") or "").strip().lower()
     market_state = str(controls.get("market_state", "") or "").strip().upper()
+    trade_mode = str(controls.get("trade_mode", "") or "").strip().upper()
     global_risk_override_count = int(diagnostics.get("global_risk_override_count", 0) or 0)
     if runtime._br_enabled and not bool(controls["benchmark_regime_on"]):
         global_risk_override_count += int(len(buy_signals))
         buy_signals = []
-    if runtime._mf_enabled and int(runtime._mf_state_arr[day_index]) == 3:
+    state_blocks_entries = False
+    if runtime._mf_enabled:
+        if trade_mode:
+            state_blocks_entries = trade_mode == "NO_TRADE"
+        else:
+            state_blocks_entries = int(runtime._mf_state_arr[day_index]) == 3
+    if state_blocks_entries:
+        global_risk_override_count += int(len(buy_signals))
+        buy_signals = []
+    freeze_trans_up_entries = bool(getattr(getattr(runtime, "_market_filter_cfg", None), "freeze_trans_up_entries", False))
+    if freeze_trans_up_entries and market_state == "TRANS_UP":
         global_risk_override_count += int(len(buy_signals))
         buy_signals = []
     if risk_off_mode == "trans_down_freeze_bear_exit" and market_state == "TRANS_DOWN":

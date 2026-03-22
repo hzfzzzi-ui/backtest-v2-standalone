@@ -47,6 +47,31 @@ def test_build_candidates_from_ohlcv_uses_pit_st_only() -> None:
     assert out.iloc[0]["security_name"] == "ST鍗庨椈"
 
 
+def test_build_candidates_from_ohlcv_marks_star_market_symbols() -> None:
+    ohlcv = pd.DataFrame(
+        [
+            {
+                "date": pd.Timestamp("2024-01-02"),
+                "symbol": "sh688001",
+                "open": 20.0,
+                "high": 20.5,
+                "low": 19.8,
+                "close": 20.1,
+                "volume": 1000,
+                "amount": 20000,
+            }
+        ]
+    )
+
+    out = build_candidates_from_ohlcv(
+        ohlcv,
+        pd.Timestamp("2024-01-02"),
+    )
+
+    assert len(out) == 1
+    assert bool(out.iloc[0]["is_star_market"]) is True
+
+
 def test_build_candidates_from_ohlcv_emits_avg_turnover_rate_20d_when_full_window_available() -> None:
     rows = []
     for i in range(20):
@@ -133,3 +158,107 @@ def test_apply_universe_filters_excludes_missing_turnover_rate_when_enabled() ->
     assert filtered.empty
     assert snapshot.iloc[0]["excluded_reason"] == "EXCLUDE_TURNOVER_RATE_UNAVAILABLE"
     assert excluded_counts == {"EXCLUDE_TURNOVER_RATE_UNAVAILABLE": 1}
+
+
+def test_apply_universe_filters_excludes_star_market_when_enabled() -> None:
+    candidates = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-21",
+                "symbol": "sh688001",
+                "in_hs300": True,
+                "in_csi500": True,
+                "is_st": False,
+                "is_delisted": False,
+                "is_suspended": False,
+                "is_star_market": True,
+                "list_days": 300,
+                "avg_turnover_20d": 2e8,
+                "avg_turnover_rate_20d": 1.0,
+                "last_close": 20.0,
+                "limit_lock": False,
+            },
+            {
+                "date": "2024-01-21",
+                "symbol": "sh600000",
+                "in_hs300": True,
+                "in_csi500": True,
+                "is_st": False,
+                "is_delisted": False,
+                "is_suspended": False,
+                "is_star_market": False,
+                "list_days": 300,
+                "avg_turnover_20d": 2e8,
+                "avg_turnover_rate_20d": 1.0,
+                "last_close": 10.0,
+                "limit_lock": False,
+            },
+        ]
+    )
+
+    filtered, snapshot, excluded_counts = apply_universe_filters(
+        candidates,
+        UniverseFilterConfig(
+            exclude_star_market=True,
+            min_list_days=0,
+            min_avg_turnover_20d=0.0,
+            min_price=0.0,
+        ),
+    )
+
+    assert filtered["symbol"].tolist() == ["sh600000"]
+    assert snapshot.loc[snapshot["symbol"] == "sh688001", "excluded_reason"].iloc[0] == "EXCLUDE_STAR_MARKET"
+    assert excluded_counts == {"EXCLUDE_STAR_MARKET": 1}
+
+
+def test_apply_universe_filters_excludes_chinext_when_enabled() -> None:
+    candidates = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-21",
+                "symbol": "sz300001",
+                "in_hs300": False,
+                "in_csi500": False,
+                "is_st": False,
+                "is_delisted": False,
+                "is_suspended": False,
+                "is_star_market": False,
+                "is_chinext": True,
+                "list_days": 300,
+                "avg_turnover_20d": 2e8,
+                "avg_turnover_rate_20d": 1.0,
+                "last_close": 20.0,
+                "limit_lock": False,
+            },
+            {
+                "date": "2024-01-21",
+                "symbol": "sh600000",
+                "in_hs300": True,
+                "in_csi500": True,
+                "is_st": False,
+                "is_delisted": False,
+                "is_suspended": False,
+                "is_star_market": False,
+                "is_chinext": False,
+                "list_days": 300,
+                "avg_turnover_20d": 2e8,
+                "avg_turnover_rate_20d": 1.0,
+                "last_close": 10.0,
+                "limit_lock": False,
+            },
+        ]
+    )
+
+    filtered, snapshot, excluded_counts = apply_universe_filters(
+        candidates,
+        UniverseFilterConfig(
+            exclude_chinext=True,
+            min_list_days=0,
+            min_avg_turnover_20d=0.0,
+            min_price=0.0,
+        ),
+    )
+
+    assert filtered["symbol"].tolist() == ["sh600000"]
+    assert snapshot.loc[snapshot["symbol"] == "sz300001", "excluded_reason"].iloc[0] == "EXCLUDE_CHINEXT"
+    assert excluded_counts == {"EXCLUDE_CHINEXT": 1}

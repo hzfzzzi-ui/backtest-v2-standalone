@@ -73,6 +73,11 @@ def build_daily_row(
         "mf_topk_reject_count": 0,
         "mf_concentrated_selected_count": 0,
         "mf_gate_on": 0,
+        "moneyflow_overlay_enabled": 0,
+        "moneyflow_overlay_mode": "off",
+        "moneyflow_overlay_gate_on": 0,
+        "moneyflow_overlay_observation_date": "",
+        "moneyflow_overlay_score_source": "",
         "strong_risk_on": 0,
         "mf_rank_suppressed_by_strong_gate": 0,
         "same_symbol_conflict_count": 0,
@@ -87,6 +92,17 @@ def build_daily_row(
         "breadth_score": controls.get("breadth_score"),
         "breadth_max_positions": int(controls.get("breadth_max_positions", controls["effective_max_positions"])),
         "dd_state": str(controls["dd_state"]),
+        "regime_engine": str(controls.get("regime_engine", "") or ""),
+        "regime_confidence": controls.get("regime_confidence"),
+        "regime_duration_bars": controls.get("regime_duration_bars"),
+        "regime_transition_reason": str(controls.get("regime_transition_reason", "") or ""),
+        "feature_availability_json": json.dumps(controls.get("feature_availability") or {}, ensure_ascii=False),
+        "market_state_5": str(controls.get("market_state_5", "") or ""),
+        "market_state_score": controls.get("market_state_score"),
+        "market_state_raw": str(controls.get("market_state_raw", "") or ""),
+        "market_state_smoothed": str(controls.get("market_state_smoothed", "") or ""),
+        "risk_budget_multiplier": controls.get("risk_budget_multiplier"),
+        "weekly_observation_flag": bool(controls.get("weekly_observation_flag", False)),
     }
     if getattr(runtime, "route_id", "") == "provider_breakout_runtime":
         row["market_state"] = str(controls["market_state"])
@@ -101,6 +117,8 @@ def prepare_daily_snapshot(runtime: Any, *, day_index: int, day: date) -> DailyS
         positions=runtime.positions,
         close_idx=runtime.close_idx,
         day=day,
+        hfq_close_idx=getattr(runtime, "hfq_close_idx", None),
+        position_entry_adj=getattr(runtime, "position_entry_adj", None),
     )
     runtime.peak_nav = max(runtime.peak_nav, nav)
     daily_ret = (nav / runtime.prev_nav - 1.0) if runtime.prev_nav > 0 else 0.0
@@ -127,14 +145,25 @@ def prepare_daily_snapshot(runtime: Any, *, day_index: int, day: date) -> DailyS
     )
     runtime.prev_nav = nav
     accounting_snapshot = getattr(runtime, "_last_accounting_snapshot", None)
-    if not isinstance(accounting_snapshot, AccountingSnapshot):
+    daily_marks = {
+        "day": day.isoformat(),
+        "nav": float(nav),
+        "market_value": float(market_value),
+    }
+    if isinstance(accounting_snapshot, AccountingSnapshot):
+        accounting_snapshot = AccountingSnapshot(
+            cash=accounting_snapshot.cash,
+            positions=accounting_snapshot.positions,
+            filled_orders=accounting_snapshot.filled_orders,
+            trade_rows=accounting_snapshot.trade_rows,
+            daily_marks={**dict(accounting_snapshot.daily_marks), **daily_marks},
+            counters=accounting_snapshot.counters,
+        )
+    else:
         accounting_snapshot = capture_accounting_snapshot(
             runtime,
-            daily_marks={
-                "day": day.isoformat(),
-                "nav": float(nav),
-                "market_value": float(market_value),
-            },
+            trade_rows=getattr(runtime, "_last_trade_rows_today", ()),
+            daily_marks=daily_marks,
         )
     return DailySnapshot(
         nav=float(nav),
@@ -322,6 +351,15 @@ def apply_daily_decision_diagnostics(runtime: Any, *, day_signals: DaySignals, d
     daily_row["mf_topk_reject_count"] = int(plan.get("mf_topk_reject_count", 0) or 0)
     daily_row["mf_concentrated_selected_count"] = int(plan.get("mf_concentrated_selected_count", 0) or 0)
     daily_row["mf_gate_on"] = 1 if bool(plan.get("mf_gate_on", False)) else 0
+    daily_row["moneyflow_overlay_enabled"] = 1 if bool(plan.get("moneyflow_overlay_enabled", False)) else 0
+    daily_row["moneyflow_overlay_mode"] = str(plan.get("moneyflow_overlay_mode", diagnostics.get("moneyflow_overlay_mode", "off")) or "off")
+    daily_row["moneyflow_overlay_gate_on"] = 1 if bool(plan.get("moneyflow_overlay_gate_on", diagnostics.get("moneyflow_overlay_gate_on", False))) else 0
+    daily_row["moneyflow_overlay_observation_date"] = str(
+        plan.get("moneyflow_overlay_observation_date", diagnostics.get("moneyflow_overlay_observation_date", "")) or ""
+    )
+    daily_row["moneyflow_overlay_score_source"] = str(
+        plan.get("moneyflow_overlay_score_source", diagnostics.get("moneyflow_overlay_score_source", "")) or ""
+    )
     daily_row["strong_risk_on"] = 1 if bool(getattr(day_signals, "strong_risk_on", False)) else 0
     cands_now = int(plan.get("buy_candidates_count", 0) or 0)
     slots_now = int(plan.get("buy_slots", 0) or 0)

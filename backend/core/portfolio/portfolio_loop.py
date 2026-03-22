@@ -32,6 +32,7 @@ from backend.core.portfolio.portfolio_runtime import (
     compute_nav_snapshot,
     resolve_mf_gate_on_today,
 )
+from backend.core.portfolio.price_index import build_backtest_hfq_indices
 from backend.core.portfolio.types import PortfolioBacktestResult, PortfolioOrder
 from backend.core.strategies.base import Strategy
 
@@ -140,10 +141,15 @@ def run_portfolio_backtest(
         history=hist,
         trading_days=trading_days,
     )
+    hfq_close_idx, adj_factor_idx = build_backtest_hfq_indices(
+        history=hist,
+        trading_days=trading_days,
+    )
 
     pending: dict[date, list[PortfolioOrder]] = {}
     positions: dict[str, int] = {}
     position_avg_cost: dict[str, float] = {}
+    position_entry_adj: dict[str, float] = {}
     cash = float(initial_cash)
     peak_nav = float(initial_cash)
     prev_nav = float(initial_cash)
@@ -228,6 +234,7 @@ def run_portfolio_backtest(
                 if positions[od.symbol] <= 0:
                     positions.pop(od.symbol, None)
                     position_avg_cost.pop(od.symbol, None)
+                    position_entry_adj.pop(od.symbol, None)
                 trade_rows.append(
                     {
                         "date": day.isoformat(),
@@ -251,10 +258,14 @@ def run_portfolio_backtest(
                 traded_value += value
                 prev_qty = int(positions.get(od.symbol, 0))
                 prev_avg = float(position_avg_cost.get(od.symbol, 0.0))
+                prev_entry_adj = float(position_entry_adj.get(od.symbol, 1.0) or 1.0)
                 new_qty = prev_qty + qty
                 new_avg = ((prev_qty * prev_avg) + (qty * px)) / float(new_qty) if new_qty > 0 else 0.0
                 positions[od.symbol] = new_qty
                 position_avg_cost[od.symbol] = float(new_avg)
+                buy_entry_adj = float(adj_factor_idx.get((day, od.symbol), 1.0) or 1.0)
+                denom = (float(prev_qty) / max(prev_entry_adj, 1e-8)) + (float(qty) / max(buy_entry_adj, 1e-8))
+                position_entry_adj[od.symbol] = (float(new_qty) / denom) if denom > 1e-8 else 1.0
                 trade_rows.append(
                     {
                         "date": day.isoformat(),
@@ -270,7 +281,14 @@ def run_portfolio_backtest(
                     }
                 )
 
-        nav, market_value, pos_values = compute_nav_snapshot(cash=cash, positions=positions, close_idx=close_idx, day=day)
+        nav, market_value, pos_values = compute_nav_snapshot(
+            cash=cash,
+            positions=positions,
+            close_idx=close_idx,
+            day=day,
+            hfq_close_idx=hfq_close_idx,
+            position_entry_adj=position_entry_adj,
+        )
         peak_nav = max(peak_nav, nav)
         daily_ret = (nav / prev_nav - 1.0) if prev_nav > 0 else 0.0
         drawdown = (nav / peak_nav - 1.0) if peak_nav > 0 else 0.0

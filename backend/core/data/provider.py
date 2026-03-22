@@ -65,6 +65,49 @@ class DataProvider(ABC):
         """
         return pd.DataFrame(columns=["symbol", "list_date", "delist_date"])
 
+    def load_stock_moneyflow(
+        self,
+        symbols: list[str],
+        start: date,
+        end: date,
+        table: str = "pit_stock_moneyflow_v2",
+    ) -> pd.DataFrame:
+        """Load stock moneyflow side-table rows.
+
+        Default implementation returns an empty DataFrame when source is unavailable.
+        """
+        return pd.DataFrame(
+            columns=[
+                "symbol",
+                "trade_date",
+                "net_mf_amount",
+                "net_mf_vol",
+                "source_moneyflow_present",
+                "net_fields_present",
+            ]
+        )
+
+    def load_moneyflow_whitelist(
+        self,
+        start: date,
+        end: date,
+        table: str = "pit_stock_moneyflow_v2_whitelist_daily",
+    ) -> pd.DataFrame:
+        """Load date-level moneyflow whitelist / coverage gate rows.
+
+        Default implementation returns an empty DataFrame when source is unavailable.
+        """
+        return pd.DataFrame(
+            columns=[
+                "trade_date",
+                "row_coverage_ratio",
+                "net_amount_coverage_ratio",
+                "required_row_coverage_ratio",
+                "required_net_coverage_ratio",
+                "allow_in_research",
+            ]
+        )
+
     def load_index_constituent_history(
         self,
         index_code: str,

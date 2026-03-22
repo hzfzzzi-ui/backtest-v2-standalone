@@ -196,6 +196,11 @@ def _build_candidate_audit_row(
     is_candidate: bool = True,
     mf_score: float | None = None,
     mf_rank: int | None = None,
+    overlay_score: float | None = None,
+    overlay_gate_on: bool = False,
+    overlay_mode: str = "off",
+    overlay_observation_date: date | None = None,
+    overlay_score_source: str = "",
     cash_available: float | None = None,
     estimated_qty: int | None = None,
     estimated_amount: float | None = None,
@@ -228,8 +233,18 @@ def _build_candidate_audit_row(
         "sector_strength_score": _safe_float_or_none(_meta.get("sector_strength_score")),
         "volume_price_quality_score": _safe_float_or_none(_meta.get("volume_price_quality_score")),
         "final_score": _safe_float_or_none(_meta.get("final_score")),
+        "baseline_score": _safe_float_or_none(_meta.get("final_score")),
         "mf_score": None if mf_score is None else float(mf_score),
         "mf_rank": None if mf_rank is None else int(mf_rank),
+        "overlay_score": None if overlay_score is None else float(overlay_score),
+        "overlay_gate_on": bool(overlay_gate_on),
+        "overlay_mode": str(overlay_mode or "off"),
+        "overlay_observation_date": (
+            overlay_observation_date.isoformat()
+            if isinstance(overlay_observation_date, date)
+            else ""
+        ),
+        "overlay_score_source": str(overlay_score_source or ""),
         "cash_available": None if cash_available is None else float(cash_available),
         "estimated_qty": None if estimated_qty is None else int(estimated_qty),
         "estimated_amount": None if estimated_amount is None else float(estimated_amount),
@@ -259,6 +274,11 @@ def build_rebalance_orders(
     mf_concentrate_scale: float = 1.5,
     mf_gate_on_today: bool = True,
     mf_score_map: dict[str, float | None] | None = None,
+    overlay_mode: str = "off",
+    overlay_gate_on_today: bool = False,
+    overlay_score_map: dict[str, float | None] | None = None,
+    overlay_observation_date: date | None = None,
+    overlay_score_source: str = "",
     momentum_top_pct: float = 0.0,
     decision_date: date | None = None,
     candidate_audit: list[dict[str, Any]] | None = None,
@@ -339,6 +359,9 @@ def build_rebalance_orders(
     ranked: list[dict[str, Any]] = []
     strength_map = dict(strength_map or {})
     decision_close_map = {str(k).lower(): float(v) for k, v in dict(decision_close_map or {}).items()}
+    overlay_score_map = dict(overlay_score_map or {})
+    overlay_mode_norm = str(overlay_mode or "off").strip().lower() or "off"
+    overlay_active_today = bool(overlay_gate_on_today) and overlay_mode_norm in {"shadow", "tiebreak", "soft_weight"}
     decision_date_s = decision_date.isoformat() if isinstance(decision_date, date) else ""
     reject_reason_counts: dict[str, int] = {}
     for sig in buy_signals:
@@ -355,6 +378,11 @@ def build_rebalance_orders(
                     reject_reason="ALREADY_HELD",
                     meta=(sig.meta if isinstance(sig.meta, dict) else None),
                     is_candidate=False,
+                    overlay_score=_safe_float_or_none(overlay_score_map.get(sym)),
+                    overlay_gate_on=bool(overlay_active_today),
+                    overlay_mode=overlay_mode_norm,
+                    overlay_observation_date=overlay_observation_date,
+                    overlay_score_source=overlay_score_source,
                 ))
             continue
         px = float(next_open.get(sym, 0.0) or 0.0)
@@ -370,6 +398,11 @@ def build_rebalance_orders(
                     reject_reason="NOT_TRADABLE",
                     meta=(sig.meta if isinstance(sig.meta, dict) else None),
                     is_candidate=False,
+                    overlay_score=_safe_float_or_none(overlay_score_map.get(sym)),
+                    overlay_gate_on=bool(overlay_active_today),
+                    overlay_mode=overlay_mode_norm,
+                    overlay_observation_date=overlay_observation_date,
+                    overlay_score_source=overlay_score_source,
                 ))
             continue
         if float(min_trade_price) > 0 and px < float(min_trade_price):
@@ -384,6 +417,11 @@ def build_rebalance_orders(
                     reject_reason="SKIP_MIN_PRICE_AT_ORDER",
                     meta=(sig.meta if isinstance(sig.meta, dict) else None),
                     is_candidate=False,
+                    overlay_score=_safe_float_or_none(overlay_score_map.get(sym)),
+                    overlay_gate_on=bool(overlay_active_today),
+                    overlay_mode=overlay_mode_norm,
+                    overlay_observation_date=overlay_observation_date,
+                    overlay_score_source=overlay_score_source,
                 ))
             continue
         meta = sig.meta if isinstance(sig.meta, dict) else {}
@@ -406,6 +444,11 @@ def build_rebalance_orders(
                     reject_reason="SKIP_ENTRY_GAP_GUARD",
                     meta=meta,
                     is_candidate=False,
+                    overlay_score=_safe_float_or_none(overlay_score_map.get(sym)),
+                    overlay_gate_on=bool(overlay_active_today),
+                    overlay_mode=overlay_mode_norm,
+                    overlay_observation_date=overlay_observation_date,
+                    overlay_score_source=overlay_score_source,
                 ))
             continue
         close_v = float(meta.get("close", 0.0) or 0.0)
@@ -425,6 +468,7 @@ def build_rebalance_orders(
                     else None
                 ),
                 "baseline_strength": baseline_strength,
+                "overlay_score": _safe_float_or_none(overlay_score_map.get(sym)),
                 "selected": False,
                 "selected_rank": None,
                 "reject_reason": "",
@@ -452,13 +496,27 @@ def build_rebalance_orders(
                 item["mf_score"] = 0.5
         rank_sorted = sorted(
             ranked,
-            key=lambda x: (-float(x.get("mf_score", 0.5)), str(x.get("symbol", "")).lower()),
+            key=lambda x: (
+                -float(x.get("mf_score", 0.5)),
+                -float(x.get("overlay_score", 0.5))
+                if bool(overlay_active_today) and overlay_mode_norm == "tiebreak" and x.get("overlay_score") is not None
+                else 0.0,
+                str(x.get("symbol", "")).lower(),
+            ),
         )
         for idx, item in enumerate(rank_sorted, start=1):
             item["mf_rank"] = int(idx)
         if len(ranked) > int(slots):
             mf_rank_triggered = True
-            ranked.sort(key=lambda x: (-float(x.get("mf_score", 0.5)), str(x.get("symbol", "")).lower()))
+            ranked.sort(
+                key=lambda x: (
+                    -float(x.get("mf_score", 0.5)),
+                    -float(x.get("overlay_score", 0.5))
+                    if bool(overlay_active_today) and overlay_mode_norm == "tiebreak" and x.get("overlay_score") is not None
+                    else 0.0,
+                    str(x.get("symbol", "")).lower(),
+                )
+            )
             # percentage-based selection when momentum_top_pct > 0
             if float(momentum_top_pct) > 0:
                 topk_n = max(1, int(len(ranked) * float(momentum_top_pct)))
@@ -491,6 +549,8 @@ def build_rebalance_orders(
         ranked=ranked,
         slots=int(slots),
         weight_mode=str(weight_mode),
+        overlay_mode=overlay_mode_norm,
+        overlay_active_today=bool(overlay_active_today),
         min_trade_price=float(min_trade_price),
         forced_not_in_topk_symbols=forced_not_in_topk_symbols,
         score_weight_min_scale=float(score_weight_min_scale),
@@ -831,6 +891,11 @@ def build_rebalance_orders(
                 is_candidate=True,
                 mf_score=_safe_float_or_none(item.get("mf_score")),
                 mf_rank=(int(item["mf_rank"]) if item.get("mf_rank") is not None else None),
+                overlay_score=_safe_float_or_none(item.get("overlay_score")),
+                overlay_gate_on=bool(overlay_active_today),
+                overlay_mode=overlay_mode_norm,
+                overlay_observation_date=overlay_observation_date,
+                overlay_score_source=overlay_score_source,
                 cash_available=_safe_float_or_none(item.get("cash_available")),
                 estimated_qty=(int(item["estimated_qty"]) if item.get("estimated_qty") is not None else None),
                 estimated_amount=_safe_float_or_none(item.get("estimated_amount")),
@@ -853,6 +918,15 @@ def build_rebalance_orders(
         debug_plan["mf_rank_triggered"] = bool(mf_rank_triggered)
         debug_plan["mf_rank_applied"] = bool(mf_rank_applied)
         debug_plan["mf_gate_on"] = bool(mf_enabled_today)
+        debug_plan["moneyflow_overlay_enabled"] = bool(overlay_mode_norm in {"shadow", "tiebreak", "soft_weight"})
+        debug_plan["moneyflow_overlay_mode"] = overlay_mode_norm
+        debug_plan["moneyflow_overlay_gate_on"] = bool(overlay_active_today)
+        debug_plan["moneyflow_overlay_observation_date"] = (
+            overlay_observation_date.isoformat()
+            if isinstance(overlay_observation_date, date)
+            else ""
+        )
+        debug_plan["moneyflow_overlay_score_source"] = str(overlay_score_source or "")
         debug_plan["mf_topk_reject_count"] = int(mf_topk_reject_count)
         debug_plan["mf_concentrated_selected_count"] = int(mf_concentrated_selected_count)
         debug_plan["mf_candidates_when_triggered"] = int(len(ranked)) if bool(mf_rank_triggered) else 0

@@ -16,6 +16,7 @@ from backend.core.data.pg_provider import PostgresDataProvider
 from backend.core.data.provider import DataProvider
 from backend.core.universe.hs300_csi500 import (
     UniverseFilterConfig,
+    apply_symbol_level_universe_filters,
     apply_universe_filters,
     build_candidates_from_ohlcv,
     is_turnover_rate_filter_enabled,
@@ -190,6 +191,7 @@ def resolve_validation_universe(
     price_min: float,
     price_max: float,
     limit_rule: str,
+    exclude_star_market: bool = False,
 ) -> ValidationUniverseSnapshot:
     access = load_runtime_data_access(bt_root)
     resolve_asof, dynamic_all_a_entry = resolve_universe_timing(
@@ -220,6 +222,7 @@ def resolve_validation_universe(
         "exclude_st": exclude_st,
         "exclude_delisted": True,
         "exclude_suspended": exclude_suspended,
+        "exclude_star_market": exclude_star_market,
         "min_list_days": min_list_days,
         "min_avg_turnover_20d": min_avg_turnover_20d,
         "min_avg_turnover_rate_20d": min_avg_turnover_rate_20d,
@@ -229,6 +232,18 @@ def resolve_validation_universe(
         "limit_rule": limit_rule,
     }
     resolved_meta["filters_config"] = dict(universe_filters_raw)
+    filter_cfg = UniverseFilterConfig(
+        exclude_st=exclude_st,
+        exclude_delisted=True,
+        exclude_suspended=exclude_suspended,
+        exclude_star_market=exclude_star_market,
+        min_list_days=min_list_days,
+        min_avg_turnover_20d=min_avg_turnover_20d,
+        min_avg_turnover_rate_20d=min_avg_turnover_rate_20d,
+        turnover_rate_field=turnover_rate_field,
+        exclude_limit_lock=limit_rule in {"forbid", "skip"},
+        min_price=price_min,
+    )
 
     if universe_filters_raw and not dynamic_all_a_entry and resolved_symbols:
         filter_asof = pd.Timestamp(start)
@@ -269,17 +284,6 @@ def resolve_validation_universe(
             security_master=security_master,
             turnover_rate_field=turnover_rate_field,
         )
-        filter_cfg = UniverseFilterConfig(
-            exclude_st=exclude_st,
-            exclude_delisted=True,
-            exclude_suspended=exclude_suspended,
-            min_list_days=min_list_days,
-            min_avg_turnover_20d=min_avg_turnover_20d,
-            min_avg_turnover_rate_20d=min_avg_turnover_rate_20d,
-            turnover_rate_field=turnover_rate_field,
-            exclude_limit_lock=limit_rule in {"forbid", "skip"},
-            min_price=price_min,
-        )
         if is_turnover_rate_filter_enabled(filter_cfg) and turnover_rate_field not in history_for_filter.columns:
             raise ValueError(f"turnover rate filter field unavailable in history frame: {turnover_rate_field}")
         filtered_candidates, _snapshot, excluded_counts = apply_universe_filters(candidates, filter_cfg)
@@ -301,10 +305,18 @@ def resolve_validation_universe(
             resolved_meta["filter_warning"] = "all symbols filtered out; fallback to pre-filter universe"
             resolved_meta["after_filters_symbols"] = before_count
     elif universe_filters_raw and dynamic_all_a_entry:
-        resolved_meta["excluded_counts"] = {}
-        resolved_meta["tradable_symbols"] = int(len(resolved_symbols))
-        resolved_meta["after_filters_symbols"] = int(len(resolved_symbols))
+        filtered_symbols, excluded_counts = apply_symbol_level_universe_filters(resolved_symbols, filter_cfg)
+        before_count = int(len(resolved_symbols))
+        after_count = int(len(filtered_symbols))
+        resolved_meta["excluded_counts"] = excluded_counts
+        resolved_meta["tradable_symbols"] = after_count
+        resolved_meta["after_filters_symbols"] = after_count
         resolved_meta["filter_mode"] = "dynamic_daily_gate"
+        if after_count > 0:
+            resolved_symbols = filtered_symbols
+        else:
+            resolved_meta["filter_warning"] = "all symbols filtered out; fallback to pre-filter universe"
+            resolved_meta["after_filters_symbols"] = before_count
 
     return ValidationUniverseSnapshot(
         access=access,

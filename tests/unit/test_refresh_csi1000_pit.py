@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.scripts.refresh_csi1000_pit import (
+from backend.cli.managed.refresh_csi1000_pit import (
     build_fetch_command,
     build_import_command,
     build_manual_command,
@@ -62,9 +62,12 @@ def test_run_refresh_executes_fetch_then_import(monkeypatch, tmp_path: Path) -> 
     def _fake_run(cmd: list[str]) -> None:
         seen.append(cmd)
 
-    monkeypatch.setattr("backend.scripts.refresh_csi1000_pit._run_command_with_env", lambda cmd, extra_env=None: seen.append(cmd))
-    monkeypatch.setattr("backend.scripts.refresh_csi1000_pit._run_command", _fake_run)
-    monkeypatch.setattr("backend.scripts.refresh_csi1000_pit._resolve_tushare_token", lambda explicit=None: "secret-token")
+    monkeypatch.setattr(
+        "backend.cli.managed.refresh_csi1000_pit._run_command_with_env",
+        lambda cmd, extra_env=None: seen.append(cmd),
+    )
+    monkeypatch.setattr("backend.cli.managed.refresh_csi1000_pit._run_command", _fake_run)
+    monkeypatch.setattr("backend.cli.managed.refresh_csi1000_pit._resolve_tushare_token", lambda explicit=None: "secret-token")
 
     summary = run_refresh(
         calendar=tmp_path / "calendar.csv",
@@ -93,9 +96,12 @@ def test_run_refresh_can_skip_import(monkeypatch, tmp_path: Path) -> None:
     def _fake_run(cmd: list[str]) -> None:
         seen.append(cmd)
 
-    monkeypatch.setattr("backend.scripts.refresh_csi1000_pit._run_command_with_env", lambda cmd, extra_env=None: seen.append(cmd))
-    monkeypatch.setattr("backend.scripts.refresh_csi1000_pit._run_command", _fake_run)
-    monkeypatch.setattr("backend.scripts.refresh_csi1000_pit._resolve_tushare_token", lambda explicit=None: "")
+    monkeypatch.setattr(
+        "backend.cli.managed.refresh_csi1000_pit._run_command_with_env",
+        lambda cmd, extra_env=None: seen.append(cmd),
+    )
+    monkeypatch.setattr("backend.cli.managed.refresh_csi1000_pit._run_command", _fake_run)
+    monkeypatch.setattr("backend.cli.managed.refresh_csi1000_pit._resolve_tushare_token", lambda explicit=None: "")
 
     summary = run_refresh(
         calendar=tmp_path / "calendar.csv",
@@ -121,9 +127,12 @@ def test_run_refresh_manual_manifest_executes_build_then_import(monkeypatch, tmp
     def _fake_run(cmd: list[str]) -> None:
         seen.append(cmd)
 
-    monkeypatch.setattr("backend.scripts.refresh_csi1000_pit._run_command_with_env", lambda cmd, extra_env=None: seen.append(cmd))
-    monkeypatch.setattr("backend.scripts.refresh_csi1000_pit._run_command", _fake_run)
-    monkeypatch.setattr("backend.scripts.refresh_csi1000_pit._resolve_tushare_token", lambda explicit=None: "")
+    monkeypatch.setattr(
+        "backend.cli.managed.refresh_csi1000_pit._run_command_with_env",
+        lambda cmd, extra_env=None: seen.append(cmd),
+    )
+    monkeypatch.setattr("backend.cli.managed.refresh_csi1000_pit._run_command", _fake_run)
+    monkeypatch.setattr("backend.cli.managed.refresh_csi1000_pit._resolve_tushare_token", lambda explicit=None: "")
 
     summary = run_refresh(
         calendar=tmp_path / "calendar.csv",

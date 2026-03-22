@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from datetime import date
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from backend.core.config.models import BenchmarkRegimeConfig
 from backend.core.config.models import ExitConfig
+from backend.core.config.models import MarketFilterConfig
 from backend.core.core.models import Position, Signal
 from backend.core.core.types import Side
 from backend.core.engine_vector.breakout_signal_provider import BreakoutTrendProvider
@@ -19,6 +23,64 @@ from backend.core.engine_vector.multi_alpha_common import (
 from backend.core.engine_vector.signal_provider import DayContext, DaySignals, ExitCounts
 from backend.core.strategies.breakout_trend import BreakoutTrendStrategy
 from backend.core.strategies.multi_alpha_strategy import MultiAlphaStrategy
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _resolve_local_path(value: Any) -> Path | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    path = Path(text)
+    if not path.is_absolute():
+        path = (_repo_root() / path).resolve()
+    return path.resolve()
+
+
+@lru_cache(maxsize=16)
+def _load_moneyflow_rows_by_observation_day(
+    selection_path: str,
+    selection_mtime_ns: int,
+    top_n: int,
+) -> dict[date, pd.DataFrame]:
+    del selection_mtime_ns
+    df = pd.read_csv(selection_path)
+    required = {"observation_date", "execution_date", "symbol"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError(f"moneyflow monthly selection missing required columns: {', '.join(missing)}")
+    rows = df.copy()
+    rows["observation_date"] = pd.to_datetime(rows["observation_date"], errors="coerce").dt.date
+    rows["execution_date"] = pd.to_datetime(rows["execution_date"], errors="coerce").dt.date
+    rows["symbol"] = rows["symbol"].astype(str).str.lower()
+    rows = rows.dropna(subset=["observation_date", "execution_date", "symbol"])
+    if "gate_status" in rows.columns:
+        rows = rows.loc[rows["gate_status"].astype(str).str.strip().str.lower() == "tradable"]
+    if "rank" in rows.columns:
+        rows["rank"] = pd.to_numeric(rows["rank"], errors="coerce")
+    else:
+        rows["rank"] = np.nan
+    rows = rows.sort_values(["observation_date", "rank", "symbol"], kind="stable").reset_index(drop=True)
+    if rows["rank"].isna().any():
+        rows["rank"] = rows.groupby("observation_date", sort=False).cumcount() + 1
+    rows["rank"] = rows["rank"].astype(int)
+    if top_n > 0:
+        rows = rows.loc[rows["rank"] <= int(top_n)].copy()
+
+    grouped: dict[date, pd.DataFrame] = {}
+    for obs_day, group in rows.groupby("observation_date", sort=True):
+        block = group.copy().sort_values(["rank", "symbol"], kind="stable").reset_index(drop=True)
+        rank_count = len(block)
+        if rank_count <= 0:
+            continue
+        if rank_count == 1:
+            block["raw_score"] = 1.0
+        else:
+            block["raw_score"] = 1.0 - ((block["rank"].astype(float) - 1.0) / float(rank_count - 1))
+        grouped[pd.Timestamp(obs_day).date()] = block
+    return grouped
 
 
 class MultiAlphaSignalProvider:
@@ -42,8 +104,14 @@ class MultiAlphaSignalProvider:
         self._history_by_day: dict[date, pd.DataFrame] = {}
         self._breakout_provider: BreakoutTrendProvider | None = None
         self._rsi_rows_by_day: dict[date, pd.DataFrame] = {}
+        self._moneyflow_rows_by_day: dict[date, pd.DataFrame] = {}
+        self._moneyflow_exit_provider: BreakoutTrendProvider | None = None
         self._risk_on_map: dict[date, bool] = {}
         self._strong_risk_on_map: dict[date, bool] = {}
+        self._benchmark_regime_on_map: dict[date, bool] = {}
+        self._market_state_name_map: dict[date, str] = {}
+        self._trade_mode_name_map: dict[date, str] = {}
+        self._breakout_buy_allowed_map: dict[date, bool] = {}
         self._market_state: np.ndarray = np.array([], dtype=np.int8)
         self._trade_mode: np.ndarray = np.array([], dtype=np.int8)
         self.precompute_seconds: float = 0.0
@@ -84,7 +152,12 @@ class MultiAlphaSignalProvider:
         }
 
         day_list = list(trading_days)
-        self._build_regime_maps(benchmark=benchmark, trading_days=day_list)
+        self._build_regime_maps(
+            benchmark=benchmark,
+            trading_days=day_list,
+            market_filter_cfg=kwargs.get("market_filter_cfg"),
+            benchmark_regime_cfg=kwargs.get("benchmark_regime_cfg"),
+        )
 
         breakout_spec = self._module_specs.get("breakout_55")
         if breakout_spec is not None:
@@ -123,8 +196,49 @@ class MultiAlphaSignalProvider:
         if rsi_spec is not None:
             self._rsi_rows_by_day = self._build_rsi_rows_by_day(self._history, rsi_spec)
 
+        moneyflow_spec = self._module_specs.get("moneyflow_monthly")
+        if moneyflow_spec is not None:
+            self._moneyflow_rows_by_day = self._build_moneyflow_rows_by_day(moneyflow_spec)
+            if self._breakout_provider is not None:
+                self._moneyflow_exit_provider = self._breakout_provider
+            else:
+                moneyflow_strategy = self._build_breakout_strategy(moneyflow_spec)
+                moneyflow_exit_provider = BreakoutTrendProvider()
+                moneyflow_exit_provider.precompute(
+                    history=history,
+                    benchmark=benchmark,
+                    raw_history=raw_history,
+                    trading_days=day_list,
+                    strategy=moneyflow_strategy,
+                    exit_cfg=kwargs.get("exit_cfg") or ExitConfig(),
+                    st_history=kwargs.get("st_history"),
+                    strength_ma=int(kwargs.get("strength_ma", 120) or 120),
+                    base_order_value=float(kwargs.get("base_order_value", 0.0) or 0.0),
+                    sector_data=kwargs.get("sector_data"),
+                    industry_map=kwargs.get("industry_map"),
+                    industry_history=kwargs.get("industry_history"),
+                    history_lookback_days=kwargs.get("history_lookback_days"),
+                    enable_multifactor_rank=bool(kwargs.get("enable_multifactor_rank", False)),
+                    mf_rank_gate_mode=str(kwargs.get("mf_rank_gate_mode") or "ALWAYS_ON"),
+                    market_filter_cfg=kwargs.get("market_filter_cfg"),
+                    benchmark_regime_cfg=kwargs.get("benchmark_regime_cfg"),
+                    sizing_cfg=kwargs.get("sizing_cfg"),
+                    risk_budget_cfg=kwargs.get("risk_budget_cfg"),
+                    regime_filter_cfg=getattr(moneyflow_strategy, "regime_filter_cfg", None),
+                )
+                moneyflow_exit_provider.last_sell_day = self.last_sell_day
+                moneyflow_exit_provider.entry_day = self.entry_day
+                moneyflow_exit_provider._peak_close_state = self._breakout_peak_state
+                moneyflow_exit_provider.peak_state_on_buy = self._breakout_peak_state
+                moneyflow_exit_provider.extra_clear_dicts = [self._breakout_peak_state]
+                self._moneyflow_exit_provider = moneyflow_exit_provider
+
     def day_signals(self, day: date, day_idx: int, ctx: DayContext) -> DaySignals:
         regime_tag = self._resolve_regime_tag(day)
+        market_state_name = str(self._market_state_name_map.get(day, "") or "")
+        trade_mode_name = str(self._trade_mode_name_map.get(day, "") or "")
+        benchmark_regime_on = bool(self._benchmark_regime_on_map.get(day, True))
+        breakout_buy_allowed = bool(self._breakout_buy_allowed_map.get(day, True))
         enabled_modules = set(self._enabled_modules_for_regime(regime_tag))
         raw_alpha_signals: list[Signal] = []
         composed_buy_signals: list[Signal] = []
@@ -181,6 +295,9 @@ class MultiAlphaSignalProvider:
                 if "breakout_55" not in enabled_modules:
                     suppressed_by_regime += 1
                     continue
+                if not breakout_buy_allowed:
+                    suppressed_by_regime += 1
+                    continue
                 composed = self._tag_signal(
                     raw_sig,
                     alpha_id=breakout_spec.alpha_id,
@@ -229,6 +346,76 @@ class MultiAlphaSignalProvider:
                 strength_map[_normalized_symbol(composed.symbol)] = float(compose_score)
                 mf_score_map[_normalized_symbol(composed.symbol)] = float(compose_score)
 
+        moneyflow_spec = self._module_specs.get("moneyflow_monthly")
+        moneyflow_exit_mode = self._moneyflow_exit_mode(moneyflow_spec)
+        if moneyflow_spec is not None:
+            if moneyflow_exit_mode == "monthly_rebalance":
+                for sig in self._build_moneyflow_monthly_sell_signals(day, ctx, moneyflow_spec):
+                    raw_sig = self._tag_signal(
+                        sig,
+                        alpha_id=moneyflow_spec.alpha_id,
+                        alpha_family=moneyflow_spec.family,
+                        sleeve_id=moneyflow_spec.sleeve_id,
+                        raw_score=0.0,
+                    )
+                    raw_alpha_signals.append(raw_sig)
+                    composed_sell_signals.append(
+                        self._tag_signal(
+                            raw_sig,
+                            alpha_id=moneyflow_spec.alpha_id,
+                            alpha_family=moneyflow_spec.family,
+                            sleeve_id=moneyflow_spec.sleeve_id,
+                            compose_score=0.0,
+                            regime_tag=regime_tag,
+                            enabled_by_policy=True,
+                            exit_owner="source_only",
+                        )
+                    )
+            elif self._moneyflow_exit_provider is not None:
+                moneyflow_ctx = self._filtered_ctx_for_alpha(ctx, alpha_id=moneyflow_spec.alpha_id)
+                moneyflow_day = self._moneyflow_exit_provider.day_signals(day, day_idx, moneyflow_ctx)
+                self._accumulate_exit_counts(aggregated_exit_counts, moneyflow_day.exit_counts)
+                for sig in moneyflow_day.sell_signals:
+                    raw_sig = self._tag_signal(
+                        sig,
+                        alpha_id=moneyflow_spec.alpha_id,
+                        alpha_family=moneyflow_spec.family,
+                        sleeve_id=moneyflow_spec.sleeve_id,
+                        raw_score=0.0,
+                    )
+                    raw_alpha_signals.append(raw_sig)
+                    composed_sell_signals.append(
+                        self._tag_signal(
+                            raw_sig,
+                            alpha_id=moneyflow_spec.alpha_id,
+                            alpha_family=moneyflow_spec.family,
+                            sleeve_id=moneyflow_spec.sleeve_id,
+                            compose_score=0.0,
+                            regime_tag=regime_tag,
+                            enabled_by_policy=True,
+                            exit_owner="source_only",
+                        )
+                    )
+        if moneyflow_spec is not None:
+            for raw_sig in self._build_moneyflow_raw_signals(day, ctx, moneyflow_spec):
+                raw_alpha_signals.append(raw_sig)
+                if "moneyflow_monthly" not in enabled_modules:
+                    suppressed_by_regime += 1
+                    continue
+                compose_score = _safe_score((raw_sig.meta or {}).get("raw_score"))
+                composed = self._tag_signal(
+                    raw_sig,
+                    alpha_id=moneyflow_spec.alpha_id,
+                    alpha_family=moneyflow_spec.family,
+                    sleeve_id=moneyflow_spec.sleeve_id,
+                    compose_score=compose_score,
+                    regime_tag=regime_tag,
+                    enabled_by_policy=True,
+                )
+                composed_buy_signals.append(composed)
+                strength_map[_normalized_symbol(composed.symbol)] = float(compose_score)
+                mf_score_map[_normalized_symbol(composed.symbol)] = float(compose_score)
+
         composed_buy_signals, conflict_resolution_count = self._apply_same_symbol_policy(
             composed_buy_signals,
             same_symbol_policy=self._same_symbol_policy,
@@ -249,6 +436,10 @@ class MultiAlphaSignalProvider:
         diagnostics["global_risk_override_count"] = int(
             sum(1 for sig in composed_sell_signals if str((sig.meta or {}).get("exit_owner", "") or "") == "global_risk_override")
         )
+        diagnostics["market_state"] = market_state_name
+        diagnostics["trade_mode"] = trade_mode_name
+        diagnostics["benchmark_regime_on"] = bool(benchmark_regime_on)
+        diagnostics["breakout_buy_allowed"] = bool(breakout_buy_allowed)
 
         return DaySignals(
             sell_signals=self._dedupe_sell_signals(composed_sell_signals),
@@ -306,6 +497,24 @@ class MultiAlphaSignalProvider:
             atr_stop_k=float(params.get("atr_stop_k", 2.0)),
             enable_atr_trail=bool(params.get("enable_atr_trail", False)),
             atr_trail_k=float(params.get("atr_trail_k", 3.0)),
+            trailing_activate_profit_pct=float(params.get("trailing_activate_profit_pct", 0.0)),
+            segmented_trend_exit_mode=str(params.get("segmented_trend_exit_mode", "off") or "off").strip().lower(),
+            segmented_mid_profit_pct=float(params.get("segmented_mid_profit_pct", 0.0)),
+            segmented_high_profit_pct=float(params.get("segmented_high_profit_pct", 0.0)),
+            segmented_high_trail_k=float(params.get("segmented_high_trail_k", 3.0)),
+            enable_pre_profit_breakout_failure_exit=bool(
+                params.get("enable_pre_profit_breakout_failure_exit", False)
+            ),
+            pre_profit_breakout_failure_max_bars=int(params.get("pre_profit_breakout_failure_max_bars", 0)),
+            pre_profit_breakout_failure_atr_buffer_k=float(
+                params.get("pre_profit_breakout_failure_atr_buffer_k", 0.0)
+            ),
+            enable_profit_decay_exit=bool(params.get("enable_profit_decay_exit", False)),
+            profit_decay_exit_profit_pct=float(params.get("profit_decay_exit_profit_pct", 0.15)),
+            profit_decay_exit_min_hold_bars=int(params.get("profit_decay_exit_min_hold_bars", 10)),
+            profit_decay_exit_residual_score_threshold=float(
+                params.get("profit_decay_exit_residual_score_threshold", 0.35)
+            ),
             enable_take_profit=bool(params.get("enable_take_profit", False)),
             take_profit_mode=str(params.get("take_profit_mode", "pct")),
             take_profit_pct=float(params.get("take_profit_pct", 0.10)),
@@ -317,6 +526,20 @@ class MultiAlphaSignalProvider:
             cooldown_days=int(params.get("cooldown_days", 0)),
             enable_ma20_exit=bool(params.get("enable_ma20_exit", False)),
             enable_low10_exit=bool(params.get("enable_low10_exit", False)),
+            risk_off_exit_mode=str(params.get("risk_off_exit_mode", "risk_on_off") or "risk_on_off").strip().lower(),
+            risk_off_exit_partial_pct=float(params.get("risk_off_exit_partial_pct", 1.0)),
+            risk_off_exit_partial_mode=str(
+                params.get("risk_off_exit_partial_mode", "all_states") or "all_states"
+            ).strip().lower(),
+            risk_off_exit_partial_only_if_profitable=bool(
+                params.get("risk_off_exit_partial_only_if_profitable", False)
+            ),
+            risk_off_exit_trans_down_max_positions=int(
+                params.get("risk_off_exit_trans_down_max_positions", 0)
+            ),
+            risk_off_exit_trans_down_min_residual_score=float(
+                params.get("risk_off_exit_trans_down_min_residual_score", 0.0)
+            ),
             enable_risk_off_exit=bool(params.get("enable_risk_off_exit", False)),
             momentum_top_pct=float(params.get("momentum_top_pct", 0.0)),
             enable_sector_gate=bool(params.get("enable_sector_gate", False)),
@@ -340,6 +563,7 @@ class MultiAlphaSignalProvider:
                 params.get("industry_relative_regime_mode", "off") or "off"
             ),
             residual_weight_regime_mode=str(params.get("residual_weight_regime_mode", "off")),
+            ranking_mode=str(params.get("ranking_mode", "none") or "none"),
             residual_benchmark_weight_fallback=float(
                 params.get("residual_benchmark_weight_fallback", params.get("residual_benchmark_weight", 0.5))
             ),
@@ -361,12 +585,23 @@ class MultiAlphaSignalProvider:
             quality_weight=float(params.get("quality_weight", 0.2)),
         )
 
-    def _build_regime_maps(self, *, benchmark: pd.DataFrame, trading_days: list[date]) -> None:
+    def _build_regime_maps(
+        self,
+        *,
+        benchmark: pd.DataFrame,
+        trading_days: list[date],
+        market_filter_cfg: MarketFilterConfig | dict[str, Any] | None = None,
+        benchmark_regime_cfg: BenchmarkRegimeConfig | dict[str, Any] | None = None,
+    ) -> None:
         day_count = len(trading_days)
         self._market_state = np.zeros(day_count, dtype=np.int8)
         self._trade_mode = np.zeros(day_count, dtype=np.int8)
         self._risk_on_map = {day: True for day in trading_days}
         self._strong_risk_on_map = {day: False for day in trading_days}
+        self._benchmark_regime_on_map = {day: True for day in trading_days}
+        self._market_state_name_map = {day: "" for day in trading_days}
+        self._trade_mode_name_map = {day: "" for day in trading_days}
+        self._breakout_buy_allowed_map = {day: True for day in trading_days}
         if benchmark.empty or not trading_days:
             return
 
@@ -390,6 +625,85 @@ class MultiAlphaSignalProvider:
         self._trade_mode = trade_mode
         self._risk_on_map = {day: bool(risk_on[idx]) for idx, day in enumerate(trading_days)}
         self._strong_risk_on_map = {day: bool(strong[idx]) for idx, day in enumerate(trading_days)}
+        state_names = ("BULL", "TRANS_DOWN", "TRANS_UP", "BEAR")
+        trade_mode_names = ("TREND_MAIN", "TREND_LIGHT", "NO_TRADE")
+        self._market_state_name_map = {
+            day: state_names[int(market_state[idx])] for idx, day in enumerate(trading_days)
+        }
+        self._trade_mode_name_map = {
+            day: trade_mode_names[int(trade_mode[idx])] for idx, day in enumerate(trading_days)
+        }
+
+        mf_cfg: MarketFilterConfig | None = None
+        if isinstance(market_filter_cfg, MarketFilterConfig):
+            mf_cfg = market_filter_cfg
+        elif isinstance(market_filter_cfg, dict):
+            mf_fields = {
+                key: value
+                for key, value in market_filter_cfg.items()
+                if key in MarketFilterConfig.__dataclass_fields__
+            }
+            mf_cfg = MarketFilterConfig(**mf_fields)
+
+        if mf_cfg is not None and mf_cfg.enabled:
+            slope_window = max(1, int(mf_cfg.slope_window))
+            slope_ma_period = max(2, int(getattr(mf_cfg, "slope_ma_period", 50)))
+            ema_s = close.ewm(span=slope_ma_period, adjust=False).mean()
+            prev = ema_s.shift(slope_window)
+            momentum = (ema_s - prev) / prev
+            ma200_gate = close.rolling(200, min_periods=200).mean()
+
+            close_np = close.to_numpy(dtype=float)
+            momentum_np = momentum.to_numpy(dtype=float)
+            ma200_np = ma200_gate.to_numpy(dtype=float)
+            valid = ~np.isnan(close_np) & ~np.isnan(momentum_np) & ~np.isnan(ma200_np)
+            above = close_np > ma200_np
+            slope_pos = momentum_np >= 0.0
+
+            market_state = np.zeros(day_count, dtype=np.int8)
+            market_state[valid & above & ~slope_pos] = 1
+            market_state[valid & ~above & slope_pos] = 2
+            market_state[valid & ~above & ~slope_pos] = 3
+            trade_mode = np.where(market_state == 0, 0, np.where(market_state == 3, 2, 1)).astype(np.int8)
+
+            self._market_state = market_state
+            self._trade_mode = trade_mode
+            self._market_state_name_map = {
+                day: state_names[int(market_state[idx])] for idx, day in enumerate(trading_days)
+            }
+            self._trade_mode_name_map = {
+                day: trade_mode_names[int(trade_mode[idx])] for idx, day in enumerate(trading_days)
+            }
+
+        br_cfg: BenchmarkRegimeConfig | None = None
+        if isinstance(benchmark_regime_cfg, BenchmarkRegimeConfig):
+            br_cfg = benchmark_regime_cfg
+        elif isinstance(benchmark_regime_cfg, dict):
+            br_fields = {
+                key: value
+                for key, value in benchmark_regime_cfg.items()
+                if key in BenchmarkRegimeConfig.__dataclass_fields__
+            }
+            br_cfg = BenchmarkRegimeConfig(**br_fields)
+
+        benchmark_gate = np.ones(day_count, dtype=bool)
+        if br_cfg is not None and br_cfg.enabled:
+            fast_period = max(2, int(br_cfg.fast_period))
+            slow_period = max(fast_period + 1, int(br_cfg.slow_period))
+            slope_window = max(1, int(br_cfg.slope_window))
+            ma_fast = close.rolling(fast_period, min_periods=fast_period).mean()
+            ma_slow = close.rolling(slow_period, min_periods=slow_period).mean()
+            slow_slope = ma_slow - ma_slow.shift(slope_window)
+            benchmark_gate = (ma_fast > ma_slow) & (slow_slope >= 0.0)
+            benchmark_gate = benchmark_gate.fillna(False).to_numpy(dtype=bool)
+
+        self._benchmark_regime_on_map = {
+            day: bool(benchmark_gate[idx]) for idx, day in enumerate(trading_days)
+        }
+        self._breakout_buy_allowed_map = {
+            day: bool(benchmark_gate[idx]) and self._trade_mode_name_map.get(day, "TREND_MAIN") != "NO_TRADE"
+            for idx, day in enumerate(trading_days)
+        }
 
     def _build_rsi_rows_by_day(self, history: pd.DataFrame, spec: _ModuleSpec) -> dict[date, pd.DataFrame]:
         params = dict(spec.params or {})
@@ -414,6 +728,20 @@ class MultiAlphaSignalProvider:
         for day_key, group in hist.groupby(hist["date"].dt.date, sort=False):
             rows_by_day[pd.Timestamp(day_key).date()] = group[["symbol", "close", "rsi", "rsi_prev"]].copy()
         return rows_by_day
+
+    def _build_moneyflow_rows_by_day(self, spec: _ModuleSpec) -> dict[date, pd.DataFrame]:
+        params = dict(spec.params or {})
+        selection_path = _resolve_local_path(params.get("selection_path"))
+        if selection_path is None:
+            raise ValueError("moneyflow_monthly requires params.selection_path")
+        if not selection_path.exists():
+            raise FileNotFoundError(f"moneyflow_monthly selection_path does not exist: {selection_path}")
+        top_n = max(0, int(params.get("top_n", 0) or 0))
+        return _load_moneyflow_rows_by_observation_day(
+            str(selection_path),
+            int(selection_path.stat().st_mtime_ns),
+            int(top_n),
+        )
 
     def _resolve_regime_tag(self, day: date) -> str:
         strong = bool(self._strong_risk_on_map.get(day, False))
@@ -547,6 +875,106 @@ class MultiAlphaSignalProvider:
                         **meta,
                         "triggered_rule": "MR_RSI_OVERSOLD_BUY",
                         "raw_score": float(raw_score),
+                    },
+                )
+            )
+        return out
+
+    def _build_moneyflow_raw_signals(self, day: date, ctx: DayContext, spec: _ModuleSpec) -> list[Signal]:
+        rows = self._moneyflow_rows_by_day.get(day)
+        if rows is None or rows.empty or ctx.next_day is None:
+            return []
+        params = dict(spec.params or {})
+        order_size = max(1, int(params.get("order_size", 1000) or 1000))
+        current_positions = {
+            _normalized_symbol(symbol)
+            for symbol, qty in ctx.positions.items()
+            if int(qty) > 0
+        }
+        out: list[Signal] = []
+        for row in rows.itertuples(index=False):
+            symbol = _normalized_symbol(getattr(row, "symbol", ""))
+            if not symbol or symbol in current_positions:
+                continue
+            execution_day = getattr(row, "execution_date", None)
+            if execution_day is None or pd.Timestamp(execution_day).date() != ctx.next_day:
+                continue
+            raw_score = _safe_score(getattr(row, "raw_score", 0.5), fallback=0.5)
+            meta = {
+                "triggered_rule": "MONEYFLOW_MONTHLY_ENTRY",
+                "observation_date": str(day),
+                "execution_date": str(ctx.next_day),
+                "rank": int(getattr(row, "rank", 0) or 0),
+                "raw_score": float(raw_score),
+            }
+            if hasattr(row, "monthly_divergence_rate"):
+                try:
+                    meta["monthly_divergence_rate"] = float(getattr(row, "monthly_divergence_rate"))
+                except Exception:
+                    pass
+            out.append(
+                Signal(
+                    signal_date=day,
+                    symbol=symbol,
+                    side=Side.BUY,
+                    qty=order_size,
+                    reason="MONEYFLOW_MONTHLY_ENTRY",
+                    reason_code="MONEYFLOW_MONTHLY_ENTRY",
+                    meta=meta,
+                )
+            )
+        return out
+
+    def _moneyflow_exit_mode(self, spec: _ModuleSpec | None) -> str:
+        if spec is None:
+            return ""
+        params = dict(spec.params or {})
+        return str(params.get("exit_mode", "shared_breakout") or "shared_breakout").strip().lower()
+
+    def _build_moneyflow_monthly_sell_signals(
+        self,
+        day: date,
+        ctx: DayContext,
+        spec: _ModuleSpec,
+    ) -> list[Signal]:
+        rows = self._moneyflow_rows_by_day.get(day)
+        if rows is None or rows.empty or ctx.next_day is None:
+            return []
+        selected = rows.copy()
+        selected = selected.loc[
+            pd.to_datetime(selected["execution_date"], errors="coerce").dt.date == ctx.next_day
+        ].copy()
+        if selected.empty:
+            return []
+        selected_symbols = {
+            _normalized_symbol(symbol)
+            for symbol in selected["symbol"].astype(str).tolist()
+            if str(symbol).strip()
+        }
+        held_positions = {
+            _normalized_symbol(symbol): int(qty)
+            for symbol, qty in ctx.positions.items()
+            if int(qty) > 0 and self._holding_source_alpha(ctx, symbol) == spec.alpha_id
+        }
+        if not held_positions:
+            return []
+        out: list[Signal] = []
+        for symbol, qty in held_positions.items():
+            if symbol in selected_symbols:
+                continue
+            out.append(
+                Signal(
+                    signal_date=day,
+                    symbol=symbol,
+                    side=Side.SELL,
+                    qty=int(qty),
+                    reason="MONEYFLOW_MONTHLY_REBALANCE_EXIT",
+                    reason_code="MONEYFLOW_MONTHLY_REBALANCE_EXIT",
+                    meta={
+                        "triggered_rule": "MONEYFLOW_MONTHLY_REBALANCE_EXIT",
+                        "observation_date": str(day),
+                        "execution_date": str(ctx.next_day),
+                        "selected_symbol_count": int(len(selected_symbols)),
                     },
                 )
             )

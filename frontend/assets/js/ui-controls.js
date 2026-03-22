@@ -1,3 +1,5 @@
+/* ui-controls.js: transitional desktop control wiring only. */
+/* Config compile/validate truth belongs to window.configDraftCore, not this shell file. */
 /* ui-controls.js: UI interactions, config building, drawer, dock tabs */
 /* Globals used: state, byId, esc, num, pct, fmtInt, fmtMoney, setTextById, setHtmlById,
    getStrategySelector, getStrategyPackValue, COMPOSE_MODULES, reasonZh, addLog,
@@ -350,6 +352,7 @@ function updateSignalCompositionSurface(draft, errors) {
 }
 
 function refreshConfigPanels() {
+  updateRegimeEngineUi();
   const preview = byId('wbConfigJsonPreview');
   if (preview) preview.textContent = JSON.stringify(state.config_draft || {}, null, 2);
   const errors = validateConfigDraft(state.config_draft || {});
@@ -636,6 +639,33 @@ function renderSummaryBar() {
   setTextById('wbSummaryStrategy', strategyInfo.extra);
 }
 
+function selectedRegimeEngineValue() {
+  return String(byId('wbRegimeEngine')?.value || 'ma200_legacy').trim().toLowerCase() || 'ma200_legacy';
+}
+
+function updateRegimeEngineUi(engine = null) {
+  const normalized = String(engine || selectedRegimeEngineValue()).trim().toLowerCase() || 'ma200_legacy';
+  const formal = normalized === 'market_regime_framework';
+  const weekly = normalized === 'weekly_five_state';
+  const selector = byId('wbRegimeEngine');
+  if (selector) selector.value = normalized;
+  const formalPanel = byId('wbRegimeFrameworkPanel');
+  if (formalPanel) formalPanel.hidden = !formal;
+  const weeklyPanel = byId('wbWeeklyFiveStatePanel');
+  if (weeklyPanel) weeklyPanel.hidden = !weekly;
+  const legacyPanel = byId('wbRegimeLegacyPanel');
+  if (legacyPanel) legacyPanel.hidden = formal || weekly;
+}
+
+function regimeRequiredBlocksFromUi() {
+  return [
+    byId('wbRegimeRequiredTrend')?.checked ? 'trend_block' : null,
+    byId('wbRegimeRequiredRisk')?.checked ? 'risk_block' : null,
+    byId('wbRegimeRequiredBreadth')?.checked ? 'breadth_block' : null,
+    byId('wbRegimeRequiredParticipation')?.checked ? 'participation_block' : null,
+  ].filter(Boolean);
+}
+
 function applyConfigToUI(cfg) {
   const _set = (id, val) => { const el = byId(id); if (el && val != null) el.value = val; };
   const _chk = (id, val) => { const el = byId(id); if (el) el.checked = !!val; };
@@ -657,6 +687,7 @@ function applyConfigToUI(cfg) {
   _set('wbUniverseLimit', u.limit);
   _chk('wbExcludeSt', f.exclude_st);
   _chk('wbExcludeSuspended', f.exclude_suspended);
+  _chk('wbExcludeStarMarket', f.exclude_star_market);
   _set('wbMinListDays', f.min_list_days);
   _set('wbMinTurnover', f.min_avg_turnover_20d);
   _set('wbPriceMin', f.price_min ?? cfg?.universe_filter?.min_price);
@@ -689,6 +720,49 @@ function applyConfigToUI(cfg) {
   _set('wbRfThreshold', rfCfg.regime_threshold ?? 0.3);
   _set('wbRfAlpha', rfCfg.alpha_m ?? 2.0);
   const rfParams = byId('wbRegimeFilterParams'); if (rfParams) rfParams.style.display = rfOn ? '' : 'none';
+
+  const regimeEngineCfg = cfg?.regime_engine || {};
+  const regimeTrend = regimeEngineCfg.trend_block || {};
+  const regimeRisk = regimeEngineCfg.risk_block || {};
+  const regimeBreadth = regimeEngineCfg.breadth_block || {};
+  const regimeParticipation = regimeEngineCfg.participation_block || {};
+  const regimePersistence = regimeEngineCfg.persistence || {};
+  const regimeFallback = regimeEngineCfg.fallback || {};
+  const regimeWeeklyFiveState = regimeEngineCfg.weekly_five_state || {};
+  const regimeEngine = String(regimeEngineCfg.engine || 'ma200_legacy').trim().toLowerCase() || 'ma200_legacy';
+  _set('wbRegimeEngine', regimeEngine);
+  _set('wbFormalRegimeBenchmark', regimeEngineCfg.benchmark ?? (u.benchmark || '000001.SH'));
+  _set('wbWeeklyTurnWeakBudget', regimeWeeklyFiveState.turn_weak_budget ?? 0.15);
+  _chk('wbRegimeTrendEnabled', regimeTrend.enabled ?? true);
+  _set('wbRegimeLongMaWindow', regimeTrend.long_ma_window ?? 200);
+  _set('wbRegimeSlopeWindow', regimeTrend.slope_window ?? 20);
+  _set('wbRegimeBreakoutLookback', regimeTrend.breakout_lookback ?? 20);
+  _chk('wbRegimeRiskEnabled', regimeRisk.enabled ?? true);
+  _set('wbRegimeRealizedVolWindow', regimeRisk.realized_vol_window ?? 20);
+  _set('wbRegimeAtrWindow', regimeRisk.atr_window ?? 14);
+  _set('wbRegimeDrawdownWindow', regimeRisk.drawdown_window ?? 60);
+  _chk('wbRegimeBreadthEnabledFormal', regimeBreadth.enabled ?? true);
+  _set('wbRegimeBreadthUniverse', regimeBreadth.universe ?? 'benchmark_constituents');
+  _set('wbRegimeAboveMaShort', regimeBreadth.above_ma_short_window ?? 50);
+  _set('wbRegimeAboveMaLong', regimeBreadth.above_ma_long_window ?? 200);
+  _set('wbRegimeNewHighLowWindow', regimeBreadth.new_high_low_window ?? 20);
+  _chk('wbRegimeParticipationEnabled', regimeParticipation.enabled ?? true);
+  _set('wbRegimeTurnoverWindow', regimeParticipation.turnover_window ?? 20);
+  _set('wbRegimeAmountWindow', regimeParticipation.amount_window ?? 20);
+  _chk('wbRegimeUseTurnoverRate', regimeParticipation.use_turnover_rate ?? true);
+  _set('wbRegimeEntryConfirmBars', regimePersistence.entry_confirm_bars ?? 3);
+  _set('wbRegimeExitConfirmBars', regimePersistence.exit_confirm_bars ?? 2);
+  _set('wbRegimeMinStateDuration', regimePersistence.min_state_duration ?? 5);
+  _set('wbRegimeConfidenceFloor', regimePersistence.confidence_floor ?? 0.55);
+  _set('wbRegimeTransitionCooldown', regimePersistence.transition_cooldown ?? 3);
+  _set('wbRegimeFallbackMode', regimeFallback.on_feature_unavailable ?? 'ma200_legacy');
+  _chk('wbRegimeEmitFeatureAvailability', regimeFallback.emit_feature_availability ?? (regimeEngine === 'market_regime_framework'));
+  const requiredBlocks = Array.isArray(regimeFallback.required_blocks) ? regimeFallback.required_blocks : [];
+  _chk('wbRegimeRequiredTrend', requiredBlocks.includes('trend_block') || (!requiredBlocks.length && regimeEngine === 'market_regime_framework'));
+  _chk('wbRegimeRequiredRisk', requiredBlocks.includes('risk_block') || (!requiredBlocks.length && regimeEngine === 'market_regime_framework'));
+  _chk('wbRegimeRequiredBreadth', requiredBlocks.includes('breadth_block'));
+  _chk('wbRegimeRequiredParticipation', requiredBlocks.includes('participation_block'));
+  updateRegimeEngineUi(regimeEngine);
 
   const trend = sgCfg.trend || {};
   const breakoutModule = hasMultiAlphaModules

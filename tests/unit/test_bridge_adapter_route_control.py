@@ -4,9 +4,11 @@ from datetime import date
 from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 
 from backend.core.engine_vector.signal_provider import DaySignals, ExitCounts
 from backend.core.stage_pipeline.adapters import bridge_adapter
+from backend.core.stage_pipeline.adapters.route_runtime import initialize_route_controls
 from backend.core.stage_pipeline.adapters.day_controls import compute_day_controls
 from backend.core.stage_pipeline.adapters.signal_postprocess import postprocess_day_signals
 from backend.core.stage_pipeline.adapters.stage_applicability import is_stage_disabled, stage_is_applicable
@@ -125,6 +127,83 @@ def test_compute_day_controls_non_breakout_route_uses_provider_diagnostics() -> 
     assert controls["benchmark_regime_on"] is True
 
 
+def test_initialize_route_controls_formal_engine_uses_light_multiplier_fallbacks() -> None:
+    trading_day = date(2026, 3, 2)
+    controls = initialize_route_controls(
+        route_id="provider_breakout_runtime",
+        data_bundle=SimpleNamespace(
+            benchmark=pd.DataFrame(),
+            trading_days=[trading_day],
+        ),
+        market_filter_cfg=SimpleNamespace(
+            enabled=True,
+            bull_multiplier=1.5,
+            light_multiplier=0.6,
+            trans_down_multiplier=None,
+            trans_up_multiplier=None,
+            bear_multiplier=None,
+        ),
+        benchmark_regime_cfg=None,
+        breadth_cfg=None,
+        provider=SimpleNamespace(
+            _regime_engine_name="market_regime_framework",
+            _market_state=np.array([1], dtype=np.int8),
+            _trade_mode=np.array([1], dtype=np.int8),
+        ),
+    )
+
+    assert controls.mf_enabled is True
+    assert float(controls.mf_mult_arr[0]) == 0.6
+
+
+def test_initialize_route_controls_weekly_engine_uses_provider_risk_budget_multiplier() -> None:
+    trading_day = date(2026, 3, 2)
+    controls = initialize_route_controls(
+        route_id="provider_breakout_runtime",
+        data_bundle=SimpleNamespace(
+            benchmark=pd.DataFrame(),
+            trading_days=[trading_day],
+        ),
+        market_filter_cfg=SimpleNamespace(enabled=True, bull_multiplier=1.8, light_multiplier=0.6),
+        benchmark_regime_cfg=None,
+        breadth_cfg=None,
+        provider=SimpleNamespace(
+            _regime_engine_name="weekly_five_state",
+            _market_state=np.array([4], dtype=np.int8),
+            _trade_mode=np.array([0], dtype=np.int8),
+            _risk_budget_multiplier_arr=np.array([0.4], dtype=float),
+        ),
+    )
+
+    assert controls.mf_enabled is True
+    assert float(controls.mf_mult_arr[0]) == 0.4
+
+
+def test_initialize_route_controls_legacy_overlay_uses_provider_veto_arrays() -> None:
+    trading_day = date(2026, 3, 2)
+    controls = initialize_route_controls(
+        route_id="provider_breakout_runtime",
+        data_bundle=SimpleNamespace(
+            benchmark=pd.DataFrame(),
+            trading_days=[trading_day],
+        ),
+        market_filter_cfg=SimpleNamespace(enabled=True, bull_multiplier=1.5, light_multiplier=0.6),
+        benchmark_regime_cfg=None,
+        breadth_cfg=None,
+        provider=SimpleNamespace(
+            _regime_engine_name="ma200_legacy",
+            _legacy_turn_weak_overlay_active=True,
+            _market_state=np.array([0], dtype=np.int8),
+            _trade_mode=np.array([2], dtype=np.int8),
+            _risk_budget_multiplier_arr=np.array([0.0], dtype=float),
+        ),
+    )
+
+    assert controls.mf_enabled is True
+    assert int(controls.mf_trade_mode_arr[0]) == 2
+    assert float(controls.mf_mult_arr[0]) == 0.0
+
+
 def test_postprocess_day_signals_respects_breakout_gates() -> None:
     runtime = SimpleNamespace(
         route_id="provider_breakout_runtime",
@@ -213,6 +292,37 @@ def test_postprocess_day_signals_freezes_entries_in_trans_down_for_m1_mode() -> 
     assert gated.buy_signals == []
 
 
+def test_postprocess_day_signals_freezes_entries_in_trans_up_when_flag_enabled() -> None:
+    runtime = SimpleNamespace(
+        route_id="provider_breakout_runtime",
+        _br_enabled=False,
+        _mf_enabled=True,
+        _mf_state_arr=np.array([2], dtype=np.int8),
+        _market_filter_cfg=SimpleNamespace(freeze_trans_up_entries=True),
+        provider=SimpleNamespace(_risk_off_exit_mode=""),
+    )
+    signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[SimpleNamespace(symbol="SH600000"), SimpleNamespace(symbol="SZ000001")],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={},
+    )
+
+    gated = postprocess_day_signals(
+        runtime,
+        day_index=0,
+        day_signals=signals,
+        controls={"benchmark_regime_on": True, "market_state": "TRANS_UP", "trade_mode": "TREND_LIGHT"},
+    )
+
+    assert gated.buy_signals == []
+
+
 def test_postprocess_day_signals_trims_to_topk_holdings_in_trans_down_for_m2_mode() -> None:
     trading_day = date(2026, 3, 2)
     runtime = SimpleNamespace(
@@ -258,6 +368,87 @@ def test_postprocess_day_signals_trims_to_topk_holdings_in_trans_down_for_m2_mod
     assert gated.sell_signals[0].qty == 100
     assert gated.sell_signals[0].reason_code == "TRANS_DOWN_TOPK_TRIM"
     assert gated.sell_signals[0].meta["trans_down_max_positions"] == 2
+
+
+def test_compute_day_controls_weekly_five_state_uses_string_state_counters() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        request=SimpleNamespace(
+            max_positions=10,
+            data_bundle=SimpleNamespace(trading_days=[trading_day]),
+        ),
+        route_id="provider_breakout_runtime",
+        _portfolio_mode="equal_10",
+        positions={},
+        close_idx={},
+        position_avg_cost={},
+        _dd_enabled=False,
+        _dd_reduce_pct=0.12,
+        _dd_reduce_scale=0.4,
+        _mf_enabled=True,
+        _mf_state_arr=np.array([0], dtype=np.int8),
+        _mf_mult_arr=np.array([0.15], dtype=float),
+        _MARKET_STATE_NAMES=("BULL", "TRANS_DOWN", "TRANS_UP", "BEAR"),
+        _TRADE_MODE_NAMES=("TREND_MAIN", "TREND_LIGHT", "NO_TRADE"),
+        market_filter_bull_days=0,
+        market_filter_bear_days=0,
+        market_state_trans_down_days=0,
+        market_state_trans_up_days=0,
+        trade_mode_main_days=0,
+        trade_mode_light_days=0,
+        trade_mode_notrade_days=0,
+        _br_enabled=False,
+        _breadth_enabled=False,
+        provider=SimpleNamespace(
+            _market_state_name_arr=np.array(["TURN_WEAK"], dtype=object),
+            _trade_mode_name_arr=np.array(["TREND_MAIN"], dtype=object),
+            _market_state_raw_name_arr=np.array(["TURN_WEAK"], dtype=object),
+            _market_state_smoothed_name_arr=np.array(["TURN_WEAK"], dtype=object),
+            _market_state_score_arr=np.array([2.0], dtype=float),
+            _risk_budget_multiplier_arr=np.array([0.15], dtype=float),
+            _weekly_observation_flag_arr=np.array([True], dtype=bool),
+            _risk_on=np.array([True], dtype=bool),
+        ),
+    )
+
+    controls = compute_day_controls(runtime, 0, trading_day, 0.0)
+
+    assert controls["market_state"] == "TURN_WEAK"
+    assert controls["market_state_5"] == "TURN_WEAK"
+    assert controls["trade_mode"] == "TREND_MAIN"
+    assert controls["risk_budget_multiplier"] == 0.15
+    assert controls["weekly_observation_flag"] is True
+    assert runtime.market_state_trans_down_days == 1
+    assert runtime.trade_mode_main_days == 1
+
+
+def test_postprocess_day_signals_blocks_weekly_five_state_no_trade_by_trade_mode() -> None:
+    runtime = SimpleNamespace(
+        route_id="provider_breakout_runtime",
+        _br_enabled=False,
+        _mf_enabled=True,
+        _mf_state_arr=np.array([0], dtype=np.int8),
+    )
+    signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[SimpleNamespace(symbol="SH600000")],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={},
+    )
+
+    gated = postprocess_day_signals(
+        runtime,
+        day_index=0,
+        day_signals=signals,
+        controls={"benchmark_regime_on": True, "market_state": "DEFENSIVE", "trade_mode": "NO_TRADE"},
+    )
+
+    assert gated.buy_signals == []
 
 
 def test_postprocess_day_signals_trims_below_residual_floor_in_trans_down() -> None:

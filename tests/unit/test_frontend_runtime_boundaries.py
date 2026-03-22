@@ -45,8 +45,8 @@ def test_desktop_main_path_uses_canonical_surface_and_sections_only() -> None:
     assert "/artifacts/read" not in artifacts_source
     assert "/artifacts/read" not in load_controls_source
     assert "/surface/${encodeURIComponent(normalizedSection)}" in artifacts_source
-    assert "requiredSections = ['nav', 'stage_funnel', 'run_meta', 'config', 'reason_codes']" in artifacts_source
-    assert "optionalSections = ['trades', 'daily', 'symbol_stats', 'stock_names']" in artifacts_source
+    assert "const requiredSections = ['nav', 'run_meta', 'config'];" in artifacts_source
+    assert "const optionalSections = [];" in artifacts_source
     assert "ensureDesktopExperimentSurfaceSection(state, normalizedExpId, 'config')" in load_controls_source
 
 
@@ -65,10 +65,12 @@ def test_legacy_desktop_controller_delegates_to_page_shell_helpers() -> None:
 
 def test_artifact_renderers_publish_canonical_lazy_sections() -> None:
     source = _read_repo_file("frontend", "assets", "js", "artifacts.js")
-    assert "lazySections: ['nav', 'symbol_stats', 'stage_funnel', 'run_meta', 'config', 'trades', 'daily', 'reason_codes', 'stock_names']" in source
-    assert "publishResultsWorkbenchSnapshot({ lazySections: ['symbol_stats', 'stock_names'] });" in source
-    assert "publishResultsWorkbenchSnapshot({ lazySections: ['trades'] });" in source
-    assert "publishResultsWorkbenchSnapshot({ lazySections: ['stage_funnel', 'run_meta', 'reason_codes', 'daily'] });" in source
+    assert "surfaceLazySections: cloneJson(surface?.lazy_sections) || {}" in source
+    assert "funnelRows: Array.isArray(sectionData.stage_funnel) ? sectionData.stage_funnel : []" in source
+    assert "reasonRows: Array.isArray(sectionData.reason_codes) ? sectionData.reason_codes : []" in source
+    assert "tradesRows: Array.isArray(sectionData.trades) ? sectionData.trades : []" in source
+    assert "symbolPerformanceRows: normalizeSymbolPerformanceRows(symbolStats)" in source
+    assert "stockNames," in source
 
 
 def test_stage_funnel_workbench_accepts_surface_funnel_rows() -> None:
@@ -222,11 +224,11 @@ def test_load_controls_are_extracted_from_backtest_controller() -> None:
     assert "assets/js/pages/desktop-load-controls.js" in index_source
     assert "async function openExperimentLoadDropdown(anchorEl = null)" in load_controls_source
     assert "function applyLoadedConfigToWorkbench(workbenchConfig, meta)" in load_controls_source
-    assert "async function loadBaselineToWorkbench(baselineId)" in load_controls_source
+    assert "async function loadBaselineToWorkbench(baselineId, options = {})" in load_controls_source
     assert "async function loadExperimentBundle(expId)" in load_controls_source
     assert "async function openExperimentLoadDropdown(anchorEl = null)" not in controller_source
     assert "function applyLoadedConfigToWorkbench(workbenchConfig, meta)" not in controller_source
-    assert "async function loadBaselineToWorkbench(baselineId)" not in controller_source
+    assert "async function loadBaselineToWorkbench(baselineId, options = {})" not in controller_source
     assert "async function loadExperimentBundle(expId)" not in controller_source
 
 

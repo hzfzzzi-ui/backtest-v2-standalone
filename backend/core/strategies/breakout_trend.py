@@ -114,6 +114,9 @@ class BreakoutTrendStrategy(Strategy):
     breakout_quality_margin_cap_pct: float = 0.08
     breakout_quality_fade_cap_pct: float = 0.035
     breakout_quality_open_gap_cap_pct: float = 0.04
+    bull_breakout_quality_veto_enabled: bool = False
+    bull_breakout_quality_veto_min_residual_strength_score: float = 0.0
+    bull_breakout_quality_veto_min_breakout_margin_score: float = 0.0
     residual_window_regime_mode: str = "off"
     residual_window_fallback: int = 60
     residual_window_regime_fast_ma: int = 120

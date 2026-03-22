@@ -7,12 +7,18 @@ import pandas as pd
 import pytest
 
 from backend.core.config.models import ExitConfig
+from backend.core.config.models import LegacyTurnWeakOverlayConfig
+from backend.core.config.models import MarketFilterConfig
+from backend.core.config.models import RegimeEngineConfig
 from backend.core.config.models import StrategyConfig
+from backend.core.config.models import WeeklyFiveStateRegimeConfig
 from backend.core.engine_vector.breakout_signal_provider import (
     BreakoutTrendProvider,
+    _build_legacy_market_filter_state,
     _build_industry_assignment_matrices,
     _compute_residual_ranking_matrices,
 )
+from backend.core.engine_vector.weekly_five_state_engine import WeeklyFiveStateEvaluation
 from backend.core.engine_vector.signal_provider import DayContext
 from backend.core.strategies.registry import build_strategy
 from backend.core.strategies.breakout_trend import BreakoutTrendStrategy
@@ -297,6 +303,22 @@ def _run_provider(
     return provider, signals
 
 
+def _build_day_context(*, market_state: str = "", risk_on: bool = True) -> DayContext:
+    return DayContext(
+        positions={},
+        position_avg_cost={},
+        cash=1_000_000.0,
+        nav=1_000_000.0,
+        base_order_value=100_000.0,
+        max_positions=10,
+        close_idx={},
+        open_idx={},
+        next_day=None,
+        market_state=market_state,
+        risk_on=risk_on,
+    )
+
+
 def test_breakout_provider_allows_buy_without_entry_filters() -> None:
     provider, signals = _run_provider(
         BreakoutTrendStrategy(
@@ -308,6 +330,191 @@ def test_breakout_provider_allows_buy_without_entry_filters() -> None:
     assert len(signals.buy_signals) == 1
     assert provider.entry_above_slow_ma_block_count == 0
     assert provider.entry_slope_block_count == 0
+
+
+def test_breakout_provider_preserves_bull_breakout_quality_veto_params() -> None:
+    strategy = build_strategy(
+        StrategyConfig(
+            name="breakout_trend",
+            params={
+                "bull_breakout_quality_veto_enabled": True,
+                "bull_breakout_quality_veto_min_residual_strength_score": 0.94,
+                "bull_breakout_quality_veto_min_breakout_margin_score": 0.55,
+            },
+        )
+    )
+
+    assert isinstance(strategy, BreakoutTrendStrategy)
+    assert strategy.bull_breakout_quality_veto_enabled is True
+    assert strategy.bull_breakout_quality_veto_min_residual_strength_score == 0.94
+    assert strategy.bull_breakout_quality_veto_min_breakout_margin_score == 0.55
+
+
+def test_breakout_provider_bull_quality_veto_default_disabled_keeps_signal() -> None:
+    provider = BreakoutTrendProvider()
+    history, benchmark, trading_days = _make_breakout_fixture()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+            enable_residual_ranking=True,
+            residual_window=40,
+        ),
+        exit_cfg=ExitConfig(),
+    )
+    provider._residual_strength_score[-1, 0] = 0.2
+    provider._breakout_margin_score[-1, 0] = 0.2
+
+    signals = provider.day_signals(
+        trading_days[-1],
+        len(trading_days) - 1,
+        _build_day_context(market_state="BULL", risk_on=True),
+    )
+
+    assert len(signals.buy_signals) == 1
+    assert signals.diagnostics["bull_breakout_quality_veto_applied"] is False
+    assert provider.bull_breakout_quality_veto_block_count == 0
+
+
+def test_breakout_provider_bull_quality_veto_blocks_low_residual_strength() -> None:
+    provider = BreakoutTrendProvider()
+    history, benchmark, trading_days = _make_breakout_fixture()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+            enable_residual_ranking=True,
+            residual_window=40,
+            bull_breakout_quality_veto_enabled=True,
+            bull_breakout_quality_veto_min_residual_strength_score=0.94,
+            bull_breakout_quality_veto_min_breakout_margin_score=0.55,
+        ),
+        exit_cfg=ExitConfig(),
+    )
+    provider._residual_strength_score[-1, 0] = 0.50
+    provider._breakout_margin_score[-1, 0] = 0.80
+
+    signals = provider.day_signals(
+        trading_days[-1],
+        len(trading_days) - 1,
+        _build_day_context(market_state="BULL", risk_on=True),
+    )
+
+    assert signals.buy_signals == []
+    assert signals.diagnostics["bull_breakout_quality_veto_applied"] is True
+    assert signals.diagnostics["bull_breakout_quality_veto_block_count"] == 1
+    assert signals.diagnostics["bull_breakout_quality_veto_residual_block_count"] == 1
+    assert signals.diagnostics["bull_breakout_quality_veto_margin_block_count"] == 0
+    assert provider.bull_breakout_quality_veto_block_count == 1
+    assert provider.diag_reason_counts["BLOCK_BULL_QUALITY_VETO"] == 1
+
+
+def test_breakout_provider_bull_quality_veto_blocks_low_breakout_margin() -> None:
+    provider = BreakoutTrendProvider()
+    history, benchmark, trading_days = _make_breakout_fixture()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+            enable_residual_ranking=True,
+            residual_window=40,
+            bull_breakout_quality_veto_enabled=True,
+            bull_breakout_quality_veto_min_residual_strength_score=0.94,
+            bull_breakout_quality_veto_min_breakout_margin_score=0.55,
+        ),
+        exit_cfg=ExitConfig(),
+    )
+    provider._residual_strength_score[-1, 0] = 0.99
+    provider._breakout_margin_score[-1, 0] = 0.20
+
+    signals = provider.day_signals(
+        trading_days[-1],
+        len(trading_days) - 1,
+        _build_day_context(market_state="BULL", risk_on=True),
+    )
+
+    assert signals.buy_signals == []
+    assert signals.diagnostics["bull_breakout_quality_veto_block_count"] == 1
+    assert signals.diagnostics["bull_breakout_quality_veto_residual_block_count"] == 0
+    assert signals.diagnostics["bull_breakout_quality_veto_margin_block_count"] == 1
+
+
+def test_breakout_provider_bull_quality_veto_does_not_apply_outside_bull() -> None:
+    provider = BreakoutTrendProvider()
+    history, benchmark, trading_days = _make_breakout_fixture()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+            enable_residual_ranking=True,
+            residual_window=40,
+            bull_breakout_quality_veto_enabled=True,
+            bull_breakout_quality_veto_min_residual_strength_score=0.94,
+            bull_breakout_quality_veto_min_breakout_margin_score=0.55,
+        ),
+        exit_cfg=ExitConfig(),
+    )
+    provider._residual_strength_score[-1, 0] = 0.20
+    provider._breakout_margin_score[-1, 0] = 0.20
+
+    signals = provider.day_signals(
+        trading_days[-1],
+        len(trading_days) - 1,
+        _build_day_context(market_state="TRANS_UP", risk_on=True),
+    )
+
+    assert len(signals.buy_signals) == 1
+    assert signals.diagnostics["bull_breakout_quality_veto_applied"] is False
+    assert provider.bull_breakout_quality_veto_block_count == 0
+
+
+def test_breakout_provider_bull_quality_veto_skips_pullback_only_candidates() -> None:
+    provider = BreakoutTrendProvider()
+    history, benchmark, trading_days = _make_pullback_reclaim_fixture()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+            enable_pullback_candidates=True,
+            bull_breakout_quality_veto_enabled=True,
+            bull_breakout_quality_veto_min_residual_strength_score=0.94,
+            bull_breakout_quality_veto_min_breakout_margin_score=0.55,
+        ),
+        exit_cfg=ExitConfig(),
+    )
+    provider._residual_strength_score[-1, 0] = 0.20
+    provider._breakout_margin_score[-1, 0] = 0.20
+
+    signals = provider.day_signals(
+        trading_days[-1],
+        len(trading_days) - 1,
+        _build_day_context(market_state="BULL", risk_on=True),
+    )
+
+    assert len(signals.buy_signals) == 1
+    assert signals.buy_signals[0].meta["alpha_source"] == "pullback_only"
+    assert signals.buy_signals[0].meta["bull_breakout_quality_veto_applied"] is False
+    assert provider.bull_breakout_quality_veto_block_count == 0
 
 
 def test_breakout_provider_blocks_entry_above_slow_ma() -> None:
@@ -402,6 +609,45 @@ def test_breakout_provider_volume_ratio_confirm_blocks_when_ratio_below_threshol
 
     assert signals.buy_signals == []
     assert bool(provider._entry_confirm_ok[-1, 0]) is False
+
+
+def test_build_legacy_market_filter_state_respects_long_ma_window() -> None:
+    benchmark = pd.DataFrame(
+        {
+            "date": pd.date_range("2026-01-01", periods=220, freq="D"),
+            "close": np.concatenate(
+                [
+                    np.full(100, 220.0),
+                    np.full(40, 80.0),
+                    np.linspace(80.0, 140.0, 80),
+                ]
+            ),
+            "high": np.concatenate(
+                [
+                    np.full(100, 220.5),
+                    np.full(40, 80.5),
+                    np.linspace(80.5, 140.5, 80),
+                ]
+            ),
+        }
+    )
+    dates = benchmark["date"].dt.date.to_numpy()
+
+    market_state_160, trade_mode_160 = _build_legacy_market_filter_state(
+        benchmark=benchmark,
+        dates=dates,
+        market_filter_cfg=MarketFilterConfig(enabled=True, long_ma_window=160, slope_window=10, slope_ma_period=50),
+    )
+    market_state_200, trade_mode_200 = _build_legacy_market_filter_state(
+        benchmark=benchmark,
+        dates=dates,
+            market_filter_cfg=MarketFilterConfig(enabled=True, long_ma_window=200, slope_window=10, slope_ma_period=50),
+        )
+
+    assert int(market_state_160[-1]) == 0
+    assert int(trade_mode_160[-1]) == 0
+    assert int(market_state_200[-1]) == 2
+    assert int(trade_mode_200[-1]) == 2
 
 
 def test_breakout_provider_emits_pullback_only_when_pullback_candidates_enabled() -> None:
@@ -1312,3 +1558,130 @@ def test_breakout_provider_skips_profit_decay_exit_when_residual_strength_still_
 
     assert signals.sell_signals == []
     assert signals.exit_counts.profit_decay_exit == 0
+
+
+def test_breakout_provider_emits_formal_regime_arrays() -> None:
+    history, benchmark, trading_days = _make_breakout_fixture()
+    benchmark = benchmark.copy()
+    benchmark["high"] = pd.to_numeric(benchmark["close"], errors="coerce") + 1.0
+    benchmark["low"] = pd.to_numeric(benchmark["close"], errors="coerce") - 1.0
+
+    provider = BreakoutTrendProvider()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+        ),
+        exit_cfg=ExitConfig(),
+        market_filter_cfg=MarketFilterConfig(enabled=True),
+        regime_engine_cfg=RegimeEngineConfig(engine="market_regime_framework"),
+    )
+
+    assert provider._regime_engine_name == "market_regime_framework"
+    assert len(provider._market_state) == len(trading_days)
+    assert len(provider._trade_mode) == len(trading_days)
+    assert len(provider._regime_confidence_arr) == len(trading_days)
+    assert len(provider._regime_duration_bars_arr) == len(trading_days)
+    assert len(provider._regime_transition_reason_arr) == len(trading_days)
+    assert len(provider._feature_availability_arr) == len(trading_days)
+    assert provider._runtime_state.regime_engine == "market_regime_framework"
+
+
+def test_breakout_provider_emits_weekly_five_state_arrays() -> None:
+    closes = [100.0 + float(i) for i in range(180)]
+    history, benchmark, trading_days = _make_price_fixture(closes)
+    benchmark = benchmark.copy()
+    benchmark["high"] = pd.to_numeric(benchmark["close"], errors="coerce") + 1.0
+    benchmark["low"] = pd.to_numeric(benchmark["close"], errors="coerce") - 1.0
+
+    provider = BreakoutTrendProvider()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+        ),
+        exit_cfg=ExitConfig(),
+        market_filter_cfg=MarketFilterConfig(enabled=True),
+        regime_engine_cfg=RegimeEngineConfig(engine="weekly_five_state"),
+    )
+
+    assert provider._regime_engine_name == "weekly_five_state"
+    assert len(provider._market_state) == len(trading_days)
+    assert len(provider._trade_mode) == len(trading_days)
+    assert len(provider._market_state_name_arr) == len(trading_days)
+    assert len(provider._market_state_raw_name_arr) == len(trading_days)
+    assert len(provider._market_state_smoothed_name_arr) == len(trading_days)
+    assert len(provider._risk_budget_multiplier_arr) == len(trading_days)
+    assert len(provider._weekly_observation_flag_arr) == len(trading_days)
+    assert provider._runtime_state.regime_engine == "weekly_five_state"
+    assert "BULL_MAIN" in set(provider._market_state_name_arr.tolist())
+
+
+def test_breakout_provider_legacy_overlay_only_vetoes_turn_weak(monkeypatch) -> None:
+    closes = [100.0 + float(i) for i in range(180)]
+    history, benchmark, trading_days = _make_price_fixture(closes)
+    benchmark = benchmark.copy()
+    benchmark["high"] = pd.to_numeric(benchmark["close"], errors="coerce") + 1.0
+    benchmark["low"] = pd.to_numeric(benchmark["close"], errors="coerce") - 1.0
+
+    def _fake_eval(**_: object) -> WeeklyFiveStateEvaluation:
+        day_count = len(trading_days)
+        smoothed_names = np.array(["BULL_MAIN"] * day_count, dtype=object)
+        smoothed_names[-1] = "TURN_WEAK"
+        return WeeklyFiveStateEvaluation(
+            market_state_codes=np.full(day_count, 4, dtype=np.int8),
+            market_state_names=np.array(["BULL_MAIN"] * day_count, dtype=object),
+            market_state_raw_names=np.array(smoothed_names, dtype=object),
+            market_state_smoothed_names=np.array(smoothed_names, dtype=object),
+            trade_mode_codes=np.zeros(day_count, dtype=np.int8),
+            trade_mode_names=np.array(["TREND_MAIN"] * day_count, dtype=object),
+            risk_budget_multipliers=np.ones(day_count, dtype=float),
+            state_scores=np.full(day_count, 5.0, dtype=float),
+            weekly_observation_flags=np.zeros(day_count, dtype=bool),
+            regime_confidence=np.full(day_count, 0.8, dtype=float),
+            regime_duration_bars=np.ones(day_count, dtype=np.int32),
+            regime_transition_reason=np.array(["UNCHANGED"] * day_count, dtype=object),
+            feature_availability=np.array([{"all_ready": True}] * day_count, dtype=object),
+            fallback_active=np.zeros(day_count, dtype=bool),
+        )
+
+    monkeypatch.setattr(
+        "backend.core.engine_vector.breakout_signal_provider.evaluate_weekly_five_state_regime",
+        _fake_eval,
+    )
+
+    provider = BreakoutTrendProvider()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+        ),
+        exit_cfg=ExitConfig(),
+        market_filter_cfg=MarketFilterConfig(enabled=True),
+        regime_engine_cfg=RegimeEngineConfig(
+            engine="ma200_legacy",
+            legacy_turn_weak_overlay=LegacyTurnWeakOverlayConfig(
+                enabled=True,
+                weekly_cfg=WeeklyFiveStateRegimeConfig(benchmark="000001.SH"),
+            ),
+        ),
+    )
+
+    assert provider._regime_engine_name == "ma200_legacy"
+    assert provider._legacy_turn_weak_overlay_active is True
+    assert provider._market_state_name_arr[-1] == "BULL"
+    assert provider._market_state_smoothed_name_arr[-1] == "TURN_WEAK"
+    assert provider._trade_mode_name_arr[-1] == "NO_TRADE"
+    assert float(provider._risk_budget_multiplier_arr[-1]) == 0.0

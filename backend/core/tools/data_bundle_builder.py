@@ -15,6 +15,7 @@ from backend.core.data.provider import DataProvider
 from backend.core.universe.membership_audit import audit_membership_history, should_block_static_fallback
 from backend.core.universe.hs300_csi500 import (
     UniverseFilterConfig,
+    apply_symbol_level_universe_filters,
     apply_universe_filters,
     build_candidates_from_ohlcv,
     is_turnover_rate_filter_enabled,
@@ -341,16 +342,13 @@ def build_data_bundle(
                 "set universe.allow_low_fidelity_history=true only for explicit low-fidelity research"
             )
 
-    _emit_progress(progress_hook, 20, f"Loading OHLCV for {len(symbols)} symbols ({universe_mode})")
-    history = provider.load_ohlcv_daily(symbols, cfg_obj.universe.start, cfg_obj.universe.end, source="stocks")
-
-    dynamic_universe_entry = dynamic_all_a_entry or dynamic_membership_entry
-    if universe_filters_raw and not dynamic_universe_entry:
-        _emit_progress(progress_hook, 30, "Applying static universe filters")
+    uf_cfg = None
+    if universe_filters_raw:
         uf_cfg = UniverseFilterConfig(
             exclude_st=bool(universe_filters_raw.get("exclude_st", True)),
             exclude_delisted=bool(universe_filters_raw.get("exclude_delisted", True)),
             exclude_suspended=bool(universe_filters_raw.get("exclude_suspended", True)),
+            exclude_star_market=bool(universe_filters_raw.get("exclude_star_market", False)),
             min_list_days=int(universe_filters_raw.get("min_list_days", 120)),
             min_avg_turnover_20d=float(universe_filters_raw.get("min_avg_turnover_20d", 1e8)),
             min_avg_turnover_rate_20d=float(universe_filters_raw.get("min_avg_turnover_rate_20d", 0.0) or 0.0),
@@ -364,6 +362,33 @@ def build_data_bundle(
                 or 0.0
             ),
         )
+
+    dynamic_universe_entry = dynamic_all_a_entry or dynamic_membership_entry
+    if universe_filters_raw and dynamic_universe_entry and uf_cfg is not None:
+        filtered_symbols, excluded_counts = apply_symbol_level_universe_filters(symbols, uf_cfg)
+        before_count = int(len(symbols))
+        after_count = int(len(filtered_symbols))
+        universe_meta["filters_config"] = dict(universe_filters_raw)
+        universe_meta["excluded_counts"] = excluded_counts
+        universe_meta["tradable_symbols"] = after_count
+        universe_meta["after_filters_symbols"] = after_count
+        universe_meta["filter_mode"] = "dynamic_membership_gate" if dynamic_membership_entry else "dynamic_daily_gate"
+        if after_count > 0:
+            symbols = filtered_symbols
+            if dynamic_membership_entry and not membership_history.empty:
+                membership_history = membership_history.loc[
+                    membership_history["symbol"].astype(str).isin(set(filtered_symbols))
+                ].reset_index(drop=True)
+                universe_meta["membership_history_rows"] = int(len(membership_history))
+        else:
+            universe_meta["filter_warning"] = "all symbols filtered out; fallback to pre-filter universe"
+            universe_meta["after_filters_symbols"] = before_count
+
+    _emit_progress(progress_hook, 20, f"Loading OHLCV for {len(symbols)} symbols ({universe_mode})")
+    history = provider.load_ohlcv_daily(symbols, cfg_obj.universe.start, cfg_obj.universe.end, source="stocks")
+
+    if universe_filters_raw and not dynamic_universe_entry:
+        _emit_progress(progress_hook, 30, "Applying static universe filters")
         filter_asof = pd.Timestamp(cfg_obj.universe.start)
         history_for_filter = history
         need_lookback = bool(
@@ -420,10 +445,6 @@ def build_data_bundle(
             universe_meta["filter_warning"] = "all symbols filtered out; fallback to pre-filter universe"
             universe_meta["after_filters_symbols"] = before_count
     elif universe_filters_raw and dynamic_universe_entry:
-        universe_meta["filters_config"] = dict(universe_filters_raw)
-        universe_meta["excluded_counts"] = {}
-        universe_meta["tradable_symbols"] = int(len(symbols))
-        universe_meta["after_filters_symbols"] = int(len(symbols))
         universe_meta["filter_mode"] = "dynamic_membership_gate" if dynamic_membership_entry else "dynamic_daily_gate"
 
     benchmark = provider.load_benchmark_daily(cfg_obj.universe.benchmark, cfg_obj.universe.start, cfg_obj.universe.end)

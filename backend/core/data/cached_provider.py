@@ -142,6 +142,23 @@ class CachedDataProvider(DataProvider):
     def load_security_master(self, symbols: list[str]) -> pd.DataFrame:
         return self._inner.load_security_master(symbols)
 
+    def load_stock_moneyflow(
+        self,
+        symbols: list[str],
+        start: date,
+        end: date,
+        table: str = "pit_stock_moneyflow_v2",
+    ) -> pd.DataFrame:
+        return self._inner.load_stock_moneyflow(symbols, start, end, table=table)
+
+    def load_moneyflow_whitelist(
+        self,
+        start: date,
+        end: date,
+        table: str = "pit_stock_moneyflow_v2_whitelist_daily",
+    ) -> pd.DataFrame:
+        return self._inner.load_moneyflow_whitelist(start, end, table=table)
+
     def load_index_constituent_history(self, index_code: str, start: date, end: date) -> pd.DataFrame:
         return self._inner.load_index_constituent_history(index_code, start, end)
 
@@ -154,9 +171,11 @@ class CachedDataProvider(DataProvider):
         t0 = time.perf_counter()
 
         src = self._inner._source
-        table = safe_ident(src.stocks_table)
-        mapping = self._inner._schema[src.stocks_table]
-        existing = self._inner._get_table_columns(src.stocks_table)
+        resolved_table = src.resolved_stocks_table()
+        mapping_key = src.resolved_stocks_mapping_table()
+        table = safe_ident(resolved_table)
+        mapping = self._inner._schema[mapping_key]
+        existing = self._inner._get_table_columns(resolved_table)
 
         ordered_keys = [
             "date",
@@ -295,9 +314,11 @@ class CachedDataProvider(DataProvider):
 
     def _current_db_signature(self) -> dict[str, Any]:
         src = self._inner._source
-        table = safe_ident(src.stocks_table)
-        mapping = self._inner._schema[src.stocks_table]
-        existing = self._inner._get_table_columns(src.stocks_table)
+        resolved_table = src.resolved_stocks_table()
+        mapping_key = src.resolved_stocks_mapping_table()
+        table = safe_ident(resolved_table)
+        mapping = self._inner._schema[mapping_key]
+        existing = self._inner._get_table_columns(resolved_table)
 
         date_col = safe_ident(mapping["date"])
         created_col = "created_at" if "created_at" in existing else None

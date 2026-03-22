@@ -81,9 +81,13 @@ def test_static_time_audits_cover_rank_market_state_and_industry_history_paths()
     assert ".shift(-" not in generic_text
     assert ".shift(-" not in multifactor_gate_text
 
-    assert "bench_close.rolling(200, min_periods=200).mean()" in route_runtime_text
+    assert 'getattr(market_filter_cfg, "long_ma_window", 200)' in route_runtime_text
+    assert "bench_close.rolling(long_ma_window, min_periods=long_ma_window).mean()" in route_runtime_text
     assert "ma_fast = bench_close.rolling(fast, min_periods=fast).mean()" in route_runtime_text
     assert ".shift(-" not in route_runtime_text
+
+    assert 'getattr(market_filter_cfg, "long_ma_window", 200)' in breakout_text
+    assert "bench_close.rolling(long_ma_window, min_periods=long_ma_window).mean()" in breakout_text
 
     assert "_build_industry_assignment_matrices" in breakout_precompute_text
     assert "industry_history=industry_history if isinstance(industry_history, pd.DataFrame) else None" in breakout_precompute_text

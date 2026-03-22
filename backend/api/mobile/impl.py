@@ -23,6 +23,10 @@ from backend.api.shared.mobile_access import (
 from backend.api.shared.paths import results_root as _results_root
 from backend.api.shared.json_utils import sanitize_json
 from backend.core.services.mobile_dashboard_service import build_mobile_dashboard
+from backend.core.services.mobile_cash_pool_service import (
+    deposit_cash_into_pool,
+    get_reconcile_refresh_status,
+)
 from backend.core.services.mobile_ops_service import (
     create_ticket_from_confirmed_action,
     issue_confirm_token,
@@ -52,6 +56,10 @@ class MobileApprovalCommitRequest(BaseModel):
 
 class MobileApprovalRevokeRequest(BaseModel):
     reason: str | None = None
+
+
+class MobileCashPoolDepositRequest(BaseModel):
+    amount: float
 
 
 def _preview_execution(config_json: dict[str, Any], exp_id: str, as_of_date: str | None) -> dict[str, Any]:
@@ -92,9 +100,16 @@ def _prepare_preview(card: dict[str, Any], body: MobileApprovalPrepareRequest) -
         "symbol": str(card.get("symbol") or ""),
         "name": str(card.get("name") or ""),
         "action_type": str(card.get("action_type") or ""),
+        "source_mode": str(card.get("source_mode") or ""),
+        "snapshot_id": str(card.get("snapshot_id") or ""),
+        "reconcile_id": str(card.get("reconcile_id") or ""),
+        "as_of_date": str(card.get("as_of_date") or card.get("signal_date") or ""),
         "decision": str(body.decision or "").strip().lower(),
         "original_qty": system_suggestion.get("suggested_qty"),
         "original_target_weight": system_suggestion.get("target_weight"),
+        "current_qty": system_suggestion.get("current_qty"),
+        "reference_price": system_suggestion.get("reference_price"),
+        "reference_price_basis": system_suggestion.get("reference_price_basis"),
         "final_qty": body.final_qty,
         "final_target_weight": body.final_target_weight,
         "reject_reason": str(body.reject_reason or "").strip(),
@@ -112,6 +127,8 @@ def _validate_prepare_request(card: dict[str, Any], body: MobileApprovalPrepareR
     decision = str(body.decision or "").strip().lower()
     if decision not in {"approve", "reject"}:
         raise HTTPException(status_code=422, detail="decision must be approve or reject")
+    if str(card.get("source_mode") or "").strip().lower() == "experiment_fallback":
+        return JSONResponse({"ok": False, "detail": "experiment fallback cards are read-only"}, status_code=409)
     if str(card.get("action_type") or "") not in {"buy", "sell"}:
         return JSONResponse({"ok": False, "detail": "hold suggestion is not actionable"}, status_code=409)
     if body.final_qty is not None and int(body.final_qty) <= 0:
@@ -130,6 +147,22 @@ def _validate_prepare_request(card: dict[str, Any], body: MobileApprovalPrepareR
                 status_code=409,
             )
     return None
+
+
+def _validate_card_version(card: dict[str, Any], token_payload: dict[str, Any]) -> None:
+    checks = [
+        ("source_mode", "dashboard source mode changed"),
+        ("exp_id", "suggestion snapshot changed"),
+        ("signal_date", "signal date changed"),
+        ("snapshot_id", "holding snapshot changed"),
+        ("reconcile_id", "reconcile surface changed"),
+        ("as_of_date", "as_of_date changed"),
+    ]
+    for field_name, detail in checks:
+        token_value = str(token_payload.get(field_name) or "").strip()
+        card_value = str(card.get(field_name) or "").strip()
+        if token_value != card_value:
+            raise HTTPException(status_code=409, detail=detail)
 
 
 def get_mobile_session_status(request: Request):
@@ -187,8 +220,12 @@ def prepare_mobile_approval(body: MobileApprovalPrepareRequest, request: Request
     confirm_token = issue_confirm_token(
         {
             "suggestion_id": str(card.get("suggestion_id") or ""),
+            "source_mode": str(card.get("source_mode") or ""),
             "exp_id": str(card.get("exp_id") or ""),
             "signal_date": str(card.get("signal_date") or ""),
+            "snapshot_id": str(card.get("snapshot_id") or ""),
+            "reconcile_id": str(card.get("reconcile_id") or ""),
+            "as_of_date": str(card.get("as_of_date") or card.get("signal_date") or ""),
             "symbol": str(card.get("symbol") or ""),
             "action_type": str(card.get("action_type") or ""),
             "decision": preview["decision"],
@@ -216,11 +253,8 @@ def commit_mobile_approval(body: MobileApprovalCommitRequest, request: Request):
     payload = _current_mobile_dashboard()
     card = _find_approval_card(payload, str(token_payload.get("suggestion_id") or ""))
     if card is None:
-        raise HTTPException(status_code=404, detail="suggestion not found")
-    if str(card.get("exp_id") or "") != str(token_payload.get("exp_id") or ""):
         raise HTTPException(status_code=409, detail="suggestion snapshot changed")
-    if str(card.get("signal_date") or "") != str(token_payload.get("signal_date") or ""):
-        raise HTTPException(status_code=409, detail="signal date changed")
+    _validate_card_version(card, token_payload)
     if str(token_payload.get("decision") or "").strip().lower() == "approve":
         blockers = [item for item in list(card.get("blockers") or []) if str(item.get("code") or "") != "duplicate_submission"]
         if blockers:
@@ -266,3 +300,26 @@ def revoke_mobile_approval_ticket(ticket_id: str, body: MobileApprovalRevokeRequ
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return sanitize_json({"ok": True, "ticket": ticket_summary(ticket)})
+
+
+def deposit_mobile_cash_pool(body: MobileCashPoolDepositRequest, request: Request):
+    require_mobile_session(request)
+    if float(body.amount) <= 0:
+        raise HTTPException(status_code=422, detail="amount must be > 0")
+    try:
+        result = deposit_cash_into_pool(
+            _results_root(),
+            amount=float(body.amount),
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="latest holdings snapshot is missing")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return sanitize_json({"ok": True, **result})
+
+
+def get_mobile_cash_pool_status(request: Request):
+    require_mobile_session(request)
+    return sanitize_json({"ok": True, "refresh_status": get_reconcile_refresh_status(_results_root())})

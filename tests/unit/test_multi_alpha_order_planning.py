@@ -184,6 +184,95 @@ def test_order_planning_hard_sleeve_budget_prefilters_composed_signals(monkeypat
     assert diag_calls[0]["debug_plan"]["sleeve_available_slots"] == {"mr": 2, "trend": 1}
 
 
+def test_order_planning_hard_sleeve_budget_uses_market_state_weight_override(monkeypatch) -> None:
+    buy_signals = [
+        _signal("sh600111", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.91),
+        _signal("sh600112", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.81),
+        _signal("sh600211", sleeve_id="mr", alpha_id="moneyflow_monthly", compose_score=0.88),
+        _signal("sh600212", sleeve_id="mr", alpha_id="moneyflow_monthly", compose_score=0.78),
+        _signal("sh600213", sleeve_id="mr", alpha_id="moneyflow_monthly", compose_score=0.68),
+    ]
+    captured: dict[str, object] = {}
+
+    def _fake_build_rebalance_orders(**kwargs):
+        captured["buy_symbols"] = [str(sig.symbol).lower() for sig in kwargs["buy_signals"]]
+        kwargs["debug_plan"]["reject_reason_counts"] = {}
+        return []
+
+    monkeypatch.setattr(
+        "backend.core.stage_pipeline.adapters.order_planning.build_rebalance_orders",
+        _fake_build_rebalance_orders,
+    )
+
+    diag_calls: list[dict[str, object]] = []
+    runtime = SimpleNamespace(
+        _current_day={
+            "day": date(2026, 3, 2),
+            "controls": {"effective_max_positions": 5, "risk_on_today": False},
+            "day_signals": DaySignals(
+                sell_signals=[],
+                buy_signals=buy_signals,
+                raw_alpha_signals=buy_signals,
+                composed_buy_signals=buy_signals,
+                exit_syms=set(),
+                strength_map={str(sig.symbol).lower(): float((sig.meta or {}).get("compose_score", 0.0)) for sig in buy_signals},
+                mf_score_map={str(sig.symbol).lower(): float((sig.meta or {}).get("compose_score", 0.0)) for sig in buy_signals},
+                mf_gate_on_today=False,
+                strong_risk_on=False,
+                exit_counts=ExitCounts(),
+                diagnostics={"composition_enabled": True, "market_state": "BEAR"},
+            ),
+            "next_open": {str(sig.symbol).lower(): 10.0 for sig in buy_signals},
+            "nav": 100000.0,
+            "holding_symbols": (),
+        },
+        request=_request_stub(),
+        provider=SimpleNamespace(
+            _feats=None,
+            _mx=None,
+            _sym_to_col={},
+            _same_symbol_policy="PREFER_HIGHER_SCORE",
+            _market_state_name_map={date(2026, 3, 2): "BEAR"},
+            _multi_alpha={
+                "signal_composition": {
+                    "modules": [
+                        {"name": "breakout_55", "weight": 0.5},
+                        {"name": "moneyflow_monthly", "weight": 0.5},
+                    ],
+                    "market_state_weight_overrides": {
+                        "BEAR": {"trend": 0.2, "mr": 0.8}
+                    },
+                }
+            },
+            _module_specs={
+                "breakout_55": SimpleNamespace(sleeve_id="trend"),
+                "moneyflow_monthly": SimpleNamespace(sleeve_id="mr"),
+            },
+        ),
+        positions={},
+        holding_sources={},
+        cash=100000.0,
+        _weight_mode="equal",
+        _min_positions_cfg=0,
+        _tilt_strength=0.0,
+        _tilt_top_n=3,
+        _tilt_bottom_n=2,
+        _min_trade_price=5.0,
+        _portfolio_mode="hard_sleeve_budget",
+        candidate_rows=[],
+        _prepared_day_index=0,
+        _apply_daily_decision_diagnostics=lambda **kwargs: diag_calls.append(kwargs),
+    )
+
+    output = build_s7_order_stage_output(runtime)
+
+    assert output.summary_fragment["portfolio_mode"] == "hard_sleeve_budget"
+    assert captured["buy_symbols"] == ["sh600111", "sh600211", "sh600212", "sh600213"]
+    assert diag_calls[0]["debug_plan"]["market_state_weight_override_key"] == "BEAR"
+    assert diag_calls[0]["debug_plan"]["sleeve_weights_effective"] == {"mr": 0.8, "trend": 0.2}
+    assert diag_calls[0]["debug_plan"]["sleeve_slot_caps"] == {"mr": 4, "trend": 1}
+
+
 def test_order_planning_passthrough_for_non_multi_alpha_portfolio_mode(monkeypatch) -> None:
     buy_signals = [
         _signal("sh600301", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.55),
@@ -661,3 +750,65 @@ def test_build_rebalance_orders_industry_second_stage_tiebreak_only_reorders_equ
     buy_orders = [order for order in orders if order.side == Side.BUY]
     assert len(buy_orders) == 1
     assert buy_orders[0].symbol == "sh600901"
+
+
+def test_build_rebalance_orders_moneyflow_overlay_tiebreak_reorders_equal_baseline_scores() -> None:
+    sig_a = _signal("sh601001", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.50)
+    sig_b = _signal("sh601002", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.50)
+
+    orders = build_rebalance_orders(
+        positions={},
+        cash_available=20_000.0,
+        nav_close=20_000.0,
+        max_positions=1,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=[sig_a, sig_b],
+        next_open={"sh601001": 10.0, "sh601002": 10.0},
+        enable_multifactor_rank=True,
+        mf_topk=1,
+        mf_gate_on_today=True,
+        mf_score_map={"sh601001": 0.60, "sh601002": 0.60},
+        overlay_mode="tiebreak",
+        overlay_gate_on_today=True,
+        overlay_score_map={"sh601001": 0.20, "sh601002": 0.90},
+        decision_date=date(2026, 3, 2),
+    )
+
+    buy_orders = [order for order in orders if order.side == Side.BUY]
+    assert len(buy_orders) == 1
+    assert buy_orders[0].symbol == "sh601002"
+
+
+def test_build_rebalance_orders_moneyflow_overlay_soft_weight_uses_overlay_score_without_reordering() -> None:
+    sig_a = _signal("sh601011", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.90)
+    sig_b = _signal("sh601012", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.80)
+    sig_c = _signal("sh601013", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.70)
+
+    orders = build_rebalance_orders(
+        positions={},
+        cash_available=120000.0,
+        nav_close=90000.0,
+        max_positions=3,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=[sig_a, sig_b, sig_c],
+        next_open={"sh601011": 10.0, "sh601012": 10.0, "sh601013": 10.0},
+        enable_multifactor_rank=True,
+        mf_topk=3,
+        mf_gate_on_today=True,
+        mf_concentrate_topn=0,
+        mf_concentrate_scale=1.0,
+        mf_score_map={"sh601011": 0.90, "sh601012": 0.80, "sh601013": 0.70},
+        overlay_mode="soft_weight",
+        overlay_gate_on_today=True,
+        overlay_score_map={"sh601011": 0.0, "sh601012": 0.5, "sh601013": 1.0},
+        weight_mode="score_weighted",
+        score_weight_min_scale=0.9,
+        score_weight_max_scale=1.1,
+        min_positions=3,
+    )
+
+    buy_orders = [order for order in orders if order.side == Side.BUY]
+    assert [order.symbol for order in buy_orders] == ["sh601011", "sh601012", "sh601013"]
+    assert [round(float(order.order_value_scale), 2) for order in buy_orders] == [0.9, 1.0, 1.1]

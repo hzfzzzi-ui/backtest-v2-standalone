@@ -20,6 +20,10 @@ ARTIFACT_FILENAMES: dict[str, str] = {
     "score_diagnostics": "score_diagnostics.csv",
     "symbol_performance": "symbol_performance.csv",
     "stage_summary": "stage_summary.json",
+    "execution_lineage_ledger": "execution_lineage_ledger.csv",
+    "regime_audit_summary": "regime_audit_summary.json",
+    "regime_transition_debug": "regime_transition_debug.csv",
+    "regime_audit_report": "regime_audit_report.md",
 }
 
 COUNTER_CANONICAL_FIELDS: tuple[str, ...] = (

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from backend.scripts.csi1000_rebalance_calendar import RebalanceCalendarEntry
-from backend.scripts.fetch_csi1000_pit_by_calendar import (
+from backend.cli.managed.csi1000_rebalance_calendar import RebalanceCalendarEntry
+from backend.cli.managed.fetch_csi1000_pit_by_calendar import (
     DEFAULT_STATIC_FALLBACK_SOURCE,
     DEFAULT_TUSHARE_SOURCE,
     build_calendar_snapshots,
@@ -24,7 +24,7 @@ def _entries() -> list[RebalanceCalendarEntry]:
 def test_build_calendar_snapshots_uses_tushare_snapshot(monkeypatch) -> None:
     symbols = [f"{idx:06d}.SZ" for idx in range(500)] + [f"{600000 + idx:06d}.SH" for idx in range(500)]
     monkeypatch.setattr(
-        "backend.scripts.fetch_csi1000_pit_by_calendar._fetch_tushare_snapshot",
+        "backend.cli.managed.fetch_csi1000_pit_by_calendar._fetch_tushare_snapshot",
         lambda effective_date, *, token, lookahead_days: (symbols, "2016-03-01"),
     )
 
@@ -54,9 +54,9 @@ def test_build_calendar_snapshots_falls_back_to_static_when_enabled(monkeypatch)
     def _raise(*args, **kwargs):
         raise RuntimeError("missing tushare event")
 
-    monkeypatch.setattr("backend.scripts.fetch_csi1000_pit_by_calendar._fetch_tushare_snapshot", _raise)
+    monkeypatch.setattr("backend.cli.managed.fetch_csi1000_pit_by_calendar._fetch_tushare_snapshot", _raise)
     monkeypatch.setattr(
-        "backend.scripts.fetch_csi1000_pit_by_calendar._fetch_akshare_static_snapshot",
+        "backend.cli.managed.fetch_csi1000_pit_by_calendar._fetch_akshare_static_snapshot",
         lambda: symbols,
     )
 

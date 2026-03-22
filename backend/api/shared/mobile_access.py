@@ -64,7 +64,24 @@ def mobile_session_ttl_seconds() -> int:
 
 def is_mobile_protected_path(path: str | None) -> bool:
     normalized = str(path or "").strip() or "/"
-    if normalized in {"/mobile", "/mobile/", "/mobile.html"}:
+    if normalized in {
+        "/mobile",
+        "/mobile/",
+        "/mobile.html",
+        "/mobile-service-worker.js",
+        "/assets/manifest.webmanifest",
+    }:
+        return True
+    if normalized in {
+        "/assets/css/mobile-dashboard.css",
+        "/assets/js/mobile-dashboard.js",
+        "/assets/js/pages/mobile-dashboard-page.js",
+        "/assets/js/state/mobile-state.js",
+        "/assets/icons/trading-assistant.svg",
+        "/assets/icons/trading-assistant-180.png",
+        "/assets/icons/trading-assistant-192.png",
+        "/assets/icons/trading-assistant-512.png",
+    }:
         return True
     return normalized.startswith("/api/mobile/")
 

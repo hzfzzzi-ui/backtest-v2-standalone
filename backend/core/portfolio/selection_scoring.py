@@ -202,6 +202,9 @@ def resolve_score_weight_scale(
 
 
 def resolve_score_weight_score(item: dict[str, Any]) -> float | None:
+    score = safe_float_or_none(item.get("score_weight_override"))
+    if score is not None:
+        return score
     score = safe_float_or_none(item.get("mf_score"))
     if score is not None:
         return score
@@ -219,6 +222,8 @@ def build_score_weight_scale_maps(
     ranked: list[dict[str, Any]],
     slots: int,
     weight_mode: str,
+    overlay_mode: str,
+    overlay_active_today: bool,
     min_trade_price: float,
     forced_not_in_topk_symbols: set[str],
     score_weight_min_scale: float,
@@ -236,6 +241,8 @@ def build_score_weight_scale_maps(
             continue
         if len(planned) >= max(0, int(slots)):
             break
+        if bool(overlay_active_today) and str(overlay_mode or "").strip().lower() == "soft_weight":
+            item["score_weight_override"] = safe_float_or_none(item.get("overlay_score"))
         score_value = resolve_score_weight_score(item)
         raw_scale = resolve_score_weight_scale(
             weight_mode=str(weight_mode),

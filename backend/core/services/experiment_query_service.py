@@ -12,9 +12,9 @@ from backend.api.backtest_v2.contracts.manifest import ExperimentManifest
 from backend.api.backtest_v2.contracts.responses import HistoryListItem, MobileExperimentSummary
 from backend.api.backtest_v2.contracts.surface import ExperimentLazySurfaceSection, ExperimentSurface, ExperimentSurfaceSummary
 from backend.api.backtest_v2.protocol import ARTIFACT_FILENAMES
-from backend.api.backtest_v2 import history_impl
 from backend.api.shared.json_utils import sanitize_json
 from backend.core.config.asset_profiles import build_asset_context
+from backend.core.services import experiment_history_service
 from backend.core.tools import baseline_access
 from backend.core.tools.experiment_artifact_access import (
     load_manifest,
@@ -232,7 +232,7 @@ def _artifact_date_bounds(frame: pd.DataFrame) -> tuple[str | None, str | None]:
     if frame.empty:
         return None, None
     date_col = None
-    for candidate in ("date", "trade_date", "order_date", "as_of_date"):
+    for candidate in ("date", "trade_date", "order_date", "as_of_date", "signal_date", "scheduled_date", "fill_date"):
         if candidate in frame.columns:
             date_col = candidate
             break
@@ -287,7 +287,7 @@ def _history_perf_summary(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_experiments() -> list[dict[str, Any]]:
-    rows = history_impl.list_experiments()
+    rows = experiment_history_service.list_experiments()
     items: list[dict[str, Any]] = []
     for row in rows:
         item = HistoryListItem(
@@ -306,11 +306,11 @@ def list_experiments() -> list[dict[str, Any]]:
 
 
 def delete_experiment(exp_id: str) -> dict[str, Any]:
-    return sanitize_json(history_impl.delete_experiment(exp_id))
+    return sanitize_json(experiment_history_service.delete_experiment(exp_id))
 
 
 def clear_all_experiments() -> dict[str, Any]:
-    return sanitize_json(history_impl.clear_all_experiments())
+    return sanitize_json(experiment_history_service.clear_all_experiments())
 
 
 def _surface_summary(exp_id: str, manifest: dict[str, Any], exp_dir: Path) -> ExperimentSurfaceSummary:
@@ -553,7 +553,18 @@ def get_execution_regression_contract(exp_id: str) -> dict[str, Any]:
                 "orders": _artifact_regression_summary(exp_dir, manifest, "orders", "orders.csv"),
                 "trades": _artifact_regression_summary(exp_dir, manifest, "trades", "portfolio_trades.csv"),
                 "nav": _artifact_regression_summary(exp_dir, manifest, "nav", "nav.csv"),
+                "execution_lineage_ledger": _artifact_regression_summary(
+                    exp_dir,
+                    manifest,
+                    "execution_lineage_ledger",
+                    ARTIFACT_FILENAMES["execution_lineage_ledger"],
+                ),
             },
+            "lineage": (
+                ((audit.get("execution_lineage") or {}) if isinstance(audit.get("execution_lineage"), dict) else {})
+                if isinstance((audit := _read_json(exp_dir / (manifest_artifact_rel(manifest, "audit") or "audit.json"))), dict)
+                else {}
+            ),
         }
     )
 

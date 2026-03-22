@@ -126,13 +126,27 @@ def _executor_status_path(results_root: Path) -> Path:
     return _mobile_ops_root(results_root) / "executor_status.json"
 
 
-def build_suggestion_id(*, exp_id: str, signal_date: str, symbol: str, action_type: str) -> str:
+def build_suggestion_id(
+    *,
+    exp_id: str,
+    signal_date: str,
+    symbol: str,
+    action_type: str,
+    source_mode: str = "",
+    snapshot_id: str = "",
+    reconcile_id: str = "",
+    as_of_date: str = "",
+) -> str:
     normalized = "|".join(
         [
             str(exp_id or "").strip(),
             str(signal_date or "").strip(),
             str(symbol or "").strip().lower(),
             str(action_type or "").strip().lower(),
+            str(source_mode or "").strip().lower(),
+            str(snapshot_id or "").strip(),
+            str(reconcile_id or "").strip(),
+            str(as_of_date or "").strip(),
         ]
     )
     digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16]
@@ -183,6 +197,7 @@ def ticket_summary(ticket: dict[str, Any]) -> dict[str, Any]:
     final_values = approval.get("final_values") if isinstance(approval.get("final_values"), dict) else {}
     original_values = approval.get("original_values") if isinstance(approval.get("original_values"), dict) else {}
     signal_snapshot = ticket.get("signal_snapshot") if isinstance(ticket.get("signal_snapshot"), dict) else {}
+    execution = ticket.get("execution") if isinstance(ticket.get("execution"), dict) else {}
     return {
         "ticket_id": str(ticket.get("ticket_id") or ""),
         "suggestion_id": str(ticket.get("suggestion_id") or signal_snapshot.get("suggestion_id") or ""),
@@ -202,7 +217,24 @@ def ticket_summary(ticket: dict[str, Any]) -> dict[str, Any]:
         "reject_reason": str(approval.get("reject_reason") or ""),
         "revoke_reason": str(approval.get("revoke_reason") or ""),
         "operator": str(approval.get("operator") or ""),
+        "exp_id": str(signal_snapshot.get("exp_id") or ""),
         "signal_date": str(signal_snapshot.get("signal_date") or ""),
+        "source_mode": str(signal_snapshot.get("source_mode") or ""),
+        "snapshot_id": str(signal_snapshot.get("snapshot_id") or ""),
+        "reconcile_id": str(signal_snapshot.get("reconcile_id") or ""),
+        "as_of_date": str(signal_snapshot.get("as_of_date") or signal_snapshot.get("signal_date") or ""),
+        "executor_id": str(execution.get("executor_id") or ""),
+        "claimed_at": str(execution.get("claimed_at") or ""),
+        "submitted_at": str(execution.get("submitted_at") or ""),
+        "completed_at": str(execution.get("completed_at") or ""),
+        "last_event_at": str(execution.get("last_event_at") or ""),
+        "last_event_status": str(execution.get("last_event_status") or ""),
+        "filled_qty": execution.get("filled_qty"),
+        "remaining_qty": execution.get("remaining_qty"),
+        "avg_fill_price": execution.get("avg_fill_price"),
+        "event_count": int(execution.get("event_count") or 0),
+        "last_error_code": str(execution.get("last_error_code") or ""),
+        "last_error_message": str(execution.get("last_error_message") or ""),
     }
 
 
@@ -396,6 +428,10 @@ def create_ticket_from_confirmed_action(
                 "suggestion_id": suggestion_id,
                 "exp_id": str(card.get("exp_id") or ""),
                 "signal_date": str(card.get("signal_date") or ""),
+                "as_of_date": str(card.get("as_of_date") or card.get("signal_date") or ""),
+                "source_mode": str(card.get("source_mode") or ""),
+                "snapshot_id": str(card.get("snapshot_id") or ""),
+                "reconcile_id": str(card.get("reconcile_id") or ""),
                 "symbol": str(card.get("symbol") or "").lower(),
                 "name": str(card.get("name") or ""),
                 "action_type": str(card.get("action_type") or ""),

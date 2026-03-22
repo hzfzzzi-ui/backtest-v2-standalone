@@ -44,11 +44,18 @@ UNIVERSE_LINEAGE: dict[str, UniverseLineage] = {
         resolve_asof_policy="start_date",
         dynamic_all_a_entry=False,
         import_assets=(
-            "backend/scripts/fetch_csi800_pit.py",
+            "backend/scripts/fetch_csi800_pit_history.py",
+            "backend/scripts/build_csi800_formal_history.py",
             "backend/scripts/import_csi800_pit.py",
+            "backend/scripts/fetch_csi800_pit.py (fallback/approximate only)",
             "backend/core/universe/ingest_universe.py --index",
         ),
-        notes="Runtime expects point-in-time CSI800 constituent rows under index_code=000906.SH.",
+        notes=(
+            "Runtime expects point-in-time CSI800 constituent rows under index_code=000906.SH. "
+            "Formal lineage is long-history seed plus optional tushare trade_date tail -> "
+            "formal history materialization -> replace import; "
+            "monthly snapshots are fallback only."
+        ),
     ),
     "CSI1000": UniverseLineage(
         mode="CSI1000",

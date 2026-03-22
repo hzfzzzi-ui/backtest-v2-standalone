@@ -294,3 +294,153 @@ def test_config_json_mf_rank_tilt_sizing_fields_become_execution_overrides(monke
     assert result["exp_id"] == "exp_test_mf_rank_tilt"
     assert result["experiment_id"] == "exp_test_mf_rank_tilt"
 
+
+def test_runtime_config_asset_context_preserves_custom_overlay_fields(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_experiment(base_cfg_path, preset="single", overrides=None, progress_hook=None):
+        captured["base_cfg_path"] = base_cfg_path
+        captured["preset"] = preset
+        captured["overrides"] = dict(overrides or {})
+        return {
+            "exp_id": "exp_test_asset_context_overlay",
+            "results_dir": "",
+            "status": "OK",
+        }
+
+    monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
+
+    runtime_cfg = _breakout_config()
+    runtime_cfg["db"] = {"host": "pams-postgres"}
+    runtime_cfg["schema_mapping"] = {}
+    runtime_cfg["asset_context"] = {
+        "asset_scope": "cn_a_equity",
+        "moneyflow_overlay": {
+            "enabled": True,
+            "mode": "shadow",
+            "factor_panel_path": "outputs/factors/monthly_factor_panel.csv",
+            "coverage_ledger_path": "outputs/factors/monthly_coverage_ledger.csv",
+        },
+    }
+    body = runner_impl.BacktestV2ExperimentRequest(
+        runtime_config_json=runtime_cfg,
+        fast_mode=True,
+    )
+    result = service.run_experiment_request_body(body)
+
+    overrides = dict(captured["overrides"] or {})
+    assert overrides["asset_context"]["asset_scope"] == "cn_a_equity"
+    assert overrides["asset_context"]["moneyflow_overlay"]["enabled"] is True
+    assert overrides["asset_context"]["moneyflow_overlay"]["mode"] == "shadow"
+    assert result["exp_id"] == "exp_test_asset_context_overlay"
+    assert result["experiment_id"] == "exp_test_asset_context_overlay"
+
+
+def test_runtime_config_can_carry_explicit_data_role(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_experiment(base_cfg_path, preset="single", overrides=None, progress_hook=None):
+        captured["overrides"] = dict(overrides or {})
+        return {
+            "exp_id": "exp_test_v2_runtime",
+            "results_dir": "",
+            "status": "OK",
+        }
+
+    monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
+    monkeypatch.setattr(
+        service,
+        "resolve_runtime_config_source",
+        lambda **kwargs: {
+            "effective_config_json": {
+                "db": {"host": "pams-postgres"},
+                "schema_mapping": {"pams_ohlcv_daily_v2": {"date": "trade_date", "symbol": "symbol"}},
+                "data_source": {
+                    "data_role": "v2_runtime",
+                    "stocks_table": "pams_ohlcv_daily",
+                    "v2_runtime_stocks_table": "pams_ohlcv_daily_v2_runtime",
+                    "v2_schema_mapping_table": "pams_ohlcv_daily_v2",
+                },
+            },
+            "config_source": "runtime_config_json",
+            "resolved_config_mode": "draft_run",
+            "resolved_config_id": "",
+            "resolved_config_hash": "cfghash",
+            "resolved_config_meta": {"source_type": "runtime_json", "owner": "manual"},
+            "config_conflict_policy": "none",
+        },
+    )
+
+    body = runner_impl.BacktestV2ExperimentRequest(runtime_config_json={"data_source": {"data_role": "v2_runtime"}})
+    result = service.run_experiment_request_body(body)
+
+    overrides = dict(captured["overrides"] or {})
+    assert overrides["data_role"] == "v2_runtime"
+    assert result["data_role"] == "v2_runtime"
+
+
+def test_workbench_config_can_carry_explicit_data_role(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_experiment(base_cfg_path, preset="single", overrides=None, progress_hook=None):
+        captured["overrides"] = dict(overrides or {})
+        return {
+            "exp_id": "exp_test_v2_canonical",
+            "results_dir": "",
+            "status": "OK",
+        }
+
+    monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
+
+    body = runner_impl.BacktestV2ExperimentRequest(
+        workbench_config={
+            "mode": "experiment",
+            "initial_capital": 1000000,
+            "strategy_pack": "BREAKOUT_TREND",
+            "universe_mode": "HS300_ZZ500",
+            "universe": {
+                "start": "2012-01-04",
+                "end": "2016-12-30",
+                "benchmark": "000300.SH",
+                "membership_mode": "PIT_DYNAMIC",
+                "filters": {
+                    "exclude_st": True,
+                    "exclude_suspended": True,
+                    "min_list_days": 120,
+                    "min_avg_turnover_20d": 100000000,
+                    "price_min": 5,
+                    "price_max": 99999,
+                    "atr_pct_range": "0,100",
+                    "limit_rule": "ignore",
+                },
+            },
+            "signal_generation": {
+                "enabled": True,
+                "strategy": "BREAKOUT_TREND",
+                "breakout": {"breakout_window": 45, "enable_dual_breakout": False},
+            },
+            "exit_rules": {
+                "enabled": True,
+                "atr_stop": {"enabled": True, "k": 1.2},
+                "trailing": {"enabled": True, "k": 3.0},
+            },
+            "position_risk": {"enabled": True, "max_positions": 10},
+            "data_source": {"data_role": "v2_canonical"},
+        }
+    )
+
+    result = service.run_experiment_request_body(body)
+
+    overrides = dict(captured["overrides"] or {})
+    assert overrides["data_role"] == "v2_canonical"
+    assert result["data_role"] == "v2_canonical"
+

@@ -2,9 +2,7 @@
 
 ## Purpose
 定义实验产物稳定化与 finalize pipeline 的模块边界，确保 `artifacts_impl.py` 只保留 facade 入口，具体 artifact finalize 逻辑按职责拆分，同时保持标准 artifact 协议稳定。
-
 ## Requirements
-
 ### Requirement: Artifact finalize MUST 按产物职责分层
 系统 MUST 将实验产物稳定化和 finalize 流程按职责拆分为独立模块。`artifacts_impl.py` SHALL 只保留 facade 入口，具体逻辑 MUST 至少拆分为 `io`、`manifest`、`stage-summary`、`diagnostics` 和 `finalize` 模块。
 
@@ -51,3 +49,17 @@
 #### Scenario: cash-aware 未选中但不属于明确现金不足
 - **WHEN** 候选仅因 `NOT_SELECTED_CASH_AWARE` 等原因未入选
 - **THEN** 系统 SHALL NOT 将这些候选写入 `cash_blocked_buys_recent.csv`
+
+### Requirement: Artifact diagnostics 必须只消费 canonical runtime diagnostics input
+系统 MUST 要求 `artifacts_diagnostics.py` 及相关 diagnostics/funnel builder 只消费 canonical runtime diagnostics input，不再直接从执行本体推导最终 stage 语义。
+
+#### Scenario: 生成 buy stage funnel
+- **WHEN** 系统为实验结果生成 buy stage funnel
+- **THEN** diagnostics builder MUST 通过 canonical diagnostics input 构建阶段计数和 note
+- **THEN** diagnostics builder SHALL NOT 直接绑定执行层私有局部状态
+
+#### Scenario: 生成 counters 与 reason diagnostics
+- **WHEN** 系统生成 counters、reason summaries 或 surface diagnostics
+- **THEN** 系统 MUST 复用同一份 canonical diagnostics input
+- **THEN** 不同 artifact SHALL NOT 各自重复定义 stage count 归一化规则
+

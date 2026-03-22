@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
 import pandas as pd
 
+from backend.core.audit.experiment_audit import build_accounting_integrity_audit
 from backend.core.portfolio.metrics import compute_backtest_metrics
 from backend.core.portfolio.types import PortfolioBacktestResult
+from backend.core.stage_pipeline.adapters.lineage import (
+    build_execution_lineage_audit,
+    finalize_execution_lineage,
+)
 
 _compute_metrics = compute_backtest_metrics
 
@@ -59,6 +65,26 @@ def augment_metrics(runtime: Any, metrics: dict[str, Any]) -> None:
     metrics["total_buy_signals"] = int(getattr(runtime.provider, "total_buy_signals", 0) or 0)
     metrics["min_hold_block_count"] = int(getattr(runtime.provider, "min_hold_block_count", 0) or 0)
     metrics["cooldown_block_count"] = int(getattr(runtime.provider, "cooldown_block_count", 0) or 0)
+    metrics["bull_breakout_quality_veto_block_count"] = int(
+        getattr(runtime.provider, "bull_breakout_quality_veto_block_count", 0) or 0
+    )
+    metrics["bull_breakout_quality_veto_residual_block_count"] = int(
+        getattr(runtime.provider, "bull_breakout_quality_veto_residual_block_count", 0) or 0
+    )
+    metrics["bull_breakout_quality_veto_margin_block_count"] = int(
+        getattr(runtime.provider, "bull_breakout_quality_veto_margin_block_count", 0) or 0
+    )
+    accounting_integrity = build_accounting_integrity_audit(
+        initial_cash=getattr(runtime.request, "initial_cash", None),
+        daily_snapshots=getattr(runtime, "accounting_audit_rows", ()),
+    )
+    execution_lineage_rows = finalize_execution_lineage(runtime)
+    execution_lineage = build_execution_lineage_audit(execution_lineage_rows)
+    audit_payload = dict(metrics.get("audit") or {})
+    audit_payload["accounting_integrity"] = accounting_integrity
+    audit_payload["execution_lineage"] = execution_lineage
+    metrics["audit"] = audit_payload
+    metrics["execution_lineage_ledger"] = execution_lineage_rows
     multi_alpha_audit = _build_multi_alpha_audit(runtime)
     if isinstance(multi_alpha_audit, dict):
         summary = dict(multi_alpha_audit.get("summary") or {})
@@ -99,6 +125,43 @@ def augment_metrics(runtime: Any, metrics: dict[str, Any]) -> None:
         else:
             metrics["breadth_score_mean"] = 0.0
             metrics["breadth_maxpos_mean"] = 0.0
+        if not daily_df.empty and "regime_confidence" in daily_df.columns:
+            regime_conf = pd.to_numeric(daily_df["regime_confidence"], errors="coerce")
+            confidence_floor = float(
+                getattr(
+                    getattr(getattr(runtime, "request", None), "regime_engine_cfg", None),
+                    "persistence",
+                    None,
+                ).confidence_floor
+            ) if getattr(getattr(getattr(runtime, "request", None), "regime_engine_cfg", None), "persistence", None) is not None else 0.55
+            metrics["regime_confidence_mean"] = float(regime_conf.dropna().mean()) if regime_conf.notna().any() else 0.0
+            metrics["regime_low_confidence_days"] = int((regime_conf < confidence_floor).sum()) if regime_conf.notna().any() else 0
+            metrics["regime_low_confidence_ratio"] = float((regime_conf < confidence_floor).mean()) if regime_conf.notna().any() else 0.0
+        if not daily_df.empty and "market_state" in daily_df.columns:
+            state_series = daily_df["market_state"].fillna("").astype(str)
+            metrics["regime_switch_count"] = int((state_series != state_series.shift(1)).sum() - (1 if len(state_series) > 0 else 0))
+        if not daily_df.empty and "regime_transition_reason" in daily_df.columns:
+            reason_counts = (
+                daily_df["regime_transition_reason"]
+                .fillna("")
+                .astype(str)
+                .loc[lambda s: s.str.len() > 0]
+                .value_counts()
+                .to_dict()
+            )
+            metrics["regime_transition_reason_counts"] = {str(key): int(value) for key, value in reason_counts.items()}
+        if not daily_df.empty and "feature_availability_json" in daily_df.columns:
+            feature_unavailable_days = 0
+            for raw in daily_df["feature_availability_json"].fillna("").astype(str):
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except Exception:
+                    continue
+                if not bool(payload.get("required_blocks_ready", True)) or bool(payload.get("fallback_active", False)):
+                    feature_unavailable_days += 1
+            metrics["regime_feature_unavailable_days"] = int(feature_unavailable_days)
         metrics["breadth_gate_block_count"] = 0
         return
     for field_name in (
