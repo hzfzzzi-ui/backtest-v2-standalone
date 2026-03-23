@@ -63,6 +63,9 @@ def test_evaluate_universe_lineage_uses_membership_audit_for_pit_dynamic() -> No
                 "audit_reason": "source_static",
                 "distinct_start_dates": 1,
                 "open_rows": 1000,
+                "provider_floor_date": "2015-07-31",
+                "refresh_event_count": 54,
+                "zero_diff_refresh_event_count": 17,
                 "rebalance_calendar_version": "seed-v1",
                 "rebalance_calendar_source": "csindex_seed_schedule",
                 "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
@@ -73,8 +76,36 @@ def test_evaluate_universe_lineage_uses_membership_audit_for_pit_dynamic() -> No
     assert gate["lineage_mode"] == "PIT_DYNAMIC"
     assert gate["status"] == "FAIL"
     assert gate["evidence"]["audit_reason"] == "source_static"
+    assert gate["evidence"]["provider_floor_date"] == "2015-07-31"
     assert gate["evidence"]["rebalance_calendar_version"] == "seed-v1"
     assert gate["metrics"]["distinct_start_dates"] == 1
+    assert gate["metrics"]["refresh_event_count"] == 54
+
+
+def test_evaluate_universe_lineage_passes_cn_etf_direct_symbols_whitelist() -> None:
+    gate = evaluate_universe_lineage(
+        run_meta={
+            "data": {"asset_scope": "cn_etf", "universe_mode": "CUSTOM"},
+            "universe": {
+                "asset_scope": "cn_etf",
+                "universe_mode": "CUSTOM",
+                "membership_source": "cn_etf_catalog_whitelist",
+                "membership_data_quality": "whitelist_verified",
+                "audit_status": "PASS",
+                "etf_batch": "cn_etf_first_wave_core",
+                "etf_symbols": ["510300.SH", "512100.SH"],
+                "coverage_start": "2016-11-04",
+                "coverage_end": "2026-03-20",
+                "price_series_semantics": "executable_price_only_not_total_return",
+            },
+        }
+    )
+
+    assert gate["lineage_mode"] == "DIRECT_SYMBOLS"
+    assert gate["status"] == "PASS"
+    assert gate["evidence"]["membership_source"] == "cn_etf_catalog_whitelist"
+    assert gate["evidence"]["etf_batch"] == "cn_etf_first_wave_core"
+    assert gate["evidence"]["coverage_end"] == "2026-03-20"
 
 
 def test_evaluate_execution_realism_flags_hard_fail_on_suspended_trade() -> None:

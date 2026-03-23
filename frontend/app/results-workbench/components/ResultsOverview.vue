@@ -24,11 +24,15 @@ defineProps({
           <dt>有效起点</dt>
           <dd>{{ summary.effectiveExecutionStartDate }}</dd>
         </div>
+        <div v-if="summary.assetScope === 'cn_etf'">
+          <dt>资产范围</dt>
+          <dd>A股ETF</dd>
+        </div>
       </dl>
     </article>
 
     <article class="wb-overview-card">
-      <div class="wb-overview-title">股票池口径</div>
+      <div class="wb-overview-title">{{ summary.universeSectionTitle }}</div>
       <dl class="wb-overview-grid">
         <div>
           <dt>区间</dt>
@@ -39,13 +43,31 @@ defineProps({
           <dd>{{ summary.benchmark }}</dd>
         </div>
         <div>
-          <dt>股票池</dt>
+          <dt>{{ summary.universeModeLabel }}</dt>
           <dd>{{ summary.universeMode }}</dd>
         </div>
         <div>
-          <dt>标的数</dt>
+          <dt>{{ summary.universeCountLabel }}</dt>
           <dd>{{ summary.universeCount }}</dd>
         </div>
+        <template v-if="summary.assetScope === 'cn_etf'">
+          <div>
+            <dt>ETF批次</dt>
+            <dd>{{ summary.etfBatch }}</dd>
+          </div>
+          <div>
+            <dt>覆盖窗口</dt>
+            <dd>{{ summary.coverageWindow }}</dd>
+          </div>
+          <div>
+            <dt>价格语义</dt>
+            <dd>{{ summary.priceSeriesSemantics }}</dd>
+          </div>
+          <div>
+            <dt>ETF名单</dt>
+            <dd>{{ summary.etfSymbols }}</dd>
+          </div>
+        </template>
       </dl>
     </article>
 

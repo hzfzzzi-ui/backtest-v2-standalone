@@ -11,6 +11,14 @@ const {
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 
+function readJsonIfExists(...parts) {
+  const filePath = path.join(PROJECT_ROOT, ...parts);
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
 function moduleSummary(draft) {
   return {
     signal_generation: (draft.signal_generation?.modules || []).map((module) => ({
@@ -143,9 +151,12 @@ test('applyConfigToUI normalizes legacy unsupported combo values into phase1 mul
   assert.equal((context.validateConfigDraft(context.state.config_draft || {}) || []).length, 0);
 });
 
-test('legacy weighted-score baseline config stays on single-strategy path', () => {
-  const baselinePath = path.join(PROJECT_ROOT, 'outputs', 'baselines', 'baseline_V1', 'config.json');
-  const legacyBaseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+test('legacy weighted-score baseline config stays on single-strategy path', (t) => {
+  const legacyBaseline = readJsonIfExists('outputs', 'baselines', 'baseline_V1', 'config.json');
+  if (!legacyBaseline) {
+    t.skip('baseline_V1 fixture missing in outputs/baselines');
+    return;
+  }
   const { context } = createWorkbenchHarness();
 
   context.applyConfigToUI(clone(legacyBaseline));
@@ -287,9 +298,12 @@ test('explicit S5 and S9 controls write back into semantic config', () => {
   assert.equal(draft.exit_rules?.trailing?.pre_profit_breakout_failure_atr_buffer_k, 0.9);
 });
 
-test('baseline_V9_1 round-trips without injecting V10-only overrides', () => {
-  const baselinePath = path.join(PROJECT_ROOT, 'outputs', 'baselines', 'baseline_V9_1', 'config.json');
-  const baselineV91 = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+test('baseline_V9_1 round-trips without injecting V10-only overrides', (t) => {
+  const baselineV91 = readJsonIfExists('outputs', 'baselines', 'baseline_V9_1', 'config.json');
+  if (!baselineV91) {
+    t.skip('baseline_V9_1 fixture missing in outputs/baselines');
+    return;
+  }
   const { context } = createWorkbenchHarness();
 
   context.state.loaded_source_config = clone(baselineV91);

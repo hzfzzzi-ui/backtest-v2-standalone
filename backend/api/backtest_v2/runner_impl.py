@@ -80,7 +80,7 @@ router = APIRouter(tags=["backtest_v2"])
 
 class BacktestV2ExperimentRequest(BaseModel):
     preset: str = "G1-G4"
-    asset_scope: str = "cn_a_equity"
+    asset_scope: str | None = None
     config_json: dict[str, Any] | None = None
     signal_generation: dict[str, Any] | None = None
     signal_composition: dict[str, Any] | None = None
@@ -211,9 +211,18 @@ def _run_locked_candidate_preset_sync(
     base_cfg, candidate_meta, overrides, resolved_config_hash, resolved_config_meta = (
         _build_locked_candidate_execution_context(body)
     )
-    candidate_asset_scope = canonical_asset_scope(getattr(body, "asset_scope", "cn_a_equity"))
+    candidate_asset_context = build_asset_context(
+        getattr(body, "asset_scope", None),
+        config_json=base_cfg,
+        metadata_scope=(
+            (base_cfg.get("asset_context") or {}).get("asset_scope")
+            if isinstance(base_cfg.get("asset_context"), dict)
+            else base_cfg.get("asset_scope")
+        ),
+    )
+    candidate_asset_scope = canonical_asset_scope(candidate_asset_context.get("asset_scope"))
     base_cfg["asset_scope"] = candidate_asset_scope
-    base_cfg["asset_context"] = sanitize_json(build_asset_context(candidate_asset_scope, config_json=base_cfg))
+    base_cfg["asset_context"] = sanitize_json(candidate_asset_context)
     overrides["asset_scope"] = candidate_asset_scope
     overrides["asset_context"] = sanitize_json(dict(base_cfg.get("asset_context") or {}))
     runtime_cfg_path: Path | None = None

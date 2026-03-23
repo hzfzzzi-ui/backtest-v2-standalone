@@ -13,7 +13,7 @@ from backend.api.backtest_v2.protocol import ARTIFACT_FILENAMES
 
 RESEARCH_AUDIT_CONTRACT_VERSION = "research_audit@1"
 RESEARCH_AUDIT_STATUSES = ("PASS", "WARN", "FAIL", "UNKNOWN")
-UNIVERSE_LINEAGE_MODES = ("PIT_DYNAMIC", "START_SNAPSHOT", "CURRENT_SNAPSHOT", "UNKNOWN")
+UNIVERSE_LINEAGE_MODES = ("PIT_DYNAMIC", "DIRECT_SYMBOLS", "START_SNAPSHOT", "CURRENT_SNAPSHOT", "UNKNOWN")
 _PRICE_ONLY_STRATEGIES = ("BREAKOUT_TREND", "BREAKOUT", "SMA_CROSS", "EMA_CROSS", "RSI_REVERSAL")
 _NEXT_DAY_MATCHING_MODES = ("NEXT_OPEN", "NEXT_DAY", "NEXT_TRADING_DAY", "NEXT_BAR_OPEN")
 
@@ -541,6 +541,11 @@ def evaluate_universe_lineage(*, run_meta: Mapping[str, Any] | None) -> dict[str
     run_meta_obj = dict(run_meta or {})
     universe_meta = dict(run_meta_obj.get("universe") or {})
     data_meta = dict(run_meta_obj.get("data") or {})
+    asset_scope = str(
+        universe_meta.get("asset_scope")
+        or data_meta.get("asset_scope")
+        or ""
+    ).strip().lower()
     raw_mode = universe_meta.get("universe_mode") or data_meta.get("universe_mode")
     mode = normalize_universe_mode(raw_mode)
     explicit_mode = str(universe_meta.get("lineage_mode") or universe_meta.get("membership_history_mode") or "").strip().upper()
@@ -550,6 +555,8 @@ def evaluate_universe_lineage(*, run_meta: Mapping[str, Any] | None) -> dict[str
         lineage_mode = explicit_mode
     elif bool(universe_meta.get("pit_dynamic")) or bool(universe_meta.get("historical_membership_dynamic")):
         lineage_mode = "PIT_DYNAMIC"
+    elif asset_scope == "cn_etf":
+        lineage_mode = "DIRECT_SYMBOLS"
     elif mode == "CUSTOM":
         lineage_mode = "UNKNOWN"
     else:
@@ -568,7 +575,23 @@ def evaluate_universe_lineage(*, run_meta: Mapping[str, Any] | None) -> dict[str
     membership_audit_status = str(universe_meta.get("audit_status") or "").strip().lower()
     audit_reason = str(universe_meta.get("audit_reason") or "").strip() or None
 
-    if lineage_mode == "PIT_DYNAMIC":
+    if lineage_mode == "DIRECT_SYMBOLS":
+        if asset_scope != "cn_etf":
+            status = "UNKNOWN"
+            reason = "DIRECT_SYMBOLS lineage is only defined for explicit ETF research entry."
+        elif membership_quality in {"whitelist_verified", "catalog_verified"} and membership_audit_status in {"", "pass", "ok"}:
+            status = "PASS"
+            reason = "ETF research entry uses an explicit catalog whitelist instead of stock PIT membership history."
+        elif membership_quality in {"missing", ""}:
+            status = "FAIL"
+            reason = "ETF research entry is missing catalog whitelist evidence."
+        else:
+            status = "WARN"
+            reason = (
+                "ETF research entry uses direct symbols, but whitelist evidence is incomplete "
+                f"(audit_reason={audit_reason or 'unknown'})."
+            )
+    elif lineage_mode == "PIT_DYNAMIC":
         if membership_quality == "static_fallback" or membership_audit_status == "blocked":
             status = "FAIL"
             reason = (
@@ -617,9 +640,15 @@ def evaluate_universe_lineage(*, run_meta: Mapping[str, Any] | None) -> dict[str
         "audit_reason": universe_meta.get("audit_reason"),
         "covers_required_start": universe_meta.get("covers_required_start"),
         "covers_required_end": universe_meta.get("covers_required_end"),
+        "provider_floor_date": universe_meta.get("provider_floor_date"),
         "rebalance_calendar_version": universe_meta.get("rebalance_calendar_version"),
         "rebalance_calendar_source": universe_meta.get("rebalance_calendar_source"),
         "rebalance_calendar_generated_at": universe_meta.get("rebalance_calendar_generated_at"),
+        "etf_batch": universe_meta.get("etf_batch"),
+        "etf_symbols": universe_meta.get("etf_symbols"),
+        "coverage_start": universe_meta.get("coverage_start"),
+        "coverage_end": universe_meta.get("coverage_end"),
+        "price_series_semantics": universe_meta.get("price_series_semantics"),
     }
     metrics = {
         "membership_history_rows": _safe_int(universe_meta.get("membership_history_rows")),
@@ -629,6 +658,8 @@ def evaluate_universe_lineage(*, run_meta: Mapping[str, Any] | None) -> dict[str
         "distinct_start_dates": _safe_int(universe_meta.get("distinct_start_dates")),
         "open_rows": _safe_int(universe_meta.get("open_rows")),
         "closed_rows": _safe_int(universe_meta.get("closed_rows")),
+        "refresh_event_count": _safe_int(universe_meta.get("refresh_event_count")),
+        "zero_diff_refresh_event_count": _safe_int(universe_meta.get("zero_diff_refresh_event_count")),
     }
     return {
         "status": status,

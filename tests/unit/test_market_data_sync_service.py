@@ -238,6 +238,43 @@ def test_build_market_data_sync_status_returns_failed_when_db_unavailable(monkey
     assert "db unavailable" in payload["message"]
 
 
+def test_build_market_data_sync_status_returns_unsupported_for_us_equity(monkeypatch) -> None:
+    monkeypatch.delenv("CN_DAILY_SYNC_ENABLED", raising=False)
+
+    payload = mod.build_market_data_sync_status(asset_scope="us_equity")
+
+    assert payload["status"] == "unsupported"
+    assert payload["asset_scope"] == "us_equity"
+    assert payload["sync_key"] == "us_equity_daily"
+    assert "us_equity" in payload["message"]
+
+
+def test_build_market_data_sync_status_returns_etf_coverage_status(monkeypatch) -> None:
+    monkeypatch.delenv("CN_DAILY_SYNC_ENABLED", raising=False)
+    monkeypatch.setattr(mod, "resolve_target_trade_date", lambda now=None: date(2026, 3, 20))
+    monkeypatch.setattr(mod, "_connect", lambda: _DummyConn())
+    monkeypatch.setattr(
+        mod,
+        "_cn_etf_coverage_summary",
+        lambda conn=None: {
+            "etf_count": 9,
+            "coverage_start": date(2013, 3, 25),
+            "coverage_end": date(2026, 3, 20),
+            "latest_refresh_at": datetime(2026, 3, 23, 10, 0, tzinfo=UTC),
+        },
+    )
+    monkeypatch.setattr(mod, "_latest_cn_etf_trade_date", lambda conn=None: date(2026, 3, 20))
+
+    payload = mod.build_market_data_sync_status(asset_scope="cn_etf")
+
+    assert payload["status"] == "fresh"
+    assert payload["sync_key"] == "cn_etf_daily"
+    assert payload["asset_scope"] == "cn_etf"
+    assert payload["freshness_basis"] == mod.ETF_FRESHNESS_BASIS
+    assert payload["coverage_symbol_count"] == 9
+    assert payload["coverage_end"] == "2026-03-20"
+
+
 def test_build_market_data_sync_status_uses_live_target_date_even_when_db_latest_is_older(monkeypatch) -> None:
     monkeypatch.setenv("CN_DAILY_SYNC_ENABLED", "true")
     monkeypatch.setattr(mod, "ensure_sync_runs_table", lambda: None)

@@ -103,9 +103,45 @@ class _FakeProvider(DataProvider):
             ]
         )
 
+    def load_index_constituent_refresh_membership(self, index_code: str) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "index_code": index_code,
+                    "refresh_date": "2024-01-01",
+                    "symbol": "sh600000",
+                    "constituent_start_date": "2024-01-01",
+                    "source": "tushare_csi1000_calendar",
+                    "event_type": "scheduled",
+                    "snapshot_trade_date": "2024-01-01",
+                    "rebalance_calendar_version": "seed-v1",
+                    "rebalance_calendar_source": "csindex_seed_schedule",
+                    "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
+                },
+                {
+                    "index_code": index_code,
+                    "refresh_date": "2024-01-01",
+                    "symbol": "sh688001",
+                    "constituent_start_date": "2024-01-01",
+                    "source": "tushare_csi1000_calendar",
+                    "event_type": "scheduled",
+                    "snapshot_trade_date": "2024-01-01",
+                    "rebalance_calendar_version": "seed-v1",
+                    "rebalance_calendar_source": "csindex_seed_schedule",
+                    "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
+                },
+            ]
+        )
+
     @property
     def query_audit(self) -> list[dict]:
         return []
+
+    def load_cn_etf_catalog(self, symbols: list[str]) -> pd.DataFrame:
+        return pd.DataFrame(columns=["ts_code", "symbol", "batch_id", "name"])
+
+    def load_cn_etf_coverage(self, symbols: list[str]) -> pd.DataFrame:
+        return pd.DataFrame(columns=["ts_code", "coverage_start", "coverage_end", "daily_table", "price_series_semantics"])
 
 
 def _cfg() -> BacktestConfig:
@@ -265,6 +301,8 @@ def test_build_data_bundle_exposes_csi1000_calendar_lineage_metadata() -> None:
     assert bundle.universe_meta["rebalance_calendar_version"] == "seed-v1"
     assert bundle.universe_meta["rebalance_calendar_source"] == "csindex_seed_schedule"
     assert bundle.universe_meta["rebalance_calendar_generated_at"] == "2026-03-11T00:00:00+08:00"
+    assert bundle.universe_meta["provider_floor_date"] == "2024-01-01"
+    assert bundle.universe_meta["refresh_event_count"] == 1
     assert bundle.summary["rebalance_calendar_version"] == "seed-v1"
     assert bundle.summary["rebalance_calendar_source"] == "csindex_seed_schedule"
 
@@ -381,3 +419,75 @@ def test_build_data_bundle_fails_fast_when_turnover_rate_filter_field_is_missing
         assert "turnover rate filter field unavailable" in str(exc)
     else:
         raise AssertionError("expected ValueError when turnover rate field is unavailable")
+
+
+class _EtfProvider(_FakeProvider):
+    def load_ohlcv_daily(self, symbols: list[str], start: date, end: date, source: str) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"date": pd.Timestamp("2024-01-02"), "symbol": "sh512100", "open": 1.0, "high": 1.02, "low": 0.99, "close": 1.01, "volume": 10000, "amount": 100000, "turnover": 100000},
+                {"date": pd.Timestamp("2024-01-03"), "symbol": "sh512100", "open": 1.01, "high": 1.03, "low": 1.0, "close": 1.02, "volume": 11000, "amount": 110000, "turnover": 110000},
+            ]
+        )
+
+    def load_benchmark_daily(self, benchmark_symbol: str, start: date, end: date) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"date": pd.Timestamp("2024-01-02"), "symbol": "512100.SH", "open": 1.0, "high": 1.02, "low": 0.99, "close": 1.01, "volume": 10000, "amount": 100000},
+                {"date": pd.Timestamp("2024-01-03"), "symbol": "512100.SH", "open": 1.01, "high": 1.03, "low": 1.0, "close": 1.02, "volume": 11000, "amount": 110000},
+            ]
+        )
+
+    def load_cn_etf_catalog(self, symbols: list[str]) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": "512100.SH",
+                    "symbol": "sh512100",
+                    "batch_id": "cn_etf_single_asset_template",
+                    "name": "中证1000ETF",
+                }
+            ]
+        )
+
+    def load_cn_etf_coverage(self, symbols: list[str]) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": "512100.SH",
+                    "coverage_start": "2016-11-04",
+                    "coverage_end": "2026-03-20",
+                    "daily_table": "pams_cn_etf_daily",
+                    "price_series_semantics": "executable_price_only_not_total_return",
+                }
+            ]
+        )
+
+
+def test_build_data_bundle_supports_cn_etf_research_entry() -> None:
+    cfg = _cfg()
+    cfg.universe.symbols = ["512100.SH"]
+    cfg.universe.benchmark = ""
+
+    bundle = build_data_bundle(
+        cfg_obj=cfg,
+        cfg_merged={"asset_scope": "cn_etf", "universe": {"filters": {"price_min": 0.0, "price_max": 99999.0, "atr_pct_range": "0,100", "limit_rule": "ignore"}}},
+        overrides={"asset_scope": "cn_etf", "universe_mode": "CUSTOM", "price_adj": "none"},
+        rules_path=Path("instrument_rules_cn.csv"),
+        provider=_EtfProvider(),
+        default_experiment_symbols=["512100.SH"],
+    )
+
+    assert bundle.symbols == ["sh512100"]
+    assert bundle.price_adj_mode == "none"
+    assert bundle.universe_meta["membership_mode"] == "DIRECT_SYMBOLS"
+    assert bundle.universe_meta["membership_data_quality"] == "whitelist_verified"
+    assert bundle.universe_meta["etf_symbols"] == ["512100.SH"]
+    assert bundle.universe_meta["etf_batch"] == "cn_etf_single_asset_template"
+    assert bundle.universe_meta["catalog_batch_id"] == "cn_etf_single_asset_template"
+    assert bundle.summary["daily_table"] == "pams_cn_etf_daily"
+    assert bundle.summary["price_series_semantics"] == "executable_price_only_not_total_return"
+    assert bundle.summary["industry_map_count"] == 0
+    assert bundle.summary["benchmark_rows"] == 2
+    assert cfg.data_source.data_role == "v1"
+    assert cfg.data_source.stocks_table == "pams_cn_etf_daily"

@@ -10,11 +10,19 @@ class UnsupportedAssetScopeError(ValueError):
 
 _DEFAULT_ASSET_SCOPE = "cn_a_equity"
 _ASSET_SCOPE_ALIASES = {
-    "cn_a_equity": _DEFAULT_ASSET_SCOPE,
-    "cn_a": _DEFAULT_ASSET_SCOPE,
-    "cn_a_stock": _DEFAULT_ASSET_SCOPE,
-    "a_share": _DEFAULT_ASSET_SCOPE,
-    "a_shares": _DEFAULT_ASSET_SCOPE,
+    "cn_a_equity": "cn_a_equity",
+    "cn_a": "cn_a_equity",
+    "cn_a_stock": "cn_a_equity",
+    "a_share": "cn_a_equity",
+    "a_shares": "cn_a_equity",
+    "cn_etf": "cn_etf",
+    "a_share_etf": "cn_etf",
+    "a_shares_etf": "cn_etf",
+    "cn_fund_etf": "cn_etf",
+    "us_equity": "us_equity",
+    "us_stock": "us_equity",
+    "us_stocks": "us_equity",
+    "us_equities": "us_equity",
 }
 
 
@@ -45,6 +53,7 @@ class ExecutionProfile:
 class AssetProfile:
     asset_scope: str
     asset_profile_id: str
+    asset_family: str
     asset_class: str
     market_profile: MarketProfile
     execution_profile: ExecutionProfile
@@ -54,6 +63,7 @@ class AssetProfile:
         return {
             "asset_scope": self.asset_scope,
             "asset_profile_id": self.asset_profile_id,
+            "asset_family": self.asset_family,
             "asset_class": self.asset_class,
             "market_profile_id": self.market_profile.profile_id,
             "execution_profile_id": self.execution_profile.profile_id,
@@ -61,6 +71,92 @@ class AssetProfile:
             "execution_profile": asdict(self.execution_profile),
             "tags": list(self.tags),
         }
+
+
+_ASSET_PROFILES: dict[str, AssetProfile] = {
+    "cn_a_equity": AssetProfile(
+        asset_scope="cn_a_equity",
+        asset_profile_id="cn_a_equity_mainline",
+        asset_family="equity",
+        asset_class="equity",
+        market_profile=MarketProfile(
+            profile_id="cn_a_mainland_equity_market",
+            market_key="CN_A",
+            venue="SSE_SZSE",
+            timezone="Asia/Shanghai",
+            currency="CNY",
+            benchmark_symbol="000300.SH",
+            industry_model="sw_l1",
+            symbol_namespace="cn_equity",
+        ),
+        execution_profile=ExecutionProfile(
+            profile_id="cn_a_tplus1_next_open",
+            signal_clock="POST_CLOSE",
+            execution_clock="NEXT_OPEN",
+            settlement_cycle="T+1",
+            lot_size=100,
+            price_adjust_default="hfq",
+            long_only=True,
+        ),
+        tags=("current_mainline", "a_share"),
+    ),
+    "cn_etf": AssetProfile(
+        asset_scope="cn_etf",
+        asset_profile_id="cn_etf_first_wave_research",
+        asset_family="fund",
+        asset_class="etf",
+        market_profile=MarketProfile(
+            profile_id="cn_etf_mainland_fund_market",
+            market_key="CN_A",
+            venue="SSE_SZSE",
+            timezone="Asia/Shanghai",
+            currency="CNY",
+            benchmark_symbol="",
+            industry_model="none",
+            symbol_namespace="cn_etf",
+        ),
+        execution_profile=ExecutionProfile(
+            profile_id="cn_etf_tplus1_next_open",
+            signal_clock="POST_CLOSE",
+            execution_clock="NEXT_OPEN",
+            settlement_cycle="T+1",
+            lot_size=100,
+            price_adjust_default="none",
+            long_only=True,
+        ),
+        tags=("research_entry", "cn_etf", "first_wave"),
+    ),
+    "us_equity": AssetProfile(
+        asset_scope="us_equity",
+        asset_profile_id="us_equity_prepare_mainline",
+        asset_family="equity",
+        asset_class="equity",
+        market_profile=MarketProfile(
+            profile_id="us_equity_primary_market",
+            market_key="US_EQUITY",
+            venue="NASDAQ_NYSE",
+            timezone="America/New_York",
+            currency="USD",
+            benchmark_symbol="SPY",
+            industry_model="gics_l1",
+            symbol_namespace="us_equity",
+        ),
+        execution_profile=ExecutionProfile(
+            profile_id="us_equity_tplus1_next_open",
+            signal_clock="POST_CLOSE",
+            execution_clock="NEXT_OPEN",
+            settlement_cycle="T+1",
+            lot_size=1,
+            price_adjust_default="none",
+            long_only=True,
+        ),
+        tags=("prepared_only", "unsupported_runtime", "us_equity"),
+    ),
+}
+
+
+def supported_asset_scopes() -> tuple[str, ...]:
+    return tuple(sorted(_ASSET_PROFILES))
 
 
 def canonical_asset_scope(value: Any) -> str:
@@ -100,6 +196,7 @@ def resolve_asset_profile(
     ]
     if baseline_id and str(baseline_id).strip():
         scope_candidates.append(_DEFAULT_ASSET_SCOPE)
+
     canonical_scope = _DEFAULT_ASSET_SCOPE
     for candidate in scope_candidates:
         text = str(candidate or "").strip()
@@ -108,36 +205,10 @@ def resolve_asset_profile(
         canonical_scope = canonical_asset_scope(text)
         break
 
-    if canonical_scope != _DEFAULT_ASSET_SCOPE:
+    profile = _ASSET_PROFILES.get(canonical_scope)
+    if profile is None:
         raise UnsupportedAssetScopeError(f"unsupported asset_scope: {canonical_scope}")
-
-    market_profile = MarketProfile(
-        profile_id="cn_a_mainland_equity_market",
-        market_key="CN_A",
-        venue="SSE_SZSE",
-        timezone="Asia/Shanghai",
-        currency="CNY",
-        benchmark_symbol="000300.SH",
-        industry_model="sw_l1",
-        symbol_namespace="cn_equity",
-    )
-    execution_profile = ExecutionProfile(
-        profile_id="cn_a_tplus1_next_open",
-        signal_clock="POST_CLOSE",
-        execution_clock="NEXT_OPEN",
-        settlement_cycle="T+1",
-        lot_size=100,
-        price_adjust_default="hfq",
-        long_only=True,
-    )
-    return AssetProfile(
-        asset_scope=canonical_scope,
-        asset_profile_id="cn_a_equity_mainline",
-        asset_class="equity",
-        market_profile=market_profile,
-        execution_profile=execution_profile,
-        tags=("current_mainline", "a_share"),
-    )
+    return profile
 
 
 def build_asset_context(
@@ -166,4 +237,5 @@ __all__ = [
     "canonical_asset_scope",
     "extract_asset_scope",
     "resolve_asset_profile",
+    "supported_asset_scopes",
 ]

@@ -107,8 +107,9 @@
     state.active_manifest = cloneJson(manifest) || null;
     state.active_surface_summary = null;
     state.active_asset_context = typeof assetContextFromPayload === 'function'
-      ? assetContextFromPayload(manifest || {}, 'cn_a_equity')
-      : { asset_scope: String(manifest?.asset_scope || 'cn_a_equity').trim() || 'cn_a_equity' };
+      ? assetContextFromPayload(manifest || {}, resolvePreferredAssetScope(manifest?.asset_scope))
+      : { asset_scope: resolvePreferredAssetScope(manifest?.asset_scope) };
+    syncAssetAwareShell(state.active_asset_context);
     if (typeof rememberRuntimeSource === 'function') {
       rememberRuntimeSource('experiment', expId, manifest, state.active_asset_context);
     }

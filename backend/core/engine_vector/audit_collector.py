@@ -30,10 +30,14 @@ class AuditCollector:
         initial_cash: float,
         max_positions: int,
         cost_config: dict[str, Any] | None = None,
+        market_key: str = "CN_A",
     ) -> None:
+        if str(market_key or "").strip().upper() not in {"CN_A", "CN_ETF"}:
+            raise ValueError(f"audit collector market rules unavailable for market_key: {market_key}")
         self._initial_cash = float(initial_cash)
         self._max_positions = int(max_positions)
         self._cost_config = dict(cost_config or {})
+        self._market_key = "CN_A" if str(market_key or "").strip().upper() == "CN_A" else "CN_ETF"
 
         # CP1: 数据质量
         self.data_quality: dict[str, Any] = {}

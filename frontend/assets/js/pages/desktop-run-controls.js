@@ -69,7 +69,7 @@
 
   function resolveRuntimeConfigHandoff(preset) {
     const requestedPreset = selectedExperimentPreset(preset);
-    const assetScope = String((state.config_draft && state.config_draft.asset_scope) || 'cn_a_equity').trim() || 'cn_a_equity';
+    const assetScope = resolvePreferredAssetScope(state.config_draft && state.config_draft.asset_scope);
     if (isLockedCandidatePreset(requestedPreset)) {
       return {
         preset: requestedPreset,
@@ -82,7 +82,7 @@
       preset: requestedPreset,
       config_json: d,
       fast_mode: true,
-      asset_scope: String(d?.asset_scope || assetScope).trim() || 'cn_a_equity',
+      asset_scope: resolvePreferredAssetScope(d?.asset_scope || assetScope),
     };
   }
 
@@ -93,6 +93,10 @@
   async function runExperiment(presetOverride = null) {
     const requestedPreset = selectedExperimentPreset(presetOverride || 'single');
     const draft = buildConfigDraft();
+    const assetScope = resolvePreferredAssetScope(draft?.asset_scope);
+    if (!isRuntimeSupportedAssetScope(assetScope)) {
+      throw new Error(`${assetScopeDisplayName(assetScope)}入口准备中，当前未支持运行`);
+    }
     const errors = validateConfigDraft(draft);
     if (errors.length) {
       const message = '配置校验失败：' + errors.join('；');
@@ -131,7 +135,7 @@
     }
     const body = {
       config_json: state.config_draft,
-      asset_scope: String(state.config_draft?.asset_scope || 'cn_a_equity').trim() || 'cn_a_equity',
+      asset_scope: resolvePreferredAssetScope(state.config_draft?.asset_scope),
       exp_id: state.active_exp?.exp_id || null,
       as_of_date: byId('wbExecDate')?.value || null,
       top_n: Number(state.config_draft?.position_risk?.max_positions || 10),

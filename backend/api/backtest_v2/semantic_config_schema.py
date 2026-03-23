@@ -456,6 +456,7 @@ class FlowScriptConfig(StrictModel):
 
 class DataSourceSemanticConfig(StrictModel):
     data_role: str | None = None
+    stocks_table: str | None = None
 
 
 class FrontendSemanticConfig(StrictModel):

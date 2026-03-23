@@ -116,6 +116,34 @@ function setSelectedLockedCandidatePreset(preset) {
   syncLoadedSourceUI();
 }
 
+const CN_ETF_PRESET_SYMBOLS = Object.freeze({
+  cn_etf_single_asset_template: '512100.SH',
+  cn_etf_first_wave_core: 'cn_etf_first_wave_core',
+  cn_etf_first_wave_all: 'cn_etf_first_wave_all',
+});
+
+function syncCnEtfPresetButtons(preset = '') {
+  const normalized = String(preset || '').trim();
+  const hiddenInput = byId('wbEtfPreset');
+  if (hiddenInput) hiddenInput.value = normalized;
+  document.querySelectorAll('#wbEtfPresetWrap button[data-preset]').forEach((button) => {
+    button.classList.toggle('active', button.getAttribute('data-preset') === normalized);
+  });
+}
+
+function detectCnEtfPresetFromSymbols(symbols) {
+  const normalized = Array.isArray(symbols)
+    ? symbols.map((item) => String(item || '').trim()).filter(Boolean)
+    : String(symbols || '').split(',').map((item) => item.trim()).filter(Boolean);
+  if (!normalized.length) return '';
+  if (normalized.length === 1) {
+    if (normalized[0] === 'cn_etf_first_wave_core') return 'cn_etf_first_wave_core';
+    if (normalized[0] === 'cn_etf_first_wave_all') return 'cn_etf_first_wave_all';
+    if (normalized[0].toUpperCase() === '512100.SH') return 'cn_etf_single_asset_template';
+  }
+  return '';
+}
+
 const MEMBERSHIP_MODE_SUPPORTED_UNIVERSES = new Set(['HS300_ZZ500', 'CSI1000']);
 
 function supportsMembershipMode(universeMode) {
@@ -149,9 +177,57 @@ function updateMembershipModeVisibility(mode = null) {
 }
 
 function updateUniverseInputVisibility() {
+  const assetScope = typeof resolvePreferredAssetScope === 'function'
+    ? resolvePreferredAssetScope()
+    : 'cn_a_equity';
+  const isCn = typeof isCnAAssetScope === 'function' ? isCnAAssetScope(assetScope) : assetScope === 'cn_a_equity';
+  const isEtf = typeof isCnEtfAssetScope === 'function' ? isCnEtfAssetScope(assetScope) : assetScope === 'cn_etf';
   const mode = byId('wbUniverseMode')?.value || 'ALL_A';
   const symbolsWrap = byId('wbSymbolsWrap');
   const industryWrap = byId('wbIndustryPickerWrap');
+  const universeModeSelect = byId('wbUniverseMode');
+  const etfPresetWrap = byId('wbEtfPresetWrap');
+  const stockOnlyWrapIds = [
+    'wbStockBasicFiltersWrap',
+    'wbMinListDaysWrap',
+    'wbMinTurnoverWrap',
+    'wbIndustryFilterWrap',
+    'wbMktCapWrap',
+    'wbIndustrySystemWrap',
+    'wbPitStatusWrap',
+  ];
+  const setHidden = (id, hidden) => {
+    const el = byId(id);
+    if (el) el.hidden = !!hidden;
+  };
+  document.querySelectorAll('#wbUniverseModeGroup button').forEach((button) => {
+    const isCustom = button.getAttribute('data-val') === 'CUSTOM';
+    button.disabled = !(isCn || (isEtf && isCustom));
+    button.title = isCn
+      ? ''
+      : (isEtf ? (isCustom ? '' : 'A股 ETF 当前仅支持 CUSTOM 和预设名单') : '当前 universe 控件仅支持 A 股与 ETF');
+  });
+  if (universeModeSelect) universeModeSelect.disabled = !(isCn || isEtf);
+  if (isEtf) {
+    if (universeModeSelect) universeModeSelect.value = 'CUSTOM';
+    document.querySelectorAll('#wbUniverseModeGroup button').forEach((button) => {
+      button.classList.toggle('active', button.getAttribute('data-val') === 'CUSTOM');
+    });
+    if (symbolsWrap) symbolsWrap.style.display = '';
+    if (industryWrap) industryWrap.hidden = true;
+    if (etfPresetWrap) etfPresetWrap.hidden = false;
+    stockOnlyWrapIds.forEach((id) => setHidden(id, true));
+    updateMembershipModeVisibility('CUSTOM');
+    return;
+  }
+  if (etfPresetWrap) etfPresetWrap.hidden = true;
+  stockOnlyWrapIds.forEach((id) => setHidden(id, false));
+  if (!isCn) {
+    if (symbolsWrap) symbolsWrap.style.display = 'none';
+    if (industryWrap) industryWrap.hidden = true;
+    updateMembershipModeVisibility('CUSTOM');
+    return;
+  }
   if (symbolsWrap) symbolsWrap.style.display = mode === 'CUSTOM' ? '' : 'none';
   if (industryWrap) industryWrap.hidden = mode !== 'INDUSTRY';
   if (mode === 'INDUSTRY') loadIndustryPicker();
@@ -160,6 +236,7 @@ function updateUniverseInputVisibility() {
 
 let _industryPickerLoaded = false;
 async function loadIndustryPicker() {
+  if (typeof isCnAAssetScope === 'function' && !isCnAAssetScope()) return;
   if (_industryPickerLoaded) return;
   const container = byId('wbIndustryPicker');
   if (!container) return;
@@ -202,8 +279,12 @@ function setDrawerPanel(panel) {
   document.querySelectorAll('.wb-module').forEach((m) => m.classList.toggle('active', m.getAttribute('data-module') === state.drawer_panel));
   const titleEl = byId('wbDrawerTitle');
   if (titleEl) {
+    const assetScope = typeof resolvePreferredAssetScope === 'function'
+      ? resolvePreferredAssetScope()
+      : 'cn_a_equity';
+    const isEtf = typeof isCnEtfAssetScope === 'function' ? isCnEtfAssetScope(assetScope) : assetScope === 'cn_etf';
     const titles = {
-      s1: 'S1 Universe',
+      s1: isEtf ? 'S1 ETF Universe' : 'S1 Universe',
       s2: 'S2 Market Regime',
       s3: 'S3 Signal Generation',
       s4: 'S4 Composite Signal',
@@ -453,7 +534,19 @@ function setMode(mode) {
 }
 
 function renderRunHints() {
-  // Keep run hints aligned with the current draft and source provenance.
+  const assetScope = typeof resolvePreferredAssetScope === 'function'
+    ? resolvePreferredAssetScope()
+    : 'cn_a_equity';
+  if (typeof syncAssetAwareShell === 'function') syncAssetAwareShell(assetScope);
+  const statusEl = byId('wbRunStatus');
+  if (!statusEl) return;
+  if (typeof isRuntimeSupportedAssetScope === 'function' && !isRuntimeSupportedAssetScope(assetScope)) {
+    statusEl.textContent = `${typeof assetScopeDisplayName === 'function' ? assetScopeDisplayName(assetScope) : assetScope}入口准备中，当前未支持运行`;
+    return;
+  }
+  if (statusEl.textContent && statusEl.textContent.includes('入口准备中')) {
+    statusEl.textContent = '';
+  }
 }
 
 function resolveSummaryConfig() {
@@ -670,12 +763,21 @@ function applyConfigToUI(cfg) {
   const _set = (id, val) => { const el = byId(id); if (el && val != null) el.value = val; };
   const _chk = (id, val) => { const el = byId(id); if (el) el.checked = !!val; };
 
+  const assetScope = typeof resolvePreferredAssetScope === 'function'
+    ? resolvePreferredAssetScope(cfg?.asset_scope || state.loaded_source_asset_context?.asset_scope)
+    : 'cn_a_equity';
+  const isEtf = typeof isCnEtfAssetScope === 'function' ? isCnEtfAssetScope(assetScope) : assetScope === 'cn_etf';
+  _set('wbAssetScope', assetScope);
+  document.querySelectorAll('#wbAssetScopeGroup button').forEach((button) => {
+    button.classList.toggle('active', button.getAttribute('data-val') === assetScope);
+  });
+
   const u = cfg?.universe || {};
   const f = u.filters || {};
   _set('wbStartDate', u.start);
   _set('wbEndDate', u.end);
   _set('wbBenchmark', u.benchmark);
-  const loadedMode = cfg?.universe_mode || byId('wbUniverseMode')?.value || 'ALL_A';
+  const loadedMode = isEtf ? 'CUSTOM' : (cfg?.universe_mode || byId('wbUniverseMode')?.value || 'ALL_A');
   _set('wbUniverseMode', loadedMode);
   document.querySelectorAll('#wbUniverseModeGroup button').forEach((b) => {
     b.classList.toggle('active', b.getAttribute('data-val') === loadedMode);
@@ -684,6 +786,7 @@ function applyConfigToUI(cfg) {
   syncMembershipModeButtons(membershipUiValue);
   updateMembershipModeVisibility(loadedMode);
   _set('wbSymbols', Array.isArray(u.symbols) ? u.symbols.join(',') : undefined);
+  syncCnEtfPresetButtons(isEtf ? detectCnEtfPresetFromSymbols(u.symbols || []) : '');
   _set('wbUniverseLimit', u.limit);
   _chk('wbExcludeSt', f.exclude_st);
   _chk('wbExcludeSuspended', f.exclude_suspended);
@@ -694,7 +797,7 @@ function applyConfigToUI(cfg) {
   _set('wbPriceMax', f.price_max);
   _set('wbLimitRule', f.limit_rule);
 
-  const loadedAdj = u.price_adj || 'hfq';
+  const loadedAdj = isEtf ? (u.price_adj || 'none') : (u.price_adj || 'hfq');
   _set('wbPriceAdj', loadedAdj);
   document.querySelectorAll('#wbAdjGroup button').forEach((b) => {
     b.classList.toggle('active', b.getAttribute('data-val') === loadedAdj);
@@ -950,6 +1053,7 @@ function applyConfigToUI(cfg) {
   }
 
   buildConfigDraft();
+  updateUniverseInputVisibility();
   syncExitLinkage();
   updateAtrNote();
   return { unsupportedStrategy: unsupportedAdaptiveRegime ? rawStrategyName : null };

@@ -9,9 +9,10 @@ from typing import Any
 
 import pandas as pd
 
-from backend.core.config.asset_profiles import canonical_asset_scope
+from backend.core.config.asset_profiles import UnsupportedAssetScopeError, resolve_asset_profile
 from backend.core.config.loader import load_config
 from backend.core.config.models import BacktestConfig
+from backend.core.data.cn_etf_catalog import normalize_cn_etf_symbol, normalize_cn_etf_ts_code
 from backend.core.data.pg_provider import PostgresDataProvider
 from backend.core.data.provider import DataProvider
 from backend.core.universe.hs300_csi500 import (
@@ -98,7 +99,16 @@ def _inject_db_env(cfg_obj: BacktestConfig) -> None:
         db.dbname = os.environ["PGDATABASE"]
 
 
-def load_runtime_data_access(bt_root: str | Path | None = None) -> RuntimeDataAccess:
+def load_runtime_data_access(
+    bt_root: str | Path | None = None,
+    *,
+    asset_scope: str | None = None,
+) -> RuntimeDataAccess:
+    asset_profile = resolve_asset_profile(asset_scope)
+    if asset_profile.asset_scope not in {"cn_a_equity", "cn_etf"}:
+        raise UnsupportedAssetScopeError(
+            f"runtime data access adapter unavailable for asset_scope: {asset_profile.asset_scope}"
+        )
     root = Path(bt_root).resolve() if bt_root is not None else _default_bt_root()
     cfg_path = root / "configs" / "pams_cn_pg.json"
     if not cfg_path.exists():
@@ -129,8 +139,9 @@ def load_benchmark_series_frame(
     end: date,
     access: RuntimeDataAccess | None = None,
     bt_root: str | Path | None = None,
+    asset_scope: str | None = None,
 ) -> pd.DataFrame:
-    runtime_access = access or load_runtime_data_access(bt_root)
+    runtime_access = access or load_runtime_data_access(bt_root, asset_scope=asset_scope)
     return runtime_access.provider.load_benchmark_daily(symbol, start, end)
 
 
@@ -141,8 +152,9 @@ def load_symbol_series_frame(
     end: date,
     access: RuntimeDataAccess | None = None,
     bt_root: str | Path | None = None,
+    asset_scope: str | None = None,
 ) -> pd.DataFrame:
-    runtime_access = access or load_runtime_data_access(bt_root)
+    runtime_access = access or load_runtime_data_access(bt_root, asset_scope=asset_scope)
     return runtime_access.provider.load_ohlcv_daily([symbol], start, end, source="stocks")
 
 
@@ -150,8 +162,12 @@ def list_runtime_industries(
     *,
     access: RuntimeDataAccess | None = None,
     bt_root: str | Path | None = None,
+    asset_scope: str | None = None,
 ) -> list[str]:
-    runtime_access = access or load_runtime_data_access(bt_root)
+    runtime_access = access or load_runtime_data_access(bt_root, asset_scope=asset_scope)
+    profile = resolve_asset_profile(asset_scope)
+    if profile.asset_scope == "cn_etf":
+        return []
     try:
         import psycopg
 
@@ -175,7 +191,7 @@ def list_runtime_industries(
 def resolve_validation_universe(
     *,
     bt_root: str | Path | None,
-    asset_scope: str = "cn_a_equity",
+    asset_scope: str | None = None,
     universe_mode: str,
     symbols: list[str],
     industries: list[str],
@@ -193,7 +209,8 @@ def resolve_validation_universe(
     limit_rule: str,
     exclude_star_market: bool = False,
 ) -> ValidationUniverseSnapshot:
-    access = load_runtime_data_access(bt_root)
+    asset_profile = resolve_asset_profile(asset_scope)
+    access = load_runtime_data_access(bt_root, asset_scope=asset_profile.asset_scope)
     resolve_asof, dynamic_all_a_entry = resolve_universe_timing(
         universe_mode,
         start=start,
@@ -204,7 +221,7 @@ def resolve_validation_universe(
         as_of=resolve_asof,
         db=access.cfg_obj.db,
         runtime=access.cfg_obj.db_runtime,
-        asset_scope=canonical_asset_scope(asset_scope),
+        asset_scope=asset_profile.asset_scope,
         industries=industries,
         symbols=symbols,
         universe_limit=universe_limit,
@@ -215,9 +232,53 @@ def resolve_validation_universe(
         start=start,
         end=end,
     )
-    resolved_meta["asset_scope"] = canonical_asset_scope(asset_scope)
+    resolved_meta["asset_scope"] = asset_profile.asset_scope
+    resolved_meta["asset_profile_id"] = asset_profile.asset_profile_id
+    resolved_meta["market_profile_id"] = asset_profile.market_profile.profile_id
+    resolved_meta["asset_family"] = asset_profile.asset_family
     resolved_meta.setdefault("tradable_symbols", int(len(resolved_symbols)))
     resolved_meta.setdefault("after_filters_symbols", int(len(resolved_symbols)))
+    if asset_profile.asset_scope == "cn_etf":
+        catalog_df = access.provider.load_cn_etf_catalog(resolved_symbols)
+        coverage_df = access.provider.load_cn_etf_coverage(resolved_symbols)
+        resolved_meta["etf_symbols"] = sorted(
+            {
+                normalize_cn_etf_ts_code(value)
+                for value in catalog_df.get("ts_code", pd.Series(dtype=str)).astype(str).tolist()
+                if str(value).strip()
+            }
+        ) or [normalize_cn_etf_ts_code(symbol) for symbol in resolved_symbols]
+        resolved_meta["etf_internal_symbols"] = sorted(
+            {
+                normalize_cn_etf_symbol(value)
+                for value in catalog_df.get("symbol", pd.Series(dtype=str)).astype(str).tolist()
+                if str(value).strip()
+            }
+        ) or [normalize_cn_etf_symbol(symbol) for symbol in resolved_symbols]
+        if not coverage_df.empty:
+            coverage_start = pd.to_datetime(coverage_df.get("coverage_start"), errors="coerce").dropna()
+            coverage_end = pd.to_datetime(coverage_df.get("coverage_end"), errors="coerce").dropna()
+            resolved_meta["coverage_start"] = coverage_start.min().date().isoformat() if not coverage_start.empty else None
+            resolved_meta["coverage_end"] = coverage_end.max().date().isoformat() if not coverage_end.empty else None
+            resolved_meta["daily_table"] = str(
+                coverage_df.get("daily_table", pd.Series(["pams_cn_etf_daily"])).iloc[0]
+            )
+            resolved_meta["price_series_semantics"] = str(
+                coverage_df.get(
+                    "price_series_semantics",
+                    pd.Series(["executable_price_only_not_total_return"]),
+                ).iloc[0]
+            )
+        return ValidationUniverseSnapshot(
+            access=access,
+            universe_mode=universe_mode,
+            resolved_symbols=[normalize_cn_etf_symbol(symbol) for symbol in resolved_symbols],
+            resolved_meta=dict(resolved_meta),
+            resolve_asof=resolve_asof,
+            dynamic_all_a_entry=False,
+            universe_filters_raw={},
+        )
+
     universe_filters_raw = {
         "exclude_st": exclude_st,
         "exclude_delisted": True,

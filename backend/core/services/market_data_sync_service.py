@@ -18,6 +18,7 @@ from backend.cli.managed import update_pams_ohlcv_daily_v2 as v2_main_updater
 from backend.cli.managed import update_pams_ohlcv_daily_v2_raw as v2_raw_updater
 from backend.cli.managed import update_pit_index_daily as pit_index_updater
 from backend.cli.managed import update_pit_stock_moneyflow_v2 as v2_moneyflow_updater
+from backend.core.config.asset_profiles import resolve_asset_profile
 from backend.core.services import sim_account_auto_sync_service
 
 
@@ -25,13 +26,17 @@ LOGGER = logging.getLogger(__name__)
 
 SYNC_KEY = "cn_a_ohlcv_daily"
 ASSET_SCOPE = "cn_a_equity"
+ETF_SYNC_KEY = "cn_etf_daily"
+ETF_ASSET_SCOPE = "cn_etf"
 DEFAULT_STATUS_TABLE = "pams_data_sync_runs"
+ETF_COVERAGE_TABLE = "cn_etf_data_coverage_daily"
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 DEFAULT_SCHEDULE_TIME = "18:30"
 DEFAULT_POLL_SECONDS = 300
 DEFAULT_RETRY_SECONDS = 3600
 DEFAULT_LIVE_CALENDAR_LOOKBACK_DAYS = 60
 MAINLINE_FRESHNESS_BASIS = "v2_mainline_min(v2_main,v2_moneyflow,v2_moneyflow_whitelist)"
+ETF_FRESHNESS_BASIS = "cn_etf_coverage_max(coverage_end)"
 MAINLINE_COMPONENT_KEYS = ("v2_main", "v2_moneyflow", "v2_moneyflow_whitelist")
 
 _SCHEDULER_LOCK = threading.Lock()
@@ -194,11 +199,12 @@ def _latest_table_trade_date(
     *,
     conn: Any | None = None,
     market: str | None = None,
+    date_column: str = "trade_date",
 ) -> date | None:
     owns_conn = conn is None
     conn = conn or _connect()
     try:
-        query = f"SELECT MAX(trade_date) FROM public.{daily_updater._safe_ident(table)}"
+        query = f"SELECT MAX({daily_updater._safe_ident(date_column)}) FROM public.{daily_updater._safe_ident(table)}"
         params: tuple[Any, ...] = ()
         if market:
             query += " WHERE market = %s"
@@ -214,6 +220,10 @@ def _latest_table_trade_date(
 
 def _latest_legacy_cn_a_trade_date(*, conn: Any | None = None) -> date | None:
     return _latest_table_trade_date(daily_updater.DEFAULT_TABLE, conn=conn, market="CN_A")
+
+
+def _latest_cn_etf_trade_date(*, conn: Any | None = None) -> date | None:
+    return _latest_table_trade_date(ETF_COVERAGE_TABLE, conn=conn, date_column="coverage_end")
 
 
 def _mainline_component_trade_dates(*, conn: Any | None = None) -> dict[str, date | None]:
@@ -242,6 +252,33 @@ def _serialize_trade_date_map(values: dict[str, date | None] | None) -> dict[str
     if not isinstance(values, dict):
         return {}
     return {str(key): (value.isoformat() if isinstance(value, date) else None) for key, value in values.items()}
+
+
+def _cn_etf_coverage_summary(*, conn: Any | None = None) -> dict[str, Any]:
+    owns_conn = conn is None
+    conn = conn or _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    COUNT(*)::bigint AS etf_count,
+                    MIN(coverage_start) AS coverage_start,
+                    MAX(coverage_end) AS coverage_end,
+                    MAX(latest_refresh_at) AS latest_refresh_at
+                FROM public.{daily_updater._safe_ident(ETF_COVERAGE_TABLE)}
+                """
+            )
+            row = cur.fetchone()
+        return {
+            "etf_count": int(row[0] or 0) if row else 0,
+            "coverage_start": _normalize_date(row[1] if row else None),
+            "coverage_end": _normalize_date(row[2] if row else None),
+            "latest_refresh_at": _normalize_datetime(row[3] if row else None),
+        }
+    finally:
+        if owns_conn:
+            conn.close()
 
 
 def _latest_cn_a_trade_date(*, conn: Any | None = None) -> date | None:
@@ -769,12 +806,15 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
 def _format_status_message(
     *,
     status: str,
+    asset_scope: str = ASSET_SCOPE,
     latest_success_trade_date: date | None,
     latest_available_trade_date: date | None,
     target_trade_date: date | None,
     lag_days: int | None,
     latest_run: SyncRunRecord | None,
 ) -> str:
+    if status == "unsupported":
+        return f"market data sync adapter unavailable for asset_scope={asset_scope}"
     if status == "fresh" and latest_success_trade_date is not None:
         return f"已同步至 {latest_success_trade_date.isoformat()}"
     if status == "running":
@@ -817,11 +857,13 @@ def _build_status_payload(
     lag_days: int | None,
     latest_run: SyncRunRecord | None,
     message: str,
+    sync_key: str = SYNC_KEY,
+    asset_scope: str = ASSET_SCOPE,
 ) -> dict[str, Any]:
     latest_display_trade_date = latest_success_trade_date or latest_available_trade_date
     return {
-        "sync_key": SYNC_KEY,
-        "asset_scope": ASSET_SCOPE,
+        "sync_key": sync_key,
+        "asset_scope": asset_scope,
         "scheduler_enabled": scheduler_enabled,
         "status": status,
         "scheduled_time": _scheduled_local_time().strftime("%H:%M"),
@@ -842,9 +884,84 @@ def _build_status_payload(
     }
 
 
-def build_market_data_sync_status(now: datetime | None = None) -> dict[str, Any]:
+def _build_cn_etf_market_data_sync_status(now: datetime | None = None) -> dict[str, Any]:
+    target_trade_date = resolve_target_trade_date(now)
+    with _connect() as conn:
+        coverage_summary = _cn_etf_coverage_summary(conn=conn)
+        latest_available_trade_date = _latest_cn_etf_trade_date(conn=conn)
+
+    lag_days = None
+    if target_trade_date is not None and latest_available_trade_date is not None:
+        lag_days = max((target_trade_date - latest_available_trade_date).days, 0)
+
+    if latest_available_trade_date is None:
+        status = "never_synced"
+    elif target_trade_date is not None and latest_available_trade_date >= target_trade_date:
+        status = "fresh"
+    else:
+        status = "stale"
+
+    payload = _build_status_payload(
+        status=status,
+        scheduler_enabled=False,
+        target_trade_date=target_trade_date,
+        latest_success_trade_date=latest_available_trade_date,
+        latest_available_trade_date=latest_available_trade_date,
+        component_trade_dates={"cn_etf_daily": latest_available_trade_date},
+        lag_days=lag_days,
+        latest_run=None,
+        message=_format_status_message(
+            status=status,
+            asset_scope=ETF_ASSET_SCOPE,
+            latest_success_trade_date=latest_available_trade_date,
+            latest_available_trade_date=latest_available_trade_date,
+            target_trade_date=target_trade_date,
+            lag_days=lag_days,
+            latest_run=None,
+        ),
+        sync_key=ETF_SYNC_KEY,
+        asset_scope=ETF_ASSET_SCOPE,
+    )
+    payload["freshness_basis"] = ETF_FRESHNESS_BASIS
+    payload["coverage_symbol_count"] = int(coverage_summary.get("etf_count") or 0)
+    payload["coverage_start"] = _serialize_date(coverage_summary.get("coverage_start"))
+    payload["coverage_end"] = _serialize_date(coverage_summary.get("coverage_end"))
+    payload["latest_refresh_at"] = _serialize_datetime(coverage_summary.get("latest_refresh_at"))
+    return payload
+
+
+def build_market_data_sync_status(
+    now: datetime | None = None,
+    *,
+    asset_scope: str | None = None,
+) -> dict[str, Any]:
     scheduler_enabled = sync_scheduler_enabled()
     try:
+        resolved_scope = resolve_asset_profile(asset_scope).asset_scope
+        if resolved_scope == ETF_ASSET_SCOPE:
+            return _build_cn_etf_market_data_sync_status(now)
+        if resolved_scope != ASSET_SCOPE:
+            return _build_status_payload(
+                status="unsupported",
+                scheduler_enabled=scheduler_enabled,
+                target_trade_date=None,
+                latest_success_trade_date=None,
+                latest_available_trade_date=None,
+                component_trade_dates=None,
+                lag_days=None,
+                latest_run=None,
+                sync_key=f"{resolved_scope}_daily",
+                asset_scope=resolved_scope,
+                message=_format_status_message(
+                    status="unsupported",
+                    asset_scope=resolved_scope,
+                    latest_success_trade_date=None,
+                    latest_available_trade_date=None,
+                    target_trade_date=None,
+                    lag_days=None,
+                    latest_run=None,
+                ),
+            )
         ensure_sync_runs_table()
         local_now = _now_local(now)
         target_trade_date = resolve_target_trade_date(local_now)
@@ -895,12 +1012,14 @@ def build_market_data_sync_status(now: datetime | None = None) -> dict[str, Any]
             latest_run=latest_run,
             message=_format_status_message(
                 status=status,
+                asset_scope=resolved_scope,
                 latest_success_trade_date=latest_success_trade_date,
                 latest_available_trade_date=latest_available_trade_date,
                 target_trade_date=target_trade_date,
                 lag_days=lag_days,
                 latest_run=latest_run_for_message,
             ),
+            asset_scope=resolved_scope,
         )
     except Exception as exc:
         LOGGER.exception("failed to build market data sync status")
@@ -914,6 +1033,7 @@ def build_market_data_sync_status(now: datetime | None = None) -> dict[str, Any]
             lag_days=None,
             latest_run=None,
             message=str(exc) or "market data sync status unavailable",
+            asset_scope=(locals().get("resolved_scope") or ASSET_SCOPE),
         )
 
 

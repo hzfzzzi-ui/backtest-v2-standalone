@@ -19,6 +19,8 @@ _TARGETS = {
     "pit_stock_moneyflow_v2": "backend.cli.managed.update_pit_stock_moneyflow_v2",
     "pit_stock_feature_coverage": "backend.cli.managed.audit_pit_stock_feature_coverage",
     "security_master": "backend.cli.managed.refresh_security_master",
+    "cn_etf_catalog": "backend.cli.managed.refresh_cn_etf_catalog",
+    "cn_etf_daily": "backend.cli.managed.refresh_cn_etf_daily",
     "csi1000_pit": "backend.cli.managed.refresh_csi1000_pit",
     "csi800_pit": "backend.cli.managed.refresh_csi800_pit",
 }

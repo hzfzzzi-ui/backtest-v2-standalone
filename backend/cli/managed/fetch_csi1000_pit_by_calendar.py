@@ -234,6 +234,7 @@ def build_calendar_snapshots(
                     source=used_source,
                     event_type=entry.event_type,
                     version=entry.version,
+                    snapshot_trade_date=snapshot_trade_dates.get(entry.effective_date, ""),
                     rebalance_calendar_source=entry.source,
                     rebalance_calendar_generated_at=entry.generated_at,
                     source_url=entry.source_url,
@@ -250,6 +251,11 @@ def build_calendar_snapshots(
         "fallback_event_count": len(fallback_dates),
         "fallback_effective_dates": fallback_dates,
         "snapshot_trade_dates": snapshot_trade_dates,
+        "provider_floor_date": (
+            min(snapshot_trade_dates.values())
+            if snapshot_trade_dates
+            else None
+        ),
         "calendar_version": (
             entries[0].version if entries and len({entry.version for entry in entries}) == 1 else "mixed"
         ),

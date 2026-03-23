@@ -541,6 +541,15 @@ def ensure_standard_artifacts(
     if isinstance(result.get("universe_meta"), dict):
         run_meta_obj["universe"] = sanitize_json(result["universe_meta"])
         run_meta_obj["data"]["universe_mode"] = str(result["universe_meta"].get("universe_mode") or "CUSTOM")
+        if str(asset_context.get("asset_scope") or "") == "cn_etf":
+            run_meta_obj["data"]["daily_table"] = str(result["universe_meta"].get("daily_table") or resolved_stocks_table)
+            run_meta_obj["data"]["price_series_semantics"] = str(
+                result["universe_meta"].get("price_series_semantics") or "executable_price_only_not_total_return"
+            )
+            run_meta_obj["data"]["coverage_start"] = result["universe_meta"].get("coverage_start")
+            run_meta_obj["data"]["coverage_end"] = result["universe_meta"].get("coverage_end")
+            run_meta_obj["data"]["etf_batch"] = result["universe_meta"].get("etf_batch")
+            run_meta_obj["data"]["etf_symbols"] = sanitize_json(result["universe_meta"].get("etf_symbols") or [])
     if isinstance(result.get("data_bundle"), dict):
         run_meta_obj["data_bundle"] = sanitize_json(result["data_bundle"])
     if isinstance(overrides.get("candidate_context"), dict) and overrides.get("candidate_context"):

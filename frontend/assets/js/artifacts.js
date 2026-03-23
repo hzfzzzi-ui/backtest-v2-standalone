@@ -401,8 +401,12 @@ async function loadActiveArtifacts() {
     ? cloneJson(surface.summary) || null
     : null;
   state.active_asset_context = typeof assetContextFromPayload === 'function'
-    ? assetContextFromPayload(surface?.asset_context || surface?.summary || state.active_manifest || {}, 'cn_a_equity')
-    : { asset_scope: String(surface?.asset_scope || state.active_manifest?.asset_scope || 'cn_a_equity').trim() || 'cn_a_equity' };
+    ? assetContextFromPayload(
+      surface?.asset_context || surface?.summary || state.active_manifest || {},
+      resolvePreferredAssetScope(surface?.asset_scope || state.active_manifest?.asset_scope),
+    )
+    : { asset_scope: resolvePreferredAssetScope(surface?.asset_scope || state.active_manifest?.asset_scope) };
+  if (typeof syncAssetAwareShell === 'function') syncAssetAwareShell(state.active_asset_context);
   if (typeof rememberRuntimeSource === 'function') {
     rememberRuntimeSource('experiment', expId, state.active_manifest, state.active_asset_context);
   }

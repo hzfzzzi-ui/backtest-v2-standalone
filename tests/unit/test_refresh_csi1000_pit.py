@@ -32,12 +32,14 @@ def test_build_fetch_command_respects_guard_flags(tmp_path: Path) -> None:
 def test_build_import_command_can_override_source_label(tmp_path: Path) -> None:
     cmd = build_import_command(
         changes_csv=tmp_path / "changes.csv",
+        snapshots_csv=tmp_path / "snapshots.csv",
         summary_out=tmp_path / "import_summary.json",
         source_label="manual_override",
     )
 
     joined = " ".join(cmd)
     assert "import_csi1000_pit.py" in joined
+    assert "--snapshots-csv" in joined
     assert "--source-label manual_override" in joined
 
 
@@ -87,6 +89,7 @@ def test_run_refresh_executes_fetch_then_import(monkeypatch, tmp_path: Path) -> 
     assert "import_csi1000_pit.py" in " ".join(seen[1])
     assert summary["skip_import"] is False
     assert summary["token_available"] is True
+    assert summary["outputs"]["snapshots_csv"].endswith("csi1000_pit_calendar_snapshots.csv")
     assert summary["outputs"]["refresh_summary"].endswith("csi1000_pit_refresh_summary.json")
 
 
@@ -119,6 +122,7 @@ def test_run_refresh_can_skip_import(monkeypatch, tmp_path: Path) -> None:
     assert "fetch_csi1000_pit_by_calendar.py" in " ".join(seen[0])
     assert summary["commands"]["import"] is None
     assert summary["outputs"]["import_summary"] is None
+    assert summary["outputs"]["snapshots_csv"].endswith("csi1000_pit_calendar_snapshots.csv")
 
 
 def test_run_refresh_manual_manifest_executes_build_then_import(monkeypatch, tmp_path: Path) -> None:
@@ -152,3 +156,4 @@ def test_run_refresh_manual_manifest_executes_build_then_import(monkeypatch, tmp
     assert "import_csi1000_pit.py" in " ".join(seen[1])
     assert summary["provider"] == "manual_manifest"
     assert summary["outputs"]["manual_build_summary"] is not None
+    assert summary["outputs"]["snapshots_csv"].endswith("csi1000_pit_manual_snapshots.csv")

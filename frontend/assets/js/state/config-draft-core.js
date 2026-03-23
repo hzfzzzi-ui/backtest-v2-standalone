@@ -97,6 +97,12 @@
     const preProfitBreakoutFailureAtrBufferInput = readOptionalNumberInput('wbPreProfitBreakoutFailureAtrBufferK');
     const selectedRegimeEngine = String(byId('wbRegimeEngine')?.value || loadedRegimeEngine.engine || 'ma200_legacy').trim().toLowerCase() || 'ma200_legacy';
     const shouldEmitRegimeEngine = ['market_regime_framework', 'weekly_five_state'].includes(selectedRegimeEngine) || hasOwnConfigKey(loadedBase, 'regime_engine');
+    const assetScope = resolvePreferredAssetScope(
+      byId('wbAssetScope')?.value || loadedBase.asset_scope || state.loaded_source_asset_context?.asset_scope,
+    );
+    const isEtfAssetScope = typeof isCnEtfAssetScope === 'function'
+      ? isCnEtfAssetScope(assetScope)
+      : assetScope === 'cn_etf';
     if (multiAlphaEnabled) {
       if (byId('wbComposeMode')) byId('wbComposeMode').value = composeMode;
       if (byId('wbSameSymbolPolicy')) byId('wbSameSymbolPolicy').value = sameSymbolPolicy;
@@ -220,17 +226,28 @@
         regime_matrix: regimeMatrix,
       }
       : (Object.keys(loadedSignalComposition).length ? cloneJson(loadedSignalComposition) : { enabled: false });
-    const universeMode = byId('wbUniverseMode')?.value || 'ALL_A';
+    const requestedUniverseMode = byId('wbUniverseMode')?.value || 'ALL_A';
+    const universeMode = isEtfAssetScope ? 'CUSTOM' : requestedUniverseMode;
+    const etfPreset = String(byId('wbEtfPreset')?.value || '').trim();
+    const etfDefaultSymbols = etfPreset === 'cn_etf_first_wave_core'
+      ? ['cn_etf_first_wave_core']
+      : (etfPreset === 'cn_etf_first_wave_all'
+        ? ['cn_etf_first_wave_all']
+        : ['512100.SH']);
+    const rawUniverseSymbols = (byId('wbSymbols')?.value || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const universeSymbols = isEtfAssetScope
+      ? (rawUniverseSymbols.length ? rawUniverseSymbols : etfDefaultSymbols)
+      : rawUniverseSymbols;
     const excludeStarMarket = !!byId('wbExcludeStarMarket')?.checked;
     const loadedHasExcludeStarMarket = Object.prototype.hasOwnProperty.call(loadedUniverseFilters, 'exclude_star_market');
     const universeDraft = {
       ...loadedUniverse,
       start: byId('wbStartDate')?.value || '2021-01-01',
       end: byId('wbEndDate')?.value || '2026-02-01',
-      benchmark: byId('wbBenchmark')?.value || '000300.SH',
-      symbols: (byId('wbSymbols')?.value || '').split(',').map((s) => s.trim()).filter(Boolean),
+      benchmark: isEtfAssetScope ? String(byId('wbBenchmark')?.value || '').trim() : (byId('wbBenchmark')?.value || '000300.SH'),
+      symbols: universeSymbols,
       limit: Number(byId('wbUniverseLimit')?.value || 1000),
-      price_adj: byId('wbPriceAdj')?.value || 'hfq',
+      price_adj: isEtfAssetScope ? (byId('wbPriceAdj')?.value || 'none') : (byId('wbPriceAdj')?.value || 'hfq'),
       filters: {
         ...loadedUniverseFilters,
         exclude_st: !!byId('wbExcludeSt')?.checked,
@@ -243,12 +260,20 @@
         limit_rule: byId('wbLimitRule')?.value || 'ignore',
       },
     };
+    if (isEtfAssetScope) {
+      universeDraft.filters = {
+        price_min: Number(byId('wbPriceMin')?.value || 0),
+        price_max: Number(byId('wbPriceMax')?.value || 99999),
+        atr_pct_range: byId('wbAtrRange')?.value || '0,100',
+        limit_rule: byId('wbLimitRule')?.value || 'ignore',
+      };
+    }
     if (excludeStarMarket || loadedHasExcludeStarMarket) {
       universeDraft.filters.exclude_star_market = excludeStarMarket;
     } else {
       delete universeDraft.filters.exclude_star_market;
     }
-    if (supportsMembershipMode(universeMode)) {
+    if (!isEtfAssetScope && supportsMembershipMode(universeMode)) {
       universeDraft.membership_mode = membershipModeFromUiValue(byId('wbConstituent')?.value || 'dynamic');
     } else {
       delete universeDraft.membership_mode;
@@ -259,11 +284,11 @@
       .filter(Boolean);
     const draft = {
       ...loadedBase,
-      asset_scope: String(loadedBase.asset_scope || state.loaded_source_asset_context?.asset_scope || 'cn_a_equity').trim() || 'cn_a_equity',
+      asset_scope: assetScope,
       mode: state.mode,
       strategy_pack: strategyPack,
       universe_mode: universeMode,
-      industries: getSelectedIndustries(),
+      industries: isEtfAssetScope ? [] : getSelectedIndustries(),
       initial_capital: Number(loadedBase.initial_capital ?? state.config_draft?.initial_capital ?? 100000),
       universe: universeDraft,
       signal_generation: signalGenerationDraft,
@@ -402,6 +427,15 @@
       } } : {}),
       exit_priority: exitPriorityItems.length ? exitPriorityItems : (cloneJson(loadedBase.exit_priority) || []),
     };
+    if (isEtfAssetScope) {
+      draft.data_source = {
+        ...(loadedBase.data_source || {}),
+        data_role: 'v1',
+        stocks_table: 'pams_cn_etf_daily',
+      };
+      draft.universe.price_adj = 'none';
+      delete draft.universe.filters.exclude_star_market;
+    }
     if (trailingActivateProfitPct != null || hasOwnConfigKey(loadedTrailing, 'activate_profit_pct')) {
       draft.exit_rules.trailing.activate_profit_pct = trailingActivateProfitPct != null
         ? trailingActivateProfitPct / 100
@@ -500,6 +534,7 @@
       delete draft.regime_engine;
     }
     state.config_draft = draft;
+    if (typeof syncAssetAwareShell === 'function') syncAssetAwareShell(draft.asset_scope);
     state.strategy_pack = draft.strategy_pack;
     state.universe_mode = draft.universe_mode;
     if (byId('wbStrategyPack')) byId('wbStrategyPack').value = draft.strategy_pack;

@@ -29,6 +29,7 @@ def _write_manifest(path: Path, rows: list[dict[str, str]]) -> None:
                 "source",
                 "event_type",
                 "version",
+                "snapshot_trade_date",
                 "rebalance_calendar_source",
                 "rebalance_calendar_generated_at",
                 "source_url",
@@ -55,6 +56,7 @@ def test_manual_snapshot_builder_reconstructs_changes(tmp_path: Path) -> None:
                 "source": "csindex_notice",
                 "event_type": "scheduled",
                 "version": "manual-v1",
+                "snapshot_trade_date": "2016-03-01",
                 "rebalance_calendar_source": "csindex_seed_schedule",
                 "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
                 "source_url": "https://example.com/a",
@@ -66,6 +68,7 @@ def test_manual_snapshot_builder_reconstructs_changes(tmp_path: Path) -> None:
                 "source": "csindex_notice",
                 "event_type": "scheduled",
                 "version": "manual-v1",
+                "snapshot_trade_date": "2016-09-01",
                 "rebalance_calendar_source": "csindex_seed_schedule",
                 "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
                 "source_url": "https://example.com/b",
@@ -103,6 +106,7 @@ def test_manual_snapshot_builder_detects_count_mismatch(tmp_path: Path) -> None:
             "source": "csindex_notice",
             "event_type": "scheduled",
             "version": "manual-v1",
+            "snapshot_trade_date": "",
             "rebalance_calendar_source": "csindex_seed_schedule",
             "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
             "source_url": "",
@@ -134,6 +138,7 @@ def test_manual_snapshot_builder_summary_includes_lineage_metadata(tmp_path: Pat
                 "source": "csindex_official_manual",
                 "event_type": "scheduled",
                 "version": "official-v1",
+                "snapshot_trade_date": "2016-03-01",
                 "rebalance_calendar_source": "csindex_notice",
                 "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
                 "source_url": "https://example.com/a",
@@ -145,6 +150,7 @@ def test_manual_snapshot_builder_summary_includes_lineage_metadata(tmp_path: Pat
                 "source": "csindex_official_manual",
                 "event_type": "scheduled",
                 "version": "official-v1",
+                "snapshot_trade_date": "2016-09-01",
                 "rebalance_calendar_source": "csindex_notice",
                 "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
                 "source_url": "https://example.com/b",
@@ -170,4 +176,5 @@ def test_manual_snapshot_builder_summary_includes_lineage_metadata(tmp_path: Pat
     assert summary["rebalance_calendar_version"] == "official-v1"
     assert summary["rebalance_calendar_source"] == "csindex_notice"
     assert summary["rebalance_calendar_generated_at"] == "2026-03-11T00:00:00+08:00"
+    assert summary["provider_floor_date"] == "2016-03-01"
     assert summary["source_url_count"] == 2

@@ -135,8 +135,8 @@
 
     const loadedSourceId = String(meta?.source_id || meta?.loaded_id || meta?.config_id || '').trim() || '-';
     const loadedAssetContext = typeof assetContextFromPayload === 'function'
-      ? assetContextFromPayload(meta?.asset_context ? meta : (workbenchConfig || meta || {}), workbenchConfig?.asset_scope || 'cn_a_equity')
-      : { asset_scope: String(workbenchConfig?.asset_scope || 'cn_a_equity').trim() || 'cn_a_equity' };
+      ? assetContextFromPayload(meta?.asset_context ? meta : (workbenchConfig || meta || {}), resolvePreferredAssetScope(workbenchConfig?.asset_scope))
+      : { asset_scope: resolvePreferredAssetScope(workbenchConfig?.asset_scope) };
     state.loaded_source_meta = {
       source_id: loadedSourceId,
       config_ref: String(meta?.config_id || '').trim() || null,
@@ -156,6 +156,7 @@
     state.loaded_source_id = loadedSourceId === '-' ? '' : loadedSourceId;
     syncWorkbenchLoadedSourceToUrl(state.loaded_source_kind, state.loaded_source_id);
     buildConfigDraft();
+    syncAssetAwareShell(loadedAssetContext);
     state.loaded_source_snapshot = stableSerializeConfig(state.config_draft || {});
     syncLoadedSourceUI();
     renderRunHints();

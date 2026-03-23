@@ -16,6 +16,7 @@ Manifest columns:
 - source (optional, default: csindex_official_manual)
 - event_type (optional, default: scheduled)
 - version (optional, default: manual-v1)
+- snapshot_trade_date (optional, structured lineage field)
 - rebalance_calendar_source (optional, default: source)
 - rebalance_calendar_generated_at (optional, ISO-8601 timestamp)
 - source_url (optional, metadata only)
@@ -45,6 +46,7 @@ class SnapshotSpec:
     source: str
     event_type: str = "scheduled"
     version: str = "manual-v1"
+    snapshot_trade_date: str = ""
     rebalance_calendar_source: str = DEFAULT_SOURCE
     rebalance_calendar_generated_at: str = ""
     source_url: str = ""
@@ -157,6 +159,7 @@ def _read_manifest(manifest_path: Path) -> list[SnapshotSpec]:
                     source=str(raw.get("source") or "").strip() or DEFAULT_SOURCE,
                     event_type=str(raw.get("event_type") or "scheduled").strip().lower() or "scheduled",
                     version=str(raw.get("version") or "manual-v1").strip() or "manual-v1",
+                    snapshot_trade_date=str(raw.get("snapshot_trade_date") or "").strip(),
                     rebalance_calendar_source=(
                         str(raw.get("rebalance_calendar_source") or "").strip()
                         or str(raw.get("source") or "").strip()
@@ -265,6 +268,7 @@ def save_flat_snapshots(path: Path, snapshots: Iterable[tuple[SnapshotSpec, list
                 "rebalance_calendar_version",
                 "rebalance_calendar_source",
                 "rebalance_calendar_generated_at",
+                "snapshot_trade_date",
                 "source_url",
                 "source_note",
             ]
@@ -280,6 +284,7 @@ def save_flat_snapshots(path: Path, snapshots: Iterable[tuple[SnapshotSpec, list
                         spec.version,
                         spec.rebalance_calendar_source,
                         spec.rebalance_calendar_generated_at,
+                        spec.snapshot_trade_date,
                         spec.source_url,
                         spec.source_note,
                     ]
@@ -319,6 +324,13 @@ def summarize_build(
     changes_csv: Path,
 ) -> dict[str, Any]:
     effective_dates = [spec.effective_date for spec, _ in snapshots]
+    provider_floor_candidates = sorted(
+        {
+            spec.snapshot_trade_date or spec.effective_date
+            for spec, _ in snapshots
+            if spec.source and "static" not in spec.source.lower()
+        }
+    )
     sources = sorted({spec.source for spec, _ in snapshots if spec.source})
     versions = sorted({spec.version for spec, _ in snapshots if spec.version})
     calendar_sources = sorted({spec.rebalance_calendar_source for spec, _ in snapshots if spec.rebalance_calendar_source})
@@ -338,6 +350,7 @@ def summarize_build(
         "strict_count": bool(strict_count),
         "first_effective_date": effective_dates[0] if effective_dates else None,
         "last_effective_date": effective_dates[-1] if effective_dates else None,
+        "provider_floor_date": provider_floor_candidates[0] if provider_floor_candidates else None,
         "source": sources[0] if len(sources) == 1 else ("mixed" if sources else None),
         "source_values": sources,
         "rebalance_calendar_version": versions[0] if len(versions) == 1 else ("mixed" if versions else None),

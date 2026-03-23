@@ -517,8 +517,8 @@ def get_stock_names(body: dict):
     return {"names": resolve_runtime_stock_names(list(symbols), bt_root=_bt_root())}
 
 
-def get_market_data_sync_status():
-    return sanitize_json(build_market_data_sync_status())
+def get_market_data_sync_status(asset_scope: str | None = None):
+    return sanitize_json(build_market_data_sync_status(asset_scope=asset_scope))
 
 
 # ── Validate data route ────────────────────────────────────────────────────
@@ -553,6 +553,7 @@ def validate_backtest_v2_data(
     industries = _parse_list_from_query(request, "industries")
     universe_limit_raw = _parse_int_from_query(request, "universe_limit", 0)
     universe_limit = universe_limit_raw if universe_limit_raw > 0 else None
+    asset_scope = str(request.query_params.get("asset_scope") or "").strip() or None
     exclude_st = _parse_bool_from_query(request, "exclude_st", True)
     exclude_suspended = _parse_bool_from_query(request, "exclude_suspended", True)
     exclude_star_market = _parse_bool_from_query(request, "exclude_star_market", False)
@@ -570,6 +571,7 @@ def validate_backtest_v2_data(
     try:
         validation_snapshot = resolve_validation_universe(
             bt_root=bt_root,
+            asset_scope=asset_scope,
             universe_mode=universe_mode,
             symbols=symbols,
             industries=industries,

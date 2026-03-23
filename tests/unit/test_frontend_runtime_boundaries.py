@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -93,7 +93,8 @@ def test_frontend_exposes_market_data_sync_status_surface() -> None:
     controller_source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
     assert 'id="wbDataSyncHint"' in index_source
     assert 'id="wbMarketDataSyncStatus"' in index_source
-    assert "apiRequestJson('market_data_sync_status', '/api/backtest_v2/market_data/sync_status')" in api_client_source
+    assert "resolvePreferredAssetScope" in api_client_source
+    assert "/api/backtest_v2/market_data/sync_status?asset_scope=${encodeURIComponent(assetScope)}" in api_client_source
     assert "renderMarketDataSyncStatus" in api_client_source
     assert "refreshMarketDataSyncStatus" in controller_source
 
@@ -192,10 +193,41 @@ def test_frontend_runtime_payloads_and_snapshot_include_asset_scope_context() ->
     controller_source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
     assert "asset_scope:" in config_core_source
     assert "asset_scope: assetScope" in run_controls_source
-    assert "asset_scope: String(state.config_draft?.asset_scope || 'cn_a_equity').trim() || 'cn_a_equity'" in run_controls_source
+    assert "resolvePreferredAssetScope(state.config_draft?.asset_scope)" in run_controls_source
     assert "assetContext: {}" in bridge_source
     assert "normalizeAssetContext" in controller_source
     assert "assetContextFromPayload" in controller_source
+    assert "syncAssetAwareShell" in controller_source
+    assert "resolvePreferredAssetScope" in controller_source
+
+
+def test_frontend_shell_is_asset_aware_instead_of_a_share_global_default() -> None:
+    index_source = _read_repo_file("frontend", "index.html")
+    controller_source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
+    ui_controls_source = _read_repo_file("frontend", "assets", "js", "ui-controls.js")
+    assert 'id="wbAssetScopeGroup"' in index_source
+    assert 'id="wbEtfPresetWrap"' in index_source
+    assert 'id="wbStageS1Btn"' in index_source
+    assert "function syncAssetAwareShell(scope = null)" in controller_source
+    assert "A股ETF" in controller_source
+    assert "ETF 目录研究" in controller_source
+    assert "wbPitStatusLabel" in controller_source
+    assert "cn_etf_first_wave_core" in ui_controls_source
+    assert "S1 ETF Universe" in ui_controls_source
+
+
+def test_results_workbench_exposes_etf_specific_summary_fields() -> None:
+    overview_source = _read_repo_file("frontend", "app", "results-workbench", "components", "ResultsOverview.vue")
+    chart_source = _read_repo_file("frontend", "app", "results-workbench", "components", "ResultsChart.vue")
+    formatting_source = _read_repo_file("frontend", "app", "results-workbench", "helpers", "resultsFormatting.js")
+    assert "ETF批次" in overview_source
+    assert "覆盖窗口" in overview_source
+    assert "价格语义" in overview_source
+    assert "ETF名单" in overview_source
+    assert "portfolioBenchmarkSymbol" in chart_source
+    assert "对比 ${portfolioBenchmarkSymbol.value}" in chart_source
+    assert "ETF研究口径" in formatting_source
+    assert "ETF名单" in formatting_source
 
 
 def test_frontend_industry_picker_uses_api_client_instead_of_raw_fetch() -> None:

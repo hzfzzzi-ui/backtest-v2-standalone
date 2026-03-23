@@ -1,0 +1,51 @@
+study_id: etf/cn_etf_first_wave_core
+title: CN ETF First Wave Core
+asset_scope: cn_etf
+baseline_id: baseline_V10_2
+hypothesis: 第一波核心 ETF 组合可作为 A股 ETF 研究主入口，用于替代个股池去表达宽基、黄金、债券和中小盘风格暴露。
+change_scope:
+  modules_modified:
+    - research_entry.cn_etf.first_wave_core
+variants:
+  - name: CORE
+    description: 首波核心 ETF 预设组
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: ""
+      - path: universe.symbols
+        value:
+          - cn_etf_first_wave_core
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-11-04"
+    end: "2026-03-20"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: outputs/baselines/baseline_V10_2/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

@@ -97,6 +97,7 @@ def build_manual_command(
 def build_import_command(
     *,
     changes_csv: Path,
+    snapshots_csv: Path | None,
     summary_out: Path,
     source_label: str = "",
 ) -> list[str]:
@@ -108,6 +109,8 @@ def build_import_command(
         "--summary-out",
         str(summary_out),
     ]
+    if snapshots_csv is not None:
+        cmd.extend(["--snapshots-csv", str(snapshots_csv)])
     if str(source_label or "").strip():
         cmd.extend(["--source-label", str(source_label).strip()])
     return cmd
@@ -122,6 +125,15 @@ def _run_command_with_env(cmd: list[str], extra_env: dict[str, str] | None = Non
     if extra_env:
         env.update({key: value for key, value in extra_env.items() if value is not None})
     subprocess.run(cmd, check=True, cwd=str(REPO_ROOT), env=env)
+
+
+def _read_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return None
 
 
 def run_refresh(
@@ -150,12 +162,14 @@ def run_refresh(
     import_summary = ops_dir / "csi1000_pit_import_summary.json"
     combined_summary = ops_dir / "csi1000_pit_refresh_summary.json"
     changes_csv = out_dir / "csi1000_pit_calendar_changes.csv"
+    snapshots_csv = out_dir / "csi1000_pit_calendar_snapshots.csv"
 
     fetch_cmd: list[str] | None = None
     manual_cmd: list[str] | None = None
     if resolved_provider == "manual_manifest":
         manifest_path = Path(manual_manifest or DEFAULT_MANUAL_MANIFEST).resolve()
         changes_csv = out_dir / "csi1000_pit_manual_changes.csv"
+        snapshots_csv = out_dir / "csi1000_pit_manual_snapshots.csv"
         manual_cmd = build_manual_command(
             manifest=manifest_path,
             out_dir=out_dir,
@@ -181,10 +195,22 @@ def run_refresh(
     if not skip_import:
         import_cmd = build_import_command(
             changes_csv=changes_csv,
+            snapshots_csv=snapshots_csv,
             summary_out=import_summary,
             source_label=source_label,
         )
         _run_command(import_cmd)
+
+    fetch_payload = _read_json(fetch_summary) if fetch_cmd is not None else None
+    manual_payload = _read_json(manual_summary) if manual_cmd is not None else None
+    import_payload = _read_json(import_summary) if not skip_import else None
+    build_payload = fetch_payload or manual_payload or {}
+    provider_floor_date = (
+        (build_payload.get("build") or {}).get("provider_floor_date")
+        or build_payload.get("provider_floor_date")
+        or ((import_payload or {}).get("sidecar") or {}).get("provider_floor_date")
+    )
+    sidecar_stats = (import_payload or {}).get("sidecar") if isinstance(import_payload, dict) else None
 
     payload = {
         "calendar": str(calendar),
@@ -201,10 +227,13 @@ def run_refresh(
         },
         "outputs": {
             "changes_csv": str(changes_csv),
+            "snapshots_csv": str(snapshots_csv),
             "fetch_summary": str(fetch_summary) if fetch_cmd is not None else None,
             "manual_build_summary": str(manual_summary) if manual_cmd is not None else None,
             "import_summary": str(import_summary) if not skip_import else None,
         },
+        "provider_floor_date": provider_floor_date,
+        "sidecar": sidecar_stats,
     }
     combined_summary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     payload["outputs"]["refresh_summary"] = str(combined_summary)

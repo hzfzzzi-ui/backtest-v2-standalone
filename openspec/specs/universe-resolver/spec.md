@@ -68,18 +68,30 @@ resolver SHALL 返回 `(symbols, meta)` 元组，其中 `meta` 除了原有 `sym
 #### Scenario: 正式入口改为正式历史链物化
 - **WHEN** 系统对外暴露 `HS300_ZZ500` 的正式导入资产或 lineage 说明
 - **THEN** 正式入口 MUST 指向“长历史 seed/正式链物化 -> replace import”
-- **THEN** `Tushare trade_date` 抓取脚本只可作为正式链 tail update 来源或 fallback 说明，MUST NOT 再被描述为单独可用的全历史 formal lineage### Requirement: Universe resolver 必须先按 asset family 分发
-系统 MUST 让 universe resolver 入口先消费 canonical `asset_profile`，再把解析流程分发到对应的 asset-family resolver。当前 A 股 resolver SHALL 只是其中一个 adapter。
+- **THEN** `Tushare trade_date` 抓取脚本只可作为正式链 tail update 来源或 fallback 说明，MUST NOT 再被描述为单独可用的全历史 formal lineage
+
+### Requirement: Universe resolver 必须先按 asset family 分发
+系统 MUST 让 universe resolver 入口先消费 canonical `asset_profile`，再把解析流程分发到对应的 asset-family resolver。当前 A 股 resolver SHALL 只是其中一个 adapter，且 resolver 返回的元数据 MUST 显式暴露 `asset_scope`、`asset_profile_id` 与 `asset_family`。
 
 #### Scenario: 运行 A 股 universe 解析
 - **WHEN** runtime compile 传入当前 canonical A 股 asset profile
 - **THEN** resolver MUST 路由到 A 股 adapter
 - **THEN** 解析结果 MUST 与当前 `V10.1` universe 语义等价
 
+#### Scenario: A 股 resolver 回填资产元数据
+- **WHEN** `asset_scope='cn_a_equity'` 进入 resolver
+- **THEN** 返回的 `meta` MUST 暴露 `asset_scope='cn_a_equity'`
+- **THEN** 返回的 `meta` MUST 暴露 `asset_profile_id` 和 `asset_family`
+
 #### Scenario: 运行未支持资产的 universe 解析
 - **WHEN** runtime compile 传入尚未实现的 asset profile
 - **THEN** resolver MUST 返回显式 unsupported error
 - **THEN** 系统 SHALL NOT 继续复用 A 股 resolver
+
+#### Scenario: 未支持资产的错误必须可审计
+- **WHEN** `asset_scope='us_equity'` 进入当前 resolver
+- **THEN** 错误元信息 MUST 暴露 `asset_scope='us_equity'`
+- **THEN** 错误元信息 MUST 暴露当前 `universe_mode`
 
 ### Requirement: A 股 resolver 规则必须作为 asset-specific adapter 保留
 系统 MUST 将 `ALL_A`、`HS300_ZZ500`、`INDUSTRY`、`CUSTOM` 等现有 A 股 universe 解析规则保留在 A 股 adapter 内，而 SHALL NOT 把它们继续定义成默认全局 universe 主语义。
@@ -141,5 +153,31 @@ resolver SHALL 返回 `(symbols, meta)` 元组，其中 `meta` 除了原有 `sym
 - **WHEN** `membership_mode` 为 dynamic 路径且 `exclude_star_market=true`
 - **THEN** 下游消费的 symbol 列表 SHALL 在进入可交易集合前排除科创板标的
 - **THEN** 实际运行期股票池 SHALL 与验证接口返回的过滤结果一致
+
+### Requirement: Universe resolver 必须支持 `cn_etf` 的受控 `CUSTOM` 解析
+当 `asset_scope='cn_etf'` 且 `universe_mode='CUSTOM'` 时，resolver MUST 只从正式 ETF 目录中解析 ETF 代码，并返回 ETF 资产元数据。resolver SHALL NOT 复用 A 股个股的股票池查询、股票行业筛选或指数成分股逻辑。
+
+#### Scenario: 解析单只 ETF
+- **WHEN** `asset_scope='cn_etf'`、`universe_mode='CUSTOM'` 且 `symbols=['512100.SH']`
+- **THEN** resolver MUST 返回标准化后的 `512100.SH`
+- **THEN** 返回的 `meta` MUST 包含 `asset_scope='cn_etf'` 与 ETF 目录来源标识
+
+#### Scenario: 拒绝未纳入目录的 ETF
+- **WHEN** `asset_scope='cn_etf'`、`universe_mode='CUSTOM'` 且 `symbols` 包含未纳入首波目录的代码
+- **THEN** resolver MUST 返回显式错误
+- **THEN** 系统 SHALL NOT 静默保留未知 symbol 或回退到股票 resolver
+
+### Requirement: Universe resolver 必须支持 ETF 预设组展开
+系统 MUST 支持把 ETF 研究 preset 展开为受控 symbol 列表并进入 `cn_etf` resolver。预设组至少包括 `cn_etf_first_wave_core` 和 `cn_etf_first_wave_all`，且展开结果 MUST 与正式 ETF 目录一致。
+
+#### Scenario: 核心批次 ETF 预设组展开
+- **WHEN** 运行配置声明 `asset_scope='cn_etf'` 且 preset 为 `cn_etf_first_wave_core`
+- **THEN** resolver 或其上游编译链路 MUST 展开出核心批次 6 只 ETF
+- **THEN** resolver 返回的 `meta` MUST 暴露 `preset_id='cn_etf_first_wave_core'`
+
+#### Scenario: 全批次 ETF 预设组展开
+- **WHEN** 运行配置声明 `asset_scope='cn_etf'` 且 preset 为 `cn_etf_first_wave_all`
+- **THEN** resolver 或其上游编译链路 MUST 展开出首波全部 9 只 ETF
+- **THEN** 展开结果 MUST 不包含目录外 symbol
 
 

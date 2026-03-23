@@ -53,9 +53,41 @@ def _calendar_lineage_is_provisional(
     return any(keyword in combined for keyword in _PROVISIONAL_CALENDAR_KEYWORDS)
 
 
+def _append_reason(reason: str, suffix: str) -> str:
+    text = str(reason or "").strip()
+    if not text:
+        return suffix
+    token = f"+{suffix}"
+    if text.endswith(token) or token in text:
+        return text
+    return f"{text}{token}"
+
+
+def _normalize_refresh_membership(refresh_membership: pd.DataFrame | None) -> pd.DataFrame:
+    if refresh_membership is None or refresh_membership.empty:
+        return pd.DataFrame(
+            columns=["index_code", "refresh_date", "symbol", "constituent_start_date", "snapshot_trade_date"]
+        )
+    out = refresh_membership.copy()
+    if "symbol" in out.columns:
+        out["symbol"] = out["symbol"].astype(str).str.lower().str.strip()
+    if "refresh_date" in out.columns:
+        out["refresh_date"] = pd.to_datetime(out["refresh_date"], errors="coerce").dt.normalize()
+    if "constituent_start_date" in out.columns:
+        out["constituent_start_date"] = pd.to_datetime(out["constituent_start_date"], errors="coerce").dt.normalize()
+    if "snapshot_trade_date" in out.columns:
+        out["snapshot_trade_date"] = pd.to_datetime(out["snapshot_trade_date"], errors="coerce").dt.normalize()
+    for column in ("source", "event_type"):
+        if column in out.columns:
+            out[column] = out[column].astype(str).str.strip()
+    out = out.dropna(subset=["symbol", "refresh_date"]).reset_index(drop=True)
+    return out
+
+
 def audit_membership_history(
     membership_history: pd.DataFrame,
     *,
+    refresh_membership: pd.DataFrame | None = None,
     required_start: date | None = None,
     required_end: date | None = None,
     require_calendar_metadata: bool = False,
@@ -84,6 +116,12 @@ def audit_membership_history(
             "rebalance_calendar_generated_at": None,
             "calendar_metadata_complete": False,
             "calendar_metadata_required": bool(require_calendar_metadata),
+            "refresh_sidecar_present": False,
+            "refresh_membership_rows": 0,
+            "refresh_event_count": 0,
+            "zero_diff_refresh_event_count": 0,
+            "covered_refresh_event_count": 0,
+            "provider_floor_date": None,
         }
 
     history = membership_history.copy()
@@ -110,6 +148,35 @@ def audit_membership_history(
     calendar_generated_values = _normalize_distinct_values(history, "rebalance_calendar_generated_at")
     metadata_complete = _calendar_metadata_complete(history)
     provisional_calendar_lineage = _calendar_lineage_is_provisional(calendar_versions, calendar_sources)
+    refresh_history = _normalize_refresh_membership(refresh_membership)
+
+    refresh_membership_rows = int(len(refresh_history.index))
+    refresh_event_dates = (
+        sorted({ts.date().isoformat() for ts in refresh_history["refresh_date"].dropna().tolist()})
+        if "refresh_date" in refresh_history.columns
+        else []
+    )
+    refresh_event_count = int(len(refresh_event_dates))
+    boundary_dates = {ts.date().isoformat() for ts in history["start_date"].dropna().tolist()}
+    boundary_dates.update({ts.date().isoformat() for ts in history["end_date"].dropna().tolist() if pd.notna(ts)})
+    zero_diff_refresh_event_count = int(sum(1 for item in refresh_event_dates if item not in boundary_dates))
+    non_static_refresh = refresh_history
+    if "source" in refresh_history.columns:
+        non_static_refresh = refresh_history.loc[
+            ~refresh_history["source"].astype(str).str.lower().str.contains("static", na=False)
+        ].reset_index(drop=True)
+    provider_dates: list[pd.Timestamp] = []
+    if not non_static_refresh.empty:
+        if "snapshot_trade_date" in non_static_refresh.columns:
+            provider_dates.extend(
+                [ts for ts in non_static_refresh["snapshot_trade_date"].dropna().tolist() if pd.notna(ts)]
+            )
+        if not provider_dates and "refresh_date" in non_static_refresh.columns:
+            provider_dates.extend(
+                [ts for ts in non_static_refresh["refresh_date"].dropna().tolist() if pd.notna(ts)]
+            )
+    provider_floor_ts = min(provider_dates) if provider_dates else None
+    provider_floor_date = provider_floor_ts.date().isoformat() if provider_floor_ts is not None else None
 
     lower_sources = [item.lower() for item in sources]
     rows_eq_symbols = row_count == distinct_symbols
@@ -141,14 +208,19 @@ def audit_membership_history(
 
     if require_calendar_metadata and not metadata_complete and quality == "pit_verified":
         quality = "approximate"
-        reason = f"{reason}+missing_calendar_metadata"
+        reason = _append_reason(reason, "missing_calendar_metadata")
     if provisional_calendar_lineage and quality == "pit_verified":
         quality = "approximate"
-        reason = f"{reason}+provisional_calendar_lineage"
+        reason = _append_reason(reason, "provisional_calendar_lineage")
+    if require_calendar_metadata and refresh_history.empty and quality == "pit_verified":
+        quality = "approximate"
+        reason = _append_reason(reason, "missing_refresh_sidecar")
 
     covers_required_start: bool | None = None
     if required_start is not None:
         start_ts = pd.Timestamp(required_start)
+        if provider_floor_ts is not None and start_ts < provider_floor_ts:
+            reason = _append_reason(reason, "provider_floor_uncovered_start")
         covers_required_start = bool(
             (
                 history["start_date"].le(start_ts)
@@ -157,7 +229,10 @@ def audit_membership_history(
         )
         if not covers_required_start and quality == "pit_verified":
             quality = "approximate"
-            reason = f"{reason}+missing_start_coverage"
+            if provider_floor_ts is not None and start_ts < provider_floor_ts:
+                reason = _append_reason(reason, "provider_floor_uncovered_start")
+            else:
+                reason = _append_reason(reason, "missing_start_coverage")
 
     covers_required_end: bool | None = None
     if required_end is not None:
@@ -170,7 +245,22 @@ def audit_membership_history(
         )
         if not covers_required_end and quality == "pit_verified":
             quality = "approximate"
-            reason = f"{reason}+missing_end_coverage"
+            reason = _append_reason(reason, "missing_end_coverage")
+
+    covered_refresh_event_count = 0
+    if refresh_event_dates:
+        covered_start_ts = pd.Timestamp(required_start) if required_start is not None else None
+        if provider_floor_ts is not None and (covered_start_ts is None or covered_start_ts < provider_floor_ts):
+            covered_start_ts = provider_floor_ts
+        covered_end_ts = pd.Timestamp(required_end) if required_end is not None else None
+        covered_refresh_event_count = int(
+            sum(
+                1
+                for refresh_date in refresh_event_dates
+                if (covered_start_ts is None or pd.Timestamp(refresh_date) >= covered_start_ts)
+                and (covered_end_ts is None or pd.Timestamp(refresh_date) <= covered_end_ts)
+            )
+        )
 
     if quality == "pit_verified":
         status = "ok"
@@ -205,6 +295,12 @@ def audit_membership_history(
         "calendar_metadata_complete": bool(metadata_complete),
         "calendar_metadata_required": bool(require_calendar_metadata),
         "calendar_lineage_provisional": bool(provisional_calendar_lineage),
+        "refresh_sidecar_present": bool(not refresh_history.empty),
+        "refresh_membership_rows": refresh_membership_rows,
+        "refresh_event_count": refresh_event_count,
+        "zero_diff_refresh_event_count": zero_diff_refresh_event_count,
+        "covered_refresh_event_count": covered_refresh_event_count,
+        "provider_floor_date": provider_floor_date,
     }
 
 

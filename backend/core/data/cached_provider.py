@@ -162,6 +162,15 @@ class CachedDataProvider(DataProvider):
     def load_index_constituent_history(self, index_code: str, start: date, end: date) -> pd.DataFrame:
         return self._inner.load_index_constituent_history(index_code, start, end)
 
+    def load_index_constituent_refresh_membership(self, index_code: str) -> pd.DataFrame:
+        return self._inner.load_index_constituent_refresh_membership(index_code)
+
+    def load_cn_etf_catalog(self, symbols: list[str] | None = None) -> pd.DataFrame:
+        return self._inner.load_cn_etf_catalog(symbols)
+
+    def load_cn_etf_coverage(self, symbols: list[str] | None = None) -> pd.DataFrame:
+        return self._inner.load_cn_etf_coverage(symbols)
+
     @property
     def query_audit(self) -> list[dict]:
         return self._inner.query_audit

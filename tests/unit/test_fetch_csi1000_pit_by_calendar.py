@@ -41,11 +41,13 @@ def test_build_calendar_snapshots_uses_tushare_snapshot(monkeypatch) -> None:
     assert spec.source == DEFAULT_TUSHARE_SOURCE
     assert spec.event_type == "scheduled"
     assert spec.version == "seed-v1"
+    assert spec.snapshot_trade_date == "2016-03-01"
     assert spec.rebalance_calendar_source == "csindex_seed_schedule"
     assert spec.rebalance_calendar_generated_at == "2026-03-11T00:00:00+08:00"
     assert len(symbols) == 1000
     assert summary["provider_counts"][DEFAULT_TUSHARE_SOURCE] == 1
     assert summary["snapshot_trade_dates"]["2016-03-01"] == "2016-03-01"
+    assert summary["provider_floor_date"] == "2016-03-01"
 
 
 def test_build_calendar_snapshots_falls_back_to_static_when_enabled(monkeypatch) -> None:
@@ -71,7 +73,9 @@ def test_build_calendar_snapshots_falls_back_to_static_when_enabled(monkeypatch)
 
     spec, symbols = snapshots[0]
     assert spec.source == DEFAULT_STATIC_FALLBACK_SOURCE
+    assert spec.snapshot_trade_date == ""
     assert "static_fallback_reason=" in spec.source_note
     assert len(symbols) == 1000
     assert summary["fallback_event_count"] == 1
     assert summary["fallback_effective_dates"] == ["2016-03-01"]
+    assert summary["provider_floor_date"] is None

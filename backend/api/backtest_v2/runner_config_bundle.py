@@ -94,10 +94,12 @@ def build_runtime_cfg_from_workbench(
     apply_risk_exit_runtime_cfg(cfg, wb_cfg, signal_context=signal_context)
     _apply_regime_engine_cfg(cfg, wb_cfg)
     wb_data_source = wb_cfg.get("data_source") if isinstance(wb_cfg.get("data_source"), dict) else {}
-    wb_data_role = str(wb_data_source.get("data_role") or "").strip()
-    if wb_data_role:
+    if wb_data_source:
         runtime_data_source = dict(cfg.get("data_source") or {})
-        runtime_data_source["data_role"] = wb_data_role
+        for key, value in wb_data_source.items():
+            if value is None:
+                continue
+            runtime_data_source[key] = value
         cfg["data_source"] = sanitize_json(runtime_data_source)
         ds_cfg = DataSourceConfig(**cfg["data_source"])
         schema_mapping = dict(cfg.get("schema_mapping") or {})

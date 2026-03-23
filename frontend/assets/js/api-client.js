@@ -253,7 +253,13 @@ function toggleStatusPanel(force = null) {
 
 async function refreshMarketDataSyncStatus() {
   try {
-    const payload = await apiRequestJson('market_data_sync_status', '/api/backtest_v2/market_data/sync_status');
+    const assetScope = typeof resolvePreferredAssetScope === 'function'
+      ? resolvePreferredAssetScope()
+      : 'cn_a_equity';
+    const payload = await apiRequestJson(
+      'market_data_sync_status',
+      `/api/backtest_v2/market_data/sync_status?asset_scope=${encodeURIComponent(assetScope)}`,
+    );
     renderMarketDataSyncStatus(payload);
     return payload;
   } catch (error) {

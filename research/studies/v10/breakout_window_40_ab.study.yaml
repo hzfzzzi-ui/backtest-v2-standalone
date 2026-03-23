@@ -1,0 +1,30 @@
+study_id: v10/breakout_window_40_ab
+title: V10.2 Breakout Window 40 A/B
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_2
+hypothesis: Shortening the breakout lookback from 45 to 40 may improve entry responsiveness on the current V10.2 PIT CSI800 setup without changing execution timing, ranking, or exits.
+change_scope:
+  modules_modified:
+    - signal_generation.breakout.breakout_window
+variants:
+  - name: B0
+    description: 保持正式 baseline_V10_2 的 breakout_window=45
+  - name: BW40
+    description: 只将 breakout_window 从 45 调到 40
+    config_patches:
+      - path: signal_generation.breakout.breakout_window
+        value: 40
+windows:
+  - key: "1226"
+    role: main
+    start: "2012-01-04"
+    end: "2026-03-20"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: outputs/baselines/baseline_V10_2/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

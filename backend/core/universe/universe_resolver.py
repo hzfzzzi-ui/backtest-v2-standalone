@@ -7,8 +7,13 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from backend.core.config.asset_profiles import canonical_asset_scope
+from backend.core.config.asset_profiles import resolve_asset_profile
 from backend.core.config.models import DBConfig, DBRuntimeConfig
+from backend.core.data.cn_etf_catalog import (
+    expand_etf_preset,
+    preset_batch_id,
+    require_catalog_entry,
+)
 from backend.core.data.mapping import normalize_stock_symbol
 from backend.core.universe.hs300_csi500 import UniverseLoadError, load_constituents_from_db
 from backend.core.universe.lineage import (
@@ -221,12 +226,54 @@ def _resolve_custom(
     }
 
 
+def _resolve_cn_etf_custom(
+    symbols: list[str] | None,
+    universe_limit: int | None = None,
+) -> tuple[list[str], dict[str, Any]]:
+    if not symbols:
+        raise UniverseLoadError(
+            status="ERROR:NO_SYMBOLS",
+            message="cn_etf CUSTOM 模式需要至少一个 ETF symbol",
+            meta={"universe_mode": "CUSTOM", "raw_count": 0},
+        )
+
+    resolved_entries = []
+    preset_name = ""
+    for raw in symbols:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        if text.startswith("cn_etf_"):
+            preset_name = text
+            resolved_entries.extend(require_catalog_entry(symbol) for symbol in expand_etf_preset(text))
+            continue
+        resolved_entries.append(require_catalog_entry(text))
+
+    dedup = {entry.ts_code: entry for entry in resolved_entries}
+    ts_codes = sorted(dedup)
+    if universe_limit is not None:
+        ts_codes = ts_codes[:universe_limit]
+    entries = [dedup[ts_code] for ts_code in ts_codes]
+    resolved_preset_id = preset_name or preset_batch_id(preset_name, ts_codes)
+    return [entry.symbol for entry in entries], {
+        "universe_mode": "CUSTOM",
+        "symbols_source": "cn_etf_catalog_whitelist",
+        "raw_count": len(dedup),
+        "constituents_load_status": "OK",
+        "preset_id": resolved_preset_id,
+        "etf_symbols": [entry.ts_code for entry in entries],
+        "etf_internal_symbols": [entry.symbol for entry in entries],
+        "etf_batch": resolved_preset_id,
+        "catalog_table": "pit_cn_etf_master",
+    }
+
+
 def resolve_universe_by_mode(
     mode: str,
     as_of: date,
     db: DBConfig,
     runtime: DBRuntimeConfig,
-    asset_scope: str = "cn_a_equity",
+    asset_scope: str | None = None,
     industries: list[str] | None = None,
     symbols: list[str] | None = None,
     universe_limit: int | None = None,
@@ -236,31 +283,68 @@ def resolve_universe_by_mode(
     返回 (symbols, meta) 元组。
     """
     mode_upper = (mode or "CUSTOM").strip().upper()
-    canonical_scope = canonical_asset_scope(asset_scope)
+    asset_profile = resolve_asset_profile(asset_scope)
+    canonical_scope = asset_profile.asset_scope
+    common_meta = {
+        "asset_scope": canonical_scope,
+        "asset_profile_id": asset_profile.asset_profile_id,
+        "market_profile_id": asset_profile.market_profile.profile_id,
+        "asset_family": asset_profile.asset_family,
+    }
+
+    if canonical_scope == "cn_etf":
+        if mode_upper != "CUSTOM":
+            raise UniverseLoadError(
+                status="ERROR:UNSUPPORTED_MODE",
+                message=f"cn_etf universe resolver only supports CUSTOM mode, got {mode_upper}",
+                meta={
+                    **common_meta,
+                    "universe_mode": mode_upper,
+                    "raw_count": 0,
+                },
+            )
+        resolved_symbols, meta = _resolve_cn_etf_custom(symbols, universe_limit)
+        meta.update(common_meta)
+        return resolved_symbols, meta
+
+    if canonical_scope != "cn_a_equity":
+        raise UniverseLoadError(
+            status="ERROR:UNSUPPORTED_ASSET_SCOPE",
+            message=f"universe resolver adapter unavailable for asset_scope={canonical_scope}",
+            meta={
+                **common_meta,
+                "universe_mode": mode_upper,
+                "raw_count": 0,
+            },
+        )
 
     if mode_upper == "ALL_A":
         resolved_symbols, meta = _resolve_all_a(as_of, db, runtime, universe_limit)
-        meta["asset_scope"] = canonical_scope
+        meta.update(common_meta)
         return resolved_symbols, meta
     elif mode_upper == "HS300_ZZ500":
         resolved_symbols, meta = _resolve_hs300_zz500(as_of, db, runtime, universe_limit)
-        meta["asset_scope"] = canonical_scope
+        meta.update(common_meta)
         return resolved_symbols, meta
     elif mode_upper == "CSI1000":
         resolved_symbols, meta = _resolve_csi1000(as_of, db, runtime, universe_limit)
-        meta["asset_scope"] = canonical_scope
+        meta.update(common_meta)
         return resolved_symbols, meta
     elif mode_upper == "INDUSTRY":
         resolved_symbols, meta = _resolve_industry(as_of, db, runtime, industries or [], universe_limit)
-        meta["asset_scope"] = canonical_scope
+        meta.update(common_meta)
         return resolved_symbols, meta
     elif mode_upper == "CUSTOM":
         resolved_symbols, meta = _resolve_custom(symbols, universe_limit)
-        meta["asset_scope"] = canonical_scope
+        meta.update(common_meta)
         return resolved_symbols, meta
     else:
         raise UniverseLoadError(
             status=f"ERROR:UNKNOWN_MODE:{mode_upper}",
             message=f"未知的 universe_mode: {mode_upper}",
-            meta={"universe_mode": mode_upper, "raw_count": 0},
+            meta={
+                **common_meta,
+                "universe_mode": mode_upper,
+                "raw_count": 0,
+            },
         )

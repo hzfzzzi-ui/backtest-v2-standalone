@@ -7,8 +7,9 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from backend.core.config.asset_profiles import canonical_asset_scope
+from backend.core.config.asset_profiles import build_asset_context, canonical_asset_scope
 from backend.core.config.models import BacktestConfig
+from backend.core.data.cn_etf_catalog import normalize_cn_etf_symbol, normalize_cn_etf_ts_code
 from backend.core.data.pg_provider import PostgresDataProvider
 from backend.core.data.price_adjust import apply_price_adjustment
 from backend.core.data.provider import DataProvider
@@ -244,6 +245,10 @@ def _build_data_bundle_summary(
         "missing_benchmark_close_rows": missing_benchmark_close,
         "filter_mode": str(universe_meta.get("filter_mode") or "static_preload"),
         "filters_config_present": bool(universe_filters_raw),
+        "coverage_start": universe_meta.get("coverage_start"),
+        "coverage_end": universe_meta.get("coverage_end"),
+        "daily_table": universe_meta.get("daily_table"),
+        "price_series_semantics": universe_meta.get("price_series_semantics"),
     }
 
 
@@ -275,7 +280,14 @@ def build_data_bundle(
     )
 
     universe_limit = int(overrides.get("universe_limit") or 0) or None
-    asset_scope = canonical_asset_scope(overrides.get("asset_scope") or cfg_merged.get("asset_scope") or "cn_a_equity")
+    asset_context = build_asset_context(
+        overrides.get("asset_scope"),
+        config_json=cfg_merged,
+        metadata_scope=(cfg_merged.get("asset_context") or {}).get("asset_scope")
+        if isinstance(cfg_merged.get("asset_context"), dict)
+        else cfg_merged.get("asset_scope"),
+    )
+    asset_scope = canonical_asset_scope(asset_context.get("asset_scope"))
     membership_history = pd.DataFrame(columns=["index_code", "symbol", "start_date", "end_date"])
     dynamic_membership_entry = membership_mode == "PIT_DYNAMIC"
 
@@ -306,6 +318,9 @@ def build_data_bundle(
         end=cfg_obj.universe.end,
     )
     universe_meta["asset_scope"] = asset_scope
+    universe_meta["asset_profile_id"] = str(asset_context.get("asset_profile_id") or "")
+    universe_meta["market_profile_id"] = str(asset_context.get("market_profile_id") or "")
+    universe_meta["asset_family"] = str(asset_context.get("asset_family") or asset_context.get("asset_class") or "")
     if dynamic_membership_entry:
         universe_meta["membership_mode"] = "PIT_DYNAMIC"
         universe_meta["membership_history_mode"] = "PIT_DYNAMIC"
@@ -318,8 +333,14 @@ def build_data_bundle(
         universe_meta["as_of"] = "dynamic_history_range"
         universe_meta["filter_mode"] = "dynamic_membership_gate"
         universe_meta["allow_low_fidelity_history"] = bool(allow_low_fidelity_history)
+        refresh_membership = pd.DataFrame()
+        if str(universe_mode or "").strip().upper() == "CSI1000":
+            refresh_membership = provider.load_index_constituent_refresh_membership(
+                str(universe_meta.get("index_code") or "")
+            )
         membership_audit = audit_membership_history(
             membership_history,
+            refresh_membership=refresh_membership,
             required_start=cfg_obj.universe.start,
             required_end=cfg_obj.universe.end,
             require_calendar_metadata=bool(universe_mode == "CSI1000"),
@@ -341,9 +362,55 @@ def build_data_bundle(
                 f"rebalance_calendar_version={membership_audit.get('rebalance_calendar_version')} "
                 "set universe.allow_low_fidelity_history=true only for explicit low-fidelity research"
             )
+    elif asset_scope == "cn_etf":
+        catalog_df = provider.load_cn_etf_catalog(symbols)
+        coverage_df = provider.load_cn_etf_coverage(symbols)
+        cfg_obj.data_source.data_role = "v1"
+        cfg_obj.data_source.stocks_table = "pams_cn_etf_daily"
+        universe_meta["membership_mode"] = "DIRECT_SYMBOLS"
+        universe_meta["membership_source"] = "cn_etf_catalog_whitelist"
+        universe_meta["membership_data_quality"] = "whitelist_verified"
+        universe_meta["audit_status"] = "PASS"
+        universe_meta["audit_reason"] = ""
+        universe_meta["etf_symbols"] = sorted(
+            {
+                normalize_cn_etf_ts_code(value)
+                for value in catalog_df.get("ts_code", pd.Series(dtype=str)).astype(str).tolist()
+                if str(value).strip()
+            }
+        ) or [normalize_cn_etf_ts_code(symbol) for symbol in symbols]
+        universe_meta["etf_internal_symbols"] = sorted(
+            {
+                normalize_cn_etf_symbol(value)
+                for value in catalog_df.get("symbol", pd.Series(dtype=str)).astype(str).tolist()
+                if str(value).strip()
+            }
+        ) or [normalize_cn_etf_symbol(symbol) for symbol in symbols]
+        if not catalog_df.empty:
+            catalog_batch_id = str(catalog_df.get("batch_id", pd.Series(["first_wave"])).iloc[0])
+            universe_meta.setdefault("etf_batch", catalog_batch_id)
+            universe_meta["catalog_batch_id"] = catalog_batch_id
+        if not coverage_df.empty:
+            coverage_start = pd.to_datetime(coverage_df.get("coverage_start"), errors="coerce").dropna()
+            coverage_end = pd.to_datetime(coverage_df.get("coverage_end"), errors="coerce").dropna()
+            universe_meta["coverage_start"] = coverage_start.min().date().isoformat() if not coverage_start.empty else None
+            universe_meta["coverage_end"] = coverage_end.max().date().isoformat() if not coverage_end.empty else None
+            universe_meta["daily_table"] = str(coverage_df.get("daily_table", pd.Series(["pams_cn_etf_daily"])).iloc[0])
+            universe_meta["price_series_semantics"] = str(
+                coverage_df.get(
+                    "price_series_semantics",
+                    pd.Series(["executable_price_only_not_total_return"]),
+                ).iloc[0]
+            )
+        else:
+            universe_meta["coverage_start"] = None
+            universe_meta["coverage_end"] = None
+            universe_meta["daily_table"] = "pams_cn_etf_daily"
+            universe_meta["price_series_semantics"] = "executable_price_only_not_total_return"
+        cfg_obj.data_source.stocks_table = str(universe_meta.get("daily_table") or "pams_cn_etf_daily")
 
     uf_cfg = None
-    if universe_filters_raw:
+    if universe_filters_raw and asset_scope == "cn_a_equity":
         uf_cfg = UniverseFilterConfig(
             exclude_st=bool(universe_filters_raw.get("exclude_st", True)),
             exclude_delisted=bool(universe_filters_raw.get("exclude_delisted", True)),
@@ -364,7 +431,7 @@ def build_data_bundle(
         )
 
     dynamic_universe_entry = dynamic_all_a_entry or dynamic_membership_entry
-    if universe_filters_raw and dynamic_universe_entry and uf_cfg is not None:
+    if universe_filters_raw and asset_scope == "cn_a_equity" and dynamic_universe_entry and uf_cfg is not None:
         filtered_symbols, excluded_counts = apply_symbol_level_universe_filters(symbols, uf_cfg)
         before_count = int(len(symbols))
         after_count = int(len(filtered_symbols))
@@ -385,9 +452,10 @@ def build_data_bundle(
             universe_meta["after_filters_symbols"] = before_count
 
     _emit_progress(progress_hook, 20, f"Loading OHLCV for {len(symbols)} symbols ({universe_mode})")
-    history = provider.load_ohlcv_daily(symbols, cfg_obj.universe.start, cfg_obj.universe.end, source="stocks")
+    history_symbols = [normalize_cn_etf_symbol(symbol) for symbol in symbols] if asset_scope == "cn_etf" else symbols
+    history = provider.load_ohlcv_daily(history_symbols, cfg_obj.universe.start, cfg_obj.universe.end, source="stocks")
 
-    if universe_filters_raw and not dynamic_universe_entry:
+    if universe_filters_raw and asset_scope == "cn_a_equity" and not dynamic_universe_entry:
         _emit_progress(progress_hook, 30, "Applying static universe filters")
         filter_asof = pd.Timestamp(cfg_obj.universe.start)
         history_for_filter = history
@@ -444,16 +512,21 @@ def build_data_bundle(
         else:
             universe_meta["filter_warning"] = "all symbols filtered out; fallback to pre-filter universe"
             universe_meta["after_filters_symbols"] = before_count
-    elif universe_filters_raw and dynamic_universe_entry:
+    elif universe_filters_raw and asset_scope == "cn_a_equity" and dynamic_universe_entry:
         universe_meta["filter_mode"] = "dynamic_membership_gate" if dynamic_membership_entry else "dynamic_daily_gate"
 
-    benchmark = provider.load_benchmark_daily(cfg_obj.universe.benchmark, cfg_obj.universe.start, cfg_obj.universe.end)
+    benchmark_symbol = str(cfg_obj.universe.benchmark or "").strip()
+    if asset_scope == "cn_etf" and not benchmark_symbol:
+        benchmark_symbol = str(universe_meta.get("etf_symbols", [None])[0] or "")
+        universe_meta["benchmark_source"] = "first_etf_symbol"
+    benchmark = provider.load_benchmark_daily(benchmark_symbol, cfg_obj.universe.start, cfg_obj.universe.end)
     calendar = provider.load_trading_calendar_cn(cfg_obj.universe.start, cfg_obj.universe.end)
     trading_days = [d.date() for d in calendar]
 
-    price_adj_mode = str(overrides.get("price_adj", "hfq")).strip().lower()
+    default_price_adj = "none" if asset_scope == "cn_etf" else "hfq"
+    price_adj_mode = str(overrides.get("price_adj", default_price_adj)).strip().lower()
     if price_adj_mode not in ("hfq", "qfq", "none"):
-        price_adj_mode = "hfq"
+        price_adj_mode = default_price_adj
     raw_history = history
     adj_factor_stats: dict[str, Any] = {}
     if "adj_factor" in history.columns:
@@ -466,18 +539,28 @@ def build_data_bundle(
     signal_history = apply_price_adjustment(history, price_adj_mode) if price_adj_mode != "none" else history
 
     _emit_progress(progress_hook, 40, "Loading auxiliary data")
-    st_history = provider.load_st_history(symbols, cfg_obj.universe.start, cfg_obj.universe.end)
+    st_history = (
+        pd.DataFrame(columns=["ts_code", "start_date", "end_date", "st_type"])
+        if asset_scope == "cn_etf"
+        else provider.load_st_history(symbols, cfg_obj.universe.start, cfg_obj.universe.end)
+    )
     sector_data: dict[str, pd.DataFrame] = {}
-    try:
-        sec_df = provider.load_sector_indices(cfg_obj.universe.start, cfg_obj.universe.end)
-        sector_col = "index_code" if "index_code" in sec_df.columns else "symbol"
-        if not sec_df.empty and sector_col in sec_df.columns:
-            for sym, grp in sec_df.groupby(sector_col):
-                sector_data[str(sym)] = grp.reset_index(drop=True)
-    except Exception:
-        pass
-    industry_map = provider.load_industry_mapping(symbols)
-    industry_history = provider.load_industry_history(symbols, cfg_obj.universe.start, cfg_obj.universe.end)
+    if asset_scope == "cn_a_equity":
+        try:
+            sec_df = provider.load_sector_indices(cfg_obj.universe.start, cfg_obj.universe.end)
+            sector_col = "index_code" if "index_code" in sec_df.columns else "symbol"
+            if not sec_df.empty and sector_col in sec_df.columns:
+                for sym, grp in sec_df.groupby(sector_col):
+                    sector_data[str(sym)] = grp.reset_index(drop=True)
+        except Exception:
+            pass
+        industry_map = provider.load_industry_mapping(symbols)
+        industry_history = provider.load_industry_history(symbols, cfg_obj.universe.start, cfg_obj.universe.end)
+    else:
+        industry_map = {}
+        industry_history = pd.DataFrame(
+            columns=["ts_code", "start_date", "end_date", "standard", "industry_l1", "industry_l2"]
+        )
 
     summary = _build_data_bundle_summary(
         symbols=symbols,

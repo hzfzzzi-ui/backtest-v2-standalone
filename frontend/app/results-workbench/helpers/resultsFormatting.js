@@ -1,4 +1,4 @@
-import { buildAgentMarkdownFromSnapshot } from './agentReportFormatting.js';
+﻿import { buildAgentMarkdownFromSnapshot } from './agentReportFormatting.js';
 import { buildUnifiedStageFunnelFromSnapshot } from './stageFunnelFormatting.js';
 
 function toFiniteNumber(value) {
@@ -530,6 +530,26 @@ export function summarizeSnapshot(snapshot) {
         : fmtInt(firstDefined(filteredCountNum, rawCountNum))
     )
     : (filteredCountNum != null ? fmtInt(filteredCountNum) : '-');
+  const assetScope = String(
+    firstDefined(
+      meta.data?.asset_scope,
+      snapshot?.assetContext?.asset_scope,
+      result.asset_scope,
+      'cn_a_equity',
+    ) || 'cn_a_equity',
+  ).trim().toLowerCase();
+  const isCnEtf = assetScope === 'cn_etf';
+  const etfSymbols = Array.isArray(meta.data?.etf_symbols)
+    ? meta.data.etf_symbols.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const coverageStart = firstDefined(meta.data?.coverage_start, meta.data_bundle?.coverage_start);
+  const coverageEnd = firstDefined(meta.data?.coverage_end, meta.data_bundle?.coverage_end);
+  const coverageWindow = coverageStart && coverageEnd ? `${coverageStart} ~ ${coverageEnd}` : '-';
+  const priceSeriesSemantics = firstDefined(
+    meta.data?.price_series_semantics,
+    meta.data_bundle?.price_series_semantics,
+    '-',
+  ) || '-';
   const strategy = strategyFields(snapshot);
   const auditSummary = artifacts.audit?.summary || {};
   const dailyReturns = buildDatedReturns(navSeries).map((item) => item.value);
@@ -545,11 +565,19 @@ export function summarizeSnapshot(snapshot) {
   );
 
   return {
+    assetScope,
+    universeSectionTitle: isCnEtf ? 'ETF研究口径' : '股票池口径',
+    universeModeLabel: isCnEtf ? 'ETF名单' : '股票池',
+    universeCountLabel: isCnEtf ? 'ETF数量' : '标的数',
+    etfBatch: firstDefined(meta.data?.etf_batch, meta.data_bundle?.etf_batch, '-') || '-',
+    etfSymbols: etfSymbols.length ? etfSymbols.join(', ') : '-',
+    coverageWindow,
+    priceSeriesSemantics,
     expId: result.exp_id || '-',
     status: result.status || 'WAITING',
     effectiveExecutionStartDate: effectiveExecutionStartDate || '-',
     universeRange: `${firstDefined(meta.data?.start, '-') || '-'} ~ ${firstDefined(meta.data?.end, '-') || '-'}`,
-    benchmark: firstDefined(meta.data?.benchmark, '-') || '-',
+    benchmark: firstDefined(meta.data?.benchmark, etfSymbols[0], '-') || '-',
     universeMode: firstDefined(meta.universe?.universe_mode, meta.data?.universe_mode, '-') || '-',
     universeCount,
     strategy: strategy.strategy,
@@ -620,3 +648,4 @@ export function normalizeSymbolRows(snapshot) {
       .filter(Boolean)
     : [];
 }
+

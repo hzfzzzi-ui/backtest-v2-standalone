@@ -36,5 +36,5 @@ def get_stock_names(body: dict):
 
 
 @router.get("/api/backtest_v2/market_data/sync_status")
-def get_market_data_sync_status():
-    return impl.get_market_data_sync_status()
+def get_market_data_sync_status(asset_scope: str | None = Query(default=None)):
+    return impl.get_market_data_sync_status(asset_scope=asset_scope)

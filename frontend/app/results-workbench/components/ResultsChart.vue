@@ -13,7 +13,7 @@ const props = defineProps({
   },
 });
 
-const SHANGHAI_INDEX_SYMBOL = '000001.SH';
+const DEFAULT_PORTFOLIO_BENCHMARK_SYMBOL = '000001.SH';
 
 const singleChartRef = ref(null);
 const portfolioTopChartRef = ref(null);
@@ -32,7 +32,12 @@ const selectedSymbol = computed(() => {
 });
 
 const isSymbolMode = computed(() => view.value.chartMode === 'symbol' && !!selectedSymbol.value);
-const benchmarkToggleLabel = computed(() => (isSymbolMode.value ? '对比基准' : '对比上证'));
+const portfolioBenchmarkSymbol = computed(() => {
+  const metaData = artifacts.value.run_meta?.data || {};
+  const etfSymbols = Array.isArray(metaData.etf_symbols) ? metaData.etf_symbols : [];
+  return String(metaData.benchmark || etfSymbols[0] || DEFAULT_PORTFOLIO_BENCHMARK_SYMBOL).trim() || DEFAULT_PORTFOLIO_BENCHMARK_SYMBOL;
+});
+const benchmarkToggleLabel = computed(() => (isSymbolMode.value ? '对比基准' : `对比 ${portfolioBenchmarkSymbol.value}`));
 const showPortfolioBenchmark = computed(() => !isSymbolMode.value && !!view.value.showBenchmark);
 
 const REGIME_MODE_LABELS = {
@@ -171,13 +176,14 @@ const ensurePortfolioBenchmarkSeries = async () => {
   const navSeries = Array.isArray(artifacts.value.navSeries) ? artifacts.value.navSeries : [];
   const start = String(navSeries[0]?.date || '').trim();
   const end = String(navSeries[navSeries.length - 1]?.date || '').trim();
-  const cacheKey = `${SHANGHAI_INDEX_SYMBOL}:${start}:${end}`;
+  const symbol = portfolioBenchmarkSymbol.value;
+  const cacheKey = `${symbol}:${start}:${end}`;
   if (portfolioBenchmarkCache.value[cacheKey]) return portfolioBenchmarkCache.value[cacheKey];
   if (typeof window.loadBenchmarkSeries !== 'function') return null;
-  const loaded = await window.loadBenchmarkSeries(navSeries, { symbol: SHANGHAI_INDEX_SYMBOL, absolute: true });
+  const loaded = await window.loadBenchmarkSeries(navSeries, { symbol, absolute: true });
   portfolioBenchmarkCache.value = {
     ...portfolioBenchmarkCache.value,
-    [cacheKey]: loaded || { points: [], ohlc: [], symbol: SHANGHAI_INDEX_SYMBOL },
+    [cacheKey]: loaded || { points: [], ohlc: [], symbol },
   };
   return portfolioBenchmarkCache.value[cacheKey];
 };
@@ -201,7 +207,7 @@ const chartFooter = computed(() => {
     ].filter(Boolean).join(' | ');
   }
   const navSeries = Array.isArray(artifacts.value.navSeries) ? artifacts.value.navSeries : [];
-  return `净值 ${String(navSeries.length || 0)} 点 | 上图 NAV + 上证归一化 | 下图 ${SHANGHAI_INDEX_SYMBOL} 绝对价格`;
+  return `净值 ${String(navSeries.length || 0)} 点 | 上图 NAV + 基准归一化 | 下图 ${portfolioBenchmarkSymbol.value} 绝对价格`;
 });
 
 const groupLoadStatus = computed(() => {
@@ -280,7 +286,7 @@ async function redrawChart() {
     aggregateNav(navSeries, chartRange),
     {
       showBenchmark: !!view.value.showBenchmark,
-      benchmarkSymbol: SHANGHAI_INDEX_SYMBOL,
+      benchmarkSymbol: portfolioBenchmarkSymbol.value,
       marketStates,
     },
   );
@@ -385,24 +391,24 @@ watch(
         }"
       >
         <div class="wb-chart-stack-panel" :style="{ minHeight: showPortfolioBenchmark ? '344px' : '520px' }">
-          <div class="wb-mini" style="margin-bottom: 6px;">上图：NAV + 上证归一化收益曲线</div>
+          <div class="wb-mini" style="margin-bottom: 6px;">上图：NAV + 基准归一化收益曲线</div>
           <div id="wbResultsWorkbenchChartTop" ref="portfolioTopChartRef" class="wb-chart wb-chart-main" :style="{ height: showPortfolioBenchmark ? '320px' : '496px' }">
             <div class="wb-empty">
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
                 <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
               </svg>
-              <span>运行实验后，在这里查看 NAV 与上证归一化收益曲线。</span>
+              <span>运行实验后，在这里查看 NAV 与基准归一化收益曲线。</span>
             </div>
           </div>
         </div>
         <div v-show="showPortfolioBenchmark" class="wb-chart-stack-panel" style="min-height: 244px;">
-          <div class="wb-mini" style="margin-bottom: 6px;">下图：上证指数绝对价格</div>
+          <div class="wb-mini" style="margin-bottom: 6px;">下图：基准绝对价格</div>
           <div id="wbResultsWorkbenchChartBottom" ref="portfolioBottomChartRef" class="wb-chart wb-chart-main" style="height: 220px;">
             <div class="wb-empty">
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
                 <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
               </svg>
-              <span>运行实验后，在这里查看上证指数 K 线。</span>
+              <span>运行实验后，在这里查看基准 K 线。</span>
             </div>
           </div>
         </div>

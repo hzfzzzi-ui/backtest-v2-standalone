@@ -1,0 +1,30 @@
+study_id: v10/csi800_vs_csi1000_pit_1526_ab
+title: V10.2 CSI800 vs CSI1000 PIT A/B
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_2
+hypothesis: Switching the PIT constituent universe from CSI800 to CSI1000 over the same 2015-2026 window may materially change opportunity breadth, liquidity quality, and trend-shell behavior even when execution, ranking, exits, and benchmark regime stay unchanged.
+change_scope:
+  modules_modified:
+    - universe.universe_mode
+variants:
+  - name: B0
+    description: 保持 baseline_V10_2 当前的 CSI800 PIT 股票池
+  - name: CSI1000
+    description: 只将股票池从 CSI800 PIT 切到 CSI1000 PIT
+    config_patches:
+      - path: universe_mode
+        value: CSI1000
+windows:
+  - key: "1526"
+    role: main
+    start: "2015-07-31"
+    end: "2026-03-20"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: outputs/baselines/baseline_V10_2/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

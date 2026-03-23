@@ -9,6 +9,7 @@ import pandas as pd
 
 from backend.core.config.models import DBConfig, DBRuntimeConfig, DataSourceConfig
 from .errors import DatabaseConnectionError, DatabaseQueryError
+from .cn_etf_catalog import normalize_cn_etf_symbol, normalize_cn_etf_ts_code
 from .mapping import normalize_index_symbol, normalize_stock_symbol, safe_ident, to_canonical
 from .provider import DataProvider
 from .rules_loader import load_rules_csv
@@ -164,7 +165,10 @@ class PostgresDataProvider(DataProvider):
             f"AND {safe_ident(mapping['symbol'])} = ANY(%s) "
             f"ORDER BY {safe_ident(mapping['date'])}, {safe_ident(mapping['symbol'])}"
         )
-        db_symbols = [normalize_stock_symbol(s) for s in symbols]
+        if resolved_table == "pams_cn_etf_daily":
+            db_symbols = [normalize_cn_etf_symbol(s) for s in symbols]
+        else:
+            db_symbols = [normalize_stock_symbol(s) for s in symbols]
         raw = self._exec_df(
             q,
             (start, end, db_symbols),
@@ -223,13 +227,7 @@ class PostgresDataProvider(DataProvider):
                 idx_can["symbol"] = benchmark_symbol
                 return idx_can
 
-        if not self._source.allow_cn_index_in_stocks_table:
-            raise ValueError(
-                f"benchmark {benchmark_symbol} not found in {self._source.index_table} and fallback is disabled"
-            )
-
         resolved_stocks_table = self._resolved_stocks_table()
-        stock_table = safe_ident(resolved_stocks_table)
         stock_map = self._resolved_stocks_mapping()
         stock_existing_cols = self._get_table_columns(resolved_stocks_table)
         cols = self._filter_existing_cols(
@@ -239,9 +237,41 @@ class PostgresDataProvider(DataProvider):
         )
         cols_sql = ", ".join(safe_ident(c) for c in cols)
 
+        if resolved_stocks_table == "pams_cn_etf_daily":
+            etf_symbol = normalize_cn_etf_symbol(benchmark_symbol)
+            q = (
+                f"SELECT {cols_sql} FROM {safe_ident(resolved_stocks_table)} "
+                f"WHERE {safe_ident(stock_map['date'])} >= %s AND {safe_ident(stock_map['date'])} <= %s "
+                f"AND {safe_ident(stock_map['symbol'])} = %s "
+                f"ORDER BY {safe_ident(stock_map['date'])}, {safe_ident(stock_map['symbol'])}"
+            )
+            raw = self._exec_df(
+                q,
+                (start, end, etf_symbol),
+                {
+                    "provider": "postgres",
+                    "source": "benchmark_etf",
+                    "table": resolved_stocks_table,
+                    "symbols": [etf_symbol],
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                },
+            )
+            can, warnings = to_canonical(raw, stock_map)
+            self._audit[-1]["warnings"] = warnings
+            if can.empty:
+                raise ValueError(f"benchmark {benchmark_symbol} empty in {resolved_stocks_table}")
+            can["symbol"] = normalize_cn_etf_ts_code(benchmark_symbol)
+            return can
+
+        if not self._source.allow_cn_index_in_stocks_table:
+            raise ValueError(
+                f"benchmark {benchmark_symbol} not found in {self._source.index_table} and fallback is disabled"
+            )
+
         filter_col = safe_ident(self._source.cn_index_filter_column)
         stock_q = (
-            f"SELECT {cols_sql} FROM {stock_table} "
+            f"SELECT {cols_sql} FROM {safe_ident(resolved_stocks_table)} "
             f"WHERE {safe_ident(stock_map['date'])} >= %s AND {safe_ident(stock_map['date'])} <= %s "
             f"AND {safe_ident(stock_map['symbol'])} = %s "
             f"AND {filter_col} = %s "
@@ -731,5 +761,143 @@ class PostgresDataProvider(DataProvider):
         raw["symbol"] = raw["symbol"].astype(str).map(normalize_stock_symbol)
         return raw
 
+    def load_index_constituent_refresh_membership(self, index_code: str) -> pd.DataFrame:
+        table = "pit_index_constituent_refresh_membership"
+        try:
+            existing = self._get_table_columns(table)
+        except Exception:
+            return pd.DataFrame(
+                columns=["index_code", "refresh_date", "symbol", "constituent_start_date", "snapshot_trade_date"]
+            )
+        if not existing:
+            return pd.DataFrame(
+                columns=["index_code", "refresh_date", "symbol", "constituent_start_date", "snapshot_trade_date"]
+            )
+
+        base_cols = ["index_code", "refresh_date", "symbol", "constituent_start_date"]
+        optional_cols = [
+            col
+            for col in (
+                "source",
+                "event_type",
+                "snapshot_trade_date",
+                "rebalance_calendar_version",
+                "rebalance_calendar_source",
+                "rebalance_calendar_generated_at",
+            )
+            if col in existing
+        ]
+        select_cols = base_cols + optional_cols
+        q = (
+            f"SELECT {', '.join(select_cols)} "
+            f"FROM {table} "
+            "WHERE index_code = %s "
+            "ORDER BY refresh_date, symbol"
+        )
+        raw = self._exec_df(
+            q,
+            (str(index_code).strip().upper(),),
+            {
+                "provider": "postgres",
+                "source": "index_constituent_refresh_membership",
+                "table": table,
+                "symbols": [str(index_code).strip().upper()],
+            },
+        )
+        if raw.empty:
+            return pd.DataFrame(columns=select_cols)
+        raw = raw.copy()
+        raw["index_code"] = raw["index_code"].astype(str).str.upper()
+        raw["symbol"] = raw["symbol"].astype(str).map(normalize_stock_symbol)
+        return raw
+
     def load_instrument_rules(self, symbols: list[str]) -> pd.DataFrame:
         return load_rules_csv(self._rules_path, symbols)
+
+    def load_cn_etf_catalog(self, symbols: list[str] | None = None) -> pd.DataFrame:
+        table = "pit_cn_etf_master"
+        try:
+            existing = self._get_table_columns(table)
+        except Exception:
+            return super().load_cn_etf_catalog(symbols)
+        if not existing:
+            return super().load_cn_etf_catalog(symbols)
+        cols = [
+            col
+            for col in (
+                "ts_code",
+                "symbol",
+                "name",
+                "exchange",
+                "batch_id",
+                "exposure_bucket",
+                "list_date",
+                "delist_date",
+            )
+            if col in existing
+        ]
+        q = f"SELECT {', '.join(safe_ident(col) for col in cols)} FROM {safe_ident(table)}"
+        params: tuple[Any, ...] = ()
+        if symbols:
+            normalized_symbols = sorted({normalize_cn_etf_symbol(symbol) for symbol in symbols if str(symbol).strip()})
+            normalized_ts_codes = sorted({normalize_cn_etf_ts_code(symbol) for symbol in symbols if str(symbol).strip()})
+            q += " WHERE symbol = ANY(%s) OR ts_code = ANY(%s)"
+            params = (normalized_symbols, normalized_ts_codes)
+        q += " ORDER BY ts_code"
+        return self._exec_df(
+            q,
+            params,
+            {
+                "provider": "postgres",
+                "source": "cn_etf_catalog",
+                "table": table,
+                "symbols": sorted(symbols or []),
+                "start": "",
+                "end": "",
+            },
+        )
+
+    def load_cn_etf_coverage(self, symbols: list[str] | None = None) -> pd.DataFrame:
+        table = "cn_etf_data_coverage_daily"
+        try:
+            existing = self._get_table_columns(table)
+        except Exception:
+            return super().load_cn_etf_coverage(symbols)
+        if not existing:
+            return super().load_cn_etf_coverage(symbols)
+        cols = [
+            col
+            for col in (
+                "ts_code",
+                "symbol",
+                "batch_id",
+                "exposure_bucket",
+                "coverage_start",
+                "coverage_end",
+                "row_count",
+                "latest_refresh_at",
+                "daily_table",
+                "price_series_semantics",
+            )
+            if col in existing
+        ]
+        q = f"SELECT {', '.join(safe_ident(col) for col in cols)} FROM {safe_ident(table)}"
+        params: tuple[Any, ...] = ()
+        if symbols:
+            normalized_symbols = sorted({normalize_cn_etf_symbol(symbol) for symbol in symbols if str(symbol).strip()})
+            normalized_ts_codes = sorted({normalize_cn_etf_ts_code(symbol) for symbol in symbols if str(symbol).strip()})
+            q += " WHERE symbol = ANY(%s) OR ts_code = ANY(%s)"
+            params = (normalized_symbols, normalized_ts_codes)
+        q += " ORDER BY ts_code"
+        return self._exec_df(
+            q,
+            params,
+            {
+                "provider": "postgres",
+                "source": "cn_etf_coverage",
+                "table": table,
+                "symbols": sorted(symbols or []),
+                "start": "",
+                "end": "",
+            },
+        )

@@ -53,6 +53,17 @@
       "close": "close",
       "volume": "volume",
       "amount": "turnover"
+    },
+    "pams_cn_etf_daily": {
+      "date": "trade_date",
+      "symbol": "symbol",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "amount",
+      "turnover": "turnover"
     }
   },
   "data_scope": {

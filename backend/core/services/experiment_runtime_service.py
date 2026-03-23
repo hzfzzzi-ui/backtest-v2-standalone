@@ -21,6 +21,7 @@ from backend.core.tools.saved_config_access import resolve_runtime_config_source
 _CANONICAL_ASSET_CONTEXT_KEYS = {
     "asset_scope",
     "asset_profile_id",
+    "asset_family",
     "asset_class",
     "market_profile_id",
     "execution_profile_id",
@@ -164,8 +165,23 @@ def run_experiment_request_body(
             elif effective_wb_cfg is None:
                 effective_wb_cfg = request_semantic_blocks
 
+    effective_wb_cfg_dict = effective_wb_cfg if isinstance(effective_wb_cfg, dict) else {}
+    asset_metadata_scope = None
+    if isinstance(effective_wb_cfg_dict.get("asset_context"), dict):
+        asset_metadata_scope = effective_wb_cfg_dict.get("asset_context", {}).get("asset_scope")
+    elif isinstance(base_cfg.get("asset_context"), dict):
+        asset_metadata_scope = base_cfg.get("asset_context", {}).get("asset_scope")
+    elif base_cfg.get("asset_scope") is not None:
+        asset_metadata_scope = base_cfg.get("asset_scope")
+
+    base_asset_context = build_asset_context(
+        getattr(body, "asset_scope", None),
+        config_json=effective_wb_cfg_dict if effective_wb_cfg_dict else base_cfg,
+        metadata_scope=asset_metadata_scope,
+    )
+    canonical_scope = canonical_asset_scope(base_asset_context.get("asset_scope"))
+
     overrides: dict[str, Any] = {}
-    canonical_scope = canonical_asset_scope(getattr(body, "asset_scope", "cn_a_equity"))
     overrides["asset_scope"] = canonical_scope
     if not use_script_cfg and not runtime_config_supplied and not isinstance(semantic_cfg_input, dict):
         if body.symbols:
@@ -246,12 +262,6 @@ def run_experiment_request_body(
         else:
             overrides["workbench_config"] = wb_cfg
             overrides["original_workbench_config"] = semantic_cfg_input if isinstance(semantic_cfg_input, dict) else wb_cfg
-    effective_wb_cfg_dict = effective_wb_cfg if isinstance(effective_wb_cfg, dict) else {}
-    base_asset_context = build_asset_context(
-        canonical_scope,
-        config_json=effective_wb_cfg_dict if effective_wb_cfg_dict else base_cfg,
-        metadata_scope=(effective_wb_cfg_dict.get("asset_context") or {}).get("asset_scope") if isinstance(effective_wb_cfg_dict.get("asset_context"), dict) else None,
-    )
     extra_asset_context = (
         dict(effective_wb_cfg_dict.get("asset_context") or {})
         if isinstance(effective_wb_cfg_dict.get("asset_context"), dict)
