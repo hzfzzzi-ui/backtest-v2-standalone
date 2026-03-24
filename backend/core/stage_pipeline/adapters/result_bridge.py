@@ -23,6 +23,93 @@ def _merge_count_map(target: dict[str, int], source: dict[str, Any] | None) -> d
     return target
 
 
+def _parse_governor_budget(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return dict(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return None
+    return dict(parsed) if isinstance(parsed, dict) else None
+
+
+def _build_governor_budget_audit(runtime: Any) -> dict[str, Any] | None:
+    rows = [dict(row) for row in list(getattr(runtime, "daily_rows", []) or ())]
+    if not rows:
+        return None
+    reason_counts: dict[str, int] = {}
+    drawdown_state_counts: dict[str, int] = {}
+    recovery_state_counts: dict[str, int] = {}
+    cooldown_state_counts: dict[str, int] = {}
+    reduced_budget_days = 0
+    defense_floor_active_days = 0
+    sleeve_budget_reject_days = 0
+    flagged_days: list[dict[str, Any]] = []
+    latest_payload: dict[str, Any] | None = None
+    for row in rows:
+        payload = _parse_governor_budget(row.get("governor_budget_json"))
+        if not isinstance(payload, dict) or not payload:
+            continue
+        latest_payload = payload
+        _merge_count_map(reason_counts, {code: 1 for code in list(payload.get("budget_reason_codes") or ())})
+        drawdown_state = str(payload.get("drawdown_state") or "").strip()
+        recovery_state = str(payload.get("recovery_state") or "").strip()
+        cooldown_state = str(payload.get("cooldown_state") or "").strip()
+        if drawdown_state:
+            drawdown_state_counts[drawdown_state] = int(drawdown_state_counts.get(drawdown_state, 0)) + 1
+        if recovery_state:
+            recovery_state_counts[recovery_state] = int(recovery_state_counts.get(recovery_state, 0)) + 1
+        if cooldown_state:
+            cooldown_state_counts[cooldown_state] = int(cooldown_state_counts.get(cooldown_state, 0)) + 1
+        total_risk_budget = payload.get("total_risk_budget")
+        if total_risk_budget is not None:
+            try:
+                if float(total_risk_budget) < 0.999:
+                    reduced_budget_days += 1
+            except Exception:
+                pass
+        defense_floor = payload.get("defense_floor")
+        try:
+            if defense_floor is not None and float(defense_floor) > 0.0:
+                defense_floor_active_days += 1
+        except Exception:
+            pass
+        reject_count = int(payload.get("sleeve_budget_reject_count", 0) or 0)
+        if reject_count > 0:
+            sleeve_budget_reject_days += 1
+        if reject_count > 0 or bool(payload.get("budget_reason_codes")):
+            flagged_days.append(
+                {
+                    "date": str(row.get("date") or ""),
+                    "drawdown_state": drawdown_state,
+                    "recovery_state": recovery_state,
+                    "cooldown_state": cooldown_state,
+                    "budget_reason_codes": list(payload.get("budget_reason_codes") or ()),
+                    "sleeve_budget_reject_count": reject_count,
+                    "budget_diagnostics": dict(payload.get("budget_diagnostics") or {}),
+                }
+            )
+    if latest_payload is None:
+        return None
+    return {
+        "contract_version": str(latest_payload.get("contract_version") or "cn_a_governor_budget@1"),
+        "summary": {
+            "budget_reason_counts": dict(sorted(reason_counts.items())),
+            "drawdown_state_counts": dict(sorted(drawdown_state_counts.items())),
+            "recovery_state_counts": dict(sorted(recovery_state_counts.items())),
+            "cooldown_state_counts": dict(sorted(cooldown_state_counts.items())),
+            "reduced_budget_days": int(reduced_budget_days),
+            "defense_floor_active_days": int(defense_floor_active_days),
+            "sleeve_budget_reject_days": int(sleeve_budget_reject_days),
+        },
+        "latest": latest_payload,
+        "flagged_days": flagged_days,
+    }
+
+
 def _build_multi_alpha_audit(runtime: Any) -> dict[str, Any] | None:
     rows = [dict(row) for row in list(getattr(runtime, "composition_audit_rows", []) or ())]
     if not rows:
@@ -92,6 +179,13 @@ def augment_metrics(runtime: Any, metrics: dict[str, Any]) -> None:
         metrics["global_risk_override_count"] = int(summary.get("global_risk_override_count", 0) or 0)
         audit_payload = dict(metrics.get("audit") or {})
         audit_payload.update(multi_alpha_audit)
+        metrics["audit"] = audit_payload
+    governor_budget_audit = _build_governor_budget_audit(runtime)
+    if isinstance(governor_budget_audit, dict):
+        summary = dict(governor_budget_audit.get("summary") or {})
+        metrics["risk_budget_active_days"] = int(summary.get("reduced_budget_days", 0) or 0)
+        audit_payload = dict(metrics.get("audit") or {})
+        audit_payload["governor_budget"] = governor_budget_audit
         metrics["audit"] = audit_payload
     if runtime.route_id == "provider_breakout_runtime":
         diag = dict(getattr(runtime.provider, "diag_reason_counts", {}) or {})

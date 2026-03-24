@@ -165,6 +165,68 @@ def test_validate_semantic_config_json_accepts_data_source_data_role() -> None:
     assert out["data_source"]["data_role"] == "v2_canonical"
 
 
+def test_validate_semantic_config_json_accepts_governed_a_share_contract() -> None:
+    payload = _valid_config()
+    payload["governed_a_share"] = {
+        "enabled": True,
+        "system_id": "cn_a_governed_multi_sleeve_phase1",
+        "stock_alpha_core": {
+            "sleeve_id": "cn_stock_trend_alpha_core",
+            "budget_semantics": "consume_governor_sleeve_budget",
+            "total_budget_owner": "global_portfolio_governor",
+            "local_budget_controls": ["max_positions", "industry_cap"],
+            "phase1_excluded_capabilities": ["cn_etf_beta"],
+        },
+        "etf_beta": {
+            "core_beta_symbols": ["510300.SH", "512100.SH"],
+            "budget_semantics": "consume_governor_sleeve_budget",
+            "total_budget_owner": "global_portfolio_governor",
+            "source_entry_type": "cn_etf_research_entry",
+            "phase1_scope_mode": "core_beta_plus_limited_defense",
+        },
+        "regime": {"manual_override": {"active": False, "scope": "runtime"}},
+    }
+
+    out = validate_semantic_config_json(payload)
+
+    assert out["governed_a_share"]["system_id"] == "cn_a_governed_multi_sleeve_phase1"
+    assert out["governed_a_share"]["stock_alpha_core"]["sleeve_id"] == "cn_stock_trend_alpha_core"
+    assert out["governed_a_share"]["etf_beta"]["core_beta_symbols"] == ["510300.SH", "512100.SH"]
+    assert out["governed_a_share"]["etf_beta"]["source_entry_type"] == "cn_etf_research_entry"
+
+
+def test_validate_semantic_config_json_infers_governed_a_share_contract_for_cn_a() -> None:
+    out = validate_semantic_config_json(_valid_config())
+
+    assert out["governed_a_share"]["system_id"] == "cn_a_governed_multi_sleeve_phase1"
+    assert out["governed_a_share"]["stock_alpha_core"]["sleeve_id"] == "cn_stock_trend_alpha_core"
+    assert out["governed_a_share"]["stock_alpha_core"]["legacy_anchor"] == "baseline_V10.1"
+    assert out["governed_a_share"]["stock_alpha_core"]["budget_semantics"] == "consume_governor_sleeve_budget"
+    assert out["governed_a_share"]["stock_alpha_core"]["total_budget_owner"] == "global_portfolio_governor"
+    assert out["governed_a_share"]["stock_alpha_core"]["phase1_excluded_capabilities"] == [
+        "value_bluechip_satellite",
+        "cn_etf_beta",
+        "insurance_overlay",
+    ]
+
+
+def test_compile_semantic_config_json_preserves_governed_a_share_contract() -> None:
+    payload = _valid_config()
+    payload["governed_a_share"] = {
+        "enabled": True,
+        "stock_alpha_core": {"sleeve_id": "cn_stock_trend_alpha_core", "legacy_anchor": "baseline_V10.1"},
+        "etf_beta": {"limited_defense_candidates": ["512890.SH"]},
+    }
+
+    compiled = compile_semantic_config_json(payload)
+
+    resolved_json = compiled["resolved_config"]["config_json"]
+    assert resolved_json["governed_a_share"]["stock_alpha_core"]["sleeve_id"] == "cn_stock_trend_alpha_core"
+    assert resolved_json["governed_a_share"]["stock_alpha_core"]["legacy_anchor"] == "baseline_V10.1"
+    assert resolved_json["governed_a_share"]["stock_alpha_core"]["budget_semantics"] == "consume_governor_sleeve_budget"
+    assert resolved_json["governed_a_share"]["etf_beta"]["limited_defense_candidates"] == ["512890.SH"]
+
+
 def test_validate_semantic_config_json_accepts_regime_engine_fields() -> None:
     payload = _valid_config()
     payload["regime_engine"] = {

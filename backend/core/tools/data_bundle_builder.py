@@ -8,6 +8,10 @@ from typing import Any, Callable
 import pandas as pd
 
 from backend.core.config.asset_profiles import build_asset_context, canonical_asset_scope
+from backend.core.config.cn_a_governed_mainline import (
+    build_cn_etf_beta_phase1_summary,
+    build_governed_a_share_contract,
+)
 from backend.core.config.models import BacktestConfig
 from backend.core.data.cn_etf_catalog import normalize_cn_etf_symbol, normalize_cn_etf_ts_code
 from backend.core.data.pg_provider import PostgresDataProvider
@@ -190,6 +194,7 @@ def _build_data_bundle_summary(
     dynamic_all_a_entry: bool,
     membership_history: pd.DataFrame,
 ) -> dict[str, Any]:
+    etf_beta_phase1_summary = dict(universe_meta.get("etf_beta_phase1_summary") or {})
     history_date_min = None
     history_date_max = None
     if not raw_history.empty and "date" in raw_history.columns:
@@ -249,6 +254,10 @@ def _build_data_bundle_summary(
         "coverage_end": universe_meta.get("coverage_end"),
         "daily_table": universe_meta.get("daily_table"),
         "price_series_semantics": universe_meta.get("price_series_semantics"),
+        "etf_beta_source_entry_type": etf_beta_phase1_summary.get("source_entry_type"),
+        "etf_beta_eligible_count": int(len(etf_beta_phase1_summary.get("eligible_etfs") or [])),
+        "etf_beta_selected_count": int(len(etf_beta_phase1_summary.get("selected_etfs") or [])),
+        "etf_beta_out_of_scope_count": int(len(etf_beta_phase1_summary.get("out_of_scope_etfs") or [])),
     }
 
 
@@ -407,6 +416,16 @@ def build_data_bundle(
             universe_meta["coverage_end"] = None
             universe_meta["daily_table"] = "pams_cn_etf_daily"
             universe_meta["price_series_semantics"] = "executable_price_only_not_total_return"
+        governed_contract = build_governed_a_share_contract(
+            cfg_merged.get("governed_a_share") if isinstance(cfg_merged.get("governed_a_share"), dict) else None,
+            asset_scope=asset_scope,
+        )
+        etf_beta_phase1_summary = build_cn_etf_beta_phase1_summary(
+            governed_contract=governed_contract,
+            universe_meta=universe_meta,
+        )
+        if isinstance(etf_beta_phase1_summary, dict):
+            universe_meta["etf_beta_phase1_summary"] = etf_beta_phase1_summary
         cfg_obj.data_source.stocks_table = str(universe_meta.get("daily_table") or "pams_cn_etf_daily")
 
     uf_cfg = None

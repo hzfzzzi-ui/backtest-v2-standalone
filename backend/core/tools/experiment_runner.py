@@ -94,6 +94,7 @@ STANDARD_DAILY_COLUMNS = [
     "market_state_smoothed",
     "risk_budget_multiplier",
     "weekly_observation_flag",
+    "governor_budget_json",
 ]
 STANDARD_TRADE_COLUMNS = [
     "date",

@@ -8,6 +8,8 @@ from backend.core.audit.research_audit import (
     aggregate_overall_status,
     build_research_audit,
     evaluate_accounting_integrity,
+    evaluate_attribution_traceability,
+    evaluate_etf_beta_sleeve,
     evaluate_execution_realism,
     evaluate_result_sanity,
     evaluate_timing_alignment,
@@ -106,6 +108,103 @@ def test_evaluate_universe_lineage_passes_cn_etf_direct_symbols_whitelist() -> N
     assert gate["evidence"]["membership_source"] == "cn_etf_catalog_whitelist"
     assert gate["evidence"]["etf_batch"] == "cn_etf_first_wave_core"
     assert gate["evidence"]["coverage_end"] == "2026-03-20"
+
+
+def test_evaluate_etf_beta_sleeve_passes_when_phase1_scope_and_budget_are_traceable() -> None:
+    gate = evaluate_etf_beta_sleeve(
+        run_meta={
+            "data": {"asset_scope": "cn_etf"},
+            "governed_a_share": {
+                "etf_beta": {
+                    "enabled": True,
+                    "sleeve_id": "cn_etf_beta",
+                    "core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                    "limited_defense_candidates": ["512890.SH"],
+                }
+            },
+            "universe": {
+                "asset_scope": "cn_etf",
+                "preset_id": "cn_etf_first_wave_core",
+                "etf_batch": "cn_etf_first_wave_core",
+                "etf_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH", "511010.SH"],
+                "coverage_start": "2013-01-04",
+                "coverage_end": "2026-03-20",
+                "daily_table": "pams_cn_etf_daily",
+                "price_series_semantics": "executable_price_only_not_total_return",
+            },
+            "etf_beta": {
+                "source_entry_type": "cn_etf_research_entry",
+                "source_preset_id": "cn_etf_first_wave_core",
+                "formal_core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                "limited_defense_candidates": ["512890.SH"],
+                "input_etfs": ["510300.SH", "510500.SH", "510050.SH", "512100.SH", "511010.SH"],
+                "eligible_etfs": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                "selected_etfs": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                "selection_reason_codes": {
+                    "510300.SH": ["FORMAL_CORE_BETA"],
+                    "510500.SH": ["FORMAL_CORE_BETA"],
+                    "510050.SH": ["FORMAL_CORE_BETA"],
+                    "512100.SH": ["FORMAL_CORE_BETA"],
+                },
+                "out_of_scope_etfs": ["511010.SH"],
+                "out_of_scope_reason_codes": {"511010.SH": ["OUT_OF_PHASE1_FORMAL_SCOPE"]},
+                "coverage_summary": {
+                    "coverage_start": "2013-01-04",
+                    "coverage_end": "2026-03-20",
+                    "daily_table": "pams_cn_etf_daily",
+                    "price_series_semantics": "executable_price_only_not_total_return",
+                },
+                "sleeve_budget_used": {
+                    "budget_owner": "global_portfolio_governor",
+                    "total_risk_budget": 0.7,
+                    "slot_cap": 4,
+                    "selected_count": 4,
+                },
+            },
+        }
+    )
+
+    assert gate is not None
+    assert gate["status"] == "PASS"
+    assert gate["metrics"]["eligible_count"] == 4
+    assert gate["metrics"]["out_of_scope_count"] == 1
+
+
+def test_evaluate_attribution_traceability_passes_when_summary_and_refs_exist(tmp_path) -> None:
+    root = tmp_path / "exp_attr"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "attribution_audit.json").write_text(
+        json.dumps(
+            {
+                "contract_version": "cn_a_attribution_audit@1",
+                "summary": {
+                    "state_log_count": 2,
+                    "budget_log_count": 2,
+                    "sleeve_log_count": 1,
+                    "manual_override_log_count": 0,
+                },
+                "reason_code_summary": {
+                    "state_reason_codes": {"TREND_BREAK": 1},
+                    "budget_reason_codes": {"TOTAL_RISK_BUDGET_REDUCED": 1},
+                    "sleeve_reason_codes": {"FORMAL_CORE_BETA": 1},
+                    "manual_override_reasons": {},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    gate = evaluate_attribution_traceability(
+        results_dir=root,
+        run_meta={"governed_a_share": {"enabled": True}},
+    )
+
+    assert gate is not None
+    assert gate["status"] == "PASS"
+    assert gate["metrics"]["state_log_count"] == 2
+    assert gate["metrics"]["has_ref"] is True
 
 
 def test_evaluate_execution_realism_flags_hard_fail_on_suspended_trade() -> None:

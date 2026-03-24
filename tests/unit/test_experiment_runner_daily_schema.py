@@ -91,6 +91,14 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
                         },
                         ensure_ascii=False,
                     ),
+                    "governor_budget_json": json.dumps(
+                        {
+                            "contract_version": "cn_a_governor_budget@1",
+                            "total_risk_budget": 0.82,
+                            "total_exposure_cap": 1.0,
+                        },
+                        ensure_ascii=False,
+                    ),
                 }
             ]
         )
@@ -115,3 +123,4 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
     assert row["regime_duration_bars"] == 12
     assert row["regime_transition_reason"] == "TREND_BLOCK_CONFIRMED"
     assert json.loads(row["feature_availability_json"])["risk_block"] is True
+    assert json.loads(row["governor_budget_json"])["contract_version"] == "cn_a_governor_budget@1"

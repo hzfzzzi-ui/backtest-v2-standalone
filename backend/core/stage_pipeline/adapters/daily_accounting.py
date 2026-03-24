@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Mapping
 
+from backend.core.config.cn_a_governed_mainline import (
+    build_governor_budget_snapshot,
+    merge_governor_budget_snapshot,
+)
 from backend.core.engine_vector.signal_provider import DaySignals
 from backend.core.portfolio.nav_snapshot import compute_nav_snapshot
 from backend.core.portfolio.sizing import calc_buy_slots
@@ -32,6 +36,19 @@ def build_daily_row(
     top5: list[dict[str, Any]],
     controls: Mapping[str, Any],
 ) -> dict[str, Any]:
+    governor_budget = controls.get("governor_budget")
+    if not isinstance(governor_budget, dict):
+        governor_budget = build_governor_budget_snapshot(
+            asset_scope=str(getattr(getattr(runtime, "request", None), "asset_scope", "") or "cn_a_equity"),
+            hard_max_positions=getattr(getattr(runtime, "request", None), "max_positions", controls["effective_max_positions"]),
+            effective_max_positions=controls["effective_max_positions"],
+            risk_budget_multiplier=controls.get("risk_budget_multiplier"),
+            drawdown=drawdown,
+            drawdown_state=controls.get("dd_state"),
+            regime_transition_reason=controls.get("regime_transition_reason"),
+            breadth_max_positions=controls.get("breadth_max_positions"),
+            positions_after_sell=len(runtime.positions),
+        )
     row = {
         "date": day.isoformat(),
         "nav": nav,
@@ -103,6 +120,7 @@ def build_daily_row(
         "market_state_smoothed": str(controls.get("market_state_smoothed", "") or ""),
         "risk_budget_multiplier": controls.get("risk_budget_multiplier"),
         "weekly_observation_flag": bool(controls.get("weekly_observation_flag", False)),
+        "governor_budget_json": json.dumps(governor_budget, ensure_ascii=False),
     }
     if getattr(runtime, "route_id", "") == "provider_breakout_runtime":
         row["market_state"] = str(controls["market_state"])
@@ -216,6 +234,20 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, (list, tuple, set)):
         return [_jsonable(item) for item in list(value)]
     return str(value)
+
+
+def _governor_budget_payload_from_row(daily_row: Mapping[str, Any]) -> dict[str, Any]:
+    raw = daily_row.get("governor_budget_json")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
+    if isinstance(raw, Mapping):
+        return dict(raw)
+    return {}
 
 
 def _signal_snapshot(signal: Any) -> dict[str, Any]:
@@ -396,6 +428,53 @@ def apply_daily_decision_diagnostics(runtime: Any, *, day_signals: DaySignals, d
         raw_after_slot_filter_count=raw_after_slot_filter_count,
         raw_after_cash_lot_count=raw_after_cash_lot_count,
     ).to_json()
+    governor_budget = merge_governor_budget_snapshot(
+        _governor_budget_payload_from_row(daily_row),
+        asset_scope=str(getattr(getattr(runtime, "request", None), "asset_scope", "") or "cn_a_equity"),
+        hard_max_positions=(
+            getattr(getattr(runtime, "request", None), "max_positions", None)
+            or daily_row.get("effective_max_positions")
+            or (((getattr(runtime, "_current_day", None) or {}).get("controls") or {}).get("effective_max_positions"))
+            or 0
+        ),
+        effective_max_positions=(
+            daily_row.get("effective_max_positions")
+            or (((getattr(runtime, "_current_day", None) or {}).get("controls") or {}).get("effective_max_positions"))
+            or 0
+        ),
+        risk_budget_multiplier=daily_row.get("risk_budget_multiplier"),
+        drawdown=daily_row.get("drawdown"),
+        drawdown_state=daily_row.get("dd_state"),
+        regime_transition_reason=daily_row.get("regime_transition_reason"),
+        breadth_max_positions=daily_row.get("breadth_max_positions"),
+        positions_after_sell=positions_after_sell,
+        sleeve_budget_mode=plan.get("sleeve_budget_mode"),
+        raw_sleeve_slot_caps=dict(plan.get("sleeve_slot_caps", {}) or {}),
+        raw_sleeve_available_slots=dict(plan.get("sleeve_available_slots", {}) or {}),
+        raw_sleeve_positions_after_sell=dict(plan.get("sleeve_positions_after_sell", {}) or {}),
+        raw_sleeve_candidate_counts=dict(plan.get("sleeve_candidate_counts", {}) or {}),
+        raw_sleeve_selected_counts=dict(plan.get("sleeve_selected_counts", {}) or {}),
+        sleeve_budget_reject_count=daily_row["sleeve_budget_reject_count"],
+    )
+    budget_reason_codes = list(governor_budget.get("budget_reason_codes") or [])
+    if int(selected_count) < int(buy_slots):
+        budget_reason_codes.append("BUY_SLOT_UNUSED")
+        if int(candidates_count) < int(buy_slots):
+            budget_reason_codes.append("CANDIDATES_BELOW_BUDGET")
+        if int(after_cash_lot_count) < int(after_slot_filter_count):
+            budget_reason_codes.append("CASH_LOT_CONSTRAINT")
+        if int(selected_count) <= 0:
+            budget_reason_codes.append("NO_SELECTED_ORDERS")
+    governor_budget["budget_reason_codes"] = sorted({str(code) for code in budget_reason_codes if str(code).strip()})
+    governor_budget["budget_diagnostics"] = {
+        "buy_slots": int(buy_slots),
+        "selected_count": int(selected_count),
+        "candidates_count": int(candidates_count),
+        "after_slot_filter_count": int(after_slot_filter_count),
+        "after_cash_lot_count": int(after_cash_lot_count),
+        "deployment_gap": max(int(buy_slots) - int(selected_count), 0),
+    }
+    daily_row["governor_budget_json"] = json.dumps(governor_budget, ensure_ascii=False)
     if not bool(day_signals.diagnostics.get("composition_enabled", False)):
         return
 

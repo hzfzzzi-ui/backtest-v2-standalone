@@ -24,6 +24,7 @@ ARTIFACT_FILENAMES: dict[str, str] = {
     "regime_audit_summary": "regime_audit_summary.json",
     "regime_transition_debug": "regime_transition_debug.csv",
     "regime_audit_report": "regime_audit_report.md",
+    "attribution_audit": "attribution_audit.json",
 }
 
 COUNTER_CANONICAL_FIELDS: tuple[str, ...] = (

@@ -1,7 +1,7 @@
 ﻿# backtest-research-audit Specification
 
 ## Purpose
-为每次回测实验提供统一的 research audit 结论，用于判断实验结果是否可信。
+为每次回测实验提供统一的 research audit 结论，用于判断实验结果是否可信，并在 governed multi-sleeve 主线下把状态、预算、sleeve 和人工 override 的证据统一串成可追溯结论。
 ## Requirements
 ### Requirement: 实验必须生成统一的 research audit 结论
 系统 MUST 在每次实验的 `audit.json` 中生成 `research_audit` 子树，用于表达该实验结果是否可信。
@@ -196,4 +196,23 @@
 - **WHEN** 当前实验缺少足够的主线会计快照，导致系统无法证明记账自洽
 - **THEN** `research_audit.gates.accounting_integrity.status` SHALL 为 `UNKNOWN`
 - **THEN** 该 gate SHALL 通过 `reason` 或等价字段说明证据不足，而不是默认为 `PASS`
+
+### Requirement: research audit 必须引用A股统一归因证据链
+当实验属于 A 股 governed multi-sleeve 主线时，`backtest-research-audit` MUST 引用 `market_regime_engine`、`global_portfolio_governor`、各 sleeve 和 `manual_override` 的统一 attribution 证据，而 SHALL NOT 只引用孤立的收益或执行产物。
+
+#### Scenario: A股 governed 实验引用 attribution 证据
+- **WHEN** 实验运行属于 A 股 governed multi-sleeve 口径
+- **THEN** `research_audit.evidence_refs` MUST 引用 regime、budget、sleeve 和 override 相关证据
+
+### Requirement: research audit 必须能回答仓位与状态来源
+当实验属于 A 股 governed multi-sleeve 主线时，research audit MUST 允许回答以下问题：
+- 今天的生效状态来自哪里
+- 今天的预算变化来自哪里
+- 某个 sleeve 为什么被压缩或停用
+- 是否存在人工 override
+
+#### Scenario: 审计结论可解释仓位变化
+- **WHEN** 用户查看 governed 主线实验的 research audit
+- **THEN** audit MUST 能定位到相应的状态、预算和 sleeve 证据
+- **THEN** audit SHALL NOT 只给出最终 PASS/WARN/FAIL 而没有可追溯来源
 

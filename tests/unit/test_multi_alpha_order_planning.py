@@ -182,6 +182,15 @@ def test_order_planning_hard_sleeve_budget_prefilters_composed_signals(monkeypat
     assert all(row["reject_reason"] == "SLEEVE_BUDGET_EXCEEDED" for row in runtime.candidate_rows)
     assert diag_calls[0]["debug_plan"]["sleeve_slot_caps"] == {"mr": 2, "trend": 3}
     assert diag_calls[0]["debug_plan"]["sleeve_available_slots"] == {"mr": 2, "trend": 1}
+    assert diag_calls[0]["debug_plan"]["system_sleeve_id"] == "cn_stock_trend_alpha_core"
+    assert diag_calls[0]["debug_plan"]["system_budget_owner"] == "global_portfolio_governor"
+    assert diag_calls[0]["debug_plan"]["system_budget_semantics"] == "consume_governor_sleeve_budget"
+    assert diag_calls[0]["debug_plan"]["system_sleeve_raw_ids"] == ["mr", "trend"]
+    assert diag_calls[0]["debug_plan"]["system_sleeve_phase1_excluded_capabilities"] == [
+        "value_bluechip_satellite",
+        "cn_etf_beta",
+        "insurance_overlay",
+    ]
 
 
 def test_order_planning_hard_sleeve_budget_uses_market_state_weight_override(monkeypatch) -> None:
@@ -271,6 +280,7 @@ def test_order_planning_hard_sleeve_budget_uses_market_state_weight_override(mon
     assert diag_calls[0]["debug_plan"]["market_state_weight_override_key"] == "BEAR"
     assert diag_calls[0]["debug_plan"]["sleeve_weights_effective"] == {"mr": 0.8, "trend": 0.2}
     assert diag_calls[0]["debug_plan"]["sleeve_slot_caps"] == {"mr": 4, "trend": 1}
+    assert diag_calls[0]["debug_plan"]["system_sleeve_id"] == "cn_stock_trend_alpha_core"
 
 
 def test_order_planning_passthrough_for_non_multi_alpha_portfolio_mode(monkeypatch) -> None:

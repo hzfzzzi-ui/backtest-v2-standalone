@@ -7,6 +7,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from backend.core.data.price_limits import round_price_to_tick
+from backend.core.config.cn_a_governed_mainline import build_cn_etf_beta_phase1_summary
 from backend.core.tools.runtime_data_access import load_runtime_data_access
 from backend.core.universe.lineage import get_universe_lineage, normalize_universe_mode
 from backend.api.backtest_v2.protocol import ARTIFACT_FILENAMES
@@ -670,6 +671,165 @@ def evaluate_universe_lineage(*, run_meta: Mapping[str, Any] | None) -> dict[str
     }
 
 
+def evaluate_etf_beta_sleeve(*, run_meta: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    run_meta_obj = dict(run_meta or {})
+    data_meta = dict(run_meta_obj.get("data") or {})
+    universe_meta = dict(run_meta_obj.get("universe") or {})
+    governed_meta = dict(run_meta_obj.get("governed_a_share") or {})
+    asset_scope = str(
+        data_meta.get("asset_scope")
+        or universe_meta.get("asset_scope")
+        or (run_meta_obj.get("asset_context") or {}).get("asset_scope")
+        or ""
+    ).strip().lower()
+    etf_meta = dict(governed_meta.get("etf_beta") or {})
+    if asset_scope != "cn_etf" and not bool(etf_meta.get("enabled")):
+        return None
+    if asset_scope != "cn_etf":
+        return None
+
+    summary = run_meta_obj.get("etf_beta")
+    if not isinstance(summary, Mapping):
+        summary = build_cn_etf_beta_phase1_summary(
+            governed_contract=governed_meta,
+            universe_meta=universe_meta,
+            governor_snapshot=run_meta_obj.get("governed_snapshot") if isinstance(run_meta_obj.get("governed_snapshot"), Mapping) else None,
+        )
+    summary_obj = dict(summary or {})
+    if not summary_obj:
+        return {
+            "status": "FAIL",
+            "reason": "Missing cn_etf_beta Phase 1 summary.",
+            "evidence": {"asset_scope": asset_scope},
+            "metrics": {"input_count": 0, "eligible_count": 0, "selected_count": 0, "out_of_scope_count": 0},
+        }
+
+    input_etfs = [str(item).strip().upper() for item in list(summary_obj.get("input_etfs") or ()) if str(item).strip()]
+    eligible_etfs = [str(item).strip().upper() for item in list(summary_obj.get("eligible_etfs") or ()) if str(item).strip()]
+    selected_etfs = [str(item).strip().upper() for item in list(summary_obj.get("selected_etfs") or ()) if str(item).strip()]
+    out_of_scope_etfs = [str(item).strip().upper() for item in list(summary_obj.get("out_of_scope_etfs") or ()) if str(item).strip()]
+    formal_scope = {
+        str(item).strip().upper()
+        for item in list(summary_obj.get("formal_core_beta_symbols") or ()) + list(summary_obj.get("limited_defense_candidates") or ())
+        if str(item).strip()
+    }
+    selection_reason_codes = {
+        str(symbol).strip().upper(): [str(code).strip() for code in list(codes or ()) if str(code).strip()]
+        for symbol, codes in dict(summary_obj.get("selection_reason_codes") or {}).items()
+        if str(symbol).strip()
+    }
+    out_of_scope_reason_codes = {
+        str(symbol).strip().upper(): [str(code).strip() for code in list(codes or ()) if str(code).strip()]
+        for symbol, codes in dict(summary_obj.get("out_of_scope_reason_codes") or {}).items()
+        if str(symbol).strip()
+    }
+    invalid_selected = [symbol for symbol in selected_etfs if symbol not in formal_scope]
+    missing_selected_reasons = [symbol for symbol in selected_etfs if symbol not in selection_reason_codes]
+    missing_out_of_scope_reasons = [symbol for symbol in out_of_scope_etfs if symbol not in out_of_scope_reason_codes]
+    sleeve_budget_used = dict(summary_obj.get("sleeve_budget_used") or {})
+    source_entry_type = str(summary_obj.get("source_entry_type") or "").strip()
+
+    if source_entry_type != "cn_etf_research_entry":
+        status = "FAIL"
+        reason = "ETF beta sleeve source entry type is not cn_etf research entry."
+    elif invalid_selected:
+        status = "FAIL"
+        reason = "ETF beta sleeve selected symbols outside Phase 1 formal scope."
+    elif missing_selected_reasons or missing_out_of_scope_reasons:
+        status = "WARN"
+        reason = "ETF beta sleeve selection markers are present, but reason codes are incomplete."
+    elif not sleeve_budget_used:
+        status = "WARN"
+        reason = "ETF beta sleeve Phase 1 summary is present, but governor budget usage is missing."
+    else:
+        status = "PASS"
+        reason = "ETF beta sleeve Phase 1 scope is explicit and governor budget usage is traceable."
+
+    evidence = {
+        "source_entry_type": source_entry_type,
+        "source_preset_id": summary_obj.get("source_preset_id"),
+        "source_batch_id": summary_obj.get("source_batch_id"),
+        "formal_core_beta_symbols": list(summary_obj.get("formal_core_beta_symbols") or []),
+        "limited_defense_candidates": list(summary_obj.get("limited_defense_candidates") or []),
+        "eligible_etfs": eligible_etfs,
+        "selected_etfs": selected_etfs,
+        "selection_reason_codes": selection_reason_codes,
+        "out_of_scope_etfs": out_of_scope_etfs,
+        "out_of_scope_reason_codes": out_of_scope_reason_codes,
+        "coverage_summary": dict(summary_obj.get("coverage_summary") or {}),
+        "sleeve_budget_used": sleeve_budget_used,
+    }
+    metrics = {
+        "input_count": len(input_etfs),
+        "eligible_count": len(eligible_etfs),
+        "selected_count": len(selected_etfs),
+        "out_of_scope_count": len(out_of_scope_etfs),
+        "invalid_selected_count": len(invalid_selected),
+        "missing_selected_reason_count": len(missing_selected_reasons),
+        "missing_out_of_scope_reason_count": len(missing_out_of_scope_reasons),
+    }
+    return {"status": status, "reason": reason, "evidence": evidence, "metrics": metrics}
+
+
+def evaluate_attribution_traceability(
+    *,
+    results_dir: str | Path | None,
+    run_meta: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    run_meta_obj = dict(run_meta or {})
+    governed = dict(run_meta_obj.get("governed_a_share") or {})
+    attribution = dict(run_meta_obj.get("attribution") or {})
+    should_apply = bool(governed.get("enabled")) or bool(attribution)
+    if not should_apply:
+        return None
+
+    attribution_obj = attribution
+    root = Path(results_dir).resolve() if results_dir is not None else None
+    if root is not None:
+        payload, _ = _read_json(root / ARTIFACT_FILENAMES["attribution_audit"])
+        if isinstance(payload, Mapping):
+            attribution_obj = {
+                "contract_version": payload.get("contract_version"),
+                "summary": payload.get("summary"),
+                "reason_code_summary": payload.get("reason_code_summary"),
+                "refs": {"attribution_audit": _clean_ref(root / ARTIFACT_FILENAMES["attribution_audit"], root=root)},
+            }
+
+    summary = dict(attribution_obj.get("summary") or {})
+    reason_code_summary = dict(attribution_obj.get("reason_code_summary") or {})
+    refs = dict(attribution_obj.get("refs") or {})
+    has_logs = all(
+        key in summary
+        for key in ("state_log_count", "budget_log_count", "sleeve_log_count", "manual_override_log_count")
+    )
+    has_reason_codes = any(bool(dict(reason_code_summary.get(key) or {})) for key in reason_code_summary.keys())
+    has_ref = bool(str(refs.get("attribution_audit") or "").strip())
+    status = "PASS" if has_logs and has_ref else "FAIL"
+    reason = (
+        "Attribution audit summary and artifact refs are present."
+        if status == "PASS"
+        else "Missing attribution summary fields or artifact references."
+    )
+    return {
+        "status": status,
+        "reason": reason,
+        "evidence": {
+            "summary": summary,
+            "reason_code_summary": reason_code_summary,
+            "refs": refs,
+        },
+        "metrics": {
+            "has_logs": has_logs,
+            "has_reason_codes": has_reason_codes,
+            "has_ref": has_ref,
+            "state_log_count": _safe_int(summary.get("state_log_count")) or 0,
+            "budget_log_count": _safe_int(summary.get("budget_log_count")) or 0,
+            "sleeve_log_count": _safe_int(summary.get("sleeve_log_count")) or 0,
+            "manual_override_log_count": _safe_int(summary.get("manual_override_log_count")) or 0,
+        },
+    }
+
+
 def evaluate_execution_realism(
     *,
     results_dir: Path | None = None,
@@ -1111,6 +1271,12 @@ def build_research_audit(
             read_errors=read_errors,
         ),
     }
+    etf_beta_gate = evaluate_etf_beta_sleeve(run_meta=run_meta)
+    if isinstance(etf_beta_gate, dict):
+        gates["etf_beta_sleeve"] = etf_beta_gate
+    attribution_gate = evaluate_attribution_traceability(results_dir=root, run_meta=run_meta)
+    if isinstance(attribution_gate, dict):
+        gates["attribution_traceability"] = attribution_gate
 
     return {
         "contract_version": RESEARCH_AUDIT_CONTRACT_VERSION,
@@ -1122,6 +1288,7 @@ def build_research_audit(
             "manifest": _clean_ref(root / "manifest.json", root=root),
             "stage_summary": _clean_ref(root / "stage_summary.json", root=root),
             "execution_lineage_ledger": _clean_ref(root / ARTIFACT_FILENAMES["execution_lineage_ledger"], root=root),
+            "attribution_audit": _clean_ref(root / ARTIFACT_FILENAMES["attribution_audit"], root=root),
             "trades": _clean_ref(root / "portfolio_trades.csv", root=root),
             "symbol_performance": _clean_ref(root / "symbol_performance.csv", root=root),
             "validate_data": validation_ref,

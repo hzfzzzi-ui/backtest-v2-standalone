@@ -485,8 +485,15 @@ def test_build_data_bundle_supports_cn_etf_research_entry() -> None:
     assert bundle.universe_meta["etf_symbols"] == ["512100.SH"]
     assert bundle.universe_meta["etf_batch"] == "cn_etf_single_asset_template"
     assert bundle.universe_meta["catalog_batch_id"] == "cn_etf_single_asset_template"
+    assert bundle.universe_meta["etf_beta_phase1_summary"]["source_entry_type"] == "cn_etf_research_entry"
+    assert bundle.universe_meta["etf_beta_phase1_summary"]["eligible_etfs"] == ["512100.SH"]
+    assert bundle.universe_meta["etf_beta_phase1_summary"]["selected_etfs"] == ["512100.SH"]
+    assert bundle.universe_meta["etf_beta_phase1_summary"]["out_of_scope_etfs"] == []
     assert bundle.summary["daily_table"] == "pams_cn_etf_daily"
     assert bundle.summary["price_series_semantics"] == "executable_price_only_not_total_return"
+    assert bundle.summary["etf_beta_source_entry_type"] == "cn_etf_research_entry"
+    assert bundle.summary["etf_beta_eligible_count"] == 1
+    assert bundle.summary["etf_beta_out_of_scope_count"] == 0
     assert bundle.summary["industry_map_count"] == 0
     assert bundle.summary["benchmark_rows"] == 2
     assert cfg.data_source.data_role == "v1"

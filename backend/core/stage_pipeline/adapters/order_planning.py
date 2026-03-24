@@ -5,6 +5,12 @@ from typing import Any
 
 import numpy as np
 
+from backend.core.config.cn_a_governed_mainline import (
+    CN_STOCK_ALPHA_CORE_BUDGET_SEMANTICS,
+    CN_STOCK_ALPHA_CORE_LOCAL_BUDGET_CONTROLS,
+    CN_STOCK_ALPHA_CORE_PHASE1_EXCLUDED_CAPABILITIES,
+    CN_STOCK_TREND_ALPHA_CORE_SLEEVE_ID,
+)
 from backend.core.core.types import Side
 from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
 from backend.core.portfolio.portfolio_runtime import build_rebalance_orders
@@ -83,6 +89,32 @@ def _resolve_market_state_for_day(runtime: Any, day: Any) -> str:
     day_signals = current_day.get("day_signals")
     diagnostics = dict(getattr(day_signals, "diagnostics", {}) or {})
     return str(diagnostics.get("market_state", "") or "").strip().upper()
+
+
+def _resolve_runtime_asset_scope(runtime: Any) -> str:
+    request = getattr(runtime, "request", None)
+    asset_scope = str(getattr(request, "asset_scope", "") or "").strip().lower()
+    if asset_scope:
+        return asset_scope
+    asset_context = dict(getattr(runtime, "asset_context", {}) or {})
+    asset_scope = str(asset_context.get("asset_scope") or "").strip().lower()
+    if asset_scope:
+        return asset_scope
+    return "cn_a_equity"
+
+
+def _stock_alpha_core_debug_context(runtime: Any) -> dict[str, Any]:
+    if _resolve_runtime_asset_scope(runtime) != "cn_a_equity":
+        return {}
+    return {
+        "system_sleeve_id": CN_STOCK_TREND_ALPHA_CORE_SLEEVE_ID,
+        "system_sleeve_role": "stock_alpha_sleeve",
+        "system_budget_owner": "global_portfolio_governor",
+        "system_budget_semantics": CN_STOCK_ALPHA_CORE_BUDGET_SEMANTICS,
+        "system_sleeve_strategy_semantics": "trend_breakout_residual",
+        "system_sleeve_local_budget_controls": list(CN_STOCK_ALPHA_CORE_LOCAL_BUDGET_CONTROLS),
+        "system_sleeve_phase1_excluded_capabilities": list(CN_STOCK_ALPHA_CORE_PHASE1_EXCLUDED_CAPABILITIES),
+    }
 
 
 def _resolve_sleeve_weights(runtime: Any, *, day: Any | None = None) -> tuple[dict[str, float], str]:
@@ -292,6 +324,9 @@ def _apply_hard_sleeve_budget(
     debug_plan["sleeve_candidate_counts"] = {sleeve: int(len(signals)) for sleeve, signals in sorted(grouped.items())}
     debug_plan["sleeve_selected_counts"] = dict(sorted(selected_counts.items()))
     debug_plan["sleeve_budget_reject_count"] = int(reject_counts.get("SLEEVE_BUDGET_EXCEEDED", 0))
+    if debug_plan.get("system_sleeve_id"):
+        debug_plan["system_sleeve_raw_ids"] = sorted(grouped.keys())
+        debug_plan["system_sleeve_consumes_governor_budget"] = True
     filtered = [signal for signal in buy_signals if id(signal) in filtered_ids]
     debug_plan["after_sleeve_budget_count"] = int(len(filtered))
     return filtered, reject_counts
@@ -362,7 +397,7 @@ def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
     day_signals = runtime._current_day["day_signals"]
     next_open = dict(runtime._current_day["next_open"])
     nav = float(runtime._current_day["nav"])
-    debug_plan: dict[str, Any] = {}
+    debug_plan: dict[str, Any] = _stock_alpha_core_debug_context(runtime)
     day_candidate_rows: list[dict[str, Any]] = []
     mf_gate_on_today = resolve_mf_gate_on_today(
         enable_multifactor_rank=bool(runtime.request.enable_multifactor_rank),

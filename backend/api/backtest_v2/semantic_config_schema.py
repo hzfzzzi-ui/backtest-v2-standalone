@@ -410,6 +410,56 @@ class RegimeEngineConfig(StrictModel):
     legacy_turn_weak_overlay: LegacyTurnWeakOverlayConfig | None = None
 
 
+class GovernedAManualOverrideConfig(StrictModel):
+    active: bool | None = None
+    reason: str | None = None
+    scope: str | None = None
+    actor: str | None = None
+
+
+class GovernedARegimeConfig(StrictModel):
+    enabled: bool | None = None
+    owner: str | None = None
+    primary_state_model: str | None = None
+    coarse_state_model: str | None = None
+    subscore_contract: list[str] | None = None
+    manual_override: GovernedAManualOverrideConfig | None = None
+
+
+class GovernedAGovernorConfig(StrictModel):
+    enabled: bool | None = None
+    owner: str | None = None
+    contract_only: bool | None = None
+    budget_source_of_truth: bool | None = None
+
+
+class GovernedASleeveConfig(StrictModel):
+    enabled: bool | None = None
+    sleeve_id: str | None = None
+    system_role: str | None = None
+    legacy_anchor: str | None = None
+    strategy_semantics: str | None = None
+    budget_semantics: str | None = None
+    total_budget_owner: str | None = None
+    local_budget_controls: list[str] | None = None
+    phase1_excluded_capabilities: list[str] | None = None
+    source_entry_type: str | None = None
+    phase1_scope_mode: str | None = None
+    core_beta_symbols: list[str] | None = None
+    limited_defense_candidates: list[str] | None = None
+
+
+class GovernedAShareConfig(StrictModel):
+    enabled: bool | None = None
+    contract_version: str | None = None
+    system_id: str | None = None
+    phase: str | None = None
+    regime: GovernedARegimeConfig | None = None
+    governor: GovernedAGovernorConfig | None = None
+    stock_alpha_core: GovernedASleeveConfig | None = None
+    etf_beta: GovernedASleeveConfig | None = None
+
+
 class CostModelConfig(StrictModel):
     commission: str | None = None
     stamp_tax: str | None = None
@@ -461,6 +511,7 @@ class DataSourceSemanticConfig(StrictModel):
 
 class FrontendSemanticConfig(StrictModel):
     asset_scope: str | None = None
+    governed_a_share: GovernedAShareConfig | None = None
     mode: str | None = None
     initial_capital: float | None = None
     strategy_pack: str | None = None

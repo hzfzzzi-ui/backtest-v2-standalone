@@ -5,11 +5,26 @@ from typing import Any
 
 import numpy as np
 
+from backend.core.config.cn_a_governed_mainline import build_governor_budget_snapshot
+
 
 _BULLISH_STATE_NAMES = {"BULL", "BULL_MAIN"}
 _TRANS_DOWN_STATE_NAMES = {"TRANS_DOWN", "TURN_WEAK"}
 _TRANS_UP_STATE_NAMES = {"TRANS_UP", "TURN_STRONG"}
 _BEARISH_STATE_NAMES = {"BEAR", "DEFENSIVE"}
+
+
+def _resolve_runtime_asset_scope(runtime: Any) -> str:
+    request = getattr(runtime, "request", None)
+    asset_scope = str(getattr(request, "asset_scope", "") or "").strip()
+    if asset_scope:
+        return asset_scope
+    asset_context = getattr(request, "asset_context", None)
+    if isinstance(asset_context, dict):
+        asset_scope = str(asset_context.get("asset_scope") or "").strip()
+        if asset_scope:
+            return asset_scope
+    return "cn_a_equity"
 
 
 def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: float) -> dict[str, Any]:
@@ -151,6 +166,17 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
     if feature_arr is not None and day_index < len(feature_arr):
         raw_feature = feature_arr[day_index]
         feature_availability = dict(raw_feature) if isinstance(raw_feature, dict) else {}
+    governor_budget = build_governor_budget_snapshot(
+        asset_scope=_resolve_runtime_asset_scope(runtime),
+        hard_max_positions=getattr(runtime.request, "max_positions", 0),
+        effective_max_positions=effective_max_positions,
+        risk_budget_multiplier=risk_budget_multiplier,
+        drawdown=drawdown,
+        drawdown_state=dd_state,
+        regime_transition_reason=regime_transition_reason,
+        breadth_max_positions=breadth_max_positions,
+        positions_after_sell=sum(1 for qty in getattr(runtime, "positions", {}).values() if int(qty) > 0),
+    )
     return {
         "effective_max_positions": int(effective_max_positions),
         "dd_state": dd_state,
@@ -171,4 +197,5 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
         "market_state_score": market_state_score,
         "risk_budget_multiplier": risk_budget_multiplier,
         "weekly_observation_flag": bool(weekly_observation_flag),
+        "governor_budget": governor_budget,
     }

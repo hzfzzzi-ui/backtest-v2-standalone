@@ -18,6 +18,7 @@ from backend.api.backtest_v2.runner_config_risk_exit import apply_risk_exit_runt
 from backend.api.backtest_v2.runner_config_signal import compile_signal_runtime
 from backend.api.backtest_v2.runner_config_universe import apply_universe_runtime_cfg
 from backend.core.config.models import DataSourceConfig
+from backend.core.config.cn_a_governed_mainline import build_governed_a_share_contract
 
 
 @dataclass(slots=True)
@@ -75,6 +76,22 @@ def _apply_regime_engine_cfg(cfg: dict[str, Any], wb_cfg: dict[str, Any]) -> Non
     cfg["regime_engine"] = sanitize_json(merged)
 
 
+def _apply_governed_a_share_cfg(cfg: dict[str, Any], wb_cfg: dict[str, Any]) -> None:
+    raw = wb_cfg.get("governed_a_share") if isinstance(wb_cfg.get("governed_a_share"), dict) else {}
+    runtime_raw = cfg.get("governed_a_share") if isinstance(cfg.get("governed_a_share"), dict) else {}
+    merged_raw = _merge_nested_dict(dict(runtime_raw), dict(raw))
+    asset_context = cfg.get("asset_context") if isinstance(cfg.get("asset_context"), dict) else {}
+    asset_scope = (
+        wb_cfg.get("asset_scope")
+        or cfg.get("asset_scope")
+        or asset_context.get("asset_scope")
+        or "cn_a_equity"
+    )
+    governed = build_governed_a_share_contract(merged_raw, asset_scope=asset_scope)
+    if governed is not None:
+        cfg["governed_a_share"] = sanitize_json(governed)
+
+
 def build_runtime_cfg_from_workbench(
     base_cfg: dict[str, Any],
     body: Any,
@@ -93,6 +110,7 @@ def build_runtime_cfg_from_workbench(
     signal_context = compile_signal_runtime(cfg, wb_cfg)
     apply_risk_exit_runtime_cfg(cfg, wb_cfg, signal_context=signal_context)
     _apply_regime_engine_cfg(cfg, wb_cfg)
+    _apply_governed_a_share_cfg(cfg, wb_cfg)
     wb_data_source = wb_cfg.get("data_source") if isinstance(wb_cfg.get("data_source"), dict) else {}
     if wb_data_source:
         runtime_data_source = dict(cfg.get("data_source") or {})

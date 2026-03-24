@@ -96,6 +96,9 @@ def test_compute_day_controls_breakout_route_preserves_market_state_and_counters
     assert controls["risk_on_today"] is True
     assert controls["breadth_score"] == 0.40
     assert controls["breadth_max_positions"] == 6
+    assert controls["governor_budget"]["total_exposure_cap"] == 0.6
+    assert controls["governor_budget"]["drawdown_state"] == "NORMAL"
+    assert controls["governor_budget"]["sleeve_budgets"]["cn_stock_trend_alpha_core"]["slot_cap"] == 6
     assert runtime.market_filter_bull_days == 1
     assert runtime.trade_mode_main_days == 1
 
@@ -125,6 +128,8 @@ def test_compute_day_controls_non_breakout_route_uses_provider_diagnostics() -> 
     assert controls["market_state"] == "TRANS_DOWN"
     assert controls["trade_mode"] == "NO_TRADE"
     assert controls["benchmark_regime_on"] is True
+    assert controls["governor_budget"]["drawdown_state"] == "REDUCED"
+    assert "DRAWDOWN_REDUCED" in controls["governor_budget"]["budget_reason_codes"]
 
 
 def test_initialize_route_controls_formal_engine_uses_light_multiplier_fallbacks() -> None:

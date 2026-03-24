@@ -1035,6 +1035,24 @@ def test_build_runtime_cfg_from_workbench_prefers_body_universe_fields_when_enab
     assert runtime_cfg["universe"]["symbols"] == ["sh600000", "sz000001"]
 
 
+def test_build_runtime_cfg_from_workbench_infers_governed_a_share_contract_for_breakout() -> None:
+    runtime_cfg = runner_impl._build_runtime_cfg_from_workbench(
+        runner_impl._load_base_config(bt_root()),
+        runner_impl.BacktestV2ExperimentRequest(),
+        _breakout_config(),
+        use_body_universe_fields=False,
+    )
+
+    governed = dict(runtime_cfg.get("governed_a_share") or {})
+    assert governed["system_id"] == "cn_a_governed_multi_sleeve_phase1"
+    assert governed["stock_alpha_core"]["sleeve_id"] == "cn_stock_trend_alpha_core"
+    assert governed["stock_alpha_core"]["legacy_anchor"] == "baseline_V10.1"
+    assert governed["stock_alpha_core"]["budget_semantics"] == "consume_governor_sleeve_budget"
+    assert governed["stock_alpha_core"]["total_budget_owner"] == "global_portfolio_governor"
+    assert governed["etf_beta"]["core_beta_symbols"] == ["510300.SH", "510500.SH", "510050.SH", "512100.SH"]
+    assert governed["etf_beta"]["limited_defense_candidates"] == ["512890.SH"]
+
+
 def test_project_trade_csv_schema_keeps_source_and_exit_fields() -> None:
     projected = _project_trade_csv_schema(
         pd.DataFrame(

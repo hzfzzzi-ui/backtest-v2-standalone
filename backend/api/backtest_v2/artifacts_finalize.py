@@ -35,9 +35,16 @@ from backend.api.backtest_v2.protocol import ARTIFACT_FILENAMES, MISSING_FIELD_K
 from backend.api.shared.json_utils import sanitize_json
 from backend.core.analytics.symbol_performance import build_symbol_performance
 from backend.core.audit.experiment_audit import merge_experiment_audit
+from backend.core.audit.attribution_audit import build_attribution_audit
 from backend.core.audit.regime_audit import write_regime_audit_artifacts
 from backend.core.audit.research_audit import build_research_audit
 from backend.core.config.asset_profiles import build_asset_context
+from backend.core.config.cn_a_governed_mainline import (
+    build_cn_etf_beta_phase1_summary,
+    build_governed_a_share_contract,
+    canonical_state_5,
+    coarse_state_from_state_5,
+)
 from backend.core.config.models import DataSourceConfig
 from backend.core.stage_pipeline.adapters.lineage import LINEAGE_LEDGER_COLUMNS
 
@@ -120,6 +127,21 @@ def _resolve_regime_meta(base_cfg: dict[str, Any], runtime_cfg: dict[str, Any]) 
             **dict(merged),
             "engine": engine,
             "regime_semantics": regime_semantics,
+            "state_contract": {
+                "primary": "five_state",
+                "primary_states": ["BULL", "TRANS_UP", "LIGHT", "TRANS_DOWN", "RISK_OFF"],
+                "coarse": "derived_three_state",
+                "coarse_states": ["RISK_ON", "NEUTRAL", "RISK_OFF"],
+            },
+            "subscore_contract": {
+                "technical": "required",
+                "sentiment": "placeholder_allowed",
+                "macro_global": "placeholder_allowed",
+            },
+            "manual_override_contract": {
+                "base_effective_dual_track": True,
+                "fields": ["active", "reason", "scope", "actor"],
+            },
             "feature_availability_contract": {
                 "required_blocks": [str(item) for item in required_blocks if str(item or "").strip()],
                 "on_feature_unavailable": on_feature_unavailable,
@@ -127,6 +149,112 @@ def _resolve_regime_meta(base_cfg: dict[str, Any], runtime_cfg: dict[str, Any]) 
             },
         }
     )
+
+
+def _resolve_governed_a_share_meta(
+    base_cfg: dict[str, Any],
+    runtime_cfg: dict[str, Any],
+    *,
+    asset_scope: str,
+) -> dict[str, Any] | None:
+    base_governed = dict(base_cfg.get("governed_a_share") or {}) if isinstance(base_cfg.get("governed_a_share"), dict) else {}
+    runtime_governed = dict(runtime_cfg.get("governed_a_share") or {}) if isinstance(runtime_cfg.get("governed_a_share"), dict) else {}
+    merged = {**base_governed, **runtime_governed}
+    governed = build_governed_a_share_contract(merged, asset_scope=asset_scope)
+    return sanitize_json(governed) if isinstance(governed, dict) else None
+
+
+def _extract_latest_regime_snapshot(daily_df: pd.DataFrame) -> dict[str, Any] | None:
+    if daily_df.empty or "date" not in daily_df.columns:
+        return None
+    df = daily_df.copy()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"]).sort_values("date")
+    if df.empty:
+        return None
+    latest = df.iloc[-1]
+    base_state_5 = canonical_state_5(
+        latest.get("base_state_5") or latest.get("market_state_5") or latest.get("market_state"),
+        trade_mode=latest.get("trade_mode"),
+    )
+    effective_state_5 = canonical_state_5(
+        latest.get("effective_state_5") or latest.get("market_state_5") or latest.get("market_state"),
+        trade_mode=latest.get("trade_mode"),
+    )
+    reason_codes_raw = latest.get("reason_codes_json")
+    reason_codes: list[str] = []
+    if isinstance(reason_codes_raw, str) and str(reason_codes_raw).strip():
+        try:
+            parsed_codes = json.loads(str(reason_codes_raw))
+        except Exception:
+            parsed_codes = [str(latest.get("regime_transition_reason") or "").strip()] if str(latest.get("regime_transition_reason") or "").strip() else []
+        if isinstance(parsed_codes, list):
+            reason_codes = [str(item).strip() for item in parsed_codes if str(item).strip()]
+    elif str(latest.get("regime_transition_reason") or "").strip():
+        reason_codes = [str(latest.get("regime_transition_reason") or "").strip()]
+    subscores_raw = latest.get("subscores_json")
+    subscores: dict[str, Any] = {}
+    if isinstance(subscores_raw, str) and subscores_raw.strip():
+        try:
+            parsed_subscores = json.loads(subscores_raw)
+        except Exception:
+            parsed_subscores = None
+        if isinstance(parsed_subscores, dict):
+            subscores = parsed_subscores
+    manual_override_raw = latest.get("manual_override_json")
+    manual_override: dict[str, Any] = {"active": False, "reason": None, "scope": None, "actor": None}
+    if isinstance(manual_override_raw, str) and manual_override_raw.strip():
+        try:
+            parsed_override = json.loads(manual_override_raw)
+        except Exception:
+            parsed_override = None
+        if isinstance(parsed_override, dict):
+            manual_override = {
+                "active": bool(parsed_override.get("active", False)),
+                "reason": parsed_override.get("reason"),
+                "scope": parsed_override.get("scope"),
+                "actor": parsed_override.get("actor"),
+            }
+    return sanitize_json(
+        {
+            "date": latest["date"].strftime("%Y-%m-%d"),
+            "base_state": base_state_5,
+            "effective_state": effective_state_5,
+            "coarse_state": coarse_state_from_state_5(base_state_5),
+            "effective_coarse_state": coarse_state_from_state_5(effective_state_5),
+            "confidence": _safe_float(latest.get("regime_confidence")),
+            "risk_budget_multiplier": _safe_float(latest.get("risk_budget_multiplier")),
+            "reason_codes": reason_codes,
+            "manual_override": manual_override,
+            "subscores": subscores,
+            "why_today": str(latest.get("regime_transition_reason") or "").strip() or "NO_TRANSITION_REASON_RECORDED",
+        }
+    )
+
+
+def _extract_latest_governor_snapshot(daily_df: pd.DataFrame) -> dict[str, Any] | None:
+    if daily_df.empty or "date" not in daily_df.columns or "governor_budget_json" not in daily_df.columns:
+        return None
+    df = daily_df.copy()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"]).sort_values("date")
+    if df.empty:
+        return None
+    latest = df.iloc[-1]
+    raw = latest.get("governor_budget_json")
+    payload: dict[str, Any] | None = None
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            payload = parsed
+    elif isinstance(raw, dict):
+        payload = dict(raw)
+    if not isinstance(payload, dict):
+        return None
+    return sanitize_json(payload)
 
 
 def _load_runtime_universe(results_dir: Path) -> dict[str, Any]:
@@ -481,6 +609,27 @@ def ensure_standard_artifacts(
             metadata_scope=(resolved_config_meta or {}).get("asset_scope"),
         )
     )
+    governed_a_share_meta = _resolve_governed_a_share_meta(
+        base_cfg,
+        runtime_cfg,
+        asset_scope=str(asset_context.get("asset_scope") or ""),
+    )
+    stock_alpha_core_role = None
+    stock_alpha_core_meta = {}
+    etf_beta_meta = {}
+    if isinstance(governed_a_share_meta, dict):
+        stock_alpha_core_meta = dict((governed_a_share_meta or {}).get("stock_alpha_core") or {})
+        etf_beta_meta = dict((governed_a_share_meta or {}).get("etf_beta") or {})
+        stock_alpha_core_role = str(
+            (stock_alpha_core_meta.get("sleeve_id") or "")
+        ).strip() or None
+    universe_meta_obj = dict(result.get("universe_meta") or {}) if isinstance(result.get("universe_meta"), dict) else {}
+    etf_beta_phase1_summary = None
+    if str(asset_context.get("asset_scope") or "") == "cn_etf" and isinstance(governed_a_share_meta, dict):
+        etf_beta_phase1_summary = build_cn_etf_beta_phase1_summary(
+            governed_contract=governed_a_share_meta,
+            universe_meta=universe_meta_obj,
+        )
 
     stage_summary_obj = _extract_stage_summary(result)
     stage_pipeline_obj = _extract_stage_pipeline_summary(result, stage_summary_obj)
@@ -518,6 +667,8 @@ def ensure_standard_artifacts(
         "warmup": sanitize_json(result.get("warmup_analysis") or {}),
         "asset_context": asset_context,
         "regime": regime_meta,
+        "governed_a_share": governed_a_share_meta,
+        "etf_beta": sanitize_json(etf_beta_phase1_summary) if isinstance(etf_beta_phase1_summary, dict) else None,
         "report_consistency": {
             "sources": {"start": start_src, "end": end_src, "benchmark": benchmark_src, "funnel": "funnel.csv"},
             "config_source": str(overrides.get("config_source") or "unknown"),
@@ -536,6 +687,28 @@ def ensure_standard_artifacts(
             "resolved_config_meta": resolved_config_meta,
             "regime_engine": str(regime_meta.get("engine") or "ma200_legacy"),
             "regime_semantics": str(regime_meta.get("regime_semantics") or "legacy_price_filter"),
+            "stock_alpha_core_role": stock_alpha_core_role,
+            "stock_alpha_core_budget_semantics": str(stock_alpha_core_meta.get("budget_semantics") or ""),
+            "stock_alpha_core_total_budget_owner": str(stock_alpha_core_meta.get("total_budget_owner") or ""),
+            "stock_alpha_core_strategy_semantics": str(stock_alpha_core_meta.get("strategy_semantics") or ""),
+            "stock_alpha_core_phase1_excluded_capabilities": sanitize_json(
+                list(stock_alpha_core_meta.get("phase1_excluded_capabilities") or [])
+            ),
+            "stock_alpha_core_local_budget_controls": sanitize_json(
+                list(stock_alpha_core_meta.get("local_budget_controls") or [])
+            ),
+            "etf_beta_role": str(etf_beta_meta.get("sleeve_id") or ""),
+            "etf_beta_budget_semantics": str(etf_beta_meta.get("budget_semantics") or ""),
+            "etf_beta_total_budget_owner": str(etf_beta_meta.get("total_budget_owner") or ""),
+            "etf_beta_source_entry_type": str(
+                ((etf_beta_phase1_summary or {}).get("source_entry_type") or etf_beta_meta.get("source_entry_type") or "")
+            ),
+            "etf_beta_formal_core_beta_symbols": sanitize_json(list(etf_beta_meta.get("core_beta_symbols") or [])),
+            "etf_beta_limited_defense_candidates": sanitize_json(
+                list(etf_beta_meta.get("limited_defense_candidates") or [])
+            ),
+            "etf_beta_selected_etfs": sanitize_json(list((etf_beta_phase1_summary or {}).get("selected_etfs") or [])),
+            "etf_beta_out_of_scope_etfs": sanitize_json(list((etf_beta_phase1_summary or {}).get("out_of_scope_etfs") or [])),
         },
     }
     if isinstance(result.get("universe_meta"), dict):
@@ -563,6 +736,8 @@ def ensure_standard_artifacts(
     regime_transition_debug_rel = None
     regime_audit_report_rel = None
     regime_audit_summary_obj: dict[str, Any] | None = None
+    attribution_audit_rel = None
+    attribution_audit_obj: dict[str, Any] | None = None
     daily_path = results_dir / ARTIFACT_FILENAMES["daily"]
     if daily_path.exists():
         try:
@@ -570,6 +745,72 @@ def ensure_standard_artifacts(
         except Exception:
             daily_df_for_regime = pd.DataFrame()
         if not daily_df_for_regime.empty:
+            run_meta_needs_rewrite = False
+            governor_snapshot = _extract_latest_governor_snapshot(daily_df_for_regime)
+            if isinstance(governor_snapshot, dict) and governed_a_share_meta:
+                run_meta_obj["governed_snapshot"] = sanitize_json(governor_snapshot)
+                run_meta_needs_rewrite = True
+            if str(asset_context.get("asset_scope") or "") == "cn_etf" and isinstance(governed_a_share_meta, dict):
+                etf_beta_phase1_summary = build_cn_etf_beta_phase1_summary(
+                    governed_contract=governed_a_share_meta,
+                    universe_meta=universe_meta_obj,
+                    governor_snapshot=governor_snapshot if isinstance(governor_snapshot, dict) else None,
+                )
+                if isinstance(etf_beta_phase1_summary, dict):
+                    run_meta_obj["etf_beta"] = sanitize_json(etf_beta_phase1_summary)
+                    prior_snapshot = dict(run_meta_obj.get("governed_snapshot") or {})
+                    sleeve_budget_used = dict(etf_beta_phase1_summary.get("sleeve_budget_used") or {})
+                    etf_sleeve_budget = sanitize_json(
+                        {
+                            "system_role": str(etf_beta_phase1_summary.get("system_role") or "market_beta_sleeve"),
+                            "budget_source": str(sleeve_budget_used.get("budget_owner") or "global_portfolio_governor"),
+                            "slot_cap": sleeve_budget_used.get("slot_cap"),
+                            "available_slots": sleeve_budget_used.get("available_slots"),
+                            "positions_after_sell": sleeve_budget_used.get("positions_after_sell"),
+                            "candidate_count": sleeve_budget_used.get("candidate_count"),
+                            "selected_count": sleeve_budget_used.get("selected_count"),
+                            "budget_share": sleeve_budget_used.get("budget_share"),
+                            "raw_sleeve_ids": list(sleeve_budget_used.get("raw_sleeve_ids") or []),
+                        }
+                    )
+                    sleeve_selection_summary = dict(prior_snapshot.get("sleeve_selection_summary") or {})
+                    sleeve_selection_summary["cn_etf_beta"] = sanitize_json(
+                        {
+                            "eligible_etfs": list(etf_beta_phase1_summary.get("eligible_etfs") or []),
+                            "selected_etfs": list(etf_beta_phase1_summary.get("selected_etfs") or []),
+                            "selection_reason_codes": dict(etf_beta_phase1_summary.get("selection_reason_codes") or {}),
+                            "out_of_scope_etfs": list(etf_beta_phase1_summary.get("out_of_scope_etfs") or []),
+                            "sleeve_budget_used": etf_beta_phase1_summary.get("sleeve_budget_used"),
+                        }
+                    )
+                    run_meta_obj["governed_snapshot"] = sanitize_json(
+                        {
+                            **prior_snapshot,
+                            "asset_scope": str(asset_context.get("asset_scope") or prior_snapshot.get("asset_scope") or ""),
+                            "budget_owner": str(sleeve_budget_used.get("budget_owner") or prior_snapshot.get("budget_owner") or ""),
+                            "budget_consumer_sleeve_id": str(
+                                etf_beta_phase1_summary.get("sleeve_id")
+                                or prior_snapshot.get("budget_consumer_sleeve_id")
+                                or ""
+                            ),
+                            "budget_consumer_system_role": str(
+                                etf_beta_phase1_summary.get("system_role")
+                                or prior_snapshot.get("budget_consumer_system_role")
+                                or ""
+                            ),
+                            "budget_semantics": str(
+                                etf_beta_phase1_summary.get("budget_semantics")
+                                or prior_snapshot.get("budget_semantics")
+                                or ""
+                            ),
+                            "local_budget_controls": [],
+                            "sleeve_budgets": {
+                                "cn_etf_beta": etf_sleeve_budget,
+                            },
+                            "sleeve_selection_summary": sleeve_selection_summary,
+                        }
+                    )
+                    run_meta_needs_rewrite = True
             try:
                 regime_artifacts = write_regime_audit_artifacts(
                     results_dir=results_dir,
@@ -581,6 +822,29 @@ def ensure_standard_artifacts(
                 regime_artifacts = None
             if isinstance(regime_artifacts, dict):
                 regime_audit_summary_obj = sanitize_json(regime_artifacts.get("summary") or {})
+                latest_regime_snapshot = _extract_latest_regime_snapshot(daily_df_for_regime)
+                if isinstance(latest_regime_snapshot, dict) and latest_regime_snapshot:
+                    run_meta_obj["regime"]["latest_state"] = latest_regime_snapshot
+                    if isinstance(governed_a_share_meta, dict) and governed_a_share_meta:
+                        prior_snapshot = dict(run_meta_obj.get("governed_snapshot") or {})
+                        sleeve_budgets = dict(prior_snapshot.get("sleeve_budgets") or {})
+                        run_meta_obj["governed_snapshot"] = sanitize_json(
+                            {
+                                **prior_snapshot,
+                                "base_state": latest_regime_snapshot.get("base_state"),
+                                "effective_state": latest_regime_snapshot.get("effective_state"),
+                                "coarse_state": latest_regime_snapshot.get("coarse_state"),
+                                "effective_coarse_state": latest_regime_snapshot.get("effective_coarse_state"),
+                                "risk_budget_multiplier": latest_regime_snapshot.get("risk_budget_multiplier"),
+                                "budget_reason_codes": list(prior_snapshot.get("budget_reason_codes") or ()),
+                                "sleeve_budgets_summary": {
+                                    "stock_alpha_core": (((governed_a_share_meta or {}).get("stock_alpha_core") or {}).get("enabled")),
+                                    "etf_beta": (((governed_a_share_meta or {}).get("etf_beta") or {}).get("enabled")),
+                                    "system_sleeves": sorted(sleeve_budgets.keys()),
+                                },
+                            }
+                        )
+                    run_meta_needs_rewrite = True
                 summary_path = regime_artifacts.get("summary_path")
                 debug_path = regime_artifacts.get("transition_debug_path")
                 report_path = regime_artifacts.get("report_path")
@@ -590,6 +854,46 @@ def ensure_standard_artifacts(
                     regime_transition_debug_rel = _to_rel(debug_path, results_dir)
                 if isinstance(report_path, Path) and report_path.exists():
                     regime_audit_report_rel = _to_rel(report_path, results_dir)
+            attribution_payload = build_attribution_audit(
+                daily_df=daily_df_for_regime,
+                run_meta=run_meta_obj,
+            )
+            if isinstance(attribution_payload, dict) and attribution_payload:
+                attribution_path = results_dir / ARTIFACT_FILENAMES["attribution_audit"]
+                attribution_path.write_text(
+                    json.dumps(sanitize_json(attribution_payload), ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                attribution_audit_rel = _to_rel(attribution_path, results_dir)
+                attribution_audit_obj = sanitize_json(
+                    {
+                        "contract_version": attribution_payload.get("contract_version"),
+                        "summary": attribution_payload.get("summary"),
+                        "reason_code_summary": attribution_payload.get("reason_code_summary"),
+                        "refs": {"attribution_audit": attribution_audit_rel},
+                    }
+                )
+                run_meta_obj["attribution"] = sanitize_json(
+                    {
+                        "contract_version": attribution_payload.get("contract_version"),
+                        "summary": attribution_payload.get("summary"),
+                        "reason_code_summary": attribution_payload.get("reason_code_summary"),
+                        "refs": {"attribution_audit": attribution_audit_rel},
+                    }
+                )
+                prior_snapshot = dict(run_meta_obj.get("governed_snapshot") or {})
+                run_meta_obj["governed_snapshot"] = sanitize_json(
+                    {
+                        **prior_snapshot,
+                        "attribution_summary": attribution_payload.get("summary"),
+                    }
+                )
+                run_meta_needs_rewrite = True
+            if run_meta_needs_rewrite:
+                run_meta_path.write_text(
+                    json.dumps(sanitize_json(run_meta_obj), ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
 
     lineage_rel = None
     lineage_rows_raw = (
@@ -618,6 +922,8 @@ def ensure_standard_artifacts(
     if isinstance(audit_data, dict) and audit_data:
         if regime_audit_summary_obj:
             audit_data["regime_audit"] = regime_audit_summary_obj
+        if attribution_audit_obj:
+            audit_data["attribution_audit"] = attribution_audit_obj
         try:
             audit_path = results_dir / "audit.json"
             audit_path.write_text(json.dumps(audit_data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -646,6 +952,7 @@ def ensure_standard_artifacts(
         "regime_audit_summary": regime_audit_rel,
         "regime_transition_debug": regime_transition_debug_rel,
         "regime_audit_report": regime_audit_report_rel,
+        "attribution_audit": attribution_audit_rel,
     }
     if trades_path.exists():
         artifacts["trades"] = _to_rel(trades_path, results_dir)

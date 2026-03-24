@@ -675,6 +675,9 @@ def test_prepare_daily_snapshot_updates_nav_trackers_and_daily_row() -> None:
     assert runtime.daily_rows[0]["regime_engine"] == "ma200_legacy"
     assert runtime.daily_rows[0]["regime_transition_reason"] == ""
     assert runtime.daily_rows[0]["feature_availability_json"] == "{}"
+    governor_budget = json.loads(runtime.daily_rows[0]["governor_budget_json"])
+    assert governor_budget["effective_max_positions"] == 5
+    assert governor_budget["sleeve_budgets"]["cn_stock_trend_alpha_core"]["slot_cap"] == 5
 
 
 def test_apply_daily_decision_diagnostics_populates_multifactor_sorting_fields() -> None:
@@ -786,6 +789,10 @@ def test_apply_daily_decision_diagnostics_populates_multifactor_sorting_fields()
     assert diagnostics_input["raw_after_held_filter_count"] == 2
     assert diagnostics_input["raw_after_slot_filter_count"] == 1
     assert diagnostics_input["raw_after_cash_lot_count"] == 1
+    governor_budget = json.loads(daily_row["governor_budget_json"])
+    assert governor_budget["sleeve_budget_mode"] == "governed_single_sleeve"
+    assert governor_budget["budget_diagnostics"]["deployment_gap"] == 1
+    assert "BUY_SLOT_UNUSED" in governor_budget["budget_reason_codes"]
 
 
 def test_apply_daily_decision_diagnostics_preserves_unavailable_stage_counts() -> None:
@@ -961,6 +968,9 @@ def test_apply_daily_decision_diagnostics_keeps_breakout_counts_raw_for_artifact
     assert diagnostics_input["raw_buy_candidate_count"] == 5
     assert diagnostics_input["raw_after_held_filter_count"] == 3
     assert diagnostics_input["raw_after_slot_filter_count"] is None
+    governor_budget = json.loads(daily_row["governor_budget_json"])
+    assert governor_budget["budget_diagnostics"]["deployment_gap"] == 1
+    assert "NO_SELECTED_ORDERS" not in governor_budget["budget_reason_codes"]
 
 
 def test_apply_daily_decision_diagnostics_populates_moneyflow_overlay_fields() -> None:
@@ -1091,6 +1101,28 @@ def test_build_portfolio_backtest_result_preserves_metrics_shape() -> None:
                         "fallback_active": True,
                     }
                 ),
+                "governor_budget_json": json.dumps(
+                    {
+                        "contract_version": "cn_a_governor_budget@1",
+                        "total_risk_budget": 0.4,
+                        "total_exposure_cap": 0.5,
+                        "drawdown_state": "REDUCED",
+                        "recovery_state": "DRAWDOWN_RECOVERY_PENDING",
+                        "cooldown_state": "INACTIVE",
+                        "defense_floor": 0.0,
+                        "sleeve_budget_reject_count": 2,
+                        "budget_reason_codes": [
+                            "DRAWDOWN_REDUCED",
+                            "TOTAL_RISK_BUDGET_REDUCED",
+                            "SLEEVE_BUDGET_REJECTS",
+                        ],
+                        "budget_diagnostics": {
+                            "buy_slots": 2,
+                            "selected_count": 1,
+                            "deployment_gap": 1,
+                        },
+                    }
+                ),
             }],
             trade_rows=[{"date": "2026-03-02", "symbol": "sh600000", "side": "BUY"}],
             candidate_rows=[{"date": "2026-03-02", "symbol": "sh600000"}],
@@ -1137,3 +1169,6 @@ def test_build_portfolio_backtest_result_preserves_metrics_shape() -> None:
     assert result.metrics["regime_switch_count"] == 0
     assert result.metrics["regime_transition_reason_counts"] == {"CONFIDENCE_FLOOR_HOLD": 1}
     assert result.metrics["regime_feature_unavailable_days"] == 1
+    assert result.metrics["risk_budget_active_days"] == 1
+    assert result.metrics["audit"]["governor_budget"]["summary"]["budget_reason_counts"]["DRAWDOWN_REDUCED"] == 1
+    assert result.metrics["audit"]["governor_budget"]["summary"]["sleeve_budget_reject_days"] == 1

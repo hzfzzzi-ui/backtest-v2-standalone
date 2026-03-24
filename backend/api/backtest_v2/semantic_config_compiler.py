@@ -15,6 +15,7 @@ from backend.api.backtest_v2.semantic_config_schema import (
     FrontendSemanticConfig,
 )
 from backend.core.config.asset_profiles import UnsupportedAssetScopeError, canonical_asset_scope
+from backend.core.config.cn_a_governed_mainline import build_governed_a_share_contract
 
 def _build_error(path: str, message: str) -> dict[str, str]:
     return {"path": path, "message": message}
@@ -768,6 +769,12 @@ def validate_semantic_config_json(raw: dict[str, Any]) -> dict[str, Any]:
             normalized["asset_scope"] = canonical_asset_scope(normalized.get("asset_scope"))
         except UnsupportedAssetScopeError as exc:
             raise HTTPException(status_code=400, detail=f"invalid config_json: {exc}") from exc
+    governed = build_governed_a_share_contract(
+        normalized.get("governed_a_share") if isinstance(normalized.get("governed_a_share"), dict) else None,
+        asset_scope=normalized.get("asset_scope") or "cn_a_equity",
+    )
+    if governed is not None:
+        normalized["governed_a_share"] = sanitize_json(governed)
     logic_errors = _validate_semantic_logic(normalized)
     if logic_errors:
         raise HTTPException(status_code=400, detail={"message": "invalid config_json", "errors": logic_errors})
