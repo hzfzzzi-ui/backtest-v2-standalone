@@ -1,7 +1,7 @@
 # cn-a-attribution-audit Specification
 
 ## Purpose
-定义 A 股子系统统一的状态、预算、sleeve 与人工干预归因审计层，确保 governed multi-sleeve 主线能稳定回答“状态从哪里来、预算为什么变、谁影响了最终决策”。
+定义 A 股子系统统一的状态、预算、sleeve 与人工干预归因审计层，确保 governed multi-sleeve 主线能够稳定回答“状态从哪里来、预算为什么变、谁影响了最终决策”。
 
 ## Requirements
 
@@ -14,28 +14,38 @@
 - **THEN** 该摘要 MUST 可被 `run_meta.json`、`audit.json` 或等价产物引用
 
 ### Requirement: Attribution audit 必须覆盖状态、预算、sleeve 与人工干预
-`cn-a-attribution-audit` MUST 至少覆盖四类审计日志：
+`cn-a-attribution-audit` MUST 至少覆盖：
 - `state_logs`
 - `budget_logs`
 - `sleeve_logs`
 - `manual_override_logs`
+- `reason_code_summary`
 
-系统 MUST 允许通过这些日志回答“状态为何切换”“预算为何变化”“哪个 sleeve 被压缩”“人工判断是否介入”等问题。
+其中 regime 相关日志至少 MUST 记录：
+- `base_state_5`
+- `effective_state_5`
+- `coarse_state`
+- `effective_coarse_state`
+- `regime_confidence`
+- `regime_transition_reason`
+- `reason_codes`
+- `subscores`
+- `manual_override`
 
-#### Scenario: 预算变化有解释链
-- **WHEN** 某一交易日的总预算或 sleeve 预算相比上一交易日发生变化
-- **THEN** attribution audit MUST 记录相应的状态、回撤、恢复或 override 解释字段
+Attribution audit SHALL NOT 仅引用最终 `market_state` 文本而丢失原始状态或干预来源。
 
-#### Scenario: 人工干预有独立留痕
-- **WHEN** 某一交易日存在 `manual_override`
-- **THEN** attribution audit MUST 记录 `base_state`
-- **THEN** attribution audit MUST 记录 `effective_state`
-- **THEN** attribution audit MUST 记录 override 的来源、原因或作用域
+#### Scenario: 归因日志包含状态双轨
+- **WHEN** 系统生成归因审计产物
+- **THEN** 归因日志 MUST 能同时回答“模型原始状态是什么”和“最终生效状态是什么”
+
+#### Scenario: 归因日志记录人工干预
+- **WHEN** 某交易日存在 manual override
+- **THEN** 归因日志 MUST 记录 override 的原因、范围和生效对象
 
 ### Requirement: Attribution audit 必须提供 reason code 汇总
 `cn-a-attribution-audit` MUST 输出统一的 `reason_code_summary` 或等价汇总结构，用于统计各类状态切换、预算压缩、sleeve 拒单和人工干预在样本窗口中的分布。
 
 #### Scenario: 可汇总统计主导原因
 - **WHEN** 用户查看一次 A 股实验的归因结论
-- **THEN** 系统 MUST 能按 reason code 汇总主要状态来源和预算来源
+- **THEN** 系统 MUST 能按 reason code 汇总主导状态来源和预算来源
 - **THEN** 系统 SHALL NOT 只提供难以聚合的自由文本日志

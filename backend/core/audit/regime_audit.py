@@ -111,6 +111,10 @@ def _coerce_manual_override(value: Any) -> dict[str, Any]:
         "reason": _normalize_text(parsed.get("reason")) or None,
         "scope": _normalize_text(parsed.get("scope")) or None,
         "actor": _normalize_text(parsed.get("actor")) or None,
+        "effective_window": dict(parsed.get("effective_window") or {}) if isinstance(parsed.get("effective_window"), dict) else None,
+        "target_state_5": canonical_state_5(parsed.get("target_state_5")) if _normalize_text(parsed.get("target_state_5")) else None,
+        "risk_budget_multiplier": _safe_float(parsed.get("risk_budget_multiplier")),
+        "defense_bias": _safe_float(parsed.get("defense_bias")),
     }
 
 
@@ -134,6 +138,19 @@ def _coerce_feature_availability(value: Any) -> dict[str, bool]:
     if not isinstance(obj, dict):
         return {}
     return {str(k): bool(v) for k, v in obj.items() if str(k or "").strip()}
+
+
+def _coerce_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    text = _normalize_text(value)
+    if not text:
+        return {}
+    try:
+        raw = json.loads(text)
+    except Exception:
+        return {}
+    return dict(raw) if isinstance(raw, dict) else {}
 
 
 def _normalize_daily_frame(daily_df: pd.DataFrame) -> pd.DataFrame:
@@ -198,6 +215,12 @@ def _normalize_daily_frame(daily_df: pd.DataFrame) -> pd.DataFrame:
     if "manual_override_json" not in df.columns:
         df["manual_override_json"] = ""
     df["manual_override"] = [_coerce_manual_override(raw) for raw in df["manual_override_json"].tolist()]
+    if "block_scores_json" not in df.columns:
+        df["block_scores_json"] = ""
+    df["block_scores"] = [_coerce_json_object(raw) for raw in df["block_scores_json"].tolist()]
+    if "state_stability_metrics_json" not in df.columns:
+        df["state_stability_metrics_json"] = ""
+    df["state_stability_metrics"] = [_coerce_json_object(raw) for raw in df["state_stability_metrics_json"].tolist()]
     return df
 
 
@@ -245,7 +268,9 @@ def build_regime_audit_summary(
         "feature_availability_json",
         "reason_codes",
         "subscores",
+        "block_scores",
         "manual_override",
+        "state_stability_metrics",
     ]].copy()
     transition_df["state_changed"] = state_change.loc[transition_mask].astype(bool).to_list()
     transition_df["trade_mode_changed"] = (

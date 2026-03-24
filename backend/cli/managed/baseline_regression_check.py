@@ -628,6 +628,9 @@ def _build_baseline_request(exp_dir: Path) -> dict[str, Any]:
     if requested_source == "runtime_config_json" and isinstance(original_wb, dict) and original_wb:
         request_payload["runtime_config_json"] = original_wb
         return request_payload
+    if requested_source == "workbench_config" and isinstance(original_wb, dict) and original_wb:
+        request_payload["workbench_config"] = original_wb
+        return request_payload
     if isinstance(compiled_runtime, dict) and compiled_runtime.get("db") and compiled_runtime.get("schema_mapping"):
         request_payload["runtime_config_json"] = compiled_runtime
         return request_payload

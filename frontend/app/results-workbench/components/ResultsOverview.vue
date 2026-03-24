@@ -92,6 +92,56 @@ defineProps({
         </div>
       </dl>
     </article>
+
+    <article v-if="summary.hasGovernedSnapshot" class="wb-overview-card">
+      <div class="wb-overview-title">Governed A股状态</div>
+      <dl class="wb-overview-grid">
+        <div>
+          <dt>基础五状态</dt>
+          <dd>{{ summary.governedBaseState }}</dd>
+        </div>
+        <div>
+          <dt>生效五状态</dt>
+          <dd>{{ summary.governedEffectiveState }}</dd>
+        </div>
+        <div>
+          <dt>基础三状态</dt>
+          <dd>{{ summary.governedCoarseState }}</dd>
+        </div>
+        <div>
+          <dt>生效三状态</dt>
+          <dd>{{ summary.governedEffectiveCoarseState }}</dd>
+        </div>
+        <div>
+          <dt>风险预算倍率</dt>
+          <dd>{{ summary.governedRiskBudgetMultiplier }}</dd>
+        </div>
+        <div>
+          <dt>总风险预算</dt>
+          <dd>{{ summary.governedTotalRiskBudget }}</dd>
+        </div>
+        <div>
+          <dt>总暴露上限</dt>
+          <dd>{{ summary.governedTotalExposureCap }}</dd>
+        </div>
+        <div>
+          <dt>防守偏置</dt>
+          <dd>{{ summary.governedDefenseBias }}</dd>
+        </div>
+        <div>
+          <dt>状态原因</dt>
+          <dd>{{ summary.governedReasonCodes }}</dd>
+        </div>
+        <div>
+          <dt>预算原因</dt>
+          <dd>{{ summary.governedBudgetReasonCodes }}</dd>
+        </div>
+        <div>
+          <dt>人工覆盖</dt>
+          <dd>{{ summary.governedManualOverride }}</dd>
+        </div>
+      </dl>
+    </article>
   </section>
 
   <section class="wb-kpi-grid">

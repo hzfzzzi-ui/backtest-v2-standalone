@@ -18,6 +18,9 @@ def test_build_attribution_audit_collects_state_budget_sleeve_and_reason_logs() 
                 "reason_codes_json": json.dumps(["BREADTH_WEAK"], ensure_ascii=False),
                 "regime_confidence": 0.55,
                 "risk_budget_multiplier": 0.6,
+                "block_scores_json": json.dumps({"breadth_block": {"support": 0.2, "stress": 0.5, "net": -0.3}}, ensure_ascii=False),
+                "subscores_json": json.dumps({"technical": 0.4, "sentiment": 0.2, "macro_global": None}, ensure_ascii=False),
+                "state_stability_metrics_json": json.dumps({"pending_transition": False, "cooldown_active": False}, ensure_ascii=False),
                 "manual_override_json": json.dumps({"active": False}, ensure_ascii=False),
                 "governor_budget_json": json.dumps(
                     {
@@ -43,8 +46,12 @@ def test_build_attribution_audit_collects_state_budget_sleeve_and_reason_logs() 
                 "reason_codes_json": json.dumps(["TREND_BREAK"], ensure_ascii=False),
                 "regime_confidence": 0.8,
                 "risk_budget_multiplier": 0.3,
+                "defense_bias": 0.7,
+                "block_scores_json": json.dumps({"risk_block": {"support": 0.1, "stress": 0.9, "net": -0.8}}, ensure_ascii=False),
+                "subscores_json": json.dumps({"technical": 0.2, "sentiment": 0.1, "macro_global": -0.4}, ensure_ascii=False),
+                "state_stability_metrics_json": json.dumps({"pending_transition": True, "cooldown_active": False}, ensure_ascii=False),
                 "manual_override_json": json.dumps(
-                    {"active": True, "reason": "manual_risk_cut", "scope": "runtime", "actor": "user"},
+                    {"active": True, "reason": "manual_risk_cut", "scope": "runtime", "actor": "user", "target_state_5": "LIGHT"},
                     ensure_ascii=False,
                 ),
                 "governor_budget_json": json.dumps(
@@ -106,3 +113,7 @@ def test_build_attribution_audit_collects_state_budget_sleeve_and_reason_logs() 
     assert payload["reason_code_summary"]["budget_reason_codes"]["DRAWDOWN_REDUCED"] == 1
     assert payload["reason_code_summary"]["sleeve_reason_codes"]["FORMAL_CORE_BETA"] == 1
     assert payload["reason_code_summary"]["manual_override_reasons"]["manual_risk_cut"] == 1
+    assert payload["state_logs"][-1]["defense_bias"] == 0.7
+    assert payload["state_logs"][-1]["block_scores"]["risk_block"]["net"] == -0.8
+    assert payload["state_logs"][-1]["state_stability_metrics"]["pending_transition"] is True
+    assert payload["manual_override_logs"][-1]["target_state_5"] == "LIGHT"

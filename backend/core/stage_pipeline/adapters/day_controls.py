@@ -9,9 +9,10 @@ from backend.core.config.cn_a_governed_mainline import build_governor_budget_sna
 
 
 _BULLISH_STATE_NAMES = {"BULL", "BULL_MAIN"}
+_LIGHT_STATE_NAMES = {"LIGHT", "LIGHT_TREND"}
 _TRANS_DOWN_STATE_NAMES = {"TRANS_DOWN", "TURN_WEAK"}
 _TRANS_UP_STATE_NAMES = {"TRANS_UP", "TURN_STRONG"}
-_BEARISH_STATE_NAMES = {"BEAR", "DEFENSIVE"}
+_BEARISH_STATE_NAMES = {"BEAR", "DEFENSIVE", "RISK_OFF"}
 
 
 def _resolve_runtime_asset_scope(runtime: Any) -> str:
@@ -45,6 +46,16 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
     market_state_smoothed = ""
     market_state_score = None
     risk_budget_multiplier = None
+    base_state_5 = ""
+    effective_state_5 = ""
+    coarse_state = ""
+    effective_coarse_state = ""
+    reason_codes: list[str] = []
+    block_scores: dict[str, Any] = {}
+    subscores: dict[str, Any] = {}
+    manual_override: dict[str, Any] = {}
+    state_stability_metrics: dict[str, Any] = {}
+    defense_bias = None
     weekly_observation_flag = False
     if runtime.route_id == "provider_breakout_runtime":
         dynamic_base_positions = int(runtime.request.max_positions)
@@ -79,7 +90,18 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
             smoothed_state_name_arr = getattr(runtime.provider, "_market_state_smoothed_name_arr", None)
             state_score_arr = getattr(runtime.provider, "_market_state_score_arr", None)
             risk_budget_arr = getattr(runtime.provider, "_risk_budget_multiplier_arr", None)
+            formal_risk_budget_arr = getattr(runtime.provider, "_regime_risk_budget_multiplier_arr", None)
             weekly_flag_arr = getattr(runtime.provider, "_weekly_observation_flag_arr", None)
+            base_state_arr = getattr(runtime.provider, "_base_state_5_arr", None)
+            effective_state_arr = getattr(runtime.provider, "_effective_state_5_arr", None)
+            coarse_state_arr = getattr(runtime.provider, "_coarse_state_arr", None)
+            effective_coarse_state_arr = getattr(runtime.provider, "_effective_coarse_state_arr", None)
+            reason_codes_arr = getattr(runtime.provider, "_reason_codes_arr", None)
+            block_scores_arr = getattr(runtime.provider, "_block_scores_arr", None)
+            subscores_arr = getattr(runtime.provider, "_subscores_arr", None)
+            manual_override_arr = getattr(runtime.provider, "_manual_override_arr", None)
+            state_stability_arr = getattr(runtime.provider, "_state_stability_metrics_arr", None)
+            defense_bias_arr = getattr(runtime.provider, "_defense_bias_arr", None)
             if isinstance(state_name_arr, np.ndarray) and day_index < len(state_name_arr):
                 market_state = str(state_name_arr[day_index] or "")
             else:
@@ -97,12 +119,42 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
                 market_state_score = None if value != value else value
             if isinstance(risk_budget_arr, np.ndarray) and day_index < len(risk_budget_arr):
                 risk_budget_multiplier = float(risk_budget_arr[day_index])
+            if isinstance(formal_risk_budget_arr, np.ndarray) and day_index < len(formal_risk_budget_arr):
+                risk_budget_multiplier = float(formal_risk_budget_arr[day_index])
             if isinstance(weekly_flag_arr, np.ndarray) and day_index < len(weekly_flag_arr):
                 weekly_observation_flag = bool(weekly_flag_arr[day_index])
-            market_state_5 = str(market_state_smoothed or market_state or "")
+            if isinstance(base_state_arr, np.ndarray) and day_index < len(base_state_arr):
+                base_state_5 = str(base_state_arr[day_index] or "")
+            if isinstance(effective_state_arr, np.ndarray) and day_index < len(effective_state_arr):
+                effective_state_5 = str(effective_state_arr[day_index] or "")
+            if isinstance(coarse_state_arr, np.ndarray) and day_index < len(coarse_state_arr):
+                coarse_state = str(coarse_state_arr[day_index] or "")
+            if isinstance(effective_coarse_state_arr, np.ndarray) and day_index < len(effective_coarse_state_arr):
+                effective_coarse_state = str(effective_coarse_state_arr[day_index] or "")
+            if isinstance(reason_codes_arr, np.ndarray) and day_index < len(reason_codes_arr):
+                raw_reason_codes = reason_codes_arr[day_index]
+                if isinstance(raw_reason_codes, (list, tuple)):
+                    reason_codes = [str(item).strip() for item in raw_reason_codes if str(item).strip()]
+            if isinstance(block_scores_arr, np.ndarray) and day_index < len(block_scores_arr):
+                raw_block_scores = block_scores_arr[day_index]
+                block_scores = dict(raw_block_scores) if isinstance(raw_block_scores, dict) else {}
+            if isinstance(subscores_arr, np.ndarray) and day_index < len(subscores_arr):
+                raw_subscores = subscores_arr[day_index]
+                subscores = dict(raw_subscores) if isinstance(raw_subscores, dict) else {}
+            if isinstance(manual_override_arr, np.ndarray) and day_index < len(manual_override_arr):
+                raw_manual_override = manual_override_arr[day_index]
+                manual_override = dict(raw_manual_override) if isinstance(raw_manual_override, dict) else {}
+            if isinstance(state_stability_arr, np.ndarray) and day_index < len(state_stability_arr):
+                raw_state_stability = state_stability_arr[day_index]
+                state_stability_metrics = dict(raw_state_stability) if isinstance(raw_state_stability, dict) else {}
+            if isinstance(defense_bias_arr, np.ndarray) and day_index < len(defense_bias_arr):
+                defense_bias = float(defense_bias_arr[day_index])
+            market_state_5 = str(effective_state_5 or market_state_smoothed or market_state or "")
             state_counter_name = str(market_state_5 or market_state or "").strip().upper()
             if state_counter_name in _BULLISH_STATE_NAMES:
                 runtime.market_filter_bull_days += 1
+            elif state_counter_name in _LIGHT_STATE_NAMES:
+                pass
             elif state_counter_name in _TRANS_DOWN_STATE_NAMES:
                 runtime.market_state_trans_down_days += 1
             elif state_counter_name in _TRANS_UP_STATE_NAMES:
@@ -174,6 +226,13 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
         drawdown=drawdown,
         drawdown_state=dd_state,
         regime_transition_reason=regime_transition_reason,
+        base_state_5=base_state_5 or market_state_5,
+        effective_state_5=effective_state_5 or market_state_5,
+        coarse_state=coarse_state,
+        effective_coarse_state=effective_coarse_state,
+        reason_codes=reason_codes,
+        defense_bias=defense_bias,
+        manual_override=manual_override,
         breadth_max_positions=breadth_max_positions,
         positions_after_sell=sum(1 for qty in getattr(runtime, "positions", {}).values() if int(qty) > 0),
     )
@@ -196,6 +255,16 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
         "market_state_smoothed": market_state_smoothed,
         "market_state_score": market_state_score,
         "risk_budget_multiplier": risk_budget_multiplier,
+        "base_state_5": base_state_5 or market_state_5,
+        "effective_state_5": effective_state_5 or market_state_5,
+        "coarse_state": coarse_state,
+        "effective_coarse_state": effective_coarse_state,
+        "reason_codes": reason_codes,
+        "block_scores": block_scores,
+        "subscores": subscores,
+        "manual_override": manual_override,
+        "state_stability_metrics": state_stability_metrics,
+        "defense_bias": defense_bias,
         "weekly_observation_flag": bool(weekly_observation_flag),
         "governor_budget": governor_budget,
     }

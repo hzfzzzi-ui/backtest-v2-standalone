@@ -779,12 +779,16 @@ def evaluate_attribution_traceability(
     run_meta_obj = dict(run_meta or {})
     governed = dict(run_meta_obj.get("governed_a_share") or {})
     attribution = dict(run_meta_obj.get("attribution") or {})
+    governed_snapshot = dict(run_meta_obj.get("governed_snapshot") or {})
+    regime_meta = dict(run_meta_obj.get("regime") or {})
+    latest_regime = dict(regime_meta.get("latest_state") or {})
     should_apply = bool(governed.get("enabled")) or bool(attribution)
     if not should_apply:
         return None
 
     attribution_obj = attribution
     root = Path(results_dir).resolve() if results_dir is not None else None
+    refs: dict[str, Any] = {}
     if root is not None:
         payload, _ = _read_json(root / ARTIFACT_FILENAMES["attribution_audit"])
         if isinstance(payload, Mapping):
@@ -794,21 +798,43 @@ def evaluate_attribution_traceability(
                 "reason_code_summary": payload.get("reason_code_summary"),
                 "refs": {"attribution_audit": _clean_ref(root / ARTIFACT_FILENAMES["attribution_audit"], root=root)},
             }
+        refs["regime_audit_summary"] = _clean_ref(root / ARTIFACT_FILENAMES["regime_audit_summary"], root=root)
 
     summary = dict(attribution_obj.get("summary") or {})
     reason_code_summary = dict(attribution_obj.get("reason_code_summary") or {})
-    refs = dict(attribution_obj.get("refs") or {})
+    refs = {**refs, **dict(attribution_obj.get("refs") or {})}
     has_logs = all(
         key in summary
         for key in ("state_log_count", "budget_log_count", "sleeve_log_count", "manual_override_log_count")
     )
-    has_reason_codes = any(bool(dict(reason_code_summary.get(key) or {})) for key in reason_code_summary.keys())
-    has_ref = bool(str(refs.get("attribution_audit") or "").strip())
-    status = "PASS" if has_logs and has_ref else "FAIL"
+    has_reason_code_summary = any(bool(dict(reason_code_summary.get(key) or {})) for key in reason_code_summary.keys())
+    has_attribution_ref = bool(str(refs.get("attribution_audit") or "").strip())
+    has_regime_ref = bool(str(refs.get("regime_audit_summary") or "").strip())
+    has_governor_snapshot = all(
+        [
+            bool(str(governed_snapshot.get("base_state") or "").strip()),
+            bool(str(governed_snapshot.get("effective_state") or "").strip()),
+            bool(str(governed_snapshot.get("coarse_state") or "").strip()),
+            bool(str(governed_snapshot.get("effective_coarse_state") or "").strip()),
+            _safe_float(governed_snapshot.get("risk_budget_multiplier")) is not None,
+        ]
+    )
+    has_regime_snapshot = all(
+        [
+            bool(str(latest_regime.get("base_state") or "").strip()),
+            bool(str(latest_regime.get("effective_state") or "").strip()),
+            bool(str(latest_regime.get("coarse_state") or "").strip()),
+            bool(str(latest_regime.get("effective_coarse_state") or "").strip()),
+            isinstance(latest_regime.get("reason_codes"), list),
+            isinstance(latest_regime.get("manual_override"), Mapping),
+        ]
+    )
+    has_budget_reason_codes = isinstance(governed_snapshot.get("budget_reason_codes"), list)
+    status = "PASS" if has_logs and has_attribution_ref and has_regime_ref and has_governor_snapshot and has_regime_snapshot and has_budget_reason_codes else "FAIL"
     reason = (
-        "Attribution audit summary and artifact refs are present."
+        "Formal regime snapshot, governor snapshot, and attribution audit refs are present."
         if status == "PASS"
-        else "Missing attribution summary fields or artifact references."
+        else "Missing unified regime/governor/attribution evidence chain."
     )
     return {
         "status": status,
@@ -816,12 +842,32 @@ def evaluate_attribution_traceability(
         "evidence": {
             "summary": summary,
             "reason_code_summary": reason_code_summary,
+            "governed_snapshot": {
+                "base_state": governed_snapshot.get("base_state"),
+                "effective_state": governed_snapshot.get("effective_state"),
+                "coarse_state": governed_snapshot.get("coarse_state"),
+                "effective_coarse_state": governed_snapshot.get("effective_coarse_state"),
+                "risk_budget_multiplier": governed_snapshot.get("risk_budget_multiplier"),
+                "budget_reason_codes": governed_snapshot.get("budget_reason_codes"),
+            },
+            "latest_regime": {
+                "base_state": latest_regime.get("base_state"),
+                "effective_state": latest_regime.get("effective_state"),
+                "coarse_state": latest_regime.get("coarse_state"),
+                "effective_coarse_state": latest_regime.get("effective_coarse_state"),
+                "reason_codes": latest_regime.get("reason_codes"),
+                "manual_override": latest_regime.get("manual_override"),
+            },
             "refs": refs,
         },
         "metrics": {
             "has_logs": has_logs,
-            "has_reason_codes": has_reason_codes,
-            "has_ref": has_ref,
+            "has_reason_code_summary": has_reason_code_summary,
+            "has_attribution_ref": has_attribution_ref,
+            "has_regime_ref": has_regime_ref,
+            "has_governor_snapshot": has_governor_snapshot,
+            "has_regime_snapshot": has_regime_snapshot,
+            "has_budget_reason_codes": has_budget_reason_codes,
             "state_log_count": _safe_int(summary.get("state_log_count")) or 0,
             "budget_log_count": _safe_int(summary.get("budget_log_count")) or 0,
             "sleeve_log_count": _safe_int(summary.get("sleeve_log_count")) or 0,
@@ -1288,6 +1334,8 @@ def build_research_audit(
             "manifest": _clean_ref(root / "manifest.json", root=root),
             "stage_summary": _clean_ref(root / "stage_summary.json", root=root),
             "execution_lineage_ledger": _clean_ref(root / ARTIFACT_FILENAMES["execution_lineage_ledger"], root=root),
+            "regime_audit_summary": _clean_ref(root / ARTIFACT_FILENAMES["regime_audit_summary"], root=root),
+            "regime_transition_debug": _clean_ref(root / ARTIFACT_FILENAMES["regime_transition_debug"], root=root),
             "attribution_audit": _clean_ref(root / ARTIFACT_FILENAMES["attribution_audit"], root=root),
             "trades": _clean_ref(root / "portfolio_trades.csv", root=root),
             "symbol_performance": _clean_ref(root / "symbol_performance.csv", root=root),

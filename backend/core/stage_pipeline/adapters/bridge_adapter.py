@@ -81,6 +81,7 @@ class StagePipelineBridgeRequest:
     breadth_cfg: BreadthConfig | None = None
     regime_engine_cfg: RegimeEngineConfig | None = None
     asset_context: Mapping[str, Any] = field(default_factory=dict)
+    governed_a_share: Mapping[str, Any] = field(default_factory=dict)
     disabled_stages: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -99,6 +100,7 @@ class StagePipelineBridgeRequest:
             tuple(sorted({str(stage).upper() for stage in self.disabled_stages})),
         )
         object.__setattr__(self, "asset_context", dict(self.asset_context or {}))
+        object.__setattr__(self, "governed_a_share", dict(self.governed_a_share or {}))
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,6 +367,7 @@ class StagePipelineBridgeRuntime:
             regime_engine_cfg=self.request.regime_engine_cfg,
             sizing_cfg=self.request.sizing_cfg,
             risk_budget_cfg=self.request.risk_budget_cfg,
+            governed_a_share=self.request.governed_a_share,
         )
 
     def _apply_open_fills(self, day: date, fills_today: Sequence[Any]) -> None:

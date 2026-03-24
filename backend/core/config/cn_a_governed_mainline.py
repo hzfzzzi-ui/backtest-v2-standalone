@@ -270,6 +270,7 @@ def _budget_reason_codes(
     regime_transition_reason: str,
     breadth_max_positions: int | None,
     sleeve_budget_reject_count: int,
+    manual_override_active: bool,
 ) -> list[str]:
     reasons: list[str] = []
     if drawdown_state == "REDUCED":
@@ -290,6 +291,8 @@ def _budget_reason_codes(
         reasons.append(f"REGIME_TRANSITION::{regime_transition_reason}")
     if int(sleeve_budget_reject_count) > 0:
         reasons.append("SLEEVE_BUDGET_REJECTS")
+    if bool(manual_override_active):
+        reasons.append("MANUAL_OVERRIDE_ACTIVE")
     return reasons
 
 
@@ -302,6 +305,13 @@ def build_governor_budget_snapshot(
     drawdown: Any = None,
     drawdown_state: Any = None,
     regime_transition_reason: Any = None,
+    base_state_5: Any = None,
+    effective_state_5: Any = None,
+    coarse_state: Any = None,
+    effective_coarse_state: Any = None,
+    reason_codes: Any = None,
+    defense_bias: Any = None,
+    manual_override: Any = None,
     breadth_max_positions: Any = None,
     positions_after_sell: Any = None,
     sleeve_budget_mode: Any = None,
@@ -321,6 +331,16 @@ def build_governor_budget_snapshot(
     total_risk_budget = risk_budget_value if risk_budget_value is not None else total_exposure_cap
     drawdown_state_text = _normalize_text(drawdown_state).upper() or "NORMAL"
     regime_reason_text = _normalize_text(regime_transition_reason)
+    base_state_text = canonical_state_5(base_state_5) if _normalize_text(base_state_5) else None
+    effective_state_text = canonical_state_5(effective_state_5) if _normalize_text(effective_state_5) else base_state_text
+    coarse_state_text = _normalize_text(coarse_state).upper() or (coarse_state_from_state_5(base_state_text) if base_state_text else "")
+    effective_coarse_state_text = _normalize_text(effective_coarse_state).upper() or (
+        coarse_state_from_state_5(effective_state_text) if effective_state_text else ""
+    )
+    reason_code_list = [text for text in (_normalize_text(item) for item in list(reason_codes or ())) if text]
+    defense_bias_value = _safe_float(defense_bias)
+    manual_override_payload = dict(manual_override or {}) if isinstance(manual_override, dict) else {}
+    manual_override_active = bool(manual_override_payload.get("active", False))
     recovery_state = "DRAWDOWN_RECOVERY_PENDING" if drawdown_state_text == "REDUCED" else "INACTIVE"
     cooldown_state = "REGIME_TRANSITION_COOLDOWN" if "COOLDOWN" in regime_reason_text.upper() else "INACTIVE"
     default_sleeve_id, default_system_role = _default_system_sleeve_meta(asset_scope)
@@ -363,6 +383,11 @@ def build_governor_budget_snapshot(
         "budget_consumer_sleeve_id": default_sleeve_id,
         "budget_consumer_system_role": default_system_role,
         "budget_semantics": CN_STOCK_ALPHA_CORE_BUDGET_SEMANTICS,
+        "regime_source_state": base_state_text,
+        "regime_effective_state": effective_state_text,
+        "coarse_state": coarse_state_text or None,
+        "effective_coarse_state": effective_coarse_state_text or None,
+        "regime_reason_codes": reason_code_list,
         "total_risk_budget": total_risk_budget,
         "total_exposure_cap": total_exposure_cap,
         "hard_max_positions": hard_positions,
@@ -371,8 +396,21 @@ def build_governor_budget_snapshot(
         "drawdown_state": drawdown_state_text,
         "recovery_state": recovery_state,
         "cooldown_state": cooldown_state,
-        "defense_floor": 0.0,
+        "defense_floor": defense_bias_value if defense_bias_value is not None else 0.0,
         "defense_floor_state": "INACTIVE",
+        "defense_bias": defense_bias_value,
+        "manual_override": {
+            "active": manual_override_active,
+            "reason": _normalize_text(manual_override_payload.get("reason")) or None,
+            "scope": _normalize_text(manual_override_payload.get("scope")) or None,
+            "actor": _normalize_text(manual_override_payload.get("actor")) or None,
+            "effective_window": dict(manual_override_payload.get("effective_window") or {})
+            if isinstance(manual_override_payload.get("effective_window"), dict)
+            else None,
+            "target_state_5": canonical_state_5(manual_override_payload.get("target_state_5"))
+            if _normalize_text(manual_override_payload.get("target_state_5"))
+            else None,
+        },
         "phase1_boundary_excludes": _phase1_excluded_capabilities_for_sleeve(default_sleeve_id),
         "local_budget_controls": _local_budget_controls_for_sleeve(default_sleeve_id),
         "sleeve_budget_mode": sleeve_budget_mode_text,
@@ -388,6 +426,7 @@ def build_governor_budget_snapshot(
             regime_transition_reason=regime_reason_text,
             breadth_max_positions=breadth_cap,
             sleeve_budget_reject_count=reject_count,
+            manual_override_active=manual_override_active,
         ),
         "sleeve_budgets": {
             default_sleeve_id: {
@@ -438,6 +477,13 @@ def merge_governor_budget_snapshot(
                 "",
             ),
         ),
+        base_state_5=kwargs.get("base_state_5", base.get("regime_source_state")),
+        effective_state_5=kwargs.get("effective_state_5", base.get("regime_effective_state")),
+        coarse_state=kwargs.get("coarse_state", base.get("coarse_state")),
+        effective_coarse_state=kwargs.get("effective_coarse_state", base.get("effective_coarse_state")),
+        reason_codes=kwargs.get("reason_codes", list(base.get("regime_reason_codes") or ())),
+        defense_bias=kwargs.get("defense_bias", base.get("defense_bias")),
+        manual_override=kwargs.get("manual_override", dict(base.get("manual_override") or {})),
         breadth_max_positions=kwargs.get(
             "breadth_max_positions",
             _safe_int(base.get("total_exposure_cap") * base.get("hard_max_positions", 0))
@@ -501,6 +547,10 @@ def _default_contract(asset_scope: str) -> dict[str, Any] | None:
                 "reason": None,
                 "scope": None,
                 "actor": None,
+                "effective_window": None,
+                "target_state_5": None,
+                "risk_budget_multiplier": None,
+                "defense_bias": None,
             },
         },
         "governor": {
@@ -551,6 +601,14 @@ def build_governed_a_share_contract(
         "reason": _normalize_text(manual_override.get("reason")) or None,
         "scope": _normalize_text(manual_override.get("scope")) or None,
         "actor": _normalize_text(manual_override.get("actor")) or None,
+        "effective_window": dict(manual_override.get("effective_window") or {})
+        if isinstance(manual_override.get("effective_window"), dict)
+        else None,
+        "target_state_5": canonical_state_5(manual_override.get("target_state_5"))
+        if _normalize_text(manual_override.get("target_state_5"))
+        else None,
+        "risk_budget_multiplier": _safe_float(manual_override.get("risk_budget_multiplier")),
+        "defense_bias": _safe_float(manual_override.get("defense_bias")),
     }
     regime["subscore_contract"] = [
         text

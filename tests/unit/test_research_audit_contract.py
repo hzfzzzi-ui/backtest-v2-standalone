@@ -173,6 +173,19 @@ def test_evaluate_etf_beta_sleeve_passes_when_phase1_scope_and_budget_are_tracea
 def test_evaluate_attribution_traceability_passes_when_summary_and_refs_exist(tmp_path) -> None:
     root = tmp_path / "exp_attr"
     root.mkdir(parents=True, exist_ok=True)
+    (root / "regime_audit_summary.json").write_text(
+        json.dumps(
+            {
+                "summary": {
+                    "base_state_5": "LIGHT",
+                    "effective_state_5": "LIGHT",
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     (root / "attribution_audit.json").write_text(
         json.dumps(
             {
@@ -198,13 +211,36 @@ def test_evaluate_attribution_traceability_passes_when_summary_and_refs_exist(tm
 
     gate = evaluate_attribution_traceability(
         results_dir=root,
-        run_meta={"governed_a_share": {"enabled": True}},
+        run_meta={
+            "governed_a_share": {"enabled": True},
+            "governed_snapshot": {
+                "base_state": "LIGHT",
+                "effective_state": "LIGHT",
+                "coarse_state": "NEUTRAL",
+                "effective_coarse_state": "NEUTRAL",
+                "risk_budget_multiplier": 0.5,
+                "budget_reason_codes": ["TOTAL_RISK_BUDGET_REDUCED"],
+            },
+            "regime": {
+                "latest_state": {
+                    "base_state": "LIGHT",
+                    "effective_state": "LIGHT",
+                    "coarse_state": "NEUTRAL",
+                    "effective_coarse_state": "NEUTRAL",
+                    "reason_codes": ["TREND_BREAK"],
+                    "manual_override": {"active": False, "reason": None, "scope": None, "actor": None},
+                }
+            },
+        },
     )
 
     assert gate is not None
     assert gate["status"] == "PASS"
     assert gate["metrics"]["state_log_count"] == 2
-    assert gate["metrics"]["has_ref"] is True
+    assert gate["metrics"]["has_attribution_ref"] is True
+    assert gate["metrics"]["has_regime_ref"] is True
+    assert gate["metrics"]["has_governor_snapshot"] is True
+    assert gate["metrics"]["has_regime_snapshot"] is True
 
 
 def test_evaluate_execution_realism_flags_hard_fail_on_suspended_trade() -> None:
@@ -667,6 +703,7 @@ def test_build_research_audit_reuses_evidence_refs_instead_of_embedding_payload(
     assert audit["gates"]["accounting_integrity"]["status"] == "UNKNOWN"
     assert audit["evidence_refs"]["audit"] == "audit.json"
     assert audit["evidence_refs"]["execution_lineage_ledger"] is None
+    assert audit["evidence_refs"]["regime_audit_summary"] is None
     assert audit["evidence_refs"]["run_meta"] == "run_meta.json"
     assert audit["evidence_refs"]["manifest"] == "manifest.json"
     assert audit["evidence_refs"]["stage_summary"] == "stage_summary.json"

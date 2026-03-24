@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from backend.cli.managed.baseline_regression_check import _load_contract, _write_json_output, compare_experiment_dirs
+from backend.cli.managed.baseline_regression_check import (
+    _build_baseline_request,
+    _load_contract,
+    _write_json_output,
+    compare_experiment_dirs,
+)
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -281,3 +286,50 @@ def test_write_json_output_updates_manifest_with_baseline_compare(tmp_path: Path
         "resolved_config": "resolved_config.json",
         "compiled_plan": "compiled_plan.json",
     }
+
+
+def test_build_baseline_request_prefers_workbench_config_when_baseline_requested(tmp_path: Path) -> None:
+    exp_dir = tmp_path / "exp_baseline"
+    exp_dir.mkdir(parents=True, exist_ok=True)
+
+    original_workbench_config = {
+        "mode": "draft_run",
+        "universe_mode": "CUSTOM",
+        "universe": {
+            "start": "2012-01-04",
+            "end": "2026-03-20",
+            "benchmark": "000300.SH",
+            "price_adj": "hfq",
+            "symbols": ["600000.SH"],
+        },
+        "flow_script": {
+            "recommended_preset": "single",
+        },
+    }
+    compiled_runtime = {
+        "db": {"enabled": True},
+        "schema_mapping": {"stocks": "pams_ohlcv_daily_v2"},
+        "runtime_only": True,
+    }
+
+    _write_json(
+        exp_dir / "config.json",
+        {
+            "overrides": {
+                "config_source": "workbench_config",
+                "config_id": "baseline_v10_1",
+                "workbench_mode": "draft_run",
+                "original_workbench_config": original_workbench_config,
+            }
+        },
+    )
+    _write_json(exp_dir / "input_config.json", {"strategy": {"name": "baseline_v10_1"}})
+    _write_json(exp_dir / "compiled_plan.json", {"runtime_config": compiled_runtime})
+
+    payload = _build_baseline_request(exp_dir)
+
+    assert payload["config_id"] == "baseline_v10_1"
+    assert "workbench_config" in payload
+    assert payload["workbench_config"] == original_workbench_config
+    assert "runtime_config_json" not in payload
+    assert "config_json" not in payload

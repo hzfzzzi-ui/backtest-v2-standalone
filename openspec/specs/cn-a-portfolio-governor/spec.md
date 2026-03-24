@@ -6,21 +6,38 @@
 ## Requirements
 
 ### Requirement: A股子系统必须存在唯一合法的总风险预算层
-系统 MUST 为 A 股子系统提供唯一合法的 `cn-a-portfolio-governor` 合同，用于统一消费 `market_regime_engine`、回撤状态、恢复/冷却状态和 sleeve 当前暴露，并输出全组合总风险预算与 sleeve 预算。任何单一 sleeve SHALL NOT 直接定义或覆盖全组合总风险预算。
+A 股子系统 MUST 存在唯一合法的 `global_portfolio_governor`，并且 Governor SHALL 只消费正式 `market_regime_engine` payload。
 
-#### Scenario: Governor 生成全组合预算
-- **WHEN** A 股子系统完成某一交易日的状态判定与组合状态汇总
-- **THEN** Governor MUST 输出 `total_risk_budget`
-- **THEN** Governor MUST 输出 `total_exposure_cap`
-- **THEN** Governor MUST 输出按 sleeve 划分的 `sleeve_budgets`
+Governor 的 regime 输入 MUST 至少包含：
+- `base_state_5`
+- `effective_state_5`
+- `coarse_state`
+- `effective_coarse_state`
+- `regime_confidence`
+- `reason_codes`
+- `risk_budget_multiplier`
+- `defense_bias`
+- `manual_override`
 
-#### Scenario: sleeve 不得绕过 Governor 改写总预算
-- **WHEN** `cn_stock_trend_alpha_core` 或 `cn_etf_beta` 运行各自的本地 sizing 逻辑
-- **THEN** 这些 sleeve MUST 只消费 Governor 下发的预算
-- **THEN** 这些 sleeve SHALL NOT 直接把全组合风险预算改写为新的全局真相
+Governor SHALL NOT：
+- 自行根据私有 `market_state` 数值或旧状态名重新猜测 canonical 状态
+- 仅根据 `coarse_state` 或 `effective_coarse_state` 单独重建正式五状态
+- 绕过 `effective_state_*` 直接用局部 `trade_mode` 决定全组合总风险预算
+- 忽略 manual override 而直接使用 `base_state_*`
+
+Governor MUST 将其消费的 regime 输入作为正式预算真相来源。
+
+#### Scenario: Governor 只消费正式 regime payload
+- **WHEN** Governor 计算总风险预算与 sleeve budget
+- **THEN** 输入 MUST 来自正式 regime payload，而不是下游自行拼接的状态字段
+
+#### Scenario: Governor 区分 base 与 effective
+- **WHEN** 某一交易日存在 override 或外部状态干预
+- **THEN** Governor MUST 能区分 `base_state_*` 与 `effective_state_*`
+- **THEN** Governor MUST 对最终预算使用生效状态
 
 ### Requirement: Governor 必须统一 drawdown ladder 与恢复状态
-`cn-a-portfolio-governor` MUST 统一管理 A 股子系统的 drawdown ladder、recovery state、cooldown state 和 defense floor。Governor SHALL 允许不同 sleeve 在预算内做本地执行，但 MUST 保持 drawdown 与恢复规则对全组合一致。
+`cn-a-portfolio-governor` MUST 统一管理 A 股子系统的 `drawdown_ladder`、`recovery_state`、`cooldown_state` 和 `defense_floor`。Governor SHALL 允许不同 sleeve 在预算内做本地执行，但 MUST 保持回撤与恢复规则对全组合一致。
 
 #### Scenario: 回撤进入更严格档位
 - **WHEN** 当前组合回撤穿越 Governor 配置的更高风险档位
@@ -33,9 +50,30 @@
 - **THEN** 下游 sleeve MUST 基于该状态调整开仓和恢复节奏
 
 ### Requirement: Governor 必须输出最小可归因预算证据链
-每次启用 Governor 的 A 股运行 MUST 输出最小预算证据链，至少包括 `portfolio_budget`、`sleeve_budgets`、`drawdown_state`、`recovery_state`、`cooldown_state` 和 `governor_reason_codes`，并允许 `run_meta.json`、`audit.json` 与工作台 snapshot 统一引用。
+Governor MUST 输出最小可归因预算证据链，并且该证据链 MUST 明确引用 regime 来源。
 
-#### Scenario: Governor 运行后可审计
-- **WHEN** A 股子系统运行完成
-- **THEN** 产物 MUST 能回答“今天为什么总仓位是这个水平”
-- **THEN** 产物 MUST 能回答“今天为什么某个 sleeve 被压缩或停用”
+最小证据链至少包含：
+- `portfolio_budget.total_risk_budget`
+- `portfolio_budget.total_exposure_cap`
+- `portfolio_budget.regime_source_state`
+- `portfolio_budget.regime_effective_state`
+- `portfolio_budget.regime_reason_codes`
+- `portfolio_budget.defense_floor`
+- `portfolio_budget.drawdown_state`
+- `portfolio_budget.recovery_state`
+- `portfolio_budget.cooldown_state`
+- `portfolio_budget.sleeve_budgets`
+- `portfolio_budget.budget_reason_codes`
+
+其中：
+- `regime_source_state` MUST 对应 `base_state_5`
+- `regime_effective_state` MUST 对应 `effective_state_5`
+- `budget_reason_codes` MUST 明确说明预算是被 regime、drawdown、cooldown、defense floor 还是 override 所驱动
+
+#### Scenario: 预算证据链能回答为什么今天降仓
+- **WHEN** Governor 输出某交易日预算摘要
+- **THEN** 结果 MUST 能追溯预算变化对应的 regime 状态、drawdown 状态和预算原因码
+
+#### Scenario: 预算证据链能区分状态与预算干预
+- **WHEN** 某交易日存在 manual override 或 defense bias
+- **THEN** Governor 证据链 MUST 能区分“状态本身变了”和“预算被额外压缩/偏防守”两类原因

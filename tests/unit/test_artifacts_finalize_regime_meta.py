@@ -92,9 +92,9 @@ def test_ensure_standard_artifacts_writes_regime_audit_bundle(tmp_path) -> None:
     (results_dir / "portfolio_daily.csv").write_text(
         "\n".join(
             [
-                "date,nav,market_state,trade_mode,regime_engine,regime_confidence,regime_duration_bars,regime_transition_reason,feature_availability_json,risk_budget_multiplier,reason_codes_json,subscores_json,manual_override_json",
-                '2026-03-02,1.0,BULL,TREND_MAIN,market_regime_framework,0.82,6,,"{""trend_block"": true, ""risk_block"": true}",1.0,"[""BULL_CONFIRMED""]","{""technical"": 0.82, ""sentiment"": null, ""macro_global"": null}","{""active"": false, ""reason"": null, ""scope"": null, ""actor"": null}"',
-                '2026-03-03,1.1,TRANS_DOWN,TREND_LIGHT,market_regime_framework,0.44,1,RISK_BLOCK_WEAKNESS,"{""trend_block"": true, ""risk_block"": false}",0.35,"[""RISK_BLOCK_WEAKNESS""]","{""technical"": 0.44, ""sentiment"": 0.1, ""macro_global"": -0.2}","{""active"": true, ""reason"": ""MANUAL_REVIEW"", ""scope"": ""cn_a_mainline"", ""actor"": ""pm""}"',
+                "date,nav,market_state,trade_mode,regime_engine,regime_confidence,regime_duration_bars,regime_transition_reason,feature_availability_json,risk_budget_multiplier,reason_codes_json,subscores_json,block_scores_json,manual_override_json,state_stability_metrics_json,base_state_5,effective_state_5,coarse_state,effective_coarse_state,defense_bias",
+                '2026-03-02,1.0,BULL,TREND_MAIN,market_regime_framework,0.82,6,,"{""trend_block"": true, ""risk_block"": true}",1.0,"[""BULL_CONFIRMED""]","{""technical"": 0.82, ""sentiment"": null, ""macro_global"": null}","{""trend_block"": {""support"": 0.8, ""stress"": 0.1, ""net"": 0.7}}","{""active"": false, ""reason"": null, ""scope"": null, ""actor"": null}","{""pending_transition"": false, ""cooldown_active"": false}","BULL","BULL","RISK_ON","RISK_ON",0.0',
+                '2026-03-03,1.1,TRANS_DOWN,TREND_LIGHT,market_regime_framework,0.44,1,RISK_BLOCK_WEAKNESS,"{""trend_block"": true, ""risk_block"": false}",0.35,"[""RISK_BLOCK_WEAKNESS""]","{""technical"": 0.44, ""sentiment"": 0.1, ""macro_global"": -0.2}","{""risk_block"": {""support"": 0.2, ""stress"": 0.9, ""net"": -0.7}}","{""active"": true, ""reason"": ""MANUAL_REVIEW"", ""scope"": ""cn_a_mainline"", ""actor"": ""pm"", ""target_state_5"": ""LIGHT""}","{""pending_transition"": true, ""cooldown_active"": false}","TRANS_DOWN","LIGHT","RISK_OFF","NEUTRAL",0.7',
             ]
         ),
         encoding="utf-8",
@@ -155,15 +155,21 @@ def test_ensure_standard_artifacts_writes_regime_audit_bundle(tmp_path) -> None:
     assert summary["summary"]["switch_count"] == 1
     assert summary["latest_state"]["why_today"] == "RISK_BLOCK_WEAKNESS"
     assert summary["latest_state"]["base_state_5"] == "TRANS_DOWN"
-    assert summary["latest_state"]["effective_state_5"] == "TRANS_DOWN"
+    assert summary["latest_state"]["effective_state_5"] == "LIGHT"
     assert summary["latest_state"]["coarse_state"] == "RISK_OFF"
     assert summary["latest_state"]["reason_codes"] == ["RISK_BLOCK_WEAKNESS"]
     assert summary["latest_state"]["manual_override"]["active"] is True
+    assert summary["latest_state"]["manual_override"]["target_state_5"] == "LIGHT"
 
     run_meta = json.loads((results_dir / "run_meta.json").read_text(encoding="utf-8"))
     assert run_meta["regime"]["latest_state"]["base_state"] == "TRANS_DOWN"
+    assert run_meta["regime"]["latest_state"]["effective_state"] == "LIGHT"
     assert run_meta["regime"]["latest_state"]["coarse_state"] == "RISK_OFF"
+    assert run_meta["regime"]["latest_state"]["effective_coarse_state"] == "NEUTRAL"
     assert run_meta["regime"]["latest_state"]["risk_budget_multiplier"] == 0.35
+    assert run_meta["regime"]["latest_state"]["defense_bias"] == 0.7
+    assert run_meta["regime"]["latest_state"]["block_scores"]["risk_block"]["net"] == -0.7
+    assert run_meta["regime"]["latest_state"]["state_stability_metrics"]["pending_transition"] is True
 
 
 def test_ensure_standard_artifacts_writes_weekly_five_state_regime_meta(tmp_path) -> None:

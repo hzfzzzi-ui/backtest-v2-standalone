@@ -198,21 +198,38 @@
 - **THEN** 该 gate SHALL 通过 `reason` 或等价字段说明证据不足，而不是默认为 `PASS`
 
 ### Requirement: research audit 必须引用A股统一归因证据链
-当实验属于 A 股 governed multi-sleeve 主线时，`backtest-research-audit` MUST 引用 `market_regime_engine`、`global_portfolio_governor`、各 sleeve 和 `manual_override` 的统一 attribution 证据，而 SHALL NOT 只引用孤立的收益或执行产物。
+当实验属于 Governed A 股主线时，`research_audit` MUST 引用统一的 `attribution_audit` 证据链，而不是自行重算或拼接 regime 语义。
 
-#### Scenario: A股 governed 实验引用 attribution 证据
-- **WHEN** 实验运行属于 A 股 governed multi-sleeve 口径
-- **THEN** `research_audit.evidence_refs` MUST 引用 regime、budget、sleeve 和 override 相关证据
+它至少 MUST 引用：
+- regime 的 `base_state_5 / effective_state_5`
+- `regime_confidence`
+- `regime_transition_reason`
+- `reason_codes`
+- `manual_override`
+- Governor 的 `budget_reason_codes`
+- sleeve budget 摘要
+
+`research_audit` SHALL NOT 仅根据 `market_state`、`trade_mode` 或收益结果对状态来源做推断。
+
+#### Scenario: Governed A股实验引用统一证据链
+- **WHEN** 实验运行属于 Governed A 股主线
+- **THEN** `research_audit` MUST 引用统一 attribution 证据，而不是独立再拼 regime 解释
 
 ### Requirement: research audit 必须能回答仓位与状态来源
-当实验属于 A 股 governed multi-sleeve 主线时，research audit MUST 允许回答以下问题：
-- 今天的生效状态来自哪里
-- 今天的预算变化来自哪里
-- 某个 sleeve 为什么被压缩或停用
-- 是否存在人工 override
+当实验属于 Governed A 股主线时，research audit MUST 能回答以下问题：
+- 今天的有效市场状态是什么
+- 这个状态主要由什么原因形成或未切换
+- 当前预算是如何被 regime / drawdown / cooldown / override 共同决定的
+- 股票 alpha sleeve 与 ETF beta sleeve 为什么拿到当前预算
 
-#### Scenario: 审计结论可解释仓位变化
-- **WHEN** 用户查看 governed 主线实验的 research audit
-- **THEN** audit MUST 能定位到相应的状态、预算和 sleeve 证据
-- **THEN** audit SHALL NOT 只给出最终 PASS/WARN/FAIL 而没有可追溯来源
+对应产物至少 MUST 暴露：
+- 当前 `effective_state_5`
+- 当前 `regime_transition_reason`
+- 当前 `budget_reason_codes`
+- 当前 `manual_override` 摘要
+- 当前 `sleeve_budget` 摘要
+
+#### Scenario: audit 能解释为什么今天不是满仓
+- **WHEN** 用户查看 Governed A 股实验的 research audit
+- **THEN** 审计结果 MUST 能明确回答当前总仓位为什么没有开满，以及这是由状态、drawdown 还是 override 导致
 

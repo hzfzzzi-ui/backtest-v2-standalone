@@ -63,8 +63,14 @@ def _normalized_state_snapshot(row: Mapping[str, Any]) -> dict[str, Any]:
         "reason": manual_override.get("reason"),
         "scope": manual_override.get("scope"),
         "actor": manual_override.get("actor"),
+        "effective_window": manual_override.get("effective_window"),
+        "target_state_5": manual_override.get("target_state_5"),
+        "risk_budget_multiplier": _safe_float(manual_override.get("risk_budget_multiplier")),
+        "defense_bias": _safe_float(manual_override.get("defense_bias")),
     }
     subscores = _parse_json_object(row.get("subscores_json"))
+    block_scores = _parse_json_object(row.get("block_scores_json"))
+    state_stability = _parse_json_object(row.get("state_stability_metrics_json"))
     return {
         "date": str(row.get("date") or ""),
         "base_state": base_state,
@@ -73,10 +79,13 @@ def _normalized_state_snapshot(row: Mapping[str, Any]) -> dict[str, Any]:
         "effective_coarse_state": coarse_state_from_state_5(effective_state),
         "confidence": _safe_float(row.get("regime_confidence")),
         "risk_budget_multiplier": _safe_float(row.get("risk_budget_multiplier")),
+        "defense_bias": _safe_float(row.get("defense_bias")),
         "reason_codes": reason_codes,
         "why_today": str(row.get("regime_transition_reason") or "").strip() or None,
         "manual_override": manual_override_payload,
         "subscores": subscores,
+        "block_scores": block_scores,
+        "state_stability_metrics": state_stability,
     }
 
 
@@ -117,6 +126,8 @@ def _build_state_logs(daily_df: pd.DataFrame) -> tuple[list[dict[str, Any]], Cou
                     "reason": manual_override.get("reason"),
                     "scope": manual_override.get("scope"),
                     "actor": manual_override.get("actor"),
+                    "effective_window": manual_override.get("effective_window"),
+                    "target_state_5": manual_override.get("target_state_5"),
                     "base_state": state["base_state"],
                     "effective_state": state["effective_state"],
                 }

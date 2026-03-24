@@ -1579,6 +1579,17 @@ def test_breakout_provider_emits_formal_regime_arrays() -> None:
         exit_cfg=ExitConfig(),
         market_filter_cfg=MarketFilterConfig(enabled=True),
         regime_engine_cfg=RegimeEngineConfig(engine="market_regime_framework"),
+        governed_a_share={
+            "regime": {
+                "manual_override": {
+                    "active": True,
+                    "reason": "manual_risk_cut",
+                    "scope": "cn_a_mainline",
+                    "actor": "pm",
+                    "target_state_5": "LIGHT",
+                }
+            }
+        },
     )
 
     assert provider._regime_engine_name == "market_regime_framework"
@@ -1588,6 +1599,22 @@ def test_breakout_provider_emits_formal_regime_arrays() -> None:
     assert len(provider._regime_duration_bars_arr) == len(trading_days)
     assert len(provider._regime_transition_reason_arr) == len(trading_days)
     assert len(provider._feature_availability_arr) == len(trading_days)
+    assert len(provider._base_state_5_arr) == len(trading_days)
+    assert len(provider._effective_state_5_arr) == len(trading_days)
+    assert len(provider._coarse_state_arr) == len(trading_days)
+    assert len(provider._effective_coarse_state_arr) == len(trading_days)
+    assert len(provider._reason_codes_arr) == len(trading_days)
+    assert len(provider._block_scores_arr) == len(trading_days)
+    assert len(provider._subscores_arr) == len(trading_days)
+    assert len(provider._manual_override_arr) == len(trading_days)
+    assert len(provider._state_stability_metrics_arr) == len(trading_days)
+    assert len(provider._regime_risk_budget_multiplier_arr) == len(trading_days)
+    assert len(provider._defense_bias_arr) == len(trading_days)
+    assert set(provider._base_state_5_arr.tolist()).issubset({"BULL", "TRANS_UP", "LIGHT", "TRANS_DOWN", "RISK_OFF"})
+    assert set(provider._effective_state_5_arr.tolist()) == {"LIGHT"}
+    assert "MANUAL_OVERRIDE_ACTIVE" in set(provider._reason_codes_arr[-1])
+    assert provider._runtime_state.base_state_5.shape[0] == len(trading_days)
+    assert provider._runtime_state.manual_override.shape[0] == len(trading_days)
     assert provider._runtime_state.regime_engine == "market_regime_framework"
 
 

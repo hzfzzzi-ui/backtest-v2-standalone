@@ -659,6 +659,19 @@ def test_prepare_daily_snapshot_updates_nav_trackers_and_daily_row() -> None:
             "benchmark_regime_on": True,
             "risk_on_today": True,
             "regime_engine": "ma200_legacy",
+            "market_state_5": "LIGHT",
+            "base_state_5": "TRANS_UP",
+            "effective_state_5": "LIGHT",
+            "coarse_state": "RISK_ON",
+            "effective_coarse_state": "NEUTRAL",
+            "reason_codes": ["MANUAL_OVERRIDE_ACTIVE", "BASE_STATE::TRANS_UP"],
+            "block_scores": {"trend_block": {"support": 0.7, "stress": 0.1, "net": 0.6}},
+            "subscores": {"technical": 0.7, "sentiment": 0.3, "macro_global": None},
+            "manual_override": {"active": True, "reason": "manual_cut", "scope": "runtime", "actor": "pm"},
+            "state_stability_metrics": {"pending_transition": False, "cooldown_active": False},
+            "defense_bias": 0.35,
+            "feature_availability": {"trend_block": True},
+            "regime_transition_reason": "MANUAL_REVIEW",
         },
     )
 
@@ -673,11 +686,25 @@ def test_prepare_daily_snapshot_updates_nav_trackers_and_daily_row() -> None:
     assert runtime.daily_rows[0]["positions_count"] == 1
     assert round(runtime.daily_rows[0]["turnover_pct"], 2) == 0.10
     assert runtime.daily_rows[0]["regime_engine"] == "ma200_legacy"
-    assert runtime.daily_rows[0]["regime_transition_reason"] == ""
-    assert runtime.daily_rows[0]["feature_availability_json"] == "{}"
+    assert runtime.daily_rows[0]["regime_transition_reason"] == "MANUAL_REVIEW"
+    assert runtime.daily_rows[0]["feature_availability_json"] == '{"trend_block": true}'
+    assert runtime.daily_rows[0]["base_state_5"] == "TRANS_UP"
+    assert runtime.daily_rows[0]["effective_state_5"] == "LIGHT"
+    assert runtime.daily_rows[0]["coarse_state"] == "RISK_ON"
+    assert runtime.daily_rows[0]["effective_coarse_state"] == "NEUTRAL"
+    assert json.loads(runtime.daily_rows[0]["reason_codes_json"]) == ["MANUAL_OVERRIDE_ACTIVE", "BASE_STATE::TRANS_UP"]
+    assert json.loads(runtime.daily_rows[0]["block_scores_json"]) == {"trend_block": {"support": 0.7, "stress": 0.1, "net": 0.6}}
+    assert json.loads(runtime.daily_rows[0]["subscores_json"]) == {"technical": 0.7, "sentiment": 0.3, "macro_global": None}
+    assert json.loads(runtime.daily_rows[0]["manual_override_json"]) == {"active": True, "reason": "manual_cut", "scope": "runtime", "actor": "pm"}
+    assert json.loads(runtime.daily_rows[0]["state_stability_metrics_json"]) == {"pending_transition": False, "cooldown_active": False}
+    assert runtime.daily_rows[0]["defense_bias"] == 0.35
     governor_budget = json.loads(runtime.daily_rows[0]["governor_budget_json"])
     assert governor_budget["effective_max_positions"] == 5
     assert governor_budget["sleeve_budgets"]["cn_stock_trend_alpha_core"]["slot_cap"] == 5
+    assert governor_budget["regime_source_state"] == "TRANS_UP"
+    assert governor_budget["regime_effective_state"] == "LIGHT"
+    assert governor_budget["manual_override"]["active"] is True
+    assert governor_budget["defense_bias"] == 0.35
 
 
 def test_apply_daily_decision_diagnostics_populates_multifactor_sorting_fields() -> None:

@@ -57,6 +57,24 @@ function parseJsonObject(value) {
   }
 }
 
+function joinList(values) {
+  const arr = Array.isArray(values)
+    ? values.map((value) => String(value || '').trim()).filter(Boolean)
+    : [];
+  return arr.length ? arr.join(', ') : '-';
+}
+
+function summarizeManualOverride(overridePayload) {
+  const payload = overridePayload && typeof overridePayload === 'object' ? overridePayload : {};
+  if (!payload.active) return '无';
+  const parts = [
+    String(payload.scope || 'override').trim(),
+    String(payload.target_state_5 || '').trim(),
+    String(payload.reason || '').trim(),
+  ].filter(Boolean);
+  return parts.length ? parts.join(' | ') : '已启用';
+}
+
 function buildDatedReturns(series) {
   const rows = Array.isArray(series) ? series : [];
   const out = [];
@@ -550,6 +568,23 @@ export function summarizeSnapshot(snapshot) {
     meta.data_bundle?.price_series_semantics,
     '-',
   ) || '-';
+  const governedSnapshot = meta.governed_snapshot && typeof meta.governed_snapshot === 'object'
+    ? meta.governed_snapshot
+    : {};
+  const latestRegime = meta.regime?.latest_state && typeof meta.regime.latest_state === 'object'
+    ? meta.regime.latest_state
+    : {};
+  const governedManualOverride = latestRegime.manual_override && typeof latestRegime.manual_override === 'object'
+    ? latestRegime.manual_override
+    : {};
+  const hasGovernedSnapshot = Boolean(
+    firstDefined(
+      governedSnapshot.effective_state,
+      latestRegime.effective_state,
+      governedSnapshot.base_state,
+      latestRegime.base_state,
+    ),
+  );
   const strategy = strategyFields(snapshot);
   const auditSummary = artifacts.audit?.summary || {};
   const dailyReturns = buildDatedReturns(navSeries).map((item) => item.value);
@@ -580,6 +615,25 @@ export function summarizeSnapshot(snapshot) {
     benchmark: firstDefined(meta.data?.benchmark, etfSymbols[0], '-') || '-',
     universeMode: firstDefined(meta.universe?.universe_mode, meta.data?.universe_mode, '-') || '-',
     universeCount,
+    hasGovernedSnapshot,
+    governedBaseState: firstDefined(governedSnapshot.base_state, latestRegime.base_state, '-') || '-',
+    governedEffectiveState: firstDefined(governedSnapshot.effective_state, latestRegime.effective_state, '-') || '-',
+    governedCoarseState: firstDefined(governedSnapshot.coarse_state, latestRegime.coarse_state, '-') || '-',
+    governedEffectiveCoarseState: firstDefined(
+      governedSnapshot.effective_coarse_state,
+      latestRegime.effective_coarse_state,
+      '-',
+    ) || '-',
+    governedRiskBudgetMultiplier: fmtRatio(
+      firstDefined(governedSnapshot.risk_budget_multiplier, latestRegime.risk_budget_multiplier),
+      2,
+    ),
+    governedTotalRiskBudget: fmtPct(governedSnapshot.total_risk_budget),
+    governedTotalExposureCap: fmtPct(governedSnapshot.total_exposure_cap),
+    governedDefenseBias: fmtPct(firstDefined(governedSnapshot.defense_bias, latestRegime.defense_bias)),
+    governedReasonCodes: joinList(latestRegime.reason_codes),
+    governedBudgetReasonCodes: joinList(governedSnapshot.budget_reason_codes),
+    governedManualOverride: summarizeManualOverride(governedManualOverride),
     strategy: strategy.strategy,
     strategyCore: strategy.strategyCore,
     portfolioMode: strategy.portfolioMode,

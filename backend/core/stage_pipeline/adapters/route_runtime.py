@@ -245,6 +245,7 @@ def precompute_signal_provider(
     regime_engine_cfg: RegimeEngineConfig | None = None,
     sizing_cfg: SizingConfig | None = None,
     risk_budget_cfg: RiskBudgetConfig | None = None,
+    governed_a_share: Mapping[str, Any] | None = None,
 ) -> None:
     provider.precompute(
         history=data_bundle.signal_history,
@@ -268,5 +269,6 @@ def precompute_signal_provider(
         regime_engine_cfg=regime_engine_cfg,
         sizing_cfg=sizing_cfg,
         risk_budget_cfg=risk_budget_cfg,
+        governed_a_share=dict(governed_a_share or {}),
         regime_filter_cfg=getattr(strategy, "regime_filter_cfg", None),
     )

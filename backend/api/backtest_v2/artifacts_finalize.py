@@ -201,6 +201,15 @@ def _extract_latest_regime_snapshot(daily_df: pd.DataFrame) -> dict[str, Any] | 
             parsed_subscores = None
         if isinstance(parsed_subscores, dict):
             subscores = parsed_subscores
+    block_scores_raw = latest.get("block_scores_json")
+    block_scores: dict[str, Any] = {}
+    if isinstance(block_scores_raw, str) and block_scores_raw.strip():
+        try:
+            parsed_block_scores = json.loads(block_scores_raw)
+        except Exception:
+            parsed_block_scores = None
+        if isinstance(parsed_block_scores, dict):
+            block_scores = parsed_block_scores
     manual_override_raw = latest.get("manual_override_json")
     manual_override: dict[str, Any] = {"active": False, "reason": None, "scope": None, "actor": None}
     if isinstance(manual_override_raw, str) and manual_override_raw.strip():
@@ -214,7 +223,20 @@ def _extract_latest_regime_snapshot(daily_df: pd.DataFrame) -> dict[str, Any] | 
                 "reason": parsed_override.get("reason"),
                 "scope": parsed_override.get("scope"),
                 "actor": parsed_override.get("actor"),
+                "effective_window": parsed_override.get("effective_window"),
+                "target_state_5": parsed_override.get("target_state_5"),
+                "risk_budget_multiplier": _safe_float(parsed_override.get("risk_budget_multiplier")),
+                "defense_bias": _safe_float(parsed_override.get("defense_bias")),
             }
+    state_stability_raw = latest.get("state_stability_metrics_json")
+    state_stability_metrics: dict[str, Any] = {}
+    if isinstance(state_stability_raw, str) and state_stability_raw.strip():
+        try:
+            parsed_state_stability = json.loads(state_stability_raw)
+        except Exception:
+            parsed_state_stability = None
+        if isinstance(parsed_state_stability, dict):
+            state_stability_metrics = parsed_state_stability
     return sanitize_json(
         {
             "date": latest["date"].strftime("%Y-%m-%d"),
@@ -224,9 +246,12 @@ def _extract_latest_regime_snapshot(daily_df: pd.DataFrame) -> dict[str, Any] | 
             "effective_coarse_state": coarse_state_from_state_5(effective_state_5),
             "confidence": _safe_float(latest.get("regime_confidence")),
             "risk_budget_multiplier": _safe_float(latest.get("risk_budget_multiplier")),
+            "defense_bias": _safe_float(latest.get("defense_bias")),
             "reason_codes": reason_codes,
             "manual_override": manual_override,
             "subscores": subscores,
+            "block_scores": block_scores,
+            "state_stability_metrics": state_stability_metrics,
             "why_today": str(latest.get("regime_transition_reason") or "").strip() or "NO_TRANSITION_REASON_RECORDED",
         }
     )

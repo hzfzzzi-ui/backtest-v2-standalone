@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Any
+from typing import Mapping
 
 import numpy as np
 import pandas as pd
@@ -44,9 +45,9 @@ from backend.core.engine_vector.breakout_support import (
 )
 from backend.core.engine_vector.data_matrix import build_ohlc_matrices_from_history
 from backend.core.engine_vector.features import compute_feature_matrices
-from backend.core.engine_vector.regime_engine_evaluator import evaluate_formal_regime_engine
 from backend.core.engine_vector.regime_engine_inputs import build_formal_regime_feature_bundle
 from backend.core.engine_vector.regime_engine_inputs import resolve_required_regime_blocks
+from backend.core.engine_vector.market_regime_engine import build_formal_market_regime_result
 from backend.core.engine_vector.signal_provider import DayContext, DaySignals, ExitCounts
 from backend.core.engine_vector.weekly_five_state_engine import evaluate_weekly_five_state_regime
 
@@ -229,6 +230,7 @@ def _apply_formal_regime_runtime(
     membership_history: pd.DataFrame | None,
     market_filter_cfg: MarketFilterConfig | None,
     regime_engine_cfg: RegimeEngineConfig,
+    governed_a_share: Mapping[str, Any] | None = None,
 ) -> None:
     provider._regime_engine_name = str(regime_engine_cfg.engine or "ma200_legacy")
     provider._legacy_turn_weak_overlay_active = False
@@ -248,6 +250,17 @@ def _apply_formal_regime_runtime(
     provider._market_state_score_arr = np.array([], dtype=float)
     provider._risk_budget_multiplier_arr = np.array([], dtype=float)
     provider._weekly_observation_flag_arr = np.array([], dtype=bool)
+    provider._base_state_5_arr = np.array([], dtype=object)
+    provider._effective_state_5_arr = np.array([], dtype=object)
+    provider._coarse_state_arr = np.array([], dtype=object)
+    provider._effective_coarse_state_arr = np.array([], dtype=object)
+    provider._reason_codes_arr = np.array([], dtype=object)
+    provider._block_scores_arr = np.array([], dtype=object)
+    provider._subscores_arr = np.array([], dtype=object)
+    provider._manual_override_arr = np.array([], dtype=object)
+    provider._state_stability_metrics_arr = np.array([], dtype=object)
+    provider._regime_risk_budget_multiplier_arr = np.array([], dtype=float)
+    provider._defense_bias_arr = np.array([], dtype=float)
 
     engine_name = str(provider._regime_engine_name).strip().lower()
     legacy_market_state, legacy_trade_mode = _build_legacy_market_filter_state(
@@ -332,24 +345,22 @@ def _apply_formal_regime_runtime(
         formal_bundle.feature_availability,
         regime_engine_cfg.fallback.required_blocks,
     )
-    formal_eval = evaluate_formal_regime_engine(
+    formal_eval = build_formal_market_regime_result(
         bundle=formal_bundle,
         regime_engine_cfg=regime_engine_cfg,
         legacy_market_state=np.array(legacy_market_state, dtype=np.int32),
         legacy_trade_mode=np.array(legacy_trade_mode, dtype=np.int32),
+        governed_contract=governed_a_share,
     )
     provider._market_state = np.array(formal_eval.market_state, dtype=np.int8)
     provider._trade_mode = np.array(formal_eval.trade_mode, dtype=np.int8)
-    provider._market_state_name_arr = np.array([
-        ("BULL" if int(state) == 0 else "TRANS_DOWN" if int(state) == 1 else "TRANS_UP" if int(state) == 2 else "BEAR")
-        for state in formal_eval.market_state
-    ], dtype=object)
+    provider._market_state_name_arr = np.array(formal_eval.base_state_5, dtype=object)
     provider._trade_mode_name_arr = np.array([
         ("TREND_MAIN" if int(mode) == 0 else "TREND_LIGHT" if int(mode) == 1 else "NO_TRADE")
         for mode in formal_eval.trade_mode
     ], dtype=object)
-    provider._market_state_raw_name_arr = np.array(provider._market_state_name_arr, dtype=object)
-    provider._market_state_smoothed_name_arr = np.array(provider._market_state_name_arr, dtype=object)
+    provider._market_state_raw_name_arr = np.array(formal_eval.base_state_5, dtype=object)
+    provider._market_state_smoothed_name_arr = np.array(formal_eval.effective_state_5, dtype=object)
     provider._market_state_score_arr = np.array([], dtype=float)
     provider._risk_budget_multiplier_arr = np.array([], dtype=float)
     provider._weekly_observation_flag_arr = np.zeros(len(formal_eval.market_state), dtype=bool)
@@ -358,6 +369,17 @@ def _apply_formal_regime_runtime(
     provider._regime_transition_reason_arr = np.array(formal_eval.regime_transition_reason, dtype=object)
     provider._feature_availability_arr = np.array(formal_eval.feature_availability, dtype=object)
     provider._fallback_active_arr = np.array(formal_eval.fallback_active, dtype=bool)
+    provider._base_state_5_arr = np.array(formal_eval.base_state_5, dtype=object)
+    provider._effective_state_5_arr = np.array(formal_eval.effective_state_5, dtype=object)
+    provider._coarse_state_arr = np.array(formal_eval.coarse_state, dtype=object)
+    provider._effective_coarse_state_arr = np.array(formal_eval.effective_coarse_state, dtype=object)
+    provider._reason_codes_arr = np.array(formal_eval.reason_codes, dtype=object)
+    provider._block_scores_arr = np.array(formal_eval.block_scores, dtype=object)
+    provider._subscores_arr = np.array(formal_eval.subscores, dtype=object)
+    provider._manual_override_arr = np.array(formal_eval.manual_override, dtype=object)
+    provider._state_stability_metrics_arr = np.array(formal_eval.state_stability_metrics, dtype=object)
+    provider._regime_risk_budget_multiplier_arr = np.array(formal_eval.risk_budget_multiplier, dtype=float)
+    provider._defense_bias_arr = np.array(formal_eval.defense_bias, dtype=float)
 
 
 
@@ -461,6 +483,17 @@ class BreakoutTrendProvider:
         self._market_state_score_arr: np.ndarray = np.array([], dtype=float)
         self._risk_budget_multiplier_arr: np.ndarray = np.array([], dtype=float)
         self._weekly_observation_flag_arr: np.ndarray = np.array([], dtype=bool)
+        self._base_state_5_arr: np.ndarray = np.array([], dtype=object)
+        self._effective_state_5_arr: np.ndarray = np.array([], dtype=object)
+        self._coarse_state_arr: np.ndarray = np.array([], dtype=object)
+        self._effective_coarse_state_arr: np.ndarray = np.array([], dtype=object)
+        self._reason_codes_arr: np.ndarray = np.array([], dtype=object)
+        self._block_scores_arr: np.ndarray = np.array([], dtype=object)
+        self._subscores_arr: np.ndarray = np.array([], dtype=object)
+        self._manual_override_arr: np.ndarray = np.array([], dtype=object)
+        self._state_stability_metrics_arr: np.ndarray = np.array([], dtype=object)
+        self._regime_risk_budget_multiplier_arr: np.ndarray = np.array([], dtype=float)
+        self._defense_bias_arr: np.ndarray = np.array([], dtype=float)
         self._ec: ExitConfig = ExitConfig()
         self._peak_close_state: dict[str, float] = {}
         self._risk_off_partial_state: dict[str, bool] = {}
@@ -654,6 +687,7 @@ class BreakoutTrendProvider:
             membership_history=membership_history if isinstance(membership_history, pd.DataFrame) else None,
             market_filter_cfg=market_filter_cfg,
             regime_engine_cfg=regime_engine_cfg,
+            governed_a_share=kwargs.get("governed_a_share") if isinstance(kwargs.get("governed_a_share"), dict) else None,
         )
 
         # -- breakout signal matrix: close[t] > high_max(window)[t-1] * (1+buffer) --

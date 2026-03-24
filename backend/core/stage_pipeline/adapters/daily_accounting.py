@@ -46,6 +46,13 @@ def build_daily_row(
             drawdown=drawdown,
             drawdown_state=controls.get("dd_state"),
             regime_transition_reason=controls.get("regime_transition_reason"),
+            base_state_5=controls.get("base_state_5") or controls.get("market_state_5"),
+            effective_state_5=controls.get("effective_state_5") or controls.get("market_state_5"),
+            coarse_state=controls.get("coarse_state"),
+            effective_coarse_state=controls.get("effective_coarse_state"),
+            reason_codes=controls.get("reason_codes"),
+            defense_bias=controls.get("defense_bias"),
+            manual_override=controls.get("manual_override"),
             breadth_max_positions=controls.get("breadth_max_positions"),
             positions_after_sell=len(runtime.positions),
         )
@@ -115,10 +122,20 @@ def build_daily_row(
         "regime_transition_reason": str(controls.get("regime_transition_reason", "") or ""),
         "feature_availability_json": json.dumps(controls.get("feature_availability") or {}, ensure_ascii=False),
         "market_state_5": str(controls.get("market_state_5", "") or ""),
+        "base_state_5": str(controls.get("base_state_5", controls.get("market_state_5", "")) or ""),
+        "effective_state_5": str(controls.get("effective_state_5", controls.get("market_state_5", "")) or ""),
+        "coarse_state": str(controls.get("coarse_state", "") or ""),
+        "effective_coarse_state": str(controls.get("effective_coarse_state", "") or ""),
         "market_state_score": controls.get("market_state_score"),
         "market_state_raw": str(controls.get("market_state_raw", "") or ""),
         "market_state_smoothed": str(controls.get("market_state_smoothed", "") or ""),
         "risk_budget_multiplier": controls.get("risk_budget_multiplier"),
+        "reason_codes_json": json.dumps(list(controls.get("reason_codes") or []), ensure_ascii=False),
+        "block_scores_json": json.dumps(_jsonable(controls.get("block_scores") or {}), ensure_ascii=False),
+        "subscores_json": json.dumps(_jsonable(controls.get("subscores") or {}), ensure_ascii=False),
+        "manual_override_json": json.dumps(_jsonable(controls.get("manual_override") or {}), ensure_ascii=False),
+        "state_stability_metrics_json": json.dumps(_jsonable(controls.get("state_stability_metrics") or {}), ensure_ascii=False),
+        "defense_bias": controls.get("defense_bias"),
         "weekly_observation_flag": bool(controls.get("weekly_observation_flag", False)),
         "governor_budget_json": json.dumps(governor_budget, ensure_ascii=False),
     }
@@ -248,6 +265,32 @@ def _governor_budget_payload_from_row(daily_row: Mapping[str, Any]) -> dict[str,
     if isinstance(raw, Mapping):
         return dict(raw)
     return {}
+
+
+def _json_array_or_empty(raw: Any) -> list[Any]:
+    if isinstance(raw, list):
+        return list(raw)
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return []
+    return list(parsed) if isinstance(parsed, list) else []
+
+
+def _json_object_or_empty(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, Mapping):
+        return dict(raw)
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return {}
+    return dict(parsed) if isinstance(parsed, dict) else {}
 
 
 def _signal_snapshot(signal: Any) -> dict[str, Any]:
@@ -446,6 +489,13 @@ def apply_daily_decision_diagnostics(runtime: Any, *, day_signals: DaySignals, d
         drawdown=daily_row.get("drawdown"),
         drawdown_state=daily_row.get("dd_state"),
         regime_transition_reason=daily_row.get("regime_transition_reason"),
+        base_state_5=daily_row.get("base_state_5") or daily_row.get("market_state_5"),
+        effective_state_5=daily_row.get("effective_state_5") or daily_row.get("market_state_5"),
+        coarse_state=daily_row.get("coarse_state"),
+        effective_coarse_state=daily_row.get("effective_coarse_state"),
+        reason_codes=_json_array_or_empty(daily_row.get("reason_codes_json")),
+        defense_bias=daily_row.get("defense_bias"),
+        manual_override=_json_object_or_empty(daily_row.get("manual_override_json")),
         breadth_max_positions=daily_row.get("breadth_max_positions"),
         positions_after_sell=positions_after_sell,
         sleeve_budget_mode=plan.get("sleeve_budget_mode"),

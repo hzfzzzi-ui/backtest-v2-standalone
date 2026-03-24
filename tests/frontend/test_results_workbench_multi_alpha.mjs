@@ -166,3 +166,61 @@ test('normalizeSymbolRows derives return_pct from pnl and buy_notional when arti
   assert.equal(rows[0].max_drawdown, -0.12);
   assert.equal(rows[0].trades, 2);
 });
+
+test('results formatting surfaces governed regime snapshot from formal fields instead of legacy market_state', () => {
+  const summary = resultsFormatting.summarizeSnapshot({
+    result: {
+      exp_id: 'exp_governed',
+      status: 'OK',
+    },
+    artifacts: {
+      perf: {},
+      run_meta: {
+        governed_snapshot: {
+          base_state: 'TRANS_DOWN',
+          effective_state: 'LIGHT',
+          coarse_state: 'RISK_OFF',
+          effective_coarse_state: 'NEUTRAL',
+          risk_budget_multiplier: 0.5,
+          total_risk_budget: 0.3,
+          total_exposure_cap: 0.35,
+          defense_bias: 0.6,
+          budget_reason_codes: ['TOTAL_RISK_BUDGET_REDUCED'],
+        },
+        regime: {
+          latest_state: {
+            base_state: 'TRANS_DOWN',
+            effective_state: 'LIGHT',
+            coarse_state: 'RISK_OFF',
+            effective_coarse_state: 'NEUTRAL',
+            reason_codes: ['BREADTH_WEAK', 'COOLDOWN_HOLD'],
+            manual_override: {
+              active: true,
+              scope: 'state_override',
+              target_state_5: 'LIGHT',
+              reason: 'MANUAL_HOLD',
+            },
+          },
+        },
+      },
+      navSeries: [],
+      benchmarkSeries: [],
+      tradesRows: [],
+      symbolPerformanceRows: [],
+      audit: { summary: {} },
+      missing: [],
+    },
+  });
+
+  assert.equal(summary.hasGovernedSnapshot, true);
+  assert.equal(summary.governedBaseState, 'TRANS_DOWN');
+  assert.equal(summary.governedEffectiveState, 'LIGHT');
+  assert.equal(summary.governedEffectiveCoarseState, 'NEUTRAL');
+  assert.equal(summary.governedRiskBudgetMultiplier, '0.50');
+  assert.equal(summary.governedTotalRiskBudget, '30.00%');
+  assert.equal(summary.governedTotalExposureCap, '35.00%');
+  assert.equal(summary.governedDefenseBias, '60.00%');
+  assert.match(summary.governedReasonCodes, /BREADTH_WEAK/);
+  assert.match(summary.governedBudgetReasonCodes, /TOTAL_RISK_BUDGET_REDUCED/);
+  assert.match(summary.governedManualOverride, /MANUAL_HOLD/);
+});

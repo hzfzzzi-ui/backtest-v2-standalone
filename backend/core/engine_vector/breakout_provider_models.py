@@ -20,6 +20,10 @@ def _empty_bool_array() -> np.ndarray:
     return np.array([], dtype=bool)
 
 
+def _empty_object_array() -> np.ndarray:
+    return np.array([], dtype=object)
+
+
 @dataclass(slots=True)
 class BreakoutProviderConfig:
     breakout_window: int = 20
@@ -125,6 +129,17 @@ class BreakoutProviderRuntimeState:
     regime_transition_reason: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
     feature_availability: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
     fallback_active: np.ndarray = field(default_factory=_empty_bool_array)
+    base_state_5: np.ndarray = field(default_factory=_empty_object_array)
+    effective_state_5: np.ndarray = field(default_factory=_empty_object_array)
+    coarse_state: np.ndarray = field(default_factory=_empty_object_array)
+    effective_coarse_state: np.ndarray = field(default_factory=_empty_object_array)
+    reason_codes: np.ndarray = field(default_factory=_empty_object_array)
+    block_scores: np.ndarray = field(default_factory=_empty_object_array)
+    subscores: np.ndarray = field(default_factory=_empty_object_array)
+    manual_override: np.ndarray = field(default_factory=_empty_object_array)
+    state_stability_metrics: np.ndarray = field(default_factory=_empty_object_array)
+    regime_risk_budget_multiplier: np.ndarray = field(default_factory=_empty_float_array)
+    defense_bias: np.ndarray = field(default_factory=_empty_float_array)
 
 
 def build_breakout_provider_config(
@@ -297,6 +312,50 @@ def capture_breakout_runtime_state(provider: Any) -> BreakoutProviderRuntimeStat
         fallback_active=np.array(
             getattr(provider, "_fallback_active_arr", np.array([], dtype=bool)),
             dtype=bool,
+        ),
+        base_state_5=np.array(
+            getattr(provider, "_base_state_5_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        effective_state_5=np.array(
+            getattr(provider, "_effective_state_5_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        coarse_state=np.array(
+            getattr(provider, "_coarse_state_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        effective_coarse_state=np.array(
+            getattr(provider, "_effective_coarse_state_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        reason_codes=np.array(
+            getattr(provider, "_reason_codes_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        block_scores=np.array(
+            getattr(provider, "_block_scores_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        subscores=np.array(
+            getattr(provider, "_subscores_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        manual_override=np.array(
+            getattr(provider, "_manual_override_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        state_stability_metrics=np.array(
+            getattr(provider, "_state_stability_metrics_arr", np.array([], dtype=object)),
+            dtype=object,
+        ),
+        regime_risk_budget_multiplier=np.array(
+            getattr(provider, "_regime_risk_budget_multiplier_arr", np.array([], dtype=float)),
+            dtype=float,
+        ),
+        defense_bias=np.array(
+            getattr(provider, "_defense_bias_arr", np.array([], dtype=float)),
+            dtype=float,
         ),
     )
     provider._runtime_state = state
