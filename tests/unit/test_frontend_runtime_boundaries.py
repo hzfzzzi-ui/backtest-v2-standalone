@@ -99,6 +99,15 @@ def test_frontend_exposes_market_data_sync_status_surface() -> None:
     assert "refreshMarketDataSyncStatus" in controller_source
 
 
+def test_frontend_api_client_supports_local_backend_port_fallback() -> None:
+    api_client_source = _read_repo_file("frontend", "assets", "js", "api-client.js")
+    assert "const LOCAL_BACKEND_FALLBACK_PORT = '8091';" in api_client_source
+    assert "function _buildApiEndpointCandidates(url)" in api_client_source
+    assert "protocol === 'file:'" in api_client_source
+    assert "http://127.0.0.1:${LOCAL_BACKEND_FALLBACK_PORT}" in api_client_source
+    assert "const endpointCandidates = _buildApiEndpointCandidates(url);" in api_client_source
+
+
 def test_config_center_controls_are_extracted_from_ui_controls() -> None:
     index_source = _read_repo_file("frontend", "index.html")
     config_controls_source = _read_repo_file("frontend", "assets", "js", "pages", "desktop-config-controls.js")

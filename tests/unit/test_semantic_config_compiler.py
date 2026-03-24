@@ -195,6 +195,29 @@ def test_validate_semantic_config_json_accepts_governed_a_share_contract() -> No
     assert out["governed_a_share"]["etf_beta"]["source_entry_type"] == "cn_etf_research_entry"
 
 
+def test_validate_semantic_config_json_accepts_governed_manual_override_enrichment_fields() -> None:
+    payload = _valid_config()
+    payload["governed_a_share"] = {
+        "enabled": True,
+        "regime": {
+            "manual_override": {
+                "active": False,
+                "scope": "state_override",
+                "effective_window": None,
+                "target_state_5": None,
+                "risk_budget_multiplier": None,
+                "defense_bias": None,
+            }
+        },
+    }
+
+    out = validate_semantic_config_json(payload)
+
+    manual_override = out["governed_a_share"]["regime"]["manual_override"]
+    assert manual_override["active"] is False
+    assert "effective_window" not in manual_override or manual_override["effective_window"] is None
+
+
 def test_validate_semantic_config_json_infers_governed_a_share_contract_for_cn_a() -> None:
     out = validate_semantic_config_json(_valid_config())
 

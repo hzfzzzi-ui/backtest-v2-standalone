@@ -170,6 +170,40 @@ function _sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const LOCAL_BACKEND_FALLBACK_PORT = '8091';
+
+function _dedupeApiEndpointCandidates(candidates) {
+  const seen = new Set();
+  return candidates.filter((candidate) => {
+    const text = String(candidate || '').trim();
+    if (!text || seen.has(text)) return false;
+    seen.add(text);
+    return true;
+  });
+}
+
+function _buildApiEndpointCandidates(url) {
+  const rawUrl = String(url || '').trim();
+  if (!rawUrl || !rawUrl.startsWith('/api/')) return [rawUrl];
+  const locationLike = globalThis?.location || null;
+  const protocol = String(locationLike?.protocol || '').trim().toLowerCase();
+  const hostname = String(locationLike?.hostname || '').trim();
+  const port = String(locationLike?.port || '').trim();
+  const candidates = [rawUrl];
+  if (protocol === 'file:') {
+    candidates.push(`http://127.0.0.1:${LOCAL_BACKEND_FALLBACK_PORT}${rawUrl}`);
+    return _dedupeApiEndpointCandidates(candidates);
+  }
+  if (!['http:', 'https:'].includes(protocol)) return _dedupeApiEndpointCandidates(candidates);
+  const normalizedHost = hostname.toLowerCase();
+  const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(normalizedHost);
+  if (!isLocalHost) return _dedupeApiEndpointCandidates(candidates);
+  if (port !== LOCAL_BACKEND_FALLBACK_PORT) {
+    candidates.push(`${protocol}//${hostname || '127.0.0.1'}:${LOCAL_BACKEND_FALLBACK_PORT}${rawUrl}`);
+  }
+  return _dedupeApiEndpointCandidates(candidates);
+}
+
 async function apiRequestJson(key, url, options = {}) {
   const requestOptions = { ...options };
   const method = String(requestOptions.method || 'GET').toUpperCase();
@@ -186,40 +220,48 @@ async function apiRequestJson(key, url, options = {}) {
 
   let lastError = null;
   const startedAt = Date.now();
-  _setApiLoading(key, url, method);
+  const endpointCandidates = _buildApiEndpointCandidates(url);
+  _setApiLoading(key, endpointCandidates[0] || url, method);
 
   for (let attempt = 0; attempt <= retryCount; attempt += 1) {
-    try {
-      const r = await fetch(url, requestOptions);
-      const durationMs = Date.now() - startedAt;
-      if (!r.ok) {
-        const detail = await _readHttpErrorDetail(r);
-        const err = new Error(`${r.status} ${detail}`);
-        err.httpStatus = r.status;
-        err.endpoint = url;
-        throw err;
-      }
-      const payload = await r.json();
-      _setApiSuccess(key, url, method, r.status, durationMs);
-      if (suppressStatusOnError) _clearApiStatus(key);
-      setStatusItems(state.manual_status_items || []);
-      return payload;
-    } catch (e) {
-      lastError = e;
-      const durationMs = Date.now() - startedAt;
-      const httpStatus = Number.isFinite(Number(e?.httpStatus)) ? Number(e.httpStatus) : null;
-      const isFinalAttempt = attempt >= retryCount;
-      if (isFinalAttempt) {
-        if (suppressStatusOnError) {
-          _clearApiStatus(key);
+    for (let candidateIndex = 0; candidateIndex < endpointCandidates.length; candidateIndex += 1) {
+      const endpoint = endpointCandidates[candidateIndex];
+      try {
+        const r = await fetch(endpoint, requestOptions);
+        const durationMs = Date.now() - startedAt;
+        if (!r.ok) {
+          const detail = await _readHttpErrorDetail(r);
+          const err = new Error(`${r.status} ${detail}`);
+          err.httpStatus = r.status;
+          err.endpoint = endpoint;
+          throw err;
+        }
+        const payload = await r.json();
+        _setApiSuccess(key, endpoint, method, r.status, durationMs);
+        if (suppressStatusOnError) _clearApiStatus(key);
+        setStatusItems(state.manual_status_items || []);
+        return payload;
+      } catch (e) {
+        lastError = e;
+        const durationMs = Date.now() - startedAt;
+        const httpStatus = Number.isFinite(Number(e?.httpStatus)) ? Number(e.httpStatus) : null;
+        const isFinalAttempt = attempt >= retryCount;
+        const hasFallbackCandidate = candidateIndex < endpointCandidates.length - 1;
+        if (hasFallbackCandidate) {
+          continue;
+        }
+        if (isFinalAttempt) {
+          if (suppressStatusOnError) {
+            _clearApiStatus(key);
+            setStatusItems(state.manual_status_items || []);
+            throw e;
+          }
+          _setApiFailed(key, e?.endpoint || endpoint, method, httpStatus, durationMs, e?.message || String(e));
           setStatusItems(state.manual_status_items || []);
           throw e;
         }
-        _setApiFailed(key, url, method, httpStatus, durationMs, e?.message || String(e));
-        setStatusItems(state.manual_status_items || []);
-        throw e;
+        await _sleep(retryDelayMs);
       }
-      await _sleep(retryDelayMs);
     }
   }
 

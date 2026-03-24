@@ -415,6 +415,10 @@ class GovernedAManualOverrideConfig(StrictModel):
     reason: str | None = None
     scope: str | None = None
     actor: str | None = None
+    effective_window: dict[str, Any] | None = None
+    target_state_5: str | None = None
+    risk_budget_multiplier: float | None = None
+    defense_bias: float | None = None
 
 
 class GovernedARegimeConfig(StrictModel):
