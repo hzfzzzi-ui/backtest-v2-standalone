@@ -75,3 +75,13 @@ def test_frontend_files_are_explicitly_marked_with_owner_boundaries() -> None:
     assert "page shell bridge owner" in page_shell_source
     assert "transition bridge between desktop shell and Vue workbench" in bridge_source
     assert "sole visible DOM owner for #wbResultsWorkbenchMount" in vue_shell_source
+
+
+def test_legacy_shell_avoids_duplicate_active_helpers_and_combo_truth_rebuilders() -> None:
+    controller_source = _read_repo_file("frontend", "assets", "js", "backtest_v2.js")
+    artifacts_source = _read_repo_file("frontend", "assets", "js", "artifacts.js")
+    assert controller_source.count("function assetScopeDisplayName(") == 1
+    assert "function buildResearchComboDisplay(" not in artifacts_source
+    assert "function loadResearchComboComponent(" not in artifacts_source
+    assert "function loadResearchComboComponentArtifacts(" not in artifacts_source
+    assert "LegacyShim" in artifacts_source

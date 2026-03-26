@@ -20,15 +20,35 @@ def _resolve_runtime_asset_scope(runtime: Any) -> str:
     asset_scope = str(getattr(request, "asset_scope", "") or "").strip()
     if asset_scope:
         return asset_scope
+    request_asset_context = getattr(request, "asset_context", None)
+    if isinstance(request_asset_context, dict):
+        asset_scope = str(request_asset_context.get("asset_scope") or "").strip()
+        if asset_scope:
+            return asset_scope
     asset_context = getattr(request, "asset_context", None)
     if isinstance(asset_context, dict):
         asset_scope = str(asset_context.get("asset_scope") or "").strip()
         if asset_scope:
             return asset_scope
+    runtime_asset_context = getattr(runtime, "asset_context", None)
+    if isinstance(runtime_asset_context, dict):
+        asset_scope = str(runtime_asset_context.get("asset_scope") or "").strip()
+        if asset_scope:
+            return asset_scope
+    data_bundle = getattr(request, "data_bundle", None)
+    universe_meta = getattr(data_bundle, "universe_meta", None)
+    if isinstance(universe_meta, dict):
+        asset_scope = str(universe_meta.get("asset_scope") or "").strip()
+        if asset_scope:
+            return asset_scope
+    provider = getattr(runtime, "provider", None)
+    if provider is not None and hasattr(provider, "_etf_beta_slot_cap_arr"):
+        return "cn_etf"
     return "cn_a_equity"
 
 
 def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: float) -> dict[str, Any]:
+    asset_scope = _resolve_runtime_asset_scope(runtime)
     effective_max_positions = int(runtime.request.max_positions)
     dd_state = "NORMAL"
     market_state = ""
@@ -180,6 +200,11 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
                 effective_max_positions = min(int(effective_max_positions), max(0, int(breadth_max_positions)))
             except Exception:
                 breadth_max_positions = int(effective_max_positions)
+        etf_slot_cap_arr = getattr(runtime.provider, "_etf_beta_slot_cap_arr", None)
+        if asset_scope == "cn_etf" and isinstance(etf_slot_cap_arr, np.ndarray) and day_index < len(etf_slot_cap_arr):
+            etf_slot_cap = max(0, int(etf_slot_cap_arr[day_index]))
+            effective_max_positions = min(int(effective_max_positions), int(etf_slot_cap))
+            breadth_max_positions = min(int(breadth_max_positions), int(etf_slot_cap))
         risk_on_today = bool(getattr(runtime.provider, "_risk_on", np.ones(len(runtime.request.data_bundle.trading_days), dtype=bool))[day_index])
     else:
         if runtime._dd_enabled and abs(drawdown) >= runtime._dd_reduce_pct:
@@ -219,7 +244,7 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
         raw_feature = feature_arr[day_index]
         feature_availability = dict(raw_feature) if isinstance(raw_feature, dict) else {}
     governor_budget = build_governor_budget_snapshot(
-        asset_scope=_resolve_runtime_asset_scope(runtime),
+        asset_scope=asset_scope,
         hard_max_positions=getattr(runtime.request, "max_positions", 0),
         effective_max_positions=effective_max_positions,
         risk_budget_multiplier=risk_budget_multiplier,

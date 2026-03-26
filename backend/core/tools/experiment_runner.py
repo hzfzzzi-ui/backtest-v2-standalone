@@ -104,6 +104,15 @@ STANDARD_DAILY_COLUMNS = [
     "state_stability_metrics_json",
     "defense_bias",
     "weekly_observation_flag",
+    "etf_target_exposure",
+    "etf_min_deployable_exposure",
+    "etf_target_exposure_source",
+    "etf_min_deployable_exposure_source",
+    "etf_actual_exposure",
+    "etf_actual_risk_exposure",
+    "etf_actual_fallback_exposure",
+    "etf_actual_other_exposure",
+    "etf_deployability_gap",
     "governor_budget_json",
 ]
 STANDARD_TRADE_COLUMNS = [
@@ -438,6 +447,7 @@ def _apply_overrides(raw_cfg: dict[str, Any], overrides: dict[str, Any]) -> dict
     out.setdefault("execution", {})
     out.setdefault("sizing", {})
     out.setdefault("data_source", {})
+    benchmark_written = False
 
     if overrides.get("symbols"):
         out["universe"]["symbols"] = list(overrides["symbols"])
@@ -445,8 +455,9 @@ def _apply_overrides(raw_cfg: dict[str, Any], overrides: dict[str, Any]) -> dict
         out["universe"]["start"] = str(overrides["start_date"])
     if overrides.get("end_date"):
         out["universe"]["end"] = str(overrides["end_date"])
-    if overrides.get("benchmark"):
+    if "benchmark" in overrides and overrides.get("benchmark") is not None:
         out["universe"]["benchmark"] = str(overrides["benchmark"])
+        benchmark_written = True
     if overrides.get("compare_symbol"):
         out["universe"]["benchmark_compare_symbol"] = str(overrides["compare_symbol"])
     if overrides.get("initial_capital") is not None:
@@ -470,12 +481,13 @@ def _apply_overrides(raw_cfg: dict[str, Any], overrides: dict[str, Any]) -> dict
             wb_uni = wb_cfg.get("universe") if isinstance(wb_cfg.get("universe"), dict) else {}
             if wb_uni.get("symbols"):
                 out["universe"]["symbols"] = list(wb_uni["symbols"])
-            if wb_uni.get("start"):
+            if "start" in wb_uni and wb_uni.get("start") is not None:
                 out["universe"]["start"] = str(wb_uni["start"])
-            if wb_uni.get("end"):
+            if "end" in wb_uni and wb_uni.get("end") is not None:
                 out["universe"]["end"] = str(wb_uni["end"])
-            if wb_uni.get("benchmark"):
+            if "benchmark" in wb_uni and wb_uni.get("benchmark") is not None:
                 out["universe"]["benchmark"] = str(wb_uni["benchmark"])
+                benchmark_written = True
 
     if overrides.get("universe_mode"):
         out["universe_mode"] = str(overrides["universe_mode"])
@@ -488,6 +500,14 @@ def _apply_overrides(raw_cfg: dict[str, Any], overrides: dict[str, Any]) -> dict
         out["asset_context"] = dict(overrides["asset_context"])
     if overrides.get("data_role"):
         out["data_source"]["data_role"] = str(overrides["data_role"])
+    asset_context = out.get("asset_context") if isinstance(out.get("asset_context"), dict) else {}
+    asset_scope = str(
+        overrides.get("asset_scope")
+        or asset_context.get("asset_scope")
+        or ""
+    ).strip().lower()
+    if asset_scope == "cn_etf" and not benchmark_written:
+        out["universe"]["benchmark"] = ""
 
     _inject_db_credentials_from_env(out)
     return out

@@ -195,6 +195,67 @@ def test_validate_semantic_config_json_accepts_governed_a_share_contract() -> No
     assert out["governed_a_share"]["etf_beta"]["source_entry_type"] == "cn_etf_research_entry"
 
 
+def test_validate_semantic_config_json_accepts_governed_etf_rule_family_fields() -> None:
+    payload = _valid_config()
+    payload["asset_scope"] = "cn_etf"
+    payload["governed_a_share"] = {
+        "enabled": True,
+        "etf_beta": {
+            "research_rule_family": "broad_based_rotation_template_a",
+            "template_id": "broad_based_rotation_template_a",
+            "template_asset_pool_version": "A0",
+            "template_role_map": {"510300.SH": "hs300", "512100.SH": "csi1000_proxy"},
+            "template_proxy_map": {"512100.SH": "CSI1000_STANDARD"},
+            "template_target_formal_symbols": ["510300.SH", "510500.SH", "CSI1000_STANDARD", "DIVIDEND_STANDARD"],
+            "growth_seat_symbol": "159915.SZ",
+            "rebalance_frequency": "monthly",
+            "absolute_filter_mode": "ma200_and_positive_12m",
+            "fallback_mode": "single_symbol",
+            "fallback_symbol": "511010.SH",
+            "relative_strength_fast_window": 63,
+            "relative_strength_mid_window": 126,
+            "relative_strength_slow_window": 252,
+            "relative_strength_fast_weight": 0.2,
+            "relative_strength_mid_weight": 0.3,
+            "relative_strength_slow_weight": 0.5,
+            "max_selected_symbols": 2,
+            "target_exposure": 0.2,
+            "min_deployable_exposure": 0.1,
+            "target_exposure_by_state_5": {"BULL": 0.3, "LIGHT": 0.15},
+            "min_deployable_exposure_by_state_5": {"BULL": 0.15, "LIGHT": 0.1},
+            "fallback_allowed": True,
+            "vol_target_window": 20,
+            "vol_target_annualized_target": 0.18,
+            "vol_target_min_scale": 0.35,
+            "vol_target_max_scale": 1.0,
+        },
+    }
+
+    out = validate_semantic_config_json(payload)
+
+    etf_beta = out["governed_a_share"]["etf_beta"]
+    assert etf_beta["research_rule_family"] == "broad_based_rotation_template_a"
+    assert etf_beta["template_id"] == "broad_based_rotation_template_a"
+    assert etf_beta["template_asset_pool_version"] == "A0"
+    assert etf_beta["template_role_map"]["510300.SH"] == "hs300"
+    assert etf_beta["template_proxy_map"]["512100.SH"] == "CSI1000_STANDARD"
+    assert etf_beta["template_target_formal_symbols"][-1] == "DIVIDEND_STANDARD"
+    assert etf_beta["growth_seat_symbol"] == "159915.SZ"
+    assert etf_beta["absolute_filter_mode"] == "ma200_and_positive_12m"
+    assert etf_beta["rebalance_frequency"] == "monthly"
+    assert etf_beta["fallback_symbol"] == "511010.SH"
+    assert etf_beta["relative_strength_mid_window"] == 126
+    assert etf_beta["relative_strength_mid_weight"] == 0.3
+    assert etf_beta["max_selected_symbols"] == 2
+    assert etf_beta["target_exposure"] == 0.2
+    assert etf_beta["min_deployable_exposure"] == 0.1
+    assert etf_beta["target_exposure_by_state_5"] == {"BULL": 0.3, "LIGHT": 0.15}
+    assert etf_beta["min_deployable_exposure_by_state_5"] == {"BULL": 0.15, "LIGHT": 0.1}
+    assert etf_beta["fallback_allowed"] is True
+    assert etf_beta["vol_target_window"] == 20
+    assert etf_beta["vol_target_annualized_target"] == 0.18
+
+
 def test_validate_semantic_config_json_accepts_governed_manual_override_enrichment_fields() -> None:
     payload = _valid_config()
     payload["governed_a_share"] = {
@@ -248,6 +309,70 @@ def test_compile_semantic_config_json_preserves_governed_a_share_contract() -> N
     assert resolved_json["governed_a_share"]["stock_alpha_core"]["legacy_anchor"] == "baseline_V10.1"
     assert resolved_json["governed_a_share"]["stock_alpha_core"]["budget_semantics"] == "consume_governor_sleeve_budget"
     assert resolved_json["governed_a_share"]["etf_beta"]["limited_defense_candidates"] == ["512890.SH"]
+
+
+def test_compile_semantic_config_json_preserves_governed_etf_rule_family_fields() -> None:
+    payload = _valid_config()
+    payload["asset_scope"] = "cn_etf"
+    payload["governed_a_share"] = {
+        "enabled": True,
+        "etf_beta": {
+            "research_rule_family": "broad_based_rotation_template_a",
+            "template_id": "broad_based_rotation_template_a",
+            "template_asset_pool_version": "A0",
+            "template_role_map": {"510300.SH": "hs300", "512100.SH": "csi1000_proxy"},
+            "template_proxy_map": {"512100.SH": "CSI1000_STANDARD"},
+            "template_target_formal_symbols": ["510300.SH", "510500.SH", "CSI1000_STANDARD", "DIVIDEND_STANDARD"],
+            "growth_seat_symbol": "588000.SH",
+            "core_beta_symbols": ["510300.SH", "510050.SH"],
+            "rebalance_frequency": "monthly",
+            "absolute_filter_mode": "ma200_and_positive_12m",
+            "fallback_mode": "single_symbol",
+            "fallback_symbol": "511010.SH",
+            "relative_strength_fast_window": 63,
+            "relative_strength_mid_window": 126,
+            "relative_strength_slow_window": 252,
+            "relative_strength_fast_weight": 0.2,
+            "relative_strength_mid_weight": 0.3,
+            "relative_strength_slow_weight": 0.5,
+            "max_selected_symbols": 2,
+            "target_exposure": 0.2,
+            "min_deployable_exposure": 0.1,
+            "target_exposure_by_state_5": {"BULL": 0.3, "LIGHT": 0.15},
+            "min_deployable_exposure_by_state_5": {"BULL": 0.15, "LIGHT": 0.1},
+            "fallback_allowed": True,
+            "vol_target_window": 30,
+            "vol_target_annualized_target": 0.16,
+            "vol_target_min_scale": 0.4,
+            "vol_target_max_scale": 1.0,
+        },
+    }
+
+    compiled = compile_semantic_config_json(payload)
+
+    etf_beta = compiled["resolved_config"]["config_json"]["governed_a_share"]["etf_beta"]
+    assert etf_beta["research_rule_family"] == "broad_based_rotation_template_a"
+    assert etf_beta["template_id"] == "broad_based_rotation_template_a"
+    assert etf_beta["template_asset_pool_version"] == "A0"
+    assert etf_beta["template_role_map"]["512100.SH"] == "csi1000_proxy"
+    assert etf_beta["template_proxy_map"]["512100.SH"] == "CSI1000_STANDARD"
+    assert etf_beta["template_target_formal_symbols"][-1] == "DIVIDEND_STANDARD"
+    assert etf_beta["growth_seat_symbol"] == "588000.SH"
+    assert etf_beta["core_beta_symbols"] == ["510300.SH", "510050.SH"]
+    assert etf_beta["absolute_filter_mode"] == "ma200_and_positive_12m"
+    assert etf_beta["rebalance_frequency"] == "monthly"
+    assert etf_beta["fallback_mode"] == "single_symbol"
+    assert etf_beta["fallback_symbol"] == "511010.SH"
+    assert etf_beta["relative_strength_mid_window"] == 126
+    assert etf_beta["relative_strength_mid_weight"] == 0.3
+    assert etf_beta["max_selected_symbols"] == 2
+    assert etf_beta["target_exposure"] == 0.2
+    assert etf_beta["min_deployable_exposure"] == 0.1
+    assert etf_beta["target_exposure_by_state_5"] == {"BULL": 0.3, "LIGHT": 0.15}
+    assert etf_beta["min_deployable_exposure_by_state_5"] == {"BULL": 0.15, "LIGHT": 0.1}
+    assert etf_beta["fallback_allowed"] is True
+    assert etf_beta["vol_target_window"] == 30
+    assert etf_beta["vol_target_annualized_target"] == 0.16
 
 
 def test_validate_semantic_config_json_accepts_regime_engine_fields() -> None:

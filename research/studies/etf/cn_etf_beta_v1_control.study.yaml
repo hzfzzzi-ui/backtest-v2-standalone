@@ -1,0 +1,79 @@
+study_id: etf/cn_etf_beta_v1_control
+title: CN ETF Beta V1 Control
+asset_scope: cn_etf
+baseline_id: baseline_V10_2
+hypothesis: 固定当前 ETF V1 规则为正式对照组，避免后续规则族研究因默认值漂移而失真。
+change_scope:
+  modules_modified:
+    - research_entry.cn_etf.beta_v1_control
+variants:
+  - name: V1_CONTROL
+    description: 复现当前 ETF V1 规则与 core4 候选池
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510050.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 510050.SH
+          - 512100.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: etf_beta_v1_control
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 510050.SH
+          - 512100.SH
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value:
+          - 512890.SH
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: weekly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma120
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: none
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 60
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 120
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.4
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.6
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-11-04"
+    end: "2026-03-20"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: outputs/baselines/baseline_V10_2/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

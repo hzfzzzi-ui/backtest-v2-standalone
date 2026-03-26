@@ -1000,6 +1000,124 @@ def test_apply_daily_decision_diagnostics_keeps_breakout_counts_raw_for_artifact
     assert "NO_SELECTED_ORDERS" not in governor_budget["budget_reason_codes"]
 
 
+def test_apply_daily_decision_diagnostics_resolves_cn_etf_governor_truth_from_asset_context() -> None:
+    runtime = SimpleNamespace(
+        daily_rows=[
+            {
+                "date": "2026-03-02",
+                "drawdown": 0.0,
+                "positions_count": 0,
+                "positions_count_end_of_day": 0,
+                "candidates_count": 0,
+                "selected_count": 0,
+                "buy_slots_before_buy": 0,
+                "buy_slots_after_sell": 0,
+                "buy_candidate_count": 0,
+                "after_held_filter_count": 0,
+                "positions_before_sell": 0,
+                "sells_executed_count": 0,
+                "positions_after_sell": 0,
+                "buy_slots_calculated": 0,
+                "raw_buy_signal_count": 0,
+                "raw_alpha_signal_count": 0,
+                "composed_buy_signal_count": 0,
+                "composed_sell_signal_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "candidates_after_held_filter_count": 0,
+                "sorting_triggered": False,
+                "mf_rank_triggered": 0,
+                "mf_rank_applied": 0,
+                "mf_candidates_when_triggered": 0,
+                "mf_topk_reject_count": 0,
+                "mf_concentrated_selected_count": 0,
+                "mf_gate_on": 0,
+                "strong_risk_on": 0,
+                "mf_rank_suppressed_by_strong_gate": 0,
+                "same_symbol_conflict_count": 0,
+                "sleeve_budget_reject_count": 0,
+                "source_only_exit_count": 0,
+                "global_risk_override_count": 0,
+                "effective_max_positions": 2,
+                "breadth_max_positions": 2,
+                "dd_state": "NORMAL",
+                "regime_transition_reason": "",
+                "market_state_5": "BULL",
+                "base_state_5": "BULL",
+                "effective_state_5": "BULL",
+                "coarse_state": "RISK_ON",
+                "effective_coarse_state": "RISK_ON",
+                "risk_budget_multiplier": 1.0,
+                "reason_codes_json": "[]",
+                "manual_override_json": "{}",
+                "defense_bias": 0.0,
+                "governor_budget_json": json.dumps(
+                    {
+                        "contract_version": "cn_a_governor_budget@1",
+                        "asset_scope": "cn_a_equity",
+                        "budget_consumer_sleeve_id": "cn_stock_trend_alpha_core",
+                        "budget_consumer_system_role": "stock_alpha_sleeve",
+                        "budget_semantics": "consume_governor_sleeve_budget",
+                        "total_risk_budget": 1.0,
+                        "budget_reason_codes": [],
+                    }
+                ),
+            }
+        ],
+        route_id="strict_inline_runtime",
+        _current_day={"controls": {"effective_max_positions": 2}},
+        positions={},
+        composition_audit_rows=[],
+        request=SimpleNamespace(
+            max_positions=2,
+            asset_context={"asset_scope": "cn_etf"},
+        ),
+    )
+    buy_signal = SimpleNamespace(symbol="SH510050", meta={"sleeve_id": "cn_etf_beta"})
+    day_signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        raw_alpha_signals=[],
+        composed_buy_signals=[],
+        composed_sell_signals=[],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={
+            "raw_buy_signal_count": 1,
+            "composition_enabled": False,
+        },
+    )
+
+    apply_daily_decision_diagnostics(
+        runtime,
+        day_signals=day_signals,
+        debug_plan={
+            "buy_candidates_count": 1,
+            "buy_slots": 1,
+            "selected_symbols": ["sh510050"],
+            "selected_count": 1,
+        },
+    )
+
+    governor_budget = json.loads(runtime.daily_rows[-1]["governor_budget_json"])
+    assert governor_budget["asset_scope"] == "cn_etf"
+    assert governor_budget["budget_consumer_sleeve_id"] == "cn_etf_beta"
+    assert governor_budget["budget_consumer_system_role"] == "market_beta_sleeve"
+    assert governor_budget["target_exposure"] == 1.0
+    assert governor_budget["target_exposure_source"] == "slot_cap_default"
+    assert governor_budget["min_deployable_exposure"] == 0.5
+    assert governor_budget["min_deployable_exposure_source"] == "derived_from_target"
+    assert governor_budget["fallback_allowed"] is False
+    assert governor_budget["actual_exposure"] == 0.0
+    assert governor_budget["actual_risk_exposure"] == 0.0
+    assert governor_budget["actual_fallback_exposure"] == 0.0
+    assert governor_budget["deployability_gap"] == 1.0
+
+
 def test_apply_daily_decision_diagnostics_populates_moneyflow_overlay_fields() -> None:
     runtime = SimpleNamespace(
         daily_rows=[
@@ -1199,3 +1317,69 @@ def test_build_portfolio_backtest_result_preserves_metrics_shape() -> None:
     assert result.metrics["risk_budget_active_days"] == 1
     assert result.metrics["audit"]["governor_budget"]["summary"]["budget_reason_counts"]["DRAWDOWN_REDUCED"] == 1
     assert result.metrics["audit"]["governor_budget"]["summary"]["sleeve_budget_reject_days"] == 1
+
+
+def test_build_portfolio_backtest_result_keeps_cn_etf_governor_latest_truth() -> None:
+    def _fake_compute_metrics(*args, **kwargs):
+        return {"audit": {}, "baseline": "ok"}
+
+    monkeypatch = MonkeyPatch()
+    monkeypatch.setattr(
+        "backend.core.stage_pipeline.adapters.result_bridge._compute_metrics",
+        _fake_compute_metrics,
+    )
+    try:
+        runtime = SimpleNamespace(
+            daily_rows=[{
+                "date": "2026-03-20",
+                "nav": 1.0,
+                "drawdown": 0.0,
+                "market_state": "BULL",
+                "governor_budget_json": json.dumps(
+                    {
+                        "contract_version": "cn_a_governor_budget@1",
+                        "asset_scope": "cn_a_equity",
+                        "budget_consumer_sleeve_id": "cn_stock_trend_alpha_core",
+                        "budget_consumer_system_role": "stock_alpha_sleeve",
+                        "budget_semantics": "consume_governor_sleeve_budget",
+                        "total_risk_budget": 0.7,
+                        "budget_reason_codes": [],
+                    }
+                ),
+            }],
+            trade_rows=[],
+            candidate_rows=[],
+            request=SimpleNamespace(
+                max_positions=4,
+                enable_strength_rank=False,
+                strength_ma=120,
+                asset_context={"asset_scope": "cn_etf"},
+            ),
+            provider=SimpleNamespace(
+                precompute_seconds=0.0,
+                blocked_by_trend_count=0,
+                total_buy_signals=0,
+                diag_reason_counts={},
+            ),
+            route_id="provider_breakout_runtime",
+            _simulation_t0=time.perf_counter() - 1.0,
+            market_filter_bull_days=0,
+            market_filter_bear_days=0,
+            market_state_trans_down_days=0,
+            market_state_trans_up_days=0,
+            trade_mode_main_days=0,
+            trade_mode_light_days=0,
+            trade_mode_notrade_days=0,
+        )
+
+        result = build_portfolio_backtest_result(runtime)
+    finally:
+        monkeypatch.undo()
+
+    latest = result.metrics["audit"]["governor_budget"]["latest"]
+    assert latest["asset_scope"] == "cn_etf"
+    assert latest["budget_consumer_sleeve_id"] == "cn_etf_beta"
+    assert latest["budget_consumer_system_role"] == "market_beta_sleeve"
+    assert latest["risk_budget_multiplier"] == 0.7
+    assert latest["local_budget_controls"] == []
+    assert list(latest["sleeve_budgets"].keys()) == ["cn_etf_beta"]

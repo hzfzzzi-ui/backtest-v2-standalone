@@ -40,10 +40,13 @@ from backend.core.audit.regime_audit import write_regime_audit_artifacts
 from backend.core.audit.research_audit import build_research_audit
 from backend.core.config.asset_profiles import build_asset_context
 from backend.core.config.cn_a_governed_mainline import (
-    build_cn_etf_beta_phase1_summary,
     build_governed_a_share_contract,
     canonical_state_5,
     coarse_state_from_state_5,
+)
+from backend.core.config.etf_beta_contract import (
+    build_etf_beta_phase1_summary as build_cn_etf_beta_phase1_summary,
+    extract_latest_etf_beta_runtime_selection,
 )
 from backend.core.config.models import DataSourceConfig
 from backend.core.stage_pipeline.adapters.lineage import LINEAGE_LEDGER_COLUMNS
@@ -256,7 +259,6 @@ def _extract_latest_regime_snapshot(daily_df: pd.DataFrame) -> dict[str, Any] | 
         }
     )
 
-
 def _extract_latest_governor_snapshot(daily_df: pd.DataFrame) -> dict[str, Any] | None:
     if daily_df.empty or "date" not in daily_df.columns or "governor_budget_json" not in daily_df.columns:
         return None
@@ -279,6 +281,11 @@ def _extract_latest_governor_snapshot(daily_df: pd.DataFrame) -> dict[str, Any] 
         payload = dict(raw)
     if not isinstance(payload, dict):
         return None
+    risk_budget_multiplier = _safe_float(payload.get("risk_budget_multiplier"))
+    if risk_budget_multiplier is None:
+        risk_budget_multiplier = _safe_float(payload.get("total_risk_budget"))
+        if risk_budget_multiplier is not None:
+            payload["risk_budget_multiplier"] = risk_budget_multiplier
     return sanitize_json(payload)
 
 
@@ -609,9 +616,15 @@ def ensure_standard_artifacts(
             return value, source
         return None, "missing"
 
+    def _pick_present_with_source(candidates: list[tuple[bool, Any, str]]) -> tuple[Any, str]:
+        for present, value, source in candidates:
+            if not present:
+                continue
+            return value, source
+        return None, "missing"
+
     start_v, start_src = _pick_with_source([(runtime_uni.get("start"), "run_config.universe.start"), (wb_uni.get("start"), "original_workbench_config.universe.start"), (overrides.get("start_date"), "overrides.start_date"), (base_uni.get("start"), "base_config.universe.start")])
     end_v, end_src = _pick_with_source([(runtime_uni.get("end"), "run_config.universe.end"), (wb_uni.get("end"), "original_workbench_config.universe.end"), (overrides.get("end_date"), "overrides.end_date"), (base_uni.get("end"), "base_config.universe.end")])
-    benchmark_v, benchmark_src = _pick_with_source([(runtime_uni.get("benchmark"), "run_config.universe.benchmark"), (wb_uni.get("benchmark"), "original_workbench_config.universe.benchmark"), (overrides.get("benchmark"), "overrides.benchmark"), (base_uni.get("benchmark"), "base_config.universe.benchmark")])
 
     resolved_config_mode = str(overrides.get("resolved_config_mode") or result.get("resolved_config_mode") or "none")
     resolved_config_id = overrides.get("resolved_config_id") or result.get("resolved_config_id")
@@ -627,6 +640,7 @@ def ensure_standard_artifacts(
     if resolved_config_meta is not None and resolved_data_role and not resolved_config_meta.get("data_role"):
         resolved_config_meta = dict(resolved_config_meta)
         resolved_config_meta["data_role"] = resolved_data_role
+    universe_meta_obj = dict(result.get("universe_meta") or {}) if isinstance(result.get("universe_meta"), dict) else {}
     asset_context = sanitize_json(
         build_asset_context(
             overrides.get("asset_scope"),
@@ -648,9 +662,41 @@ def ensure_standard_artifacts(
         stock_alpha_core_role = str(
             (stock_alpha_core_meta.get("sleeve_id") or "")
         ).strip() or None
-    universe_meta_obj = dict(result.get("universe_meta") or {}) if isinstance(result.get("universe_meta"), dict) else {}
+    benchmark_v = None
+    benchmark_src = "missing"
+    asset_scope = str(asset_context.get("asset_scope") or "").strip().lower()
+    if asset_scope == "cn_etf":
+        benchmark_v, benchmark_src = _pick_present_with_source(
+            [
+                ("benchmark" in runtime_uni, runtime_uni.get("benchmark"), "run_config.universe.benchmark"),
+                ("benchmark" in wb_uni, wb_uni.get("benchmark"), "original_workbench_config.universe.benchmark"),
+                ("benchmark" in overrides, overrides.get("benchmark"), "overrides.benchmark"),
+            ]
+        )
+        if isinstance(benchmark_v, str):
+            benchmark_v = benchmark_v.strip()
+        if benchmark_v in (None, ""):
+            benchmark_source = str(universe_meta_obj.get("benchmark_source") or "").strip()
+            fallback_benchmark = ""
+            if benchmark_source == "first_etf_symbol":
+                fallback_benchmark = str((universe_meta_obj.get("etf_symbols") or [None])[0] or "").strip()
+            if fallback_benchmark:
+                benchmark_v = fallback_benchmark
+                benchmark_src = f"universe_meta.benchmark_source::{benchmark_source}"
+            elif benchmark_v == "":
+                benchmark_v = ""
+                benchmark_src = f"{benchmark_src}::empty"
+    else:
+        benchmark_v, benchmark_src = _pick_with_source(
+            [
+                (runtime_uni.get("benchmark"), "run_config.universe.benchmark"),
+                (wb_uni.get("benchmark"), "original_workbench_config.universe.benchmark"),
+                (overrides.get("benchmark"), "overrides.benchmark"),
+                (base_uni.get("benchmark"), "base_config.universe.benchmark"),
+            ]
+        )
     etf_beta_phase1_summary = None
-    if str(asset_context.get("asset_scope") or "") == "cn_etf" and isinstance(governed_a_share_meta, dict):
+    if asset_scope == "cn_etf" and isinstance(governed_a_share_meta, dict):
         etf_beta_phase1_summary = build_cn_etf_beta_phase1_summary(
             governed_contract=governed_a_share_meta,
             universe_meta=universe_meta_obj,
@@ -673,6 +719,7 @@ def ensure_standard_artifacts(
             "start": start_v,
             "end": end_v,
             "benchmark": benchmark_v,
+            "benchmark_source": benchmark_src,
             "compare_symbol": overrides.get("compare_symbol") or base_cfg.get("universe", {}).get("benchmark_compare_symbol"),
             "universe_limit": _safe_int(overrides.get("universe_limit")),
             "asset_scope": str(asset_context.get("asset_scope") or "cn_a_equity"),
@@ -772,6 +819,7 @@ def ensure_standard_artifacts(
         if not daily_df_for_regime.empty:
             run_meta_needs_rewrite = False
             governor_snapshot = _extract_latest_governor_snapshot(daily_df_for_regime)
+            etf_beta_runtime_selection = extract_latest_etf_beta_runtime_selection(daily_df_for_regime)
             if isinstance(governor_snapshot, dict) and governed_a_share_meta:
                 run_meta_obj["governed_snapshot"] = sanitize_json(governor_snapshot)
                 run_meta_needs_rewrite = True
@@ -780,9 +828,21 @@ def ensure_standard_artifacts(
                     governed_contract=governed_a_share_meta,
                     universe_meta=universe_meta_obj,
                     governor_snapshot=governor_snapshot if isinstance(governor_snapshot, dict) else None,
+                    runtime_selection_summary=etf_beta_runtime_selection if isinstance(etf_beta_runtime_selection, dict) else None,
                 )
                 if isinstance(etf_beta_phase1_summary, dict):
                     run_meta_obj["etf_beta"] = sanitize_json(etf_beta_phase1_summary)
+                    report_consistency = dict(run_meta_obj.get("report_consistency") or {})
+                    report_consistency["etf_beta_source_entry_type"] = str(
+                        etf_beta_phase1_summary.get("source_entry_type") or report_consistency.get("etf_beta_source_entry_type") or ""
+                    )
+                    report_consistency["etf_beta_selected_etfs"] = sanitize_json(
+                        list(etf_beta_phase1_summary.get("selected_etfs") or [])
+                    )
+                    report_consistency["etf_beta_out_of_scope_etfs"] = sanitize_json(
+                        list(etf_beta_phase1_summary.get("out_of_scope_etfs") or [])
+                    )
+                    run_meta_obj["report_consistency"] = report_consistency
                     prior_snapshot = dict(run_meta_obj.get("governed_snapshot") or {})
                     sleeve_budget_used = dict(etf_beta_phase1_summary.get("sleeve_budget_used") or {})
                     etf_sleeve_budget = sanitize_json(
@@ -795,6 +855,11 @@ def ensure_standard_artifacts(
                             "candidate_count": sleeve_budget_used.get("candidate_count"),
                             "selected_count": sleeve_budget_used.get("selected_count"),
                             "budget_share": sleeve_budget_used.get("budget_share"),
+                            "target_exposure": sleeve_budget_used.get("target_exposure"),
+                            "min_deployable_exposure": sleeve_budget_used.get("min_deployable_exposure"),
+                            "fallback_allowed": sleeve_budget_used.get("fallback_allowed"),
+                            "under_deploy_reason_codes": list(sleeve_budget_used.get("under_deploy_reason_codes") or []),
+                            "target_selected_count": sleeve_budget_used.get("target_selected_count"),
                             "raw_sleeve_ids": list(sleeve_budget_used.get("raw_sleeve_ids") or []),
                         }
                     )
@@ -804,6 +869,12 @@ def ensure_standard_artifacts(
                             "eligible_etfs": list(etf_beta_phase1_summary.get("eligible_etfs") or []),
                             "selected_etfs": list(etf_beta_phase1_summary.get("selected_etfs") or []),
                             "selection_reason_codes": dict(etf_beta_phase1_summary.get("selection_reason_codes") or {}),
+                            "runtime_reason_codes": list(etf_beta_phase1_summary.get("runtime_reason_codes") or []),
+                            "target_selected_count": etf_beta_phase1_summary.get("target_selected_count"),
+                            "target_exposure": etf_beta_phase1_summary.get("target_exposure"),
+                            "min_deployable_exposure": etf_beta_phase1_summary.get("min_deployable_exposure"),
+                            "fallback_allowed": etf_beta_phase1_summary.get("fallback_allowed"),
+                            "under_deploy_reason_codes": list(etf_beta_phase1_summary.get("under_deploy_reason_codes") or []),
                             "out_of_scope_etfs": list(etf_beta_phase1_summary.get("out_of_scope_etfs") or []),
                             "sleeve_budget_used": etf_beta_phase1_summary.get("sleeve_budget_used"),
                         }
@@ -828,6 +899,10 @@ def ensure_standard_artifacts(
                                 or prior_snapshot.get("budget_semantics")
                                 or ""
                             ),
+                            "target_exposure": etf_beta_phase1_summary.get("target_exposure"),
+                            "min_deployable_exposure": etf_beta_phase1_summary.get("min_deployable_exposure"),
+                            "fallback_allowed": etf_beta_phase1_summary.get("fallback_allowed"),
+                            "under_deploy_reason_codes": list(etf_beta_phase1_summary.get("under_deploy_reason_codes") or []),
                             "local_budget_controls": [],
                             "sleeve_budgets": {
                                 "cn_etf_beta": etf_sleeve_budget,
@@ -853,6 +928,13 @@ def ensure_standard_artifacts(
                     if isinstance(governed_a_share_meta, dict) and governed_a_share_meta:
                         prior_snapshot = dict(run_meta_obj.get("governed_snapshot") or {})
                         sleeve_budgets = dict(prior_snapshot.get("sleeve_budgets") or {})
+                        risk_budget_multiplier = latest_regime_snapshot.get("risk_budget_multiplier")
+                        if risk_budget_multiplier is None:
+                            risk_budget_multiplier = (
+                                prior_snapshot.get("risk_budget_multiplier")
+                                if prior_snapshot.get("risk_budget_multiplier") is not None
+                                else prior_snapshot.get("total_risk_budget")
+                            )
                         run_meta_obj["governed_snapshot"] = sanitize_json(
                             {
                                 **prior_snapshot,
@@ -860,7 +942,7 @@ def ensure_standard_artifacts(
                                 "effective_state": latest_regime_snapshot.get("effective_state"),
                                 "coarse_state": latest_regime_snapshot.get("coarse_state"),
                                 "effective_coarse_state": latest_regime_snapshot.get("effective_coarse_state"),
-                                "risk_budget_multiplier": latest_regime_snapshot.get("risk_budget_multiplier"),
+                                "risk_budget_multiplier": risk_budget_multiplier,
                                 "budget_reason_codes": list(prior_snapshot.get("budget_reason_codes") or ()),
                                 "sleeve_budgets_summary": {
                                     "stock_alpha_core": (((governed_a_share_meta or {}).get("stock_alpha_core") or {}).get("enabled")),

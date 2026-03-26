@@ -99,6 +99,15 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
                         },
                         ensure_ascii=False,
                     ),
+                    "etf_target_exposure": 0.2,
+                    "etf_min_deployable_exposure": 0.1,
+                    "etf_target_exposure_source": "fixed",
+                    "etf_min_deployable_exposure_source": "fixed",
+                    "etf_actual_exposure": 0.16,
+                    "etf_actual_risk_exposure": 0.15,
+                    "etf_actual_fallback_exposure": 0.01,
+                    "etf_actual_other_exposure": 0.0,
+                    "etf_deployability_gap": 0.04,
                 }
             ]
         )
@@ -124,3 +133,7 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
     assert row["regime_transition_reason"] == "TREND_BLOCK_CONFIRMED"
     assert json.loads(row["feature_availability_json"])["risk_block"] is True
     assert json.loads(row["governor_budget_json"])["contract_version"] == "cn_a_governor_budget@1"
+    assert row["etf_target_exposure"] == 0.2
+    assert row["etf_target_exposure_source"] == "fixed"
+    assert row["etf_actual_risk_exposure"] == 0.15
+    assert row["etf_deployability_gap"] == 0.04

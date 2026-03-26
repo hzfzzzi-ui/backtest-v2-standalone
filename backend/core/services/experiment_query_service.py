@@ -34,6 +34,7 @@ _ALLOWED_SURFACE_SECTIONS = {
     "reason_codes",
     "cash_blocked_buys_recent",
     "stock_names",
+    "combo_truth",
 }
 
 
@@ -442,6 +443,186 @@ def _surface_stock_names(exp_dir: Path, manifest: dict[str, Any]) -> dict[str, A
     return sanitize_json(_read_json(exp_dir / rel))
 
 
+def _format_pct_text(value: Any) -> str:
+    num = _to_finite_float(value)
+    return f"{num * 100:.2f}%" if num is not None else "-"
+
+
+def _join_non_empty(parts: list[str]) -> str:
+    values = [str(part or "").strip() for part in parts if str(part or "").strip()]
+    return " | ".join(values) if values else "-"
+
+
+def _summarize_reason_codes(values: Any) -> str:
+    items = [str(item or "").strip() for item in list(values or ()) if str(item or "").strip()]
+    return ", ".join(items[:3]) if items else "-"
+
+
+def _summarize_manual_override(payload: Any) -> str:
+    override_payload = payload if isinstance(payload, dict) else {}
+    if not override_payload.get("active"):
+        return "无"
+    parts = [
+        str(override_payload.get("scope") or "override").strip(),
+        str(override_payload.get("target_state_5") or "").strip(),
+        str(override_payload.get("reason") or "").strip(),
+    ]
+    return _join_non_empty(parts)
+
+
+def _surface_component_snapshot(exp_id: str) -> dict[str, Any] | None:
+    component_dir = resolve_experiment_dir_by_id(exp_id)
+    if component_dir is None:
+        return None
+    manifest = load_manifest(component_dir)
+    if not isinstance(manifest, dict) or not manifest:
+        return None
+    summary = sanitize_json(_surface_summary(exp_id, manifest, component_dir).model_dump())
+    nav_rows = _surface_nav(component_dir, manifest)
+    payload = {
+        "active": True,
+        "source": {"kind": "experiment", "id": exp_id},
+        "assetContext": dict(summary.get("asset_context") or {}),
+        "result": {
+            "exp_id": exp_id,
+            "status": str(manifest.get("status") or ""),
+        },
+        "manifest": sanitize_json(manifest),
+        "artifacts": {
+            "perf": _surface_perf_payload(component_dir, manifest),
+            "run_meta": _surface_run_meta(component_dir, manifest),
+            "config": _surface_config(component_dir, manifest),
+            "nav": nav_rows,
+            "navSeries": [{"date": row.get("date"), "value": row.get("nav")} for row in nav_rows],
+            "symbolPerformanceRows": _surface_symbol_stats(component_dir, manifest),
+            "tradesRows": _surface_trades(component_dir, manifest),
+            "funnelRows": _surface_stage_funnel(component_dir, manifest),
+            "dailyRows": _surface_daily(component_dir, manifest),
+            "reasonRows": _surface_reason_codes(component_dir, manifest),
+            "stockNames": _surface_stock_names(component_dir, manifest),
+            "surfaceSummary": summary,
+            "surfaceLazySections": {},
+            "machineOutputs": dict(manifest.get("machine_outputs") or {}),
+            "humanOutputs": dict(manifest.get("human_outputs") or {}),
+        },
+        "view": {},
+        "updatedAt": None,
+    }
+    return sanitize_json(payload)
+
+
+def _build_research_combo_display(
+    stock_snapshot: dict[str, Any] | None,
+    etf_snapshot: dict[str, Any] | None,
+    combo_run_meta: dict[str, Any] | None,
+) -> dict[str, Any]:
+    stock_run_meta = (
+        ((stock_snapshot or {}).get("artifacts") or {}).get("run_meta")
+        if isinstance(((stock_snapshot or {}).get("artifacts") or {}), dict)
+        else {}
+    )
+    etf_run_meta = (
+        ((etf_snapshot or {}).get("artifacts") or {}).get("run_meta")
+        if isinstance(((etf_snapshot or {}).get("artifacts") or {}), dict)
+        else {}
+    )
+    stock_run_meta = stock_run_meta if isinstance(stock_run_meta, dict) else {}
+    etf_run_meta = etf_run_meta if isinstance(etf_run_meta, dict) else {}
+    combo_meta = combo_run_meta if isinstance(combo_run_meta, dict) else {}
+    stock_latest = dict(((stock_run_meta.get("regime") or {}).get("latest_state") or {}))
+    etf_latest = dict(((etf_run_meta.get("regime") or {}).get("latest_state") or {}))
+    stock_governor = dict(stock_run_meta.get("governed_snapshot") or {})
+    etf_governor = dict(etf_run_meta.get("governed_snapshot") or {})
+    combo_mode = str(((combo_meta.get("research_combo") or {}).get("mode")) or "").strip()
+    regime_summary = {
+        "available": bool(
+            stock_latest.get("base_state")
+            or stock_latest.get("effective_state")
+            or etf_latest.get("base_state")
+            or etf_latest.get("effective_state")
+        ),
+        "base_state": str(stock_latest.get("base_state") or "").strip() and f"个股 {stock_latest.get('base_state')}" or "-",
+        "effective_state": str(etf_latest.get("effective_state") or "").strip() and f"ETF {etf_latest.get('effective_state')}" or "-",
+        "coarse_state": _join_non_empty([
+            str(stock_latest.get("effective_coarse_state") or "").strip() and f"个股 {stock_latest.get('effective_coarse_state')}" or "",
+            str(etf_latest.get("effective_coarse_state") or "").strip() and f"ETF {etf_latest.get('effective_coarse_state')}" or "",
+        ]),
+        "risk_budget_multiplier_text": _join_non_empty([
+            stock_governor.get("total_risk_budget") is not None and f"个股 {_format_pct_text(stock_governor.get('total_risk_budget'))}" or "",
+            etf_governor.get("total_risk_budget") is not None and f"ETF {_format_pct_text(etf_governor.get('total_risk_budget'))}" or "",
+        ]),
+        "reason_text": _join_non_empty([
+            str(stock_latest.get("effective_state") or "").strip() and f"个股 {stock_latest.get('effective_state')}" or "",
+            str(etf_latest.get("effective_state") or "").strip() and f"ETF {etf_latest.get('effective_state')}" or "",
+            combo_mode and f"模式 {combo_mode}" or "",
+        ]),
+        "manual_override_text": (
+            _join_non_empty([
+                stock_latest.get("manual_override", {}).get("active") and f"个股 {_summarize_manual_override(stock_latest.get('manual_override'))}" or "",
+                etf_latest.get("manual_override", {}).get("active") and f"ETF {_summarize_manual_override(etf_latest.get('manual_override'))}" or "",
+            ])
+            if bool((stock_latest.get("manual_override") or {}).get("active")) or bool((etf_latest.get("manual_override") or {}).get("active"))
+            else "无"
+        ),
+    }
+    governor_summary = {
+        "available": bool(
+            stock_governor.get("total_risk_budget") is not None
+            or etf_governor.get("total_risk_budget") is not None
+            or stock_governor.get("budget_consumer_sleeve_id")
+            or etf_governor.get("budget_consumer_sleeve_id")
+        ),
+        "total_risk_budget_text": _join_non_empty([
+            stock_governor.get("total_risk_budget") is not None and f"个股 {_format_pct_text(stock_governor.get('total_risk_budget'))}" or "",
+            etf_governor.get("total_risk_budget") is not None and f"ETF {_format_pct_text(etf_governor.get('total_risk_budget'))}" or "",
+        ]),
+        "total_exposure_cap_text": combo_mode and f"研究组合 {combo_mode}" or "研究组合 50/50",
+        "budget_consumer_text": "cn_stock_trend_alpha_core + cn_etf_beta",
+        "budget_reason_text": _join_non_empty([
+            (stock_governor.get("budget_reason_codes") or []) and f"个股 {_summarize_reason_codes(stock_governor.get('budget_reason_codes'))}" or "",
+            (etf_governor.get("budget_reason_codes") or []) and f"ETF {_summarize_reason_codes(etf_governor.get('budget_reason_codes'))}" or "",
+        ]),
+    }
+    return sanitize_json(
+        {
+            "contract_version": "research_combo_truth_display@1",
+            "regime": regime_summary,
+            "governor": governor_summary,
+        }
+    )
+
+
+def _surface_combo_truth(exp_dir: Path, manifest: dict[str, Any]) -> dict[str, Any] | None:
+    run_meta = _surface_run_meta(exp_dir, manifest)
+    asset_role = str(((run_meta.get("data") or {}).get("asset_role")) or "").strip().lower()
+    execution_shell = str(((manifest.get("stage_pipeline") or {}).get("execution_shell")) or "").strip().lower()
+    if asset_role != "research_combo" and execution_shell != "read_only_combo":
+        return None
+    combo_components = dict(run_meta.get("combo_components") or {})
+    stock_exp_id = str(((combo_components.get("stock_component") or {}).get("exp_id")) or "").strip()
+    etf_exp_id = str(((combo_components.get("etf_component") or {}).get("exp_id")) or "").strip()
+    stock_snapshot = _surface_component_snapshot(stock_exp_id) if stock_exp_id else None
+    etf_snapshot = _surface_component_snapshot(etf_exp_id) if etf_exp_id else None
+    return sanitize_json(
+        {
+            "contract_version": "research_combo_truth@1",
+            "display": _build_research_combo_display(stock_snapshot, etf_snapshot, run_meta),
+            "components": {
+                "stock": {
+                    "exp_id": stock_exp_id or None,
+                    "asset_scope": "cn_a_equity",
+                    "snapshot": stock_snapshot,
+                },
+                "etf": {
+                    "exp_id": etf_exp_id or None,
+                    "asset_scope": "cn_etf",
+                    "snapshot": etf_snapshot,
+                },
+            },
+        }
+    )
+
+
 def _surface_section_data(exp_dir: Path, manifest: dict[str, Any], section: str) -> Any:
     if section == "nav":
         return _surface_nav(exp_dir, manifest)
@@ -465,6 +646,8 @@ def _surface_section_data(exp_dir: Path, manifest: dict[str, Any], section: str)
         return _surface_cash_blocked_buys_recent(exp_dir, manifest)
     if section == "stock_names":
         return _surface_stock_names(exp_dir, manifest)
+    if section == "combo_truth":
+        return _surface_combo_truth(exp_dir, manifest)
     return None
 
 

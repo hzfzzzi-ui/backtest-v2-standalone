@@ -47,14 +47,20 @@ def _apply_regime_engine_cfg(cfg: dict[str, Any], wb_cfg: dict[str, Any]) -> Non
     wb_regime_engine = wb_cfg.get("regime_engine") if isinstance(wb_cfg.get("regime_engine"), dict) else {}
     runtime_regime_engine = dict(cfg.get("regime_engine") or {})
     merged = _merge_nested_dict(runtime_regime_engine, wb_regime_engine)
+    runtime_universe = cfg.get("universe") if isinstance(cfg.get("universe"), dict) else {}
+    wb_universe = wb_cfg.get("universe") if isinstance(wb_cfg.get("universe"), dict) else {}
 
     engine = str(merged.get("engine") or "ma200_legacy").strip() or "ma200_legacy"
-    benchmark = str(
-        merged.get("benchmark")
-        or (wb_cfg.get("universe") or {}).get("benchmark")
-        or (cfg.get("universe") or {}).get("benchmark")
-        or ""
-    ).strip()
+    benchmark = None
+    for present, value in (
+        ("benchmark" in merged, merged.get("benchmark")),
+        ("benchmark" in wb_universe, wb_universe.get("benchmark")),
+        ("benchmark" in runtime_universe, runtime_universe.get("benchmark")),
+    ):
+        if not present:
+            continue
+        benchmark = str(value or "").strip()
+        break
 
     fallback = dict(merged.get("fallback") or {})
     required_blocks = fallback.get("required_blocks")
@@ -70,7 +76,7 @@ def _apply_regime_engine_cfg(cfg: dict[str, Any], wb_cfg: dict[str, Any]) -> Non
     )
 
     merged["engine"] = engine
-    if benchmark:
+    if benchmark is not None:
         merged["benchmark"] = benchmark
     merged["fallback"] = fallback
     cfg["regime_engine"] = sanitize_json(merged)

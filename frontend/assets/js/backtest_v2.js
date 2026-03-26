@@ -17,11 +17,12 @@ const state = {
   ...((window.createViewState && window.createViewState()) || {}),
 };
 
+const DEFAULT_BOOTSTRAP_CONFIG_ID = 'cfg_cn_stock_etf_v1';
 const DEFAULT_BOOTSTRAP_BASELINE_ID = 'baseline_V10_2';
 const DEFAULT_BOOTSTRAP_SOURCE = {
-  kind: 'baseline',
-  id: 'baseline_V10_2',
-  label: 'V10.2 | 2012-2026',
+  kind: 'config',
+  id: DEFAULT_BOOTSTRAP_CONFIG_ID,
+  label: 'A股个股+ETFV1',
 };
 const FALLBACK_BOOTSTRAP_SOURCE = {
   kind: 'baseline',
@@ -133,7 +134,7 @@ function isRuntimeSupportedAssetScope(scope = null) {
   return resolvedScope === 'cn_a_equity' || resolvedScope === 'cn_etf';
 }
 
-function assetScopeDisplayName(scope = null) {
+function assetScopeDisplayNameLegacyShim(scope = null) {
   return isCnAAssetScope(scope) ? 'A股' : '美股';
 }
 
@@ -170,6 +171,219 @@ function assetScopeDisplayName(scope = null) {
   if (resolvedScope === 'cn_etf') return 'A股ETF';
   if (resolvedScope === 'us_equity') return '美股';
   return 'A股个股';
+}
+
+function joinSummaryCodes(values) {
+  const items = Array.isArray(values)
+    ? values.map((value) => String(value || '').trim()).filter(Boolean)
+    : [];
+  return items.length ? items.join(', ') : '-';
+}
+
+function summarizeGlobalManualOverride(payload) {
+  const overridePayload = payload && typeof payload === 'object' ? payload : {};
+  if (!overridePayload.active) return '无';
+  const parts = [
+    String(overridePayload.scope || 'override').trim(),
+    String(overridePayload.target_state_5 || '').trim(),
+    String(overridePayload.reason || '').trim(),
+  ].filter(Boolean);
+  return parts.length ? parts.join(' | ') : '已启用';
+}
+
+function resolveAssetScopedPanelMeta(scope = null) {
+  const resolvedScope = resolvePreferredAssetScope(scope);
+  if (resolvedScope === 'cn_etf') {
+    return {
+      s1: { label: 'ETF池', title: 'ETF Beta 范围', hidden: false },
+      s2: { label: 'Regime', title: 'Regime 规则', hidden: true },
+      s3: { label: '候选池', title: 'ETF 候选池', hidden: false },
+      s4: { label: 'Beta', title: 'ETF Beta 规则', hidden: false },
+      s5: { label: '排序', title: 'ETF 排序', hidden: false },
+      s6: { label: '调仓', title: '调仓 / 配置', hidden: false },
+      s7: { label: 'Governor', title: 'Governor 预算', hidden: true },
+      s8: { label: '风险', title: '风险约束', hidden: false },
+      s9: { label: '退出', title: '退出 / 保护', hidden: false },
+    };
+  }
+  if (resolvedScope === 'us_equity') {
+    return {
+      s1: { label: '入口', title: '美股入口', hidden: false },
+      s2: { label: 'Regime', title: 'Regime 规则', hidden: true },
+      s3: { label: '预留', title: '预留', hidden: true },
+      s4: { label: '预留', title: '预留', hidden: true },
+      s5: { label: '预留', title: '预留', hidden: true },
+      s6: { label: '预留', title: '预留', hidden: true },
+      s7: { label: 'Governor', title: 'Governor 预算', hidden: true },
+      s8: { label: '预留', title: '预留', hidden: true },
+      s9: { label: '预留', title: '预留', hidden: true },
+    };
+  }
+  return {
+    s1: { label: '股票池', title: '股票 Alpha 范围', hidden: false },
+    s2: { label: 'Regime', title: 'Regime 规则', hidden: true },
+    s3: { label: '范围', title: '股票范围 / 行业', hidden: false },
+    s4: { label: '趋势', title: '趋势 / 信号', hidden: false },
+    s5: { label: '排序', title: '残差排序', hidden: false },
+    s6: { label: '建仓', title: '组合构建', hidden: false },
+    s7: { label: 'Governor', title: 'Governor 预算', hidden: true },
+    s8: { label: '风控', title: '风险控制', hidden: false },
+    s9: { label: '退出', title: '退出规则', hidden: false },
+  };
+}
+
+function syncAssetScopedRail(scope = null) {
+  const resolvedScope = resolvePreferredAssetScope(scope);
+  const panelMeta = resolveAssetScopedPanelMeta(resolvedScope);
+  const fallbackPanel = Object.entries(panelMeta).find(([, meta]) => !meta.hidden)?.[0] || 's1';
+
+  Object.entries(panelMeta).forEach(([panel, meta]) => {
+    const upperPanel = String(panel || '').toUpperCase();
+    const button = byId(`wbStage${upperPanel}Btn`) || document.querySelector(`.wb-rail-btn[data-panel="${panel}"]`);
+    const labelEl = byId(`wbStage${upperPanel}Label`) || button?.querySelector?.('.wb-rail-label') || null;
+    if (button) {
+      button.hidden = !!meta.hidden;
+      if (meta.title) button.title = meta.title;
+    }
+    if (labelEl && meta.label) labelEl.textContent = meta.label;
+  });
+
+  if (state.drawer_panel && panelMeta[state.drawer_panel]?.hidden && typeof setDrawerPanel === 'function') {
+    setDrawerPanel(fallbackPanel);
+  }
+}
+
+function syncGlobalControlStrip(scope = null) {
+  const resolvedScope = resolvePreferredAssetScope(scope);
+  const runMeta = state?.active_artifacts?.run_meta && typeof state.active_artifacts.run_meta === 'object'
+    ? state.active_artifacts.run_meta
+    : {};
+  const comboTruth = state?.active_artifacts?.comboTruth
+    && typeof state.active_artifacts.comboTruth === 'object'
+      ? state.active_artifacts.comboTruth
+      : null;
+  const researchComboDisplay = comboTruth?.display && typeof comboTruth.display === 'object'
+    ? comboTruth.display
+    : (
+      state?.active_artifacts?.researchComboDisplay
+      && typeof state.active_artifacts.researchComboDisplay === 'object'
+        ? state.active_artifacts.researchComboDisplay
+        : null
+    );
+  const configDraft = state?.config_draft && typeof state.config_draft === 'object'
+    ? state.config_draft
+    : {};
+  const universe = configDraft.universe && typeof configDraft.universe === 'object'
+    ? configDraft.universe
+    : {};
+  const isResearchCombo = String(runMeta?.data?.asset_role || '').trim().toLowerCase() === 'research_combo';
+  const latestRegime = runMeta.regime?.latest_state && typeof runMeta.regime.latest_state === 'object'
+    ? runMeta.regime.latest_state
+    : {};
+  const governedSnapshot = runMeta.governed_snapshot && typeof runMeta.governed_snapshot === 'object'
+    ? runMeta.governed_snapshot
+    : {};
+  const comboRegime = researchComboDisplay?.regime && typeof researchComboDisplay.regime === 'object'
+    ? researchComboDisplay.regime
+    : {};
+  const comboGovernor = researchComboDisplay?.governor && typeof researchComboDisplay.governor === 'object'
+    ? researchComboDisplay.governor
+    : {};
+
+  const assetModeSummary = resolvedScope === 'cn_etf'
+    ? `ETF池：${String(runMeta.universe?.preset_id || configDraft.universe_mode || 'CUSTOM').trim() || 'CUSTOM'}`
+    : `股票池：${String(configDraft.universe_mode || 'ALL_A').trim() || 'ALL_A'}`;
+  const timeWindowSummary = `窗口：${String(universe.start || '-')} ~ ${String(universe.end || '-')}`;
+  const baseState = isResearchCombo
+    ? String(comboRegime.base_state || '-')
+    : String(latestRegime.base_state || governedSnapshot.regime_source_state || '-');
+  const effectiveState = isResearchCombo
+    ? String(comboRegime.effective_state || '-')
+    : String(latestRegime.effective_state || governedSnapshot.regime_effective_state || '-');
+  const coarseState = isResearchCombo
+    ? String(comboRegime.coarse_state || '-')
+    : String(latestRegime.effective_coarse_state || latestRegime.coarse_state || governedSnapshot.effective_coarse_state || governedSnapshot.coarse_state || '-');
+  const budgetMultiplier = isResearchCombo
+    ? String(comboRegime.risk_budget_multiplier_text || '-')
+    : (latestRegime.risk_budget_multiplier != null ? num(latestRegime.risk_budget_multiplier, 2) : '-');
+  const regimeReason = isResearchCombo
+    ? String(comboRegime.reason_text || '-')
+    : joinSummaryCodes(latestRegime.reason_codes || governedSnapshot.regime_reason_codes);
+  const manualOverrideSummary = isResearchCombo
+    ? String(comboRegime.manual_override_text || '无')
+    : summarizeGlobalManualOverride(latestRegime.manual_override || governedSnapshot.manual_override);
+
+  const budgetConsumer = isResearchCombo
+    ? String(comboGovernor.budget_consumer_text || '-')
+    : (String(
+      governedSnapshot.budget_consumer_sleeve_id
+      || runMeta.etf_beta?.sleeve_id
+      || runMeta.report_consistency?.stock_alpha_core_role
+      || '-',
+    ).trim() || '-');
+  const budgetReason = isResearchCombo
+    ? String(comboGovernor.budget_reason_text || '-')
+    : joinSummaryCodes(governedSnapshot.budget_reason_codes);
+  const totalRiskBudget = isResearchCombo
+    ? String(comboGovernor.total_risk_budget_text || '-')
+    : (governedSnapshot.total_risk_budget != null ? pct(governedSnapshot.total_risk_budget) : '-');
+  const totalExposureCap = isResearchCombo
+    ? String(comboGovernor.total_exposure_cap_text || '-')
+    : (governedSnapshot.total_exposure_cap != null ? pct(governedSnapshot.total_exposure_cap) : '-');
+  const defenseBias = governedSnapshot.defense_bias != null
+    ? governedSnapshot.defense_bias
+    : latestRegime.defense_bias;
+  const hasRunResult = !!(state?.active_result?.exp_id || state?.active_artifacts?.run_meta);
+  const hasFormalRegimeData = Boolean(
+    (isResearchCombo && comboRegime.available)
+    || latestRegime.base_state
+    || latestRegime.effective_state
+    || latestRegime.reason_codes?.length
+    || governedSnapshot.regime_source_state
+    || governedSnapshot.regime_effective_state
+  );
+  const hasGovernorData = Boolean(
+    (isResearchCombo && comboGovernor.available)
+    || governedSnapshot.total_risk_budget != null
+    || governedSnapshot.total_exposure_cap != null
+    || governedSnapshot.budget_consumer_sleeve_id
+    || governedSnapshot.budget_reason_codes?.length
+  );
+
+  setTextById('wbGlobalAssetSummary', assetScopeDisplayName(resolvedScope));
+  setTextById('wbGlobalAssetModeSummary', assetModeSummary);
+  setTextById('wbGlobalDataWindowSummary', timeWindowSummary);
+  setTextById('wbGlobalRegimeBase', baseState);
+  setTextById('wbGlobalRegimeEffective', effectiveState);
+  setTextById('wbGlobalRegimeCoarse', coarseState);
+  setTextById('wbGlobalRegimeBudgetMultiplier', budgetMultiplier);
+  setTextById('wbGlobalRegimeReason', regimeReason);
+  setTextById('wbGlobalRegimeManual', manualOverrideSummary);
+  setTextById('wbGlobalGovernorBudget', totalRiskBudget);
+  setTextById('wbGlobalGovernorExposure', totalExposureCap);
+  setTextById('wbGlobalGovernorSleeve', budgetConsumer);
+  setTextById('wbGlobalGovernorDefense', defenseBias != null ? pct(defenseBias) : '-');
+  setTextById('wbGlobalGovernorReason', budgetReason);
+
+  const regimeDetail = byId('wbGlobalRegimeDetail');
+  const regimeEmpty = byId('wbGlobalRegimeEmpty');
+  if (regimeDetail) regimeDetail.hidden = !hasFormalRegimeData;
+  if (regimeEmpty) {
+    regimeEmpty.hidden = hasFormalRegimeData;
+    regimeEmpty.textContent = hasRunResult
+      ? '当前结果未提供 formal regime 数据'
+      : '运行后在这里显示 formal regime 摘要';
+  }
+
+  const governorDetail = byId('wbGlobalGovernorDetail');
+  const governorEmpty = byId('wbGlobalGovernorEmpty');
+  if (governorDetail) governorDetail.hidden = !hasGovernorData;
+  if (governorEmpty) {
+    governorEmpty.hidden = hasGovernorData;
+    governorEmpty.textContent = hasRunResult
+      ? '当前结果未提供 governed snapshot'
+      : '运行后在这里显示 Governor 摘要';
+  }
 }
 
 function syncAssetAwareShell(scope = null) {
@@ -210,13 +424,8 @@ function syncAssetAwareShell(scope = null) {
   setTextById('wbSymbolsLabel', isEtf ? 'ETF 代码 / 预设' : '自选代码');
   setTextById('wbPitStatusLabel', isEtf ? '研究口径' : '点位一致');
   setTextById('wbBenchmarkLabel', isEtf ? '比较基准' : '基准');
-  setTextById('wbStageS1Label', isEtf ? 'ETF池' : '股票池');
-  const stageS1Btn = byId('wbStageS1Btn');
-  if (stageS1Btn) stageS1Btn.title = isEtf ? 'S1 ETF Universe' : 'S1 股票池';
-  const drawerTitle = byId('wbDrawerTitle');
-  if (drawerTitle && state.drawer_panel === 's1') {
-    drawerTitle.textContent = isEtf ? 'S1 ETF Universe' : 'S1 Universe';
-  }
+  syncAssetScopedRail(resolvedScope);
+  syncGlobalControlStrip(resolvedScope);
 }
 
 function byId(id) { return document.getElementById(id); }
@@ -676,10 +885,12 @@ function loadItemYearLabel(item) {
 }
 
 function loadItemBadgeLabel(item) {
+  if (item?.kind === 'config') return 'Config';
   return item?.kind === 'baseline' ? 'Baseline' : 'Experiment';
 }
 
 function loadItemBadgeClass(item) {
+  if (item?.kind === 'config') return 'wb-load-kind-config';
   return item?.kind === 'baseline' ? 'wb-load-kind-baseline' : 'wb-load-kind-experiment';
 }
 
@@ -702,7 +913,10 @@ function currentWorkbenchInputSourceFromUrl() {
     const params = new URLSearchParams(window.location.search || '');
     const loadId = String(params.get('load_id') || '').trim();
     const loadKind = String(params.get('load_kind') || '').trim().toLowerCase();
-    if (loadId) return { kind: loadKind === 'experiment' ? 'experiment' : 'baseline', id: loadId };
+    if (loadId) {
+      if (loadKind === 'config') return { kind: 'config', id: loadId };
+      return { kind: loadKind === 'experiment' ? 'experiment' : 'baseline', id: loadId };
+    }
   } catch (_) {
     return null;
   }
@@ -716,7 +930,10 @@ function syncWorkbenchLoadedSourceToUrl(kind, sourceId) {
     const normalizedKind = String(kind || '').trim().toLowerCase();
     url.searchParams.delete('exp_id');
     if (normalizedId) {
-      url.searchParams.set('load_kind', normalizedKind === 'experiment' ? 'experiment' : 'baseline');
+      const persistedKind = normalizedKind === 'experiment'
+        ? 'experiment'
+        : (normalizedKind === 'config' ? 'config' : 'baseline');
+      url.searchParams.set('load_kind', persistedKind);
       url.searchParams.set('load_id', normalizedId);
     } else {
       url.searchParams.delete('load_kind');
@@ -733,7 +950,14 @@ async function resolveBootstrapSource(source) {
   const normalizedId = String(source?.id || '').trim();
   if (!normalizedId) return null;
   try {
-    if (normalizedKind === 'experiment') {
+    if (normalizedKind === 'config') {
+      const payload = await apiRequestJson(
+        `bootstrap_config_${normalizedId}`,
+        `/api/backtest_v2/configs/${encodeURIComponent(normalizedId)}`,
+        { suppressStatusOnError: true },
+      );
+      if (String(payload?.config_id || '').trim() === normalizedId) return source;
+    } else if (normalizedKind === 'experiment') {
       const payload = await apiRequestJson(
         'bootstrap_experiments_index',
         '/api/backtest_v2/experiments',
@@ -767,7 +991,8 @@ async function bootstrapInitialExperiment() {
   const source = await resolveBootstrapSource(explicitSource || DEFAULT_BOOTSTRAP_SOURCE);
   if (!source?.id || currentRuntimeSourceRef().id || state.loaded_source_id) return;
   try {
-    if (source.kind === 'experiment') await loadExperimentBundle(source.id);
+    if (source.kind === 'config') await loadConfig(source.id);
+    else if (source.kind === 'experiment') await loadExperimentBundle(source.id);
     else await loadBaselineToWorkbench(source.id, { loadLinkedResult: !!explicitSource });
   } catch (e) {
     addLog(`Load source failed: ${source?.id || '-'} | ${e?.message || e}`);
@@ -976,6 +1201,14 @@ function renderRightInspector() {
 
 function bindEvents() {
   document.querySelectorAll('#wbMode button').forEach((btn) => btn.addEventListener('click', () => setMode(btn.getAttribute('data-mode') || 'experiment')));
+  document.querySelectorAll('[data-open-panel]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const panel = String(btn.getAttribute('data-open-panel') || '').trim();
+      if (!panel || typeof setDrawerPanel !== 'function') return;
+      toggleDrawer(false);
+      setDrawerPanel(panel);
+    });
+  });
   document.querySelectorAll('#wbAssetScopeGroup button').forEach((btn) => {
     btn.addEventListener('click', () => {
       const val = btn.getAttribute('data-val');
@@ -1234,7 +1467,7 @@ function bindEvents() {
   byId('wbPriceAdj')?.addEventListener('change', updateAtrNote);
   byId('wbMatchPrice')?.addEventListener('change', updateAtrNote);
 
-// Public surface only keeps experiment loading; replace any historical config-load bindings.
+// Public surface keeps one unified load entry for config / baseline / experiment.
   const quickLoadBtn = byId('wbQuickLoad');
   if (quickLoadBtn) {
     const cleanQuickLoadBtn = quickLoadBtn.cloneNode(true);

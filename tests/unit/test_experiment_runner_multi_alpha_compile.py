@@ -228,6 +228,35 @@ def test_compile_semantic_bundle_preserves_regime_engine_in_runtime_config() -> 
     assert regime_engine["fallback"]["required_blocks"] == ["trend_block", "risk_block"]
 
 
+def test_compile_semantic_bundle_preserves_blank_etf_benchmark_truth() -> None:
+    payload = {
+        "asset_scope": "cn_etf",
+        "universe_mode": "CUSTOM",
+        "universe": {
+            "start": "2016-11-04",
+            "end": "2026-03-20",
+            "benchmark": "",
+            "symbols": ["cn_etf_first_wave_core"],
+            "price_adj": "none",
+        },
+        "data_source": {"stocks_table": "pams_cn_etf_daily", "data_role": "v1"},
+        "regime_engine": {"engine": "market_regime_framework"},
+    }
+
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=payload,
+        config_source="config_json",
+        use_body_universe_fields=False,
+    )
+
+    runtime_cfg = compiled["runtime_config"]
+    assert runtime_cfg["asset_context"]["asset_scope"] == "cn_etf"
+    assert runtime_cfg["universe"]["benchmark"] == ""
+    assert runtime_cfg["regime_engine"]["benchmark"] == ""
+
+
 def test_compile_semantic_bundle_preserves_turnover_rate_filter_fields() -> None:
     payload = _breakout_config()
     payload["universe"]["filters"]["min_avg_turnover_rate_20d"] = 1.1

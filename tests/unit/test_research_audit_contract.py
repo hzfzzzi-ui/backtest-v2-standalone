@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import pandas as pd
+import pytest
 
 from backend.core.audit.research_audit import (
     aggregate_overall_status,
@@ -114,10 +115,17 @@ def test_evaluate_etf_beta_sleeve_passes_when_phase1_scope_and_budget_are_tracea
     gate = evaluate_etf_beta_sleeve(
         run_meta={
             "data": {"asset_scope": "cn_etf"},
+            "counters": {"orders": 8, "closed_trades": 4},
             "governed_a_share": {
                 "etf_beta": {
                     "enabled": True,
                     "sleeve_id": "cn_etf_beta",
+                    "template_id": "broad_based_rotation_template_a",
+                    "template_asset_pool_version": "A0",
+                    "template_role_map": {"510300.SH": "hs300", "512100.SH": "csi1000_proxy"},
+                    "template_proxy_map": {"512100.SH": "CSI1000_STANDARD"},
+                    "template_target_formal_symbols": ["510300.SH", "510500.SH", "CSI1000_STANDARD", "DIVIDEND_STANDARD"],
+                    "growth_seat_symbol": "159915.SZ",
                     "core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
                     "limited_defense_candidates": ["512890.SH"],
                 }
@@ -135,6 +143,24 @@ def test_evaluate_etf_beta_sleeve_passes_when_phase1_scope_and_budget_are_tracea
             "etf_beta": {
                 "source_entry_type": "cn_etf_research_entry",
                 "source_preset_id": "cn_etf_first_wave_core",
+                "template_id": "broad_based_rotation_template_a",
+                "template_asset_pool_version": "A0",
+                "template_role_map": {"510300.SH": "hs300", "512100.SH": "csi1000_proxy"},
+                "template_proxy_map": {"512100.SH": "CSI1000_STANDARD"},
+                "template_target_formal_symbols": ["510300.SH", "510500.SH", "CSI1000_STANDARD", "DIVIDEND_STANDARD"],
+                "proxy_replacement_mode": "csi1000_proxy_only",
+                "formal_replacement_pairs": {"512100.SH": "159845.SZ"},
+                "core_slot_symbols": ["510300.SH", "512100.SH"],
+                "growth_slot_symbols": ["159915.SZ"],
+                "growth_seat_symbol": "159915.SZ",
+                "absolute_filter_mode": "ma200_and_positive_12m",
+                "fallback_mode": "cash",
+                "relative_strength_fast_window": 63,
+                "relative_strength_mid_window": 126,
+                "relative_strength_slow_window": 252,
+                "relative_strength_fast_weight": 0.2,
+                "relative_strength_mid_weight": 0.3,
+                "relative_strength_slow_weight": 0.5,
                 "formal_core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
                 "limited_defense_candidates": ["512890.SH"],
                 "input_etfs": ["510300.SH", "510500.SH", "510050.SH", "512100.SH", "511010.SH"],
@@ -146,6 +172,13 @@ def test_evaluate_etf_beta_sleeve_passes_when_phase1_scope_and_budget_are_tracea
                     "510050.SH": ["FORMAL_CORE_BETA"],
                     "512100.SH": ["FORMAL_CORE_BETA"],
                 },
+                "core_slot_selected_symbol": "510300.SH",
+                "growth_slot_selected_symbol": "159915.SZ",
+                "slot_selection_reason_codes": {
+                    "core_slot": ["SELECTED::510300.SH"],
+                    "growth_slot": ["SELECTED::159915.SZ"],
+                },
+                "slot_under_deploy_reason_codes": {},
                 "out_of_scope_etfs": ["511010.SH"],
                 "out_of_scope_reason_codes": {"511010.SH": ["OUT_OF_PHASE1_FORMAL_SCOPE"]},
                 "coverage_summary": {
@@ -167,7 +200,179 @@ def test_evaluate_etf_beta_sleeve_passes_when_phase1_scope_and_budget_are_tracea
     assert gate is not None
     assert gate["status"] == "PASS"
     assert gate["metrics"]["eligible_count"] == 4
+    assert gate["evidence"]["proxy_replacement_mode"] == "csi1000_proxy_only"
+    assert gate["evidence"]["core_slot_selected_symbol"] == "510300.SH"
+    assert gate["evidence"]["growth_slot_selected_symbol"] == "159915.SZ"
     assert gate["metrics"]["out_of_scope_count"] == 1
+    assert gate["metrics"]["order_count"] == 8
+    assert gate["metrics"]["trade_count"] == 4
+    assert gate["evidence"]["template_id"] == "broad_based_rotation_template_a"
+    assert gate["evidence"]["template_asset_pool_version"] == "A0"
+    assert gate["evidence"]["template_proxy_map"]["512100.SH"] == "CSI1000_STANDARD"
+    assert gate["evidence"]["relative_strength_windows"]["mid"] == 126
+    assert gate["evidence"]["absolute_filter_mode"] == "ma200_and_positive_12m"
+
+
+def test_evaluate_etf_beta_sleeve_fails_when_smoke_has_zero_orders_or_trades() -> None:
+    gate = evaluate_etf_beta_sleeve(
+        run_meta={
+            "data": {"asset_scope": "cn_etf"},
+            "counters": {"orders": 0, "closed_trades": 0},
+            "governed_a_share": {
+                "etf_beta": {
+                    "enabled": True,
+                    "sleeve_id": "cn_etf_beta",
+                    "core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                    "limited_defense_candidates": ["512890.SH"],
+                }
+            },
+            "etf_beta": {
+                "source_entry_type": "cn_etf_research_entry",
+                "formal_core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                "limited_defense_candidates": ["512890.SH"],
+                "input_etfs": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                "eligible_etfs": ["510300.SH"],
+                "selected_etfs": [],
+                "selection_reason_codes": {},
+                "out_of_scope_etfs": [],
+                "out_of_scope_reason_codes": {},
+                "coverage_summary": {"daily_table": "pams_cn_etf_daily"},
+                "sleeve_budget_used": {"budget_owner": "global_portfolio_governor", "slot_cap": 2},
+            },
+        }
+    )
+
+    assert gate is not None
+    assert gate["status"] == "FAIL"
+    assert gate["metrics"]["order_count"] == 0
+    assert gate["metrics"]["trade_count"] == 0
+
+
+def test_evaluate_etf_beta_sleeve_warns_when_deployment_is_traceable_but_underdeployed(tmp_path) -> None:
+    root = tmp_path / "exp_etf_underdeploy"
+    root.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "date": "2026-03-18",
+                "gross_exposure": 0.0,
+                "etf_target_exposure": 0.2,
+                "etf_actual_exposure": 0.0,
+                "etf_actual_risk_exposure": 0.0,
+                "etf_actual_fallback_exposure": 0.0,
+                "etf_actual_other_exposure": 0.0,
+                "etf_deployability_gap": 0.2,
+                "governor_budget_json": json.dumps(
+                    {
+                        "target_exposure": 0.2,
+                        "min_deployable_exposure": 0.1,
+                        "fallback_allowed": False,
+                        "under_deploy_reason_codes": ["ETF_BETA_NO_ELIGIBLE_AFTER_ABSOLUTE_FILTER"],
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            {
+                "date": "2026-03-19",
+                "gross_exposure": 0.05,
+                "etf_target_exposure": 0.2,
+                "etf_actual_exposure": 0.05,
+                "etf_actual_risk_exposure": 0.05,
+                "etf_actual_fallback_exposure": 0.0,
+                "etf_actual_other_exposure": 0.0,
+                "etf_deployability_gap": 0.15,
+                "governor_budget_json": json.dumps(
+                    {
+                        "target_exposure": 0.2,
+                        "min_deployable_exposure": 0.1,
+                        "fallback_allowed": False,
+                        "under_deploy_reason_codes": ["ETF_BETA_UNDERFILLED_DEPLOYMENT"],
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            {
+                "date": "2026-03-20",
+                "gross_exposure": 0.08,
+                "etf_target_exposure": 0.2,
+                "etf_actual_exposure": 0.08,
+                "etf_actual_risk_exposure": 0.08,
+                "etf_actual_fallback_exposure": 0.0,
+                "etf_actual_other_exposure": 0.0,
+                "etf_deployability_gap": 0.12,
+                "governor_budget_json": json.dumps(
+                    {
+                        "target_exposure": 0.2,
+                        "min_deployable_exposure": 0.1,
+                        "fallback_allowed": False,
+                        "under_deploy_reason_codes": ["ETF_BETA_UNDERFILLED_DEPLOYMENT"],
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+    ).to_csv(root / "portfolio_daily.csv", index=False)
+    pd.DataFrame(
+        [
+            {"date": "2026-03-19", "reason_code": "ETF_BETA_WEEKLY_RS"},
+            {"date": "2026-03-20", "reason_code": "ETF_BETA_REBALANCE_EXIT"},
+        ]
+    ).to_csv(root / "orders.csv", index=False)
+
+    gate = evaluate_etf_beta_sleeve(
+        results_dir=root,
+        run_meta={
+            "data": {"asset_scope": "cn_etf"},
+            "counters": {"orders": 2, "closed_trades": 1},
+            "governed_a_share": {
+                "etf_beta": {
+                    "enabled": True,
+                    "sleeve_id": "cn_etf_beta",
+                    "core_beta_symbols": ["510300.SH", "510050.SH"],
+                    "limited_defense_candidates": [],
+                }
+            },
+            "etf_beta": {
+                "source_entry_type": "cn_etf_research_entry",
+                "formal_core_beta_symbols": ["510300.SH", "510050.SH"],
+                "limited_defense_candidates": [],
+                "input_etfs": ["510300.SH", "510050.SH"],
+                "eligible_etfs": ["510300.SH"],
+                "selected_etfs": ["510300.SH"],
+                "selection_reason_codes": {
+                    "510300.SH": ["FORMAL_CORE_BETA"],
+                },
+                "out_of_scope_etfs": [],
+                "out_of_scope_reason_codes": {},
+                "coverage_summary": {"daily_table": "pams_cn_etf_daily"},
+                "target_exposure": 0.2,
+                "min_deployable_exposure": 0.1,
+                "fallback_allowed": False,
+                "under_deploy_reason_codes": ["ETF_BETA_UNDERFILLED_DEPLOYMENT"],
+                "sleeve_budget_used": {
+                    "budget_owner": "global_portfolio_governor",
+                    "slot_cap": 2,
+                    "target_exposure": 0.2,
+                    "min_deployable_exposure": 0.1,
+                    "fallback_allowed": False,
+                    "under_deploy_reason_codes": ["ETF_BETA_UNDERFILLED_DEPLOYMENT"],
+                },
+            },
+        },
+    )
+
+    assert gate is not None
+    assert gate["status"] == "WARN"
+    assert gate["metrics"]["avg_target_exposure"] == pytest.approx(0.2)
+    assert gate["metrics"]["avg_actual_exposure"] == 0.043333333333333335
+    assert gate["metrics"]["avg_actual_risk_exposure"] == pytest.approx(0.043333333333333335)
+    assert gate["metrics"]["avg_actual_fallback_exposure"] == pytest.approx(0.0)
+    assert gate["metrics"]["avg_deployability_gap"] == pytest.approx(0.15666666666666668)
+    assert gate["metrics"]["avg_actual_exposure_on_invested_days"] == 0.065
+    assert gate["metrics"]["invested_day_count"] == 2
+    assert gate["metrics"]["fallback_buy_count"] == 0
+    assert gate["metrics"]["deployment_assessment"] == "UNDERDEPLOYED"
+    assert gate["metrics"]["under_deploy_reason_counts"]["ETF_BETA_UNDERFILLED_DEPLOYMENT"] == 2
 
 
 def test_evaluate_attribution_traceability_passes_when_summary_and_refs_exist(tmp_path) -> None:

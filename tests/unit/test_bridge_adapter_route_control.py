@@ -132,6 +132,49 @@ def test_compute_day_controls_non_breakout_route_uses_provider_diagnostics() -> 
     assert "DRAWDOWN_REDUCED" in controls["governor_budget"]["budget_reason_codes"]
 
 
+def test_compute_day_controls_cn_etf_caps_slots_by_etf_beta_deployability() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        request=SimpleNamespace(
+            max_positions=10,
+            asset_scope="cn_etf",
+            data_bundle=SimpleNamespace(trading_days=[trading_day]),
+        ),
+        route_id="provider_breakout_runtime",
+        _portfolio_mode="profit_release",
+        positions={},
+        close_idx={},
+        position_avg_cost={},
+        _dd_enabled=False,
+        _mf_enabled=True,
+        _mf_state_arr=np.array([0], dtype=np.int8),
+        _mf_mult_arr=np.array([1.0], dtype=float),
+        _MARKET_STATE_NAMES=("BULL", "TRANS_DOWN", "TRANS_UP", "BEAR"),
+        _TRADE_MODE_NAMES=("TREND_MAIN", "TREND_LIGHT", "NO_TRADE"),
+        market_filter_bull_days=0,
+        market_filter_bear_days=0,
+        market_state_trans_down_days=0,
+        market_state_trans_up_days=0,
+        trade_mode_main_days=0,
+        trade_mode_light_days=0,
+        trade_mode_notrade_days=0,
+        _br_enabled=False,
+        _breadth_enabled=False,
+        provider=SimpleNamespace(
+            _risk_on=np.array([True], dtype=bool),
+            _market_state_name_arr=np.array(["BULL"], dtype=object),
+            _trade_mode_name_arr=np.array(["TREND_MAIN"], dtype=object),
+            _effective_state_5_arr=np.array(["BULL"], dtype=object),
+            _etf_beta_slot_cap_arr=np.array([1], dtype=np.int32),
+        ),
+    )
+
+    controls = compute_day_controls(runtime, 0, trading_day, 0.0)
+
+    assert controls["effective_max_positions"] == 1
+    assert controls["governor_budget"]["sleeve_budgets"]["cn_etf_beta"]["slot_cap"] == 1
+
+
 def test_initialize_route_controls_formal_engine_uses_light_multiplier_fallbacks() -> None:
     trading_day = date(2026, 3, 2)
     controls = initialize_route_controls(

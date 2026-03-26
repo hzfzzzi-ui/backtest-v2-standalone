@@ -259,6 +259,222 @@ test('formal regime engine config round-trips with grouped parameters intact', (
   assert.deepEqual(clone(context.state.config_draft?.regime_engine), config.regime_engine);
 });
 
+test('syncAssetAwareShell moves public summary to global strip and scopes left rail for ETF', () => {
+  const { context } = createWorkbenchHarness();
+  context.state.config_draft = {
+    asset_scope: 'cn_etf',
+    universe_mode: 'CUSTOM',
+    universe: {
+      start: '2012-01-04',
+      end: '2026-03-24',
+    },
+  };
+  context.state.active_artifacts = {
+    run_meta: {
+      regime: {
+        latest_state: {
+          base_state: 'TRANS_UP',
+          effective_state: 'LIGHT',
+          effective_coarse_state: 'NEUTRAL',
+          risk_budget_multiplier: 0.5,
+          reason_codes: ['BREADTH_WEAK'],
+          manual_override: {
+            active: true,
+            scope: 'state_override',
+            target_state_5: 'LIGHT',
+            reason: 'MANUAL_HOLD',
+          },
+        },
+      },
+      governed_snapshot: {
+        budget_consumer_sleeve_id: 'cn_etf_beta',
+        total_risk_budget: 0.3,
+        total_exposure_cap: 0.35,
+        budget_reason_codes: ['TOTAL_RISK_BUDGET_REDUCED'],
+      },
+      universe: {
+        preset_id: 'cn_etf_first_wave_core',
+      },
+    },
+  };
+
+  context.syncAssetAwareShell('cn_etf');
+
+  assert.equal(context.byId('wbStageS1Label').textContent, 'ETF池');
+  assert.equal(context.byId('wbStageS2Btn').hidden, true);
+  assert.equal(context.byId('wbStageS7Btn').hidden, true);
+  assert.match(context.byId('wbGlobalAssetModeSummary').textContent, /ETF池/);
+  assert.equal(context.byId('wbGlobalRegimeBase').textContent, 'TRANS_UP');
+  assert.equal(context.byId('wbGlobalRegimeEffective').textContent, 'LIGHT');
+  assert.match(context.byId('wbGlobalRegimeReason').textContent, /BREADTH_WEAK/);
+  assert.match(context.byId('wbGlobalRegimeManual').textContent, /MANUAL_HOLD/);
+  assert.equal(context.byId('wbGlobalGovernorSleeve').textContent, 'cn_etf_beta');
+  assert.match(context.byId('wbGlobalGovernorReason').textContent, /TOTAL_RISK_BUDGET_REDUCED/);
+  assert.equal(context.byId('wbGlobalRegimeDetail').hidden, false);
+  assert.equal(context.byId('wbGlobalRegimeEmpty').hidden, true);
+  assert.equal(context.byId('wbGlobalGovernorDetail').hidden, false);
+  assert.equal(context.byId('wbGlobalGovernorEmpty').hidden, true);
+});
+
+test('syncAssetAwareShell shows compact empty state for legacy experiments without formal regime/governor data', () => {
+  const { context } = createWorkbenchHarness();
+  context.state.config_draft = {
+    asset_scope: 'cn_a_equity',
+    universe_mode: 'HS300_ZZ500',
+    universe: {
+      start: '2012-01-04',
+      end: '2026-03-20',
+    },
+  };
+  context.state.active_result = { exp_id: 'exp_legacy' };
+  context.state.active_artifacts = {
+    run_meta: {
+      data: {
+        asset_scope: 'cn_a_equity',
+      },
+    },
+  };
+
+  context.syncAssetAwareShell('cn_a_equity');
+
+  assert.equal(context.byId('wbGlobalRegimeDetail').hidden, true);
+  assert.equal(context.byId('wbGlobalGovernorDetail').hidden, true);
+  assert.equal(context.byId('wbGlobalRegimeEmpty').hidden, false);
+  assert.equal(context.byId('wbGlobalGovernorEmpty').hidden, false);
+  assert.match(context.byId('wbGlobalRegimeEmpty').textContent, /formal regime/);
+  assert.match(context.byId('wbGlobalGovernorEmpty').textContent, /governed snapshot/);
+});
+
+/*
+test('syncAssetAwareShell renders research combo summaries from backend combo truth display', () => {
+  const { context } = createWorkbenchHarness();
+  context.state.config_draft = {
+    asset_scope: 'cn_a_equity',
+    universe_mode: 'HS300_ZZ500',
+    universe: {
+      start: '2021-01-04',
+      end: '2026-03-20',
+    },
+  };
+  context.state.active_result = { exp_id: 'exp_combo' };
+  context.state.active_artifacts = {
+    run_meta: {
+      data: {
+        asset_scope: 'cn_a_equity',
+        asset_role: 'research_combo',
+      },
+    },
+    comboTruth: {
+      display: {
+        regime: {
+        available: true,
+        base_state: '个股 TRANS_DOWN',
+        effective_state: 'ETF RISK_OFF',
+        coarse_state: '个股 RISK_OFF | ETF RISK_OFF',
+        risk_budget_multiplier_text: '个股 60.00% | ETF 0.00%',
+        reason_text: '个股 TRANS_DOWN | ETF RISK_OFF | 模式 daily_rebalanced_equal_weight_50_50',
+        manual_override_text: '无',
+      },
+        governor: {
+        available: true,
+        total_risk_budget_text: '个股 60.00% | ETF 0.00%',
+        total_exposure_cap_text: '研究组合 daily_rebalanced_equal_weight_50_50',
+        budget_consumer_text: 'cn_stock_trend_alpha_core + cn_etf_beta',
+        budget_reason_text: '个股 TOTAL_RISK_BUDGET_REDUCED | ETF NO_DEPLOYABLE_SLOTS',
+        },
+      },
+    },
+  };
+
+  context.syncAssetAwareShell('cn_a_equity');
+
+  assert.equal(context.byId('wbGlobalRegimeBase').textContent, '个股 TRANS_DOWN');
+  assert.equal(context.byId('wbGlobalRegimeEffective').textContent, 'ETF RISK_OFF');
+  assert.match(context.byId('wbGlobalRegimeReason').textContent, /daily_rebalanced_equal_weight_50_50/);
+  assert.equal(context.byId('wbGlobalGovernorBudget').textContent, '个股 60.00% | ETF 0.00%');
+  assert.equal(context.byId('wbGlobalGovernorSleeve').textContent, 'cn_stock_trend_alpha_core + cn_etf_beta');
+  assert.equal(context.byId('wbGlobalRegimeDetail').hidden, false);
+  assert.equal(context.byId('wbGlobalGovernorDetail').hidden, false);
+});
+
+*/
+
+test('syncAssetAwareShell renders research combo summaries from backend combo truth display', () => {
+  const { context } = createWorkbenchHarness();
+  context.state.config_draft = {
+    asset_scope: 'cn_a_equity',
+    universe_mode: 'HS300_ZZ500',
+    universe: {
+      start: '2021-01-04',
+      end: '2026-03-20',
+    },
+  };
+  context.state.active_result = { exp_id: 'exp_combo' };
+  context.state.active_artifacts = {
+    run_meta: {
+      data: {
+        asset_scope: 'cn_a_equity',
+        asset_role: 'research_combo',
+      },
+    },
+    comboTruth: {
+      display: {
+        regime: {
+          available: true,
+          base_state: 'stock TRANS_DOWN',
+          effective_state: 'ETF RISK_OFF',
+          coarse_state: 'stock RISK_OFF | ETF RISK_OFF',
+          risk_budget_multiplier_text: 'stock 60.00% | ETF 0.00%',
+          reason_text: 'stock TRANS_DOWN | ETF RISK_OFF | mode daily_rebalanced_equal_weight_50_50',
+          manual_override_text: 'none',
+        },
+        governor: {
+          available: true,
+          total_risk_budget_text: 'stock 60.00% | ETF 0.00%',
+          total_exposure_cap_text: 'combo daily_rebalanced_equal_weight_50_50',
+          budget_consumer_text: 'cn_stock_trend_alpha_core + cn_etf_beta',
+          budget_reason_text: 'stock TOTAL_RISK_BUDGET_REDUCED | ETF NO_DEPLOYABLE_SLOTS',
+        },
+      },
+    },
+  };
+
+  context.syncAssetAwareShell('cn_a_equity');
+
+  assert.equal(context.byId('wbGlobalRegimeBase').textContent, 'stock TRANS_DOWN');
+  assert.equal(context.byId('wbGlobalRegimeEffective').textContent, 'ETF RISK_OFF');
+  assert.match(context.byId('wbGlobalRegimeReason').textContent, /daily_rebalanced_equal_weight_50_50/);
+  assert.equal(context.byId('wbGlobalGovernorBudget').textContent, 'stock 60.00% | ETF 0.00%');
+  assert.equal(context.byId('wbGlobalGovernorSleeve').textContent, 'cn_stock_trend_alpha_core + cn_etf_beta');
+  assert.equal(context.byId('wbGlobalRegimeDetail').hidden, false);
+  assert.equal(context.byId('wbGlobalGovernorDetail').hidden, false);
+});
+
+test('config is a first-class load source in badge and URL sync helpers', () => {
+  const { context } = createWorkbenchHarness();
+  context.URL = URL;
+  let replacedUrl = '';
+  context.window.history.replaceState = (_state, _title, nextUrl) => {
+    replacedUrl = String(nextUrl || '');
+    const parsed = new URL(replacedUrl);
+    context.location.href = parsed.toString();
+    context.location.search = parsed.search;
+    context.window.location.href = parsed.toString();
+    context.window.location.search = parsed.search;
+  };
+
+  assert.equal(context.loadItemBadgeLabel({ kind: 'config' }), 'Config');
+  assert.equal(context.loadItemBadgeClass({ kind: 'config' }), 'wb-load-kind-config');
+
+  context.syncWorkbenchLoadedSourceToUrl('config', 'cfg_cn_stock_etf_v1');
+  assert.match(replacedUrl, /load_kind=config/);
+  assert.match(replacedUrl, /load_id=cfg_cn_stock_etf_v1/);
+
+  const parsedSource = context.currentWorkbenchInputSourceFromUrl();
+  assert.equal(parsedSource?.kind, 'config');
+  assert.equal(parsedSource?.id, 'cfg_cn_stock_etf_v1');
+});
+
 test('applyConfigToUI populates explicit S5 and S9 controls for baseline_V10', () => {
   const baselinePath = path.join(PROJECT_ROOT, 'outputs', 'baselines', 'baseline_V10', 'config.json');
   const baselineV10 = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));

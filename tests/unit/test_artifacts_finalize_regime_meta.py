@@ -325,6 +325,7 @@ def test_ensure_standard_artifacts_writes_governor_snapshot_into_run_meta(tmp_pa
     run_meta = json.loads((results_dir / "run_meta.json").read_text(encoding="utf-8"))
     snapshot = dict(run_meta["governed_snapshot"])
     assert snapshot["total_risk_budget"] == 0.8
+    assert snapshot["risk_budget_multiplier"] == 0.8
     assert snapshot["total_exposure_cap"] == 0.6
     assert snapshot["drawdown_state"] == "REDUCED"
     assert snapshot["budget_owner"] == "global_portfolio_governor"
@@ -346,6 +347,46 @@ def test_ensure_standard_artifacts_writes_cn_etf_beta_phase1_summary(tmp_path) -
                 "market_state_5": "BULL",
                 "trade_mode": "TREND_MAIN",
                 "regime_engine": "ma200_legacy",
+                "diagnostics_input_json": json.dumps(
+                    {
+                        "diagnostics": {
+                            "etf_beta_rebalance_day": True,
+                            "etf_beta_deployable_slot_cap": 2,
+                            "etf_beta_max_selected_symbols": 2,
+                            "etf_beta_selected_cap": 2,
+                            "etf_beta_eligible_symbols": [
+                                "510050.SH",
+                                "510300.SH",
+                                "510500.SH",
+                                "512100.SH",
+                            ],
+                            "etf_beta_selected_symbols": [
+                                "510300.SH",
+                                "512100.SH",
+                            ],
+                            "etf_beta_selection_reason_codes": {
+                                "510300.SH": ["ETF_BETA_CORE_SCOPE", "ABSOLUTE_TREND_PASS"],
+                                "512100.SH": ["ETF_BETA_CORE_SCOPE", "ABSOLUTE_TREND_PASS"],
+                            },
+                            "etf_beta_runtime_reason_codes": ["ETF_BETA_WEEKLY_SELECTION_ACTIVE", "ETF_BETA_VOL_TARGET_ACTIVE"],
+                            "etf_beta_under_deploy_reason_codes": [],
+                            "etf_beta_vol_target_active": True,
+                            "etf_beta_vol_target_window": 20,
+                            "etf_beta_vol_target_annualized_target": 0.18,
+                            "etf_beta_vol_target_min_scale": 0.35,
+                            "etf_beta_vol_target_max_scale": 1.0,
+                            "etf_beta_vol_target_scale_by_symbol": {
+                                "510300.SH": 0.72,
+                                "512100.SH": 0.61,
+                            },
+                            "etf_beta_vol_target_realized_vol_by_symbol": {
+                                "510300.SH": 0.25,
+                                "512100.SH": 0.295,
+                            },
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
                 "governor_budget_json": json.dumps(
                     {
                         "contract_version": "cn_a_governor_budget@1",
@@ -355,6 +396,17 @@ def test_ensure_standard_artifacts_writes_cn_etf_beta_phase1_summary(tmp_path) -
                         "budget_semantics": "consume_governor_sleeve_budget",
                         "total_risk_budget": 0.7,
                         "total_exposure_cap": 0.6,
+                        "target_exposure": 0.2,
+                        "target_exposure_source": "fixed",
+                        "min_deployable_exposure": 0.1,
+                        "min_deployable_exposure_source": "fixed",
+                        "fallback_allowed": False,
+                        "under_deploy_reason_codes": [],
+                        "actual_exposure": 0.18,
+                        "actual_risk_exposure": 0.15,
+                        "actual_fallback_exposure": 0.03,
+                        "actual_other_exposure": 0.0,
+                        "deployability_gap": 0.02,
                         "hard_max_positions": 10,
                         "effective_max_positions": 6,
                         "drawdown_state": "NORMAL",
@@ -369,6 +421,18 @@ def test_ensure_standard_artifacts_writes_cn_etf_beta_phase1_summary(tmp_path) -
                                 "candidate_count": 4,
                                 "selected_count": 4,
                                 "budget_share": 1.0,
+                                "target_exposure": 0.2,
+                                "target_exposure_source": "fixed",
+                                "min_deployable_exposure": 0.1,
+                                "min_deployable_exposure_source": "fixed",
+                                "fallback_allowed": False,
+                                "under_deploy_reason_codes": [],
+                                "target_selected_count": 2,
+                                "actual_exposure": 0.18,
+                                "actual_risk_exposure": 0.15,
+                                "actual_fallback_exposure": 0.03,
+                                "actual_other_exposure": 0.0,
+                                "deployability_gap": 0.02,
                                 "raw_sleeve_ids": ["cn_etf_beta"],
                             }
                         },
@@ -410,6 +474,7 @@ def test_ensure_standard_artifacts_writes_cn_etf_beta_phase1_summary(tmp_path) -
                 "audit_status": "PASS",
                 "preset_id": "cn_etf_first_wave_core",
                 "etf_batch": "cn_etf_first_wave_core",
+                "benchmark_source": "first_etf_symbol",
                 "etf_symbols": [
                     "510050.SH",
                     "510300.SH",
@@ -434,23 +499,58 @@ def test_ensure_standard_artifacts_writes_cn_etf_beta_phase1_summary(tmp_path) -
 
     run_meta = json.loads((results_dir / "run_meta.json").read_text(encoding="utf-8"))
     etf_beta = dict(run_meta["etf_beta"])
+    assert run_meta["data"]["benchmark"] == "510050.SH"
+    assert run_meta["data"]["benchmark_source"] == "universe_meta.benchmark_source::first_etf_symbol"
     assert etf_beta["source_entry_type"] == "cn_etf_research_entry"
     assert etf_beta["eligible_etfs"] == ["510050.SH", "510300.SH", "510500.SH", "512100.SH"]
-    assert etf_beta["selected_etfs"] == ["510050.SH", "510300.SH", "510500.SH", "512100.SH"]
+    assert etf_beta["selected_etfs"] == ["510300.SH", "512100.SH"]
     assert etf_beta["out_of_scope_etfs"] == ["511010.SH", "518880.SH"]
+    assert etf_beta["runtime_reason_codes"] == ["ETF_BETA_WEEKLY_SELECTION_ACTIVE", "ETF_BETA_VOL_TARGET_ACTIVE"]
+    assert etf_beta["target_selected_count"] == 2
+    assert etf_beta["target_exposure"] == 0.2
+    assert etf_beta["target_exposure_source"] == "budget_snapshot"
+    assert etf_beta["min_deployable_exposure"] == 0.1
+    assert etf_beta["min_deployable_exposure_source"] == "budget_snapshot"
+    assert etf_beta["fallback_allowed"] is False
+    assert etf_beta["under_deploy_reason_codes"] == []
+    assert etf_beta["actual_exposure"] == 0.18
+    assert etf_beta["actual_risk_exposure"] == 0.15
+    assert etf_beta["actual_fallback_exposure"] == 0.03
+    assert etf_beta["deployability_gap"] == 0.02
+    assert etf_beta["vol_target"]["active"] is True
+    assert etf_beta["vol_target"]["window"] == 20
+    assert etf_beta["vol_target"]["scale_by_symbol"]["510300.SH"] == 0.72
     assert etf_beta["sleeve_budget_used"]["slot_cap"] == 6
+    assert etf_beta["sleeve_budget_used"]["target_exposure"] == 0.2
+    assert etf_beta["sleeve_budget_used"]["target_exposure_source"] == "budget_snapshot"
+    assert etf_beta["sleeve_budget_used"]["actual_exposure"] == 0.18
     assert run_meta["report_consistency"]["etf_beta_role"] == "cn_etf_beta"
     assert run_meta["report_consistency"]["etf_beta_budget_semantics"] == "consume_governor_sleeve_budget"
-    assert run_meta["report_consistency"]["etf_beta_selected_etfs"] == ["510050.SH", "510300.SH", "510500.SH", "512100.SH"]
+    assert run_meta["report_consistency"]["etf_beta_selected_etfs"] == ["510300.SH", "512100.SH"]
     assert run_meta["governed_snapshot"]["asset_scope"] == "cn_etf"
     assert run_meta["governed_snapshot"]["budget_consumer_sleeve_id"] == "cn_etf_beta"
     assert run_meta["governed_snapshot"]["budget_consumer_system_role"] == "market_beta_sleeve"
+    assert run_meta["governed_snapshot"]["risk_budget_multiplier"] == 0.7
+    assert run_meta["governed_snapshot"]["target_exposure"] == 0.2
+    assert run_meta["governed_snapshot"]["target_exposure_source"] == "fixed"
+    assert run_meta["governed_snapshot"]["min_deployable_exposure"] == 0.1
+    assert run_meta["governed_snapshot"]["min_deployable_exposure_source"] == "fixed"
+    assert run_meta["governed_snapshot"]["fallback_allowed"] is False
+    assert run_meta["governed_snapshot"]["actual_risk_exposure"] == 0.15
+    assert run_meta["governed_snapshot"]["actual_fallback_exposure"] == 0.03
+    assert run_meta["governed_snapshot"]["deployability_gap"] == 0.02
     assert run_meta["governed_snapshot"]["sleeve_budgets"]["cn_etf_beta"]["slot_cap"] == 6
+    assert run_meta["governed_snapshot"]["sleeve_budgets"]["cn_etf_beta"]["target_selected_count"] == 2
     assert run_meta["attribution"]["summary"]["sleeve_log_count"] == 1
     assert run_meta["governed_snapshot"]["attribution_summary"]["sleeve_log_count"] == 1
     assert run_meta["governed_snapshot"]["sleeve_selection_summary"]["cn_etf_beta"]["out_of_scope_etfs"] == [
         "511010.SH",
         "518880.SH",
+    ]
+    assert run_meta["governed_snapshot"]["sleeve_selection_summary"]["cn_etf_beta"]["target_selected_count"] == 2
+    assert run_meta["governed_snapshot"]["sleeve_selection_summary"]["cn_etf_beta"]["runtime_reason_codes"] == [
+        "ETF_BETA_WEEKLY_SELECTION_ACTIVE",
+        "ETF_BETA_VOL_TARGET_ACTIVE",
     ]
     audit = json.loads((results_dir / "audit.json").read_text(encoding="utf-8"))
     assert audit["attribution_audit"]["summary"]["sleeve_log_count"] == 1

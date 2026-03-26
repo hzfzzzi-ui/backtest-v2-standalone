@@ -5,6 +5,7 @@ from typing import Any, Type
 
 from backend.core.config.asset_profiles import canonical_asset_scope
 from backend.core.engine_vector.breakout_signal_provider import BreakoutTrendProvider
+from backend.core.engine_vector.cn_etf_beta_signal_provider import CNETFBetaSignalProvider
 from backend.core.engine_vector.generic_signal_provider import GenericSignalProvider
 from backend.core.engine_vector.multi_alpha_signal_provider import MultiAlphaSignalProvider
 from backend.core.engine_vector.regime_router_signal_provider import RegimeRouterSignalProvider
@@ -27,12 +28,13 @@ class RouteBinding:
 
 
 def resolve_route_binding(strategy: Any, asset_context: dict[str, Any] | None = None) -> RouteBinding:
+    asset_scope = ""
     if isinstance(asset_context, dict) and asset_context:
-        canonical_asset_scope(asset_context.get("asset_scope"))
+        asset_scope = canonical_asset_scope(asset_context.get("asset_scope"))
     if isinstance(strategy, BreakoutTrendStrategy):
         return RouteBinding(
             route_id="provider_breakout_runtime",
-            provider_cls=BreakoutTrendProvider,
+            provider_cls=CNETFBetaSignalProvider if asset_scope == "cn_etf" else BreakoutTrendProvider,
             extension_path="provider",
         )
     if isinstance(strategy, MultiAlphaStrategy):

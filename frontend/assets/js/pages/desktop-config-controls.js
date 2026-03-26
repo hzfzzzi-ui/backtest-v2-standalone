@@ -10,6 +10,15 @@
     }
     setSelectedLockedCandidatePreset('');
     rememberLoadedSource(payload, stableSerializeConfig(state.config_draft || {}), payload.config_json || {});
+    const linkedExpId = String(payload?.linked_exp_id || '').trim();
+    if (linkedExpId && typeof loadHistoricalExperiment === 'function') {
+      await loadHistoricalExperiment(linkedExpId);
+      if (typeof setTextById === 'function') {
+        setTextById('wbRunStatus', `已加载配置 ${payload.config_id} 和结果 ${linkedExpId}`);
+      }
+      addLog(`已加载配置 ${payload.config_id} 和结果 ${linkedExpId}`);
+      return;
+    }
     addLog(`已加载配置 ${payload.config_id}`);
   }
 
@@ -19,7 +28,7 @@
     const select = byId('wbConfigList');
     if (!select) return items;
     select.innerHTML = '<option value="">选择配置...</option>' + items.map((item) => {
-    const label = `${loadedSourceMetaLabel(item)} ${configDisplayName(item) || item.config_id}`;
+      const label = `${loadedSourceMetaLabel(item)} ${configDisplayName(item) || item.config_id}`;
       return `<option value="${esc(item.config_id)}">${esc(label)} | ${esc(item.saved_at || '')}</option>`;
     }).join('');
     return items;
@@ -69,12 +78,12 @@
       ],
       candidate: Object.keys(LOCKED_CANDIDATE_PRESETS).map((preset) => ({
         key: `candidate:${preset}`,
-        title: preset === 'v2-breakout-br35-atr10-candidate' ? '候选 BR35 + ATR1.0' : '候选 ATR 1.0',
+        title: preset === 'v2-breakout-br35-atr10-candidate' ? '候选：BR35 + ATR1.0' : '候选：ATR 1.0',
         desc: lockedCandidatePresetMeta(preset)?.hint || '锁定候选入口',
         active: String(state.selected_locked_candidate_preset || '').trim() === preset,
         onClick: () => {
           setSelectedLockedCandidatePreset(preset);
-          addLog(`已选择锁定候选 ${preset}`);
+          addLog(`已选择锁定候选：${preset}`);
         },
       })),
       builtin: builtin.map((item) => ({

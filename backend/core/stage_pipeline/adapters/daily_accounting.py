@@ -9,9 +9,11 @@ from backend.core.config.cn_a_governed_mainline import (
     build_governor_budget_snapshot,
     merge_governor_budget_snapshot,
 )
+from backend.core.config.etf_beta_contract import resolve_etf_beta_exposure_semantics as resolve_cn_etf_beta_exposure_semantics
 from backend.core.engine_vector.signal_provider import DaySignals
 from backend.core.portfolio.nav_snapshot import compute_nav_snapshot
 from backend.core.portfolio.sizing import calc_buy_slots
+from backend.core.stage_pipeline.adapters.day_controls import _resolve_runtime_asset_scope
 from backend.core.stage_pipeline.contracts import AccountingSnapshot, RuntimeDiagnosticsInput
 from backend.core.stage_pipeline.adapters.fill_accounting import capture_accounting_snapshot
 
@@ -35,11 +37,13 @@ def build_daily_row(
     turnover_pct: float,
     top5: list[dict[str, Any]],
     controls: Mapping[str, Any],
+    etf_exposure_semantics: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    runtime_asset_scope = _resolve_runtime_asset_scope(runtime)
     governor_budget = controls.get("governor_budget")
     if not isinstance(governor_budget, dict):
         governor_budget = build_governor_budget_snapshot(
-            asset_scope=str(getattr(getattr(runtime, "request", None), "asset_scope", "") or "cn_a_equity"),
+            asset_scope=runtime_asset_scope,
             hard_max_positions=getattr(getattr(runtime, "request", None), "max_positions", controls["effective_max_positions"]),
             effective_max_positions=controls["effective_max_positions"],
             risk_budget_multiplier=controls.get("risk_budget_multiplier"),
@@ -137,6 +141,15 @@ def build_daily_row(
         "state_stability_metrics_json": json.dumps(_jsonable(controls.get("state_stability_metrics") or {}), ensure_ascii=False),
         "defense_bias": controls.get("defense_bias"),
         "weekly_observation_flag": bool(controls.get("weekly_observation_flag", False)),
+        "etf_target_exposure": (etf_exposure_semantics or {}).get("target_exposure"),
+        "etf_min_deployable_exposure": (etf_exposure_semantics or {}).get("min_deployable_exposure"),
+        "etf_target_exposure_source": str((etf_exposure_semantics or {}).get("target_exposure_source") or ""),
+        "etf_min_deployable_exposure_source": str((etf_exposure_semantics or {}).get("min_deployable_exposure_source") or ""),
+        "etf_actual_exposure": (etf_exposure_semantics or {}).get("actual_exposure"),
+        "etf_actual_risk_exposure": (etf_exposure_semantics or {}).get("actual_risk_exposure"),
+        "etf_actual_fallback_exposure": (etf_exposure_semantics or {}).get("actual_fallback_exposure"),
+        "etf_actual_other_exposure": (etf_exposure_semantics or {}).get("actual_other_exposure"),
+        "etf_deployability_gap": (etf_exposure_semantics or {}).get("deployability_gap"),
         "governor_budget_json": json.dumps(governor_budget, ensure_ascii=False),
     }
     if getattr(runtime, "route_id", "") == "provider_breakout_runtime":
@@ -165,6 +178,13 @@ def prepare_daily_snapshot(runtime: Any, *, day_index: int, day: date) -> DailyS
         {"symbol": symbol, "value": round(value, 2)}
         for symbol, value in sorted(pos_values, key=lambda item: item[1], reverse=True)[:5]
     ]
+    etf_exposure_semantics = _resolve_cn_etf_exposure_semantics(
+        runtime,
+        nav=nav,
+        market_value=market_value,
+        pos_values=pos_values,
+        controls=controls,
+    )
     runtime.daily_rows.append(
         build_daily_row(
             runtime,
@@ -176,6 +196,7 @@ def prepare_daily_snapshot(runtime: Any, *, day_index: int, day: date) -> DailyS
             turnover_pct=turnover_pct,
             top5=top5,
             controls=controls,
+            etf_exposure_semantics=etf_exposure_semantics,
         )
     )
     runtime.prev_nav = nav
@@ -235,6 +256,102 @@ def _safe_int_or_none(value: Any) -> int | None:
         except Exception:
             return None
     return int(out)
+
+
+def _normalize_cn_etf_symbol_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    if "." in text:
+        code, venue = text.split(".", 1)
+        code = code.strip()
+        venue = venue.strip().lower()
+        if code and venue in {"sh", "sse"}:
+            return f"sh{code}"
+        if code and venue in {"sz", "szse"}:
+            return f"sz{code}"
+    if len(text) > 2 and text[:2] in {"sh", "sz"}:
+        return text
+    return text
+
+
+def _resolve_cn_etf_exposure_semantics(
+    runtime: Any,
+    *,
+    nav: float,
+    market_value: float,
+    pos_values: list[tuple[str, float]],
+    controls: Mapping[str, Any],
+) -> dict[str, Any]:
+    runtime_asset_scope = _resolve_runtime_asset_scope(runtime)
+    if runtime_asset_scope != "cn_etf":
+        return {}
+    request = getattr(runtime, "request", None)
+    governed_contract = (
+        dict(getattr(request, "governed_a_share", {}) or {})
+        if isinstance(getattr(request, "governed_a_share", None), dict)
+        else {}
+    )
+    etf_beta_contract = dict(governed_contract.get("etf_beta") or {})
+    if not etf_beta_contract:
+        return {}
+    fallback_symbol = _normalize_cn_etf_symbol_key(etf_beta_contract.get("fallback_symbol"))
+    risk_scope = {
+        _normalize_cn_etf_symbol_key(symbol)
+        for symbol in list(etf_beta_contract.get("core_beta_symbols") or ())
+        + list(etf_beta_contract.get("limited_defense_candidates") or ())
+        if _normalize_cn_etf_symbol_key(symbol)
+    }
+    actual_risk_value = 0.0
+    actual_fallback_value = 0.0
+    actual_other_value = 0.0
+    for symbol, value in list(pos_values or ()):
+        normalized = _normalize_cn_etf_symbol_key(symbol)
+        value_float = _safe_float(value)
+        if not normalized or value_float is None or value_float <= 0.0:
+            continue
+        if fallback_symbol and normalized == fallback_symbol:
+            actual_fallback_value += float(value_float)
+        elif normalized in risk_scope:
+            actual_risk_value += float(value_float)
+        else:
+            actual_other_value += float(value_float)
+    actual_exposure = float(market_value / nav) if nav > 0.0 else 0.0
+    actual_risk_exposure = float(actual_risk_value / nav) if nav > 0.0 else 0.0
+    actual_fallback_exposure = float(actual_fallback_value / nav) if nav > 0.0 else 0.0
+    actual_other_exposure = float(actual_other_value / nav) if nav > 0.0 else 0.0
+    governor_budget = {}
+    raw_governor = controls.get("governor_budget")
+    if isinstance(raw_governor, Mapping):
+        governor_budget = dict(raw_governor)
+    sleeve_budget = dict((governor_budget.get("sleeve_budgets") or {}).get("cn_etf_beta") or {})
+    target_selected_count = sleeve_budget.get("target_selected_count")
+    slot_cap = sleeve_budget.get("slot_cap")
+    if target_selected_count in (None, "", 0):
+        target_selected_count = controls.get("buy_slots_before_buy") or controls.get("buy_slots_after_sell")
+    exposure_semantics = resolve_cn_etf_beta_exposure_semantics(
+        etf_beta_contract=etf_beta_contract,
+        effective_state_5=controls.get("effective_state_5") or controls.get("market_state_5"),
+        total_exposure_cap=governor_budget.get("total_exposure_cap"),
+        slot_cap=slot_cap,
+        target_selected_count=target_selected_count,
+        sleeve_budget_snapshot=sleeve_budget,
+    )
+    target_exposure = _safe_float(exposure_semantics.get("target_exposure"), fallback=0.0)
+    deployability_gap = max(float(target_exposure or 0.0) - float(actual_exposure), 0.0)
+    return {
+        "target_exposure": target_exposure,
+        "target_exposure_source": str(exposure_semantics.get("target_exposure_source") or ""),
+        "min_deployable_exposure": _safe_float(exposure_semantics.get("min_deployable_exposure"), fallback=0.0),
+        "min_deployable_exposure_source": str(exposure_semantics.get("min_deployable_exposure_source") or ""),
+        "target_selected_count": int(exposure_semantics.get("target_selected_count") or 0),
+        "fallback_allowed": bool(exposure_semantics.get("fallback_allowed", False)),
+        "actual_exposure": float(actual_exposure),
+        "actual_risk_exposure": float(actual_risk_exposure),
+        "actual_fallback_exposure": float(actual_fallback_exposure),
+        "actual_other_exposure": float(actual_other_exposure),
+        "deployability_gap": float(deployability_gap),
+    }
 
 
 def _jsonable(value: Any) -> Any:
@@ -471,15 +588,73 @@ def apply_daily_decision_diagnostics(runtime: Any, *, day_signals: DaySignals, d
         raw_after_slot_filter_count=raw_after_slot_filter_count,
         raw_after_cash_lot_count=raw_after_cash_lot_count,
     ).to_json()
+    runtime_asset_scope = _resolve_runtime_asset_scope(runtime)
+    etf_target_selected_count = (
+        _safe_int_or_none(diagnostics.get("etf_beta_selected_cap"))
+        if runtime_asset_scope == "cn_etf"
+        else None
+    )
+    if runtime_asset_scope == "cn_etf" and etf_target_selected_count is None:
+        etf_target_selected_count = int(buy_slots)
+    hard_max_positions = (
+        getattr(getattr(runtime, "request", None), "max_positions", None)
+        or daily_row.get("effective_max_positions")
+        or (((getattr(runtime, "_current_day", None) or {}).get("controls") or {}).get("effective_max_positions"))
+        or 0
+    )
+    target_exposure = None
+    min_deployable_exposure = None
+    target_exposure_source = None
+    min_deployable_exposure_source = None
+    fallback_allowed = None
+    under_deploy_reason_codes: list[str] = []
+    actual_exposure = _safe_float(daily_row.get("etf_actual_exposure"), fallback=0.0)
+    actual_risk_exposure = _safe_float(daily_row.get("etf_actual_risk_exposure"), fallback=0.0)
+    actual_fallback_exposure = _safe_float(daily_row.get("etf_actual_fallback_exposure"), fallback=0.0)
+    actual_other_exposure = _safe_float(daily_row.get("etf_actual_other_exposure"), fallback=0.0)
+    deployability_gap = _safe_float(daily_row.get("etf_deployability_gap"), fallback=0.0)
+    row_governor_payload = _governor_budget_payload_from_row(daily_row)
+    if runtime_asset_scope == "cn_etf":
+        request = getattr(runtime, "request", None)
+        governed_contract = (
+            dict(getattr(request, "governed_a_share", {}) or {})
+            if isinstance(getattr(request, "governed_a_share", None), dict)
+            else {}
+        )
+        etf_beta_contract = dict(governed_contract.get("etf_beta") or {})
+        deploy_target_count = max(int(etf_target_selected_count or 0), 0)
+        total_exposure_cap = None
+        raw_total_exposure_cap = row_governor_payload.get("total_exposure_cap")
+        if raw_total_exposure_cap not in (None, ""):
+            total_exposure_cap = _safe_float(raw_total_exposure_cap, fallback=float("nan"))
+            if total_exposure_cap != total_exposure_cap:
+                total_exposure_cap = None
+        if total_exposure_cap is None:
+            raw_total_risk_budget = row_governor_payload.get("total_risk_budget")
+            if raw_total_risk_budget not in (None, ""):
+                total_exposure_cap = _safe_float(raw_total_risk_budget, fallback=float("nan"))
+                if total_exposure_cap != total_exposure_cap:
+                    total_exposure_cap = None
+        if total_exposure_cap is None:
+            total_exposure_cap = 1.0
+        exposure_semantics = resolve_cn_etf_beta_exposure_semantics(
+            etf_beta_contract=etf_beta_contract,
+            effective_state_5=daily_row.get("effective_state_5") or daily_row.get("market_state_5"),
+            total_exposure_cap=total_exposure_cap,
+            slot_cap=deploy_target_count,
+            target_selected_count=deploy_target_count,
+            sleeve_budget_snapshot=dict((row_governor_payload.get("sleeve_budgets") or {}).get("cn_etf_beta") or {}),
+        )
+        target_exposure = exposure_semantics.get("target_exposure")
+        min_deployable_exposure = exposure_semantics.get("min_deployable_exposure")
+        target_exposure_source = exposure_semantics.get("target_exposure_source")
+        min_deployable_exposure_source = exposure_semantics.get("min_deployable_exposure_source")
+        fallback_allowed = bool(exposure_semantics.get("fallback_allowed", False))
+        deployability_gap = max(float(target_exposure or 0.0) - float(actual_exposure or 0.0), 0.0)
     governor_budget = merge_governor_budget_snapshot(
-        _governor_budget_payload_from_row(daily_row),
-        asset_scope=str(getattr(getattr(runtime, "request", None), "asset_scope", "") or "cn_a_equity"),
-        hard_max_positions=(
-            getattr(getattr(runtime, "request", None), "max_positions", None)
-            or daily_row.get("effective_max_positions")
-            or (((getattr(runtime, "_current_day", None) or {}).get("controls") or {}).get("effective_max_positions"))
-            or 0
-        ),
+        row_governor_payload,
+        asset_scope=runtime_asset_scope,
+        hard_max_positions=hard_max_positions,
         effective_max_positions=(
             daily_row.get("effective_max_positions")
             or (((getattr(runtime, "_current_day", None) or {}).get("controls") or {}).get("effective_max_positions"))
@@ -505,25 +680,86 @@ def apply_daily_decision_diagnostics(runtime: Any, *, day_signals: DaySignals, d
         raw_sleeve_candidate_counts=dict(plan.get("sleeve_candidate_counts", {}) or {}),
         raw_sleeve_selected_counts=dict(plan.get("sleeve_selected_counts", {}) or {}),
         sleeve_budget_reject_count=daily_row["sleeve_budget_reject_count"],
+        target_exposure=target_exposure,
+        min_deployable_exposure=min_deployable_exposure,
+        target_exposure_source=target_exposure_source,
+        min_deployable_exposure_source=min_deployable_exposure_source,
+        fallback_allowed=fallback_allowed,
+        actual_exposure=actual_exposure,
+        actual_risk_exposure=actual_risk_exposure,
+        actual_fallback_exposure=actual_fallback_exposure,
+        actual_other_exposure=actual_other_exposure,
+        deployability_gap=deployability_gap,
     )
     budget_reason_codes = list(governor_budget.get("budget_reason_codes") or [])
-    if int(selected_count) < int(buy_slots):
+    deploy_target_count = int(etf_target_selected_count if runtime_asset_scope == "cn_etf" and etf_target_selected_count is not None else buy_slots)
+    if int(selected_count) < int(deploy_target_count):
         budget_reason_codes.append("BUY_SLOT_UNUSED")
-        if int(candidates_count) < int(buy_slots):
+        if int(candidates_count) < int(deploy_target_count):
             budget_reason_codes.append("CANDIDATES_BELOW_BUDGET")
         if int(after_cash_lot_count) < int(after_slot_filter_count):
             budget_reason_codes.append("CASH_LOT_CONSTRAINT")
         if int(selected_count) <= 0:
             budget_reason_codes.append("NO_SELECTED_ORDERS")
+    if runtime_asset_scope == "cn_etf":
+        under_deploy_reason_codes.extend(
+            [
+                str(code).strip()
+                for code in list(diagnostics.get("etf_beta_under_deploy_reason_codes") or [])
+                if str(code).strip()
+            ]
+        )
+        if int(selected_count) < int(deploy_target_count):
+            under_deploy_reason_codes.extend(
+                [
+                    code
+                    for code in [
+                        "BUY_SLOT_UNUSED",
+                        "CANDIDATES_BELOW_BUDGET" if int(candidates_count) < int(deploy_target_count) else "",
+                        "CASH_LOT_CONSTRAINT" if int(after_cash_lot_count) < int(after_slot_filter_count) else "",
+                        "NO_SELECTED_ORDERS" if int(selected_count) <= 0 else "",
+                    ]
+                    if code
+                ]
+            )
     governor_budget["budget_reason_codes"] = sorted({str(code) for code in budget_reason_codes if str(code).strip()})
     governor_budget["budget_diagnostics"] = {
         "buy_slots": int(buy_slots),
+        "deploy_target_count": int(deploy_target_count),
         "selected_count": int(selected_count),
         "candidates_count": int(candidates_count),
         "after_slot_filter_count": int(after_slot_filter_count),
         "after_cash_lot_count": int(after_cash_lot_count),
-        "deployment_gap": max(int(buy_slots) - int(selected_count), 0),
+        "deployment_gap": max(int(deploy_target_count) - int(selected_count), 0),
     }
+    if runtime_asset_scope == "cn_etf":
+        governor_budget["target_exposure"] = target_exposure
+        governor_budget["min_deployable_exposure"] = min_deployable_exposure
+        governor_budget["target_exposure_source"] = target_exposure_source
+        governor_budget["min_deployable_exposure_source"] = min_deployable_exposure_source
+        governor_budget["fallback_allowed"] = bool(fallback_allowed)
+        governor_budget["under_deploy_reason_codes"] = sorted({str(code) for code in under_deploy_reason_codes if str(code).strip()})
+        governor_budget["actual_exposure"] = float(actual_exposure or 0.0)
+        governor_budget["actual_risk_exposure"] = float(actual_risk_exposure or 0.0)
+        governor_budget["actual_fallback_exposure"] = float(actual_fallback_exposure or 0.0)
+        governor_budget["actual_other_exposure"] = float(actual_other_exposure or 0.0)
+        governor_budget["deployability_gap"] = float(deployability_gap or 0.0)
+        sleeve_budgets = dict(governor_budget.get("sleeve_budgets") or {})
+        etf_sleeve = dict(sleeve_budgets.get("cn_etf_beta") or {})
+        etf_sleeve["target_exposure"] = target_exposure
+        etf_sleeve["min_deployable_exposure"] = min_deployable_exposure
+        etf_sleeve["target_exposure_source"] = target_exposure_source
+        etf_sleeve["min_deployable_exposure_source"] = min_deployable_exposure_source
+        etf_sleeve["fallback_allowed"] = bool(fallback_allowed)
+        etf_sleeve["under_deploy_reason_codes"] = sorted({str(code) for code in under_deploy_reason_codes if str(code).strip()})
+        etf_sleeve["target_selected_count"] = int(deploy_target_count)
+        etf_sleeve["actual_exposure"] = float(actual_exposure or 0.0)
+        etf_sleeve["actual_risk_exposure"] = float(actual_risk_exposure or 0.0)
+        etf_sleeve["actual_fallback_exposure"] = float(actual_fallback_exposure or 0.0)
+        etf_sleeve["actual_other_exposure"] = float(actual_other_exposure or 0.0)
+        etf_sleeve["deployability_gap"] = float(deployability_gap or 0.0)
+        sleeve_budgets["cn_etf_beta"] = etf_sleeve
+        governor_budget["sleeve_budgets"] = sleeve_budgets
     daily_row["governor_budget_json"] = json.dumps(governor_budget, ensure_ascii=False)
     if not bool(day_signals.diagnostics.get("composition_enabled", False)):
         return

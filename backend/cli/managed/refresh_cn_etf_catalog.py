@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from backend.core.data.cn_etf_catalog import list_first_wave_entries
+from backend.core.data.cn_etf_catalog import list_seeded_entries
 from . import cn_side_table_common as common
 
 
@@ -68,7 +68,7 @@ def run_refresh(*, token: str = "", source: str = DEFAULT_SOURCE, summary_out: P
     with common.connect() as conn:
         with conn.cursor() as cur:
             _ensure_table(cur)
-            for entry in list_first_wave_entries():
+            for entry in list_seeded_entries():
                 ts_row = tushare_rows.get(entry.ts_code, {})
                 name = str(ts_row.get("name") or entry.name).strip() or entry.name
                 list_date = _normalize_optional_text(ts_row.get("list_date"))
@@ -149,7 +149,7 @@ def run_refresh(*, token: str = "", source: str = DEFAULT_SOURCE, summary_out: P
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Refresh first-wave cn_etf catalog into pit_cn_etf_master")
+    parser = argparse.ArgumentParser(description="Refresh seeded cn_etf catalog into pit_cn_etf_master")
     parser.add_argument("--token", default="", help="optional Tushare token for fund_basic enrichment")
     parser.add_argument("--source", default=DEFAULT_SOURCE, help="fallback source label when Tushare is unavailable")
     parser.add_argument("--summary-out", default="", help="optional summary json output path")

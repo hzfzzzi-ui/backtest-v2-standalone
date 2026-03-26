@@ -51,7 +51,7 @@ def test_run_refresh_normalizes_nan_catalog_dates(monkeypatch, tmp_path: Path) -
     )
 
     monkeypatch.setattr(refresh_cn_etf_catalog.common, "connect", lambda: fake_conn)
-    monkeypatch.setattr(refresh_cn_etf_catalog, "list_first_wave_entries", lambda: (entry,))
+    monkeypatch.setattr(refresh_cn_etf_catalog, "list_seeded_entries", lambda: (entry,))
     monkeypatch.setattr(
         refresh_cn_etf_catalog,
         "_load_tushare_catalog_rows",

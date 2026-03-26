@@ -6,6 +6,8 @@ from typing import Any
 import numpy as np
 
 from backend.core.config.cn_a_governed_mainline import (
+    CN_ETF_BETA_BUDGET_SEMANTICS,
+    CN_ETF_BETA_SLEEVE_ID,
     CN_STOCK_ALPHA_CORE_BUDGET_SEMANTICS,
     CN_STOCK_ALPHA_CORE_LOCAL_BUDGET_CONTROLS,
     CN_STOCK_ALPHA_CORE_PHASE1_EXCLUDED_CAPABILITIES,
@@ -96,15 +98,40 @@ def _resolve_runtime_asset_scope(runtime: Any) -> str:
     asset_scope = str(getattr(request, "asset_scope", "") or "").strip().lower()
     if asset_scope:
         return asset_scope
+    request_asset_context = getattr(request, "asset_context", None)
+    if isinstance(request_asset_context, dict):
+        asset_scope = str(request_asset_context.get("asset_scope") or "").strip().lower()
+        if asset_scope:
+            return asset_scope
     asset_context = dict(getattr(runtime, "asset_context", {}) or {})
     asset_scope = str(asset_context.get("asset_scope") or "").strip().lower()
     if asset_scope:
         return asset_scope
+    data_bundle = getattr(request, "data_bundle", None)
+    universe_meta = getattr(data_bundle, "universe_meta", None)
+    if isinstance(universe_meta, dict):
+        asset_scope = str(universe_meta.get("asset_scope") or "").strip().lower()
+        if asset_scope:
+            return asset_scope
+    provider = getattr(runtime, "provider", None)
+    if provider is not None and hasattr(provider, "_etf_beta_slot_cap_arr"):
+        return "cn_etf"
     return "cn_a_equity"
 
 
-def _stock_alpha_core_debug_context(runtime: Any) -> dict[str, Any]:
-    if _resolve_runtime_asset_scope(runtime) != "cn_a_equity":
+def _system_sleeve_debug_context(runtime: Any) -> dict[str, Any]:
+    asset_scope = _resolve_runtime_asset_scope(runtime)
+    if asset_scope == "cn_etf":
+        return {
+            "system_sleeve_id": CN_ETF_BETA_SLEEVE_ID,
+            "system_sleeve_role": "market_beta_sleeve",
+            "system_budget_owner": "global_portfolio_governor",
+            "system_budget_semantics": CN_ETF_BETA_BUDGET_SEMANTICS,
+            "system_sleeve_strategy_semantics": "weekly_relative_strength_beta",
+            "system_sleeve_local_budget_controls": [],
+            "system_sleeve_phase1_excluded_capabilities": [],
+        }
+    if asset_scope != "cn_a_equity":
         return {}
     return {
         "system_sleeve_id": CN_STOCK_TREND_ALPHA_CORE_SLEEVE_ID,
@@ -397,7 +424,7 @@ def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
     day_signals = runtime._current_day["day_signals"]
     next_open = dict(runtime._current_day["next_open"])
     nav = float(runtime._current_day["nav"])
-    debug_plan: dict[str, Any] = _stock_alpha_core_debug_context(runtime)
+    debug_plan: dict[str, Any] = _system_sleeve_debug_context(runtime)
     day_candidate_rows: list[dict[str, Any]] = []
     mf_gate_on_today = resolve_mf_gate_on_today(
         enable_multifactor_rank=bool(runtime.request.enable_multifactor_rank),

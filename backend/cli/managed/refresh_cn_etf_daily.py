@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from backend.core.data.cn_etf_catalog import list_first_wave_entries, normalize_cn_etf_ts_code
+from backend.core.data.cn_etf_catalog import list_seeded_entries, normalize_cn_etf_ts_code
 from . import cn_side_table_common as common
 
 
@@ -72,7 +72,7 @@ def _resolve_target_end(pro, explicit_end: str) -> date:
 
 def _read_catalog_symbols(symbols_csv: str) -> list[str]:
     requested = {normalize_cn_etf_ts_code(item) for item in str(symbols_csv or "").split(",") if str(item).strip()}
-    supported = {entry.ts_code for entry in list_first_wave_entries()}
+    supported = {entry.ts_code for entry in list_seeded_entries()}
     if not requested:
         return sorted(supported)
     unsupported = sorted(requested - supported)
@@ -111,7 +111,7 @@ def run_refresh(
     with common.connect() as conn:
         with conn.cursor() as cur:
             _ensure_tables(cur)
-            catalog_rows = {entry.ts_code: entry for entry in list_first_wave_entries() if entry.ts_code in selected_symbols}
+            catalog_rows = {entry.ts_code: entry for entry in list_seeded_entries() if entry.ts_code in selected_symbols}
             for ts_code in selected_symbols:
                 entry = catalog_rows[ts_code]
                 raw = _load_tushare_daily(pro, ts_code, requested_start, target_end)
@@ -259,7 +259,7 @@ def run_refresh(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Refresh first-wave cn_etf daily bars into pams_cn_etf_daily")
+    parser = argparse.ArgumentParser(description="Refresh seeded cn_etf daily bars into pams_cn_etf_daily")
     parser.add_argument("--token", default="", help="Tushare token")
     parser.add_argument("--start", default="", help="optional inclusive start date (YYYY-MM-DD)")
     parser.add_argument("--end", default="", help="optional inclusive end date (YYYY-MM-DD)")

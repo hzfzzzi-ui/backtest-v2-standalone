@@ -169,6 +169,48 @@ function registerElement(elements, id, tagName = 'input', props = {}) {
 }
 
 function defaultElementMap(elements) {
+  registerElement(elements, 'wbAssetScopeLabel', 'label');
+  registerElement(elements, 'wbUniverseModeLabel', 'label');
+  registerElement(elements, 'wbSymbolsLabel', 'label');
+  registerElement(elements, 'wbPitStatusLabel', 'label');
+  registerElement(elements, 'wbBenchmarkLabel', 'label');
+  registerElement(elements, 'wbDrawerTitle', 'div');
+  registerElement(elements, 'wbGlobalAssetSummary', 'div');
+  registerElement(elements, 'wbGlobalAssetModeSummary', 'div');
+  registerElement(elements, 'wbGlobalDataWindowSummary', 'div');
+  registerElement(elements, 'wbGlobalRegimeBase', 'div');
+  registerElement(elements, 'wbGlobalRegimeEffective', 'div');
+  registerElement(elements, 'wbGlobalRegimeCoarse', 'div');
+  registerElement(elements, 'wbGlobalRegimeBudgetMultiplier', 'div');
+  registerElement(elements, 'wbGlobalRegimeReason', 'div');
+  registerElement(elements, 'wbGlobalRegimeManual', 'div');
+  registerElement(elements, 'wbGlobalRegimeDetail', 'div', { hidden: false });
+  registerElement(elements, 'wbGlobalRegimeEmpty', 'div', { hidden: true });
+  registerElement(elements, 'wbGlobalGovernorBudget', 'div');
+  registerElement(elements, 'wbGlobalGovernorExposure', 'div');
+  registerElement(elements, 'wbGlobalGovernorSleeve', 'div');
+  registerElement(elements, 'wbGlobalGovernorDefense', 'div');
+  registerElement(elements, 'wbGlobalGovernorReason', 'div');
+  registerElement(elements, 'wbGlobalGovernorDetail', 'div', { hidden: false });
+  registerElement(elements, 'wbGlobalGovernorEmpty', 'div', { hidden: true });
+  registerElement(elements, 'wbStageS1Btn', 'button', { hidden: false });
+  registerElement(elements, 'wbStageS2Btn', 'button', { hidden: false });
+  registerElement(elements, 'wbStageS3Btn', 'button', { hidden: false });
+  registerElement(elements, 'wbStageS4Btn', 'button', { hidden: false });
+  registerElement(elements, 'wbStageS5Btn', 'button', { hidden: false });
+  registerElement(elements, 'wbStageS6Btn', 'button', { hidden: false });
+  registerElement(elements, 'wbStageS7Btn', 'button', { hidden: false });
+  registerElement(elements, 'wbStageS8Btn', 'button', { hidden: false });
+  registerElement(elements, 'wbStageS9Btn', 'button', { hidden: false });
+  registerElement(elements, 'wbStageS1Label', 'span');
+  registerElement(elements, 'wbStageS2Label', 'span');
+  registerElement(elements, 'wbStageS3Label', 'span');
+  registerElement(elements, 'wbStageS4Label', 'span');
+  registerElement(elements, 'wbStageS5Label', 'span');
+  registerElement(elements, 'wbStageS6Label', 'span');
+  registerElement(elements, 'wbStageS7Label', 'span');
+  registerElement(elements, 'wbStageS8Label', 'span');
+  registerElement(elements, 'wbStageS9Label', 'span');
   registerElement(elements, 'wbEnableSignal', 'input', { checked: true });
   registerElement(elements, 'wbEnableComposition', 'input', { checked: false });
   registerElement(elements, 'wbUniverseMode', 'select', { value: 'HS300_ZZ500' });
@@ -431,7 +473,7 @@ function createWorkbenchHarness() {
   Object.assign(context, context.window.multiAlphaUi || {});
   vm.runInContext(fs.readFileSync(CONFIG_DRAFT_CORE_SCRIPT, 'utf8'), context, { filename: 'config-draft-core.js' });
   vm.runInContext(fs.readFileSync(UI_CONTROLS_SCRIPT, 'utf8'), context, { filename: 'ui-controls.js' });
-  vm.runInContext("this.__codexExports = { state, byId, buildConfigDraft, validateConfigDraft, applyConfigToUI, defaultComposeRows, defaultRegimeMatrix };", context);
+  vm.runInContext("this.__codexExports = { state, byId, buildConfigDraft, validateConfigDraft, applyConfigToUI, defaultComposeRows, defaultRegimeMatrix, syncAssetAwareShell, setDrawerPanel };", context);
   Object.assign(context, context.__codexExports || {});
   defaultElementMap(elements);
   patchWorkbench(context);

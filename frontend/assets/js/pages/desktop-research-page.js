@@ -191,8 +191,16 @@
       .map((row) => ({
         date: String(row?.date || '').trim().slice(0, 10),
         nav: Number(row?.nav),
+        stock_nav: Number(row?.stock_nav),
+        etf_nav: Number(row?.etf_nav),
       }))
-      .filter((row) => row.date && Number.isFinite(row.nav) && row.nav > 0);
+      .filter((row) => row.date && Number.isFinite(row.nav) && row.nav > 0)
+      .map((row) => ({
+        date: row.date,
+        nav: row.nav,
+        ...(Number.isFinite(row.stock_nav) && row.stock_nav > 0 ? { stock_nav: row.stock_nav } : {}),
+        ...(Number.isFinite(row.etf_nav) && row.etf_nav > 0 ? { etf_nav: row.etf_nav } : {}),
+      }));
   }
 
   function normalizeDrawdownSectionData(rows) {
@@ -286,7 +294,8 @@
       }
       const benchmarkSeriesExists = Array.isArray(artifacts.benchmarkSeries) && artifacts.benchmarkSeries.length;
       const benchmarkOhlcExists = Array.isArray(artifacts.benchmarkOhlc) && artifacts.benchmarkOhlc.length;
-      if ((!benchmarkSeriesExists || !benchmarkOhlcExists || !options.reuseExistingBenchmark) && typeof globalScope.loadBenchmarkSeries === 'function') {
+      const isResearchCombo = String(artifacts.run_meta?.data?.asset_role || '').trim().toLowerCase() === 'research_combo';
+      if (!isResearchCombo && (!benchmarkSeriesExists || !benchmarkOhlcExists || !options.reuseExistingBenchmark) && typeof globalScope.loadBenchmarkSeries === 'function') {
         try {
           const benchmark = await globalScope.loadBenchmarkSeries(navRows);
           const benchmarkPoints = Array.isArray(benchmark?.points) ? benchmark.points : [];
@@ -304,6 +313,12 @@
         } catch (error) {
           artifacts.benchmarkError = String(error?.message || error || '');
         }
+      } else if (isResearchCombo) {
+        artifacts.benchmarkSeries = [];
+        artifacts.benchmarkOhlc = [];
+        artifacts.benchmarkDrawdownSeries = [];
+        artifacts.benchmarkSource = 'skipped_research_combo';
+        artifacts.benchmarkError = '';
       }
     } else if (section === 'drawdown') {
       artifacts.drawdownSeries = normalizeDrawdownSectionData(Array.isArray(data) ? data : []);

@@ -33,9 +33,11 @@ FIRST_WAVE_CORE = "cn_etf_first_wave_core"
 FIRST_WAVE_ALL = "cn_etf_first_wave_all"
 SINGLE_ASSET_TEMPLATE = "cn_etf_single_asset_template"
 FIRST_WAVE_BATCH = "first_wave"
+TEMPLATE_A_A1_CANDIDATES = "cn_etf_template_a_a1_candidates"
+TEMPLATE_A_A1_BATCH = "template_a_a1"
 
 
-_CATALOG: tuple[CnEtfCatalogEntry, ...] = (
+_FIRST_WAVE_CATALOG: tuple[CnEtfCatalogEntry, ...] = (
     CnEtfCatalogEntry("510300.SH", "sh510300", "沪深300ETF", "SSE", FIRST_WAVE_BATCH, "broad_equity"),
     CnEtfCatalogEntry("510500.SH", "sh510500", "中证500ETF", "SSE", FIRST_WAVE_BATCH, "mid_cap_equity"),
     CnEtfCatalogEntry("510050.SH", "sh510050", "上证50ETF", "SSE", FIRST_WAVE_BATCH, "large_cap_equity"),
@@ -46,6 +48,29 @@ _CATALOG: tuple[CnEtfCatalogEntry, ...] = (
     CnEtfCatalogEntry("588000.SH", "sh588000", "科创50ETF", "SSE", FIRST_WAVE_BATCH, "technology_growth"),
     CnEtfCatalogEntry("159915.SZ", "sz159915", "创业板ETF", "SZSE", FIRST_WAVE_BATCH, "growth_equity"),
 )
+
+_TEMPLATE_A_A1_CATALOG: tuple[CnEtfCatalogEntry, ...] = (
+    CnEtfCatalogEntry(
+        "159845.SZ",
+        "sz159845",
+        "中证1000ETF",
+        "SZSE",
+        TEMPLATE_A_A1_BATCH,
+        "small_cap_equity_standard",
+        list_date="20210331",
+    ),
+    CnEtfCatalogEntry(
+        "510880.SH",
+        "sh510880",
+        "红利ETF",
+        "SSE",
+        TEMPLATE_A_A1_BATCH,
+        "dividend_standard",
+        list_date="20070118",
+    ),
+)
+
+_CATALOG: tuple[CnEtfCatalogEntry, ...] = _FIRST_WAVE_CATALOG + _TEMPLATE_A_A1_CATALOG
 
 
 CATALOG_BY_TS_CODE = {entry.ts_code: entry for entry in _CATALOG}
@@ -60,11 +85,20 @@ PRESET_GROUPS: dict[str, tuple[str, ...]] = {
         "511010.SH",
         "512100.SH",
     ),
-    FIRST_WAVE_ALL: tuple(entry.ts_code for entry in _CATALOG),
+    FIRST_WAVE_ALL: tuple(entry.ts_code for entry in _FIRST_WAVE_CATALOG),
+    TEMPLATE_A_A1_CANDIDATES: tuple(entry.ts_code for entry in _TEMPLATE_A_A1_CATALOG),
 }
 
 
 def list_first_wave_entries() -> tuple[CnEtfCatalogEntry, ...]:
+    return _FIRST_WAVE_CATALOG
+
+
+def list_template_a_a1_entries() -> tuple[CnEtfCatalogEntry, ...]:
+    return _TEMPLATE_A_A1_CATALOG
+
+
+def list_seeded_entries() -> tuple[CnEtfCatalogEntry, ...]:
     return _CATALOG
 
 
@@ -137,6 +171,8 @@ def preset_batch_id(name: str, symbols: list[str]) -> str:
         return FIRST_WAVE_CORE
     if key == FIRST_WAVE_ALL:
         return FIRST_WAVE_ALL
+    if key == TEMPLATE_A_A1_CANDIDATES:
+        return TEMPLATE_A_A1_BATCH
     if len(symbols) == 1:
         return SINGLE_ASSET_TEMPLATE
     return FIRST_WAVE_BATCH
@@ -148,9 +184,13 @@ __all__ = [
     "FIRST_WAVE_BATCH",
     "FIRST_WAVE_CORE",
     "SINGLE_ASSET_TEMPLATE",
+    "TEMPLATE_A_A1_BATCH",
+    "TEMPLATE_A_A1_CANDIDATES",
     "expand_etf_preset",
     "get_catalog_entry",
     "list_first_wave_entries",
+    "list_seeded_entries",
+    "list_template_a_a1_entries",
     "normalize_cn_etf_symbol",
     "normalize_cn_etf_ts_code",
     "preset_batch_id",

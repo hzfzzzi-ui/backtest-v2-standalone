@@ -206,6 +206,127 @@ input[type="checkbox"] {
   box-shadow: 0 4px 16px rgba(231,76,60,.45) !important;
 }
 
+.wb-global-strip {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: minmax(320px, 1.2fr) repeat(2, minmax(260px, 1fr));
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(82,168,255,.10);
+  background:
+    linear-gradient(180deg, rgba(16,23,35,.96), rgba(10,16,26,.98)),
+    radial-gradient(circle at top center, rgba(82,168,255,.08), transparent 38%);
+}
+
+.wb-global-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(82,168,255,.10);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(18,26,40,.96), rgba(10,16,26,.98)),
+    radial-gradient(circle at top left, rgba(82,168,255,.05), transparent 40%);
+}
+
+.wb-global-card-primary {
+  grid-template-columns: 1fr;
+}
+
+.wb-global-inline-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, .9fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.wb-global-inline-group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wb-global-date-range .wb-field-label,
+.wb-global-inline-group .wb-field-label {
+  margin-bottom: 0;
+}
+
+.wb-global-date-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.wb-global-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wb-global-card-head strong {
+  display: block;
+  font-size: 15px;
+  color: var(--wb-text);
+}
+
+.wb-global-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--wb-text-soft);
+  margin-bottom: 4px;
+}
+
+.wb-global-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wb-global-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.wb-global-grid-compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wb-global-grid div {
+  min-width: 0;
+}
+
+.wb-global-grid dt {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--wb-text-soft);
+}
+
+.wb-global-grid dd {
+  margin: 0;
+  color: var(--wb-text);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.wb-global-grid-span {
+  grid-column: 1 / -1;
+}
+
+.wb-global-empty {
+  margin: 0;
+  color: var(--wb-text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .wb-load-dropdown {
   position: absolute; right: 0; top: 40px;
   min-width: 280px; max-height: 320px; overflow-y: auto;
@@ -273,11 +394,19 @@ input[type="checkbox"] {
   background: rgba(82, 168, 255, .12);
   border-color: rgba(82, 168, 255, .30);
 }
+.wb-load-kind-config {
+  color: #d0b3ff;
+  background: rgba(178, 126, 255, .12);
+  border-color: rgba(178, 126, 255, .30);
+}
 .wb-load-item-baseline {
   border-left: 2px solid rgba(86, 197, 133, .35);
 }
 .wb-load-item-experiment {
   border-left: 2px solid rgba(82, 168, 255, .35);
+}
+.wb-load-item-config {
+  border-left: 2px solid rgba(178, 126, 255, .35);
 }
 .wb-config-center-title {
   font-size: 12px;
@@ -402,6 +531,7 @@ input[type="checkbox"] {
   color: var(--wb-accent);
   border-color: color-mix(in srgb, var(--wb-accent) 35%, var(--wb-line));
 }
+.wb-rail-btn[hidden] { display: none !important; }
 /* Stage badge number */
 .wb-rail-stage {
   align-items: center;
@@ -1731,6 +1861,8 @@ input[type="checkbox"] {
 }
 @media (max-width: 1180px) {
   .wb-command { grid-template-columns: 1fr; height: auto; padding: 8px 12px; }
+  .wb-global-strip { grid-template-columns: 1fr; }
+  .wb-global-inline-controls { grid-template-columns: 1fr; }
   .wb-body { grid-template-columns: 1fr; }
   .wb-rail { flex-direction: row; border-right: none; border-bottom: 1px solid var(--wb-line-dim); padding: 6px; }
   .wb-rail-btn { min-width: 92px; }
@@ -1739,6 +1871,8 @@ input[type="checkbox"] {
   .wb-app.wb-drawer-hidden .wb-drawer { display: none; }
 }
 @media (max-width: 900px) {
+  .wb-global-grid { grid-template-columns: 1fr; }
+  .wb-global-date-fields { grid-template-columns: 1fr; }
   .wb-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .wb-canvas-head { flex-direction: column; align-items: flex-start; }
   .wb-result-overview,
@@ -1963,6 +2097,110 @@ input[type="checkbox"] {
   width: 100%;
   max-width: 100%;
   min-width: 0;
+}
+
+.wb-results-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wb-results-tab {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgba(82,168,255,.14);
+  border-radius: 999px;
+  background: rgba(255,255,255,.02);
+  color: var(--wb-text-soft);
+  cursor: pointer;
+  transition: all var(--wb-transition);
+}
+
+.wb-results-tab:hover {
+  border-color: rgba(82,168,255,.28);
+  color: var(--wb-text);
+}
+
+.wb-results-tab.active {
+  background: linear-gradient(180deg, rgba(82,168,255,.16), rgba(82,168,255,.08));
+  color: #d9ecff;
+  border-color: rgba(82,168,255,.30);
+}
+
+.wb-workbench-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.wb-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.wb-detail-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(82,168,255,.10);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(18,26,40,.96), rgba(12,18,28,.98)),
+    radial-gradient(circle at top left, rgba(82,168,255,.05), transparent 42%);
+}
+
+.wb-detail-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--wb-text);
+}
+
+.wb-detail-list,
+.wb-detail-kv {
+  display: grid;
+  gap: 8px;
+}
+
+.wb-detail-kv div {
+  min-width: 0;
+}
+
+.wb-detail-kv dt,
+.wb-detail-list dt {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--wb-text-soft);
+}
+
+.wb-detail-kv dd,
+.wb-detail-list dd {
+  margin: 0;
+  color: var(--wb-text);
+  word-break: break-word;
+}
+
+.wb-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wb-code-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--wb-text);
+}
+
+.wb-code-list li + li {
+  margin-top: 6px;
+}
+
+.wb-note {
+  color: var(--wb-text-soft);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .wb-empty {
@@ -2208,6 +2446,10 @@ html {
 }
 
 @media (max-width: 1180px) {
+  .wb-global-strip {
+    padding: 10px 12px;
+  }
+
   .wb-command {
     padding: 8px 12px;
   }
@@ -2222,6 +2464,7 @@ html {
 }
 
 @media (max-width: 900px) {
+  .wb-global-grid,
   .wb-result-overview,
   .wb-kpi-grid {
     grid-template-columns: 1fr;
@@ -2429,6 +2672,10 @@ html {
 }
 
 @media (max-width: 1320px) {
+  .wb-global-strip {
+    grid-template-columns: 1fr;
+  }
+
   .wb-result-overview {
     grid-template-columns: 1fr;
   }

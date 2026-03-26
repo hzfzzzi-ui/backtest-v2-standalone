@@ -82,7 +82,7 @@ def test_run_refresh_writes_daily_rows_and_coverage(monkeypatch, tmp_path: Path)
 
     monkeypatch.setattr(refresh_cn_etf_daily.common, "connect", lambda: fake_conn)
     monkeypatch.setattr(refresh_cn_etf_daily.common, "load_tushare_client", lambda token: _FakePro())
-    monkeypatch.setattr(refresh_cn_etf_daily, "list_first_wave_entries", lambda: (entry,))
+    monkeypatch.setattr(refresh_cn_etf_daily, "list_seeded_entries", lambda: (entry,))
 
     summary = refresh_cn_etf_daily.run_refresh(
         token="dummy",

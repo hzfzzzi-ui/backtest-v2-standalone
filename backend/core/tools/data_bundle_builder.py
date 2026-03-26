@@ -8,10 +8,8 @@ from typing import Any, Callable
 import pandas as pd
 
 from backend.core.config.asset_profiles import build_asset_context, canonical_asset_scope
-from backend.core.config.cn_a_governed_mainline import (
-    build_cn_etf_beta_phase1_summary,
-    build_governed_a_share_contract,
-)
+from backend.core.config.cn_a_governed_mainline import build_governed_a_share_contract
+from backend.core.config.etf_beta_contract import build_etf_beta_phase1_summary as build_cn_etf_beta_phase1_summary
 from backend.core.config.models import BacktestConfig
 from backend.core.data.cn_etf_catalog import normalize_cn_etf_symbol, normalize_cn_etf_ts_code
 from backend.core.data.pg_provider import PostgresDataProvider

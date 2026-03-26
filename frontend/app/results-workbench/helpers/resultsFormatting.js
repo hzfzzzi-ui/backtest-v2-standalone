@@ -320,6 +320,20 @@ function normalizeSymbolRow(row) {
   };
 }
 
+function deriveNavComponentTotalReturn(rows, key) {
+  const series = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      date: String(row?.date || '').trim(),
+      value: Number(row?.[key]),
+    }))
+    .filter((row) => row.date && Number.isFinite(row.value) && row.value > 0);
+  if (!series.length) return null;
+  const firstValue = Number(series[0]?.value);
+  const lastValue = Number(series[series.length - 1]?.value);
+  if (!Number.isFinite(firstValue) || !Number.isFinite(lastValue) || firstValue <= 0) return null;
+  return (lastValue / firstValue) - 1;
+}
+
 function deriveTop10ProfitConcentration(rows) {
   const positivePnls = (Array.isArray(rows) ? rows : [])
     .map((row) => Number(row?.net_pnl))
@@ -498,6 +512,7 @@ export function summarizeSnapshot(snapshot) {
   const perf = artifacts.perf || {};
   const meta = artifacts.run_meta || {};
   const navSeries = Array.isArray(artifacts.navSeries) ? artifacts.navSeries : [];
+  const navRows = Array.isArray(artifacts.nav) ? artifacts.nav : [];
   const benchmarkSeries = Array.isArray(artifacts.benchmarkSeries) ? artifacts.benchmarkSeries : [];
   const tradesRows = Array.isArray(artifacts.tradesRows) ? artifacts.tradesRows : [];
   const symbolRows = Array.isArray(artifacts.symbolPerformanceRows) ? artifacts.symbolPerformanceRows : [];
@@ -556,6 +571,8 @@ export function summarizeSnapshot(snapshot) {
       'cn_a_equity',
     ) || 'cn_a_equity',
   ).trim().toLowerCase();
+  const assetRole = String(firstDefined(meta.data?.asset_role, result.asset_role, '') || '').trim().toLowerCase();
+  const isResearchCombo = assetRole === 'research_combo' || !!(meta.research_combo && typeof meta.research_combo === 'object');
   const isCnEtf = assetScope === 'cn_etf';
   const etfSymbols = Array.isArray(meta.data?.etf_symbols)
     ? meta.data.etf_symbols.map((item) => String(item || '').trim()).filter(Boolean)
@@ -598,11 +615,23 @@ export function summarizeSnapshot(snapshot) {
     meta.warmup?.effective_execution_start_date,
     perf.candidate_ready_date,
   );
+  const comboMetrics = meta.combo_metrics && typeof meta.combo_metrics === 'object' ? meta.combo_metrics : {};
+  const researchCombo = meta.research_combo && typeof meta.research_combo === 'object' ? meta.research_combo : {};
+  const comboComponents = meta.combo_components && typeof meta.combo_components === 'object' ? meta.combo_components : {};
+  const comboStockExpId = firstDefined(comboComponents.stock_component?.exp_id, '-') || '-';
+  const comboEtfExpId = firstDefined(comboComponents.etf_component?.exp_id, '-') || '-';
+  const comboStockReturn = deriveNavComponentTotalReturn(navRows, firstDefined(researchCombo.stock_nav_column, 'stock_nav'));
+  const comboEtfReturn = deriveNavComponentTotalReturn(navRows, firstDefined(researchCombo.etf_nav_column, 'etf_nav'));
+  const comboWindowStart = firstDefined(comboMetrics.start, meta.data?.coverage_start);
+  const comboWindowEnd = firstDefined(comboMetrics.end, meta.data?.coverage_end);
+  const comboWindow = comboWindowStart && comboWindowEnd ? `${comboWindowStart} ~ ${comboWindowEnd}` : '-';
 
   return {
     assetScope,
-    universeSectionTitle: isCnEtf ? 'ETF研究口径' : '股票池口径',
-    universeModeLabel: isCnEtf ? 'ETF名单' : '股票池',
+    assetRole,
+    isResearchCombo,
+    universeSectionTitle: isResearchCombo ? '组合研究口径' : (isCnEtf ? 'ETF研究口径' : '股票池口径'),
+    universeModeLabel: isResearchCombo ? '组合模式' : (isCnEtf ? 'ETF名单' : '股票池'),
     universeCountLabel: isCnEtf ? 'ETF数量' : '标的数',
     etfBatch: firstDefined(meta.data?.etf_batch, meta.data_bundle?.etf_batch, '-') || '-',
     etfSymbols: etfSymbols.length ? etfSymbols.join(', ') : '-',
@@ -612,8 +641,10 @@ export function summarizeSnapshot(snapshot) {
     status: result.status || 'WAITING',
     effectiveExecutionStartDate: effectiveExecutionStartDate || '-',
     universeRange: `${firstDefined(meta.data?.start, '-') || '-'} ~ ${firstDefined(meta.data?.end, '-') || '-'}`,
-    benchmark: firstDefined(meta.data?.benchmark, etfSymbols[0], '-') || '-',
-    universeMode: firstDefined(meta.universe?.universe_mode, meta.data?.universe_mode, '-') || '-',
+    benchmark: isResearchCombo ? '-' : (firstDefined(meta.data?.benchmark, etfSymbols[0], '-') || '-'),
+    universeMode: isResearchCombo
+      ? (firstDefined(researchCombo.mode, meta.data?.asset_role, '-') || '-')
+      : (firstDefined(meta.universe?.universe_mode, meta.data?.universe_mode, '-') || '-'),
     universeCount,
     hasGovernedSnapshot,
     governedBaseState: firstDefined(governedSnapshot.base_state, latestRegime.base_state, '-') || '-',
@@ -662,6 +693,14 @@ export function summarizeSnapshot(snapshot) {
     top10ProfitConcentration: fmtPct(top10ProfitConcentrationValue),
     top10AvgReturn: fmtPct(top10AvgReturn),
     tier: firstDefined(perf.tier, result.tier, meta.tier) || '-',
+    comboMode: firstDefined(researchCombo.mode, '-') || '-',
+    comboAssumption: firstDefined(researchCombo.assumption, '-') || '-',
+    comboWindow,
+    comboStockExpId,
+    comboEtfExpId,
+    comboStockTotalReturn: fmtPct(comboStockReturn),
+    comboEtfTotalReturn: fmtPct(comboEtfReturn),
+    comboReadOnlyNote: isResearchCombo ? '当前结果是研究组合锚点，只读展示，不代表 unified runtime 正式实验。' : '-',
     groupLoadStatus: artifacts?.missing?.length
       ? `缺少 ${String(artifacts.missing.length)} 个产物`
       : '产物已加载',
@@ -673,6 +712,271 @@ export function summarizeSnapshot(snapshot) {
       sourceOnlyExitCount: fmtInt(auditSummary.source_only_exit_count),
       globalRiskOverrideCount: fmtInt(auditSummary.global_risk_override_count),
     },
+  };
+}
+
+function mapObjectEntries(payload, valueFormatter = null) {
+  const source = payload && typeof payload === 'object' ? payload : {};
+  return Object.entries(source)
+    .map(([name, value]) => {
+      const formatted = typeof valueFormatter === 'function' ? valueFormatter(value, name) : value;
+      return {
+        name,
+        value: formatted == null || formatted === '' ? '-' : String(formatted),
+      };
+    })
+    .filter((entry) => entry.value !== '-');
+}
+
+function extractComboTruthPayload(snapshot) {
+  const payload = snapshot?.artifacts?.comboTruth;
+  return payload && typeof payload === 'object' ? payload : {};
+}
+
+function extractResearchComboDisplay(snapshot) {
+  const comboTruth = extractComboTruthPayload(snapshot);
+  if (comboTruth.display && typeof comboTruth.display === 'object') {
+    return comboTruth.display;
+  }
+  const legacyDisplay = snapshot?.artifacts?.researchComboDisplay;
+  return legacyDisplay && typeof legacyDisplay === 'object' ? legacyDisplay : {};
+}
+
+function extractResearchComboComponents(snapshot) {
+  const comboTruth = extractComboTruthPayload(snapshot);
+  if (comboTruth.components && typeof comboTruth.components === 'object') {
+    return comboTruth.components;
+  }
+  const legacyComponents = snapshot?.artifacts?.researchComboComponents;
+  return legacyComponents && typeof legacyComponents === 'object' ? legacyComponents : {};
+}
+
+function extractResearchComboComponentRunMeta(snapshot, componentKey) {
+  const components = extractResearchComboComponents(snapshot);
+  const payload = components?.[componentKey];
+  if (!payload || typeof payload !== 'object') return {};
+  const snapshotPayload = payload.snapshot && typeof payload.snapshot === 'object' ? payload.snapshot : null;
+  const snapshotArtifacts = snapshotPayload?.artifacts && typeof snapshotPayload.artifacts === 'object'
+    ? snapshotPayload.artifacts
+    : null;
+  if (snapshotArtifacts?.run_meta && typeof snapshotArtifacts.run_meta === 'object') {
+    return snapshotArtifacts.run_meta;
+  }
+  const legacyRunMeta = payload.run_meta;
+  return legacyRunMeta && typeof legacyRunMeta === 'object' ? legacyRunMeta : {};
+}
+
+export function buildRegimePanelModel(snapshot) {
+  const meta = snapshot?.artifacts?.run_meta || {};
+  const researchComboDisplay = extractResearchComboDisplay(snapshot);
+  const latestState = meta.regime?.latest_state && typeof meta.regime.latest_state === 'object'
+    ? meta.regime.latest_state
+    : {};
+  const governedSnapshot = meta.governed_snapshot && typeof meta.governed_snapshot === 'object'
+    ? meta.governed_snapshot
+    : {};
+  const stockRunMeta = extractResearchComboComponentRunMeta(snapshot, 'stock');
+  const etfRunMeta = extractResearchComboComponentRunMeta(snapshot, 'etf');
+  const stockLatestState = stockRunMeta?.regime?.latest_state
+    && typeof stockRunMeta.regime.latest_state === 'object'
+      ? stockRunMeta.regime.latest_state
+      : {};
+  const etfLatestState = etfRunMeta?.regime?.latest_state
+    && typeof etfRunMeta.regime.latest_state === 'object'
+      ? etfRunMeta.regime.latest_state
+      : {};
+  const manualOverride = latestState.manual_override && typeof latestState.manual_override === 'object'
+    ? latestState.manual_override
+    : {};
+  const confidence = toFiniteNumber(latestState.confidence);
+
+  if (!firstDefined(latestState.effective_state, latestState.base_state, governedSnapshot.regime_effective_state) && researchComboDisplay?.regime?.available) {
+    return {
+      available: true,
+      baseState: String(researchComboDisplay.regime.base_state || '-'),
+      effectiveState: String(researchComboDisplay.regime.effective_state || '-'),
+      coarseState: String(researchComboDisplay.regime.coarse_state || '-'),
+      effectiveCoarseState: String(researchComboDisplay.regime.coarse_state || '-'),
+      confidence: '-',
+      riskBudgetMultiplier: String(researchComboDisplay.regime.risk_budget_multiplier_text || '-'),
+      defenseBias: '-',
+      durationBars: '-',
+      transitionReason: String(researchComboDisplay.regime.reason_text || '-'),
+      reasonCodes: [
+        stockLatestState.effective_state ? `个股 ${stockLatestState.effective_state}` : '',
+        etfLatestState.effective_state ? `ETF ${etfLatestState.effective_state}` : '',
+      ].filter(Boolean),
+      manualOverrideSummary: String(researchComboDisplay.regime.manual_override_text || '无'),
+      manualOverride: {},
+      subscores: [
+        stockLatestState.effective_state ? { name: '个股状态', value: String(stockLatestState.effective_state) } : null,
+        etfLatestState.effective_state ? { name: 'ETF状态', value: String(etfLatestState.effective_state) } : null,
+      ].filter(Boolean),
+      blockScores: [],
+      stability: [],
+      featureAvailability: [],
+    };
+  }
+
+  return {
+    available: Boolean(firstDefined(latestState.effective_state, latestState.base_state, governedSnapshot.regime_effective_state)),
+    baseState: firstDefined(latestState.base_state, governedSnapshot.regime_source_state, '-') || '-',
+    effectiveState: firstDefined(latestState.effective_state, governedSnapshot.regime_effective_state, '-') || '-',
+    coarseState: firstDefined(latestState.coarse_state, governedSnapshot.coarse_state, '-') || '-',
+    effectiveCoarseState: firstDefined(latestState.effective_coarse_state, governedSnapshot.effective_coarse_state, '-') || '-',
+    confidence: confidence != null ? fmtRatio(confidence, 2) : '-',
+    riskBudgetMultiplier: fmtRatio(firstDefined(latestState.risk_budget_multiplier, governedSnapshot.risk_budget_multiplier), 2),
+    defenseBias: fmtPct(firstDefined(latestState.defense_bias, governedSnapshot.defense_bias)),
+    durationBars: fmtInt(firstDefined(latestState.regime_duration_bars, latestState.duration_bars)),
+    transitionReason: firstDefined(latestState.regime_transition_reason, latestState.transition_reason, '-') || '-',
+    reasonCodes: Array.isArray(latestState.reason_codes) ? latestState.reason_codes : [],
+    manualOverrideSummary: summarizeManualOverride(manualOverride),
+    manualOverride,
+    subscores: mapObjectEntries(latestState.subscores, (value) => (typeof value === 'number' ? fmtRatio(value, 2) : JSON.stringify(value))),
+    blockScores: mapObjectEntries(latestState.block_scores, (value) => (typeof value === 'number' ? fmtRatio(value, 2) : JSON.stringify(value))),
+    stability: mapObjectEntries(latestState.state_stability_metrics, (value) => {
+      if (typeof value === 'boolean') return value ? '是' : '否';
+      if (typeof value === 'number') return fmtRatio(value, 2);
+      return JSON.stringify(value);
+    }),
+    featureAvailability: mapObjectEntries(latestState.feature_availability, (value) => {
+      if (typeof value === 'boolean') return value ? '可用' : '缺失';
+      return JSON.stringify(value);
+    }),
+  };
+}
+
+export function buildGovernorPanelModel(snapshot) {
+  const meta = snapshot?.artifacts?.run_meta || {};
+  const researchComboDisplay = extractResearchComboDisplay(snapshot);
+  const governedSnapshot = meta.governed_snapshot && typeof meta.governed_snapshot === 'object'
+    ? meta.governed_snapshot
+    : {};
+  const stockRunMeta = extractResearchComboComponentRunMeta(snapshot, 'stock');
+  const etfRunMeta = extractResearchComboComponentRunMeta(snapshot, 'etf');
+  const stockGovernor = stockRunMeta?.governed_snapshot
+    && typeof stockRunMeta.governed_snapshot === 'object'
+      ? stockRunMeta.governed_snapshot
+      : {};
+  const etfGovernor = etfRunMeta?.governed_snapshot
+    && typeof etfRunMeta.governed_snapshot === 'object'
+      ? etfRunMeta.governed_snapshot
+      : {};
+  const sleeveBudgets = governedSnapshot.sleeve_budgets && typeof governedSnapshot.sleeve_budgets === 'object'
+    ? governedSnapshot.sleeve_budgets
+    : {};
+
+  if (!firstDefined(governedSnapshot.budget_owner, governedSnapshot.budget_consumer_sleeve_id) && researchComboDisplay?.governor?.available) {
+    return {
+      available: true,
+      assetScope: 'research_combo',
+      budgetOwner: 'research_combo_anchor',
+      consumerSleeveId: String(researchComboDisplay.governor.budget_consumer_text || '-'),
+      consumerRole: 'stock_alpha_sleeve + market_beta_sleeve',
+      totalRiskBudget: String(researchComboDisplay.governor.total_risk_budget_text || '-'),
+      totalExposureCap: String(researchComboDisplay.governor.total_exposure_cap_text || '-'),
+      hardMaxPositions: '-',
+      effectiveMaxPositions: '-',
+      drawdown: '-',
+      drawdownState: '-',
+      recoveryState: '-',
+      cooldownState: '-',
+      defenseFloor: '-',
+      defenseFloorState: '-',
+      defenseBias: '-',
+      budgetReasonCodes: [
+        stockGovernor.budget_reason_codes?.length ? `个股 ${stockGovernor.budget_reason_codes.join(', ')}` : '',
+        etfGovernor.budget_reason_codes?.length ? `ETF ${etfGovernor.budget_reason_codes.join(', ')}` : '',
+      ].filter(Boolean),
+      localBudgetControls: [],
+      sleeveBudgets: [
+        stockGovernor.budget_consumer_sleeve_id ? {
+          sleeveId: String(stockGovernor.budget_consumer_sleeve_id),
+          systemRole: String(stockGovernor.budget_consumer_system_role || '-'),
+          slotCap: fmtInt(stockGovernor.effective_max_positions),
+          availableSlots: '-',
+          selectedCount: '-',
+          candidateCount: '-',
+          budgetShare: String(stockGovernor.total_risk_budget != null ? fmtPct(stockGovernor.total_risk_budget) : '-'),
+        } : null,
+        etfGovernor.budget_consumer_sleeve_id ? {
+          sleeveId: String(etfGovernor.budget_consumer_sleeve_id),
+          systemRole: String(etfGovernor.budget_consumer_system_role || '-'),
+          slotCap: fmtInt(etfGovernor.effective_max_positions),
+          availableSlots: '-',
+          selectedCount: '-',
+          candidateCount: '-',
+          budgetShare: String(etfGovernor.total_risk_budget != null ? fmtPct(etfGovernor.total_risk_budget) : '-'),
+        } : null,
+      ].filter(Boolean),
+    };
+  }
+
+  return {
+    available: Boolean(firstDefined(governedSnapshot.budget_owner, governedSnapshot.budget_consumer_sleeve_id)),
+    assetScope: firstDefined(governedSnapshot.asset_scope, meta.data?.asset_scope, '-') || '-',
+    budgetOwner: firstDefined(governedSnapshot.budget_owner, '-') || '-',
+    consumerSleeveId: firstDefined(governedSnapshot.budget_consumer_sleeve_id, '-') || '-',
+    consumerRole: firstDefined(governedSnapshot.budget_consumer_system_role, '-') || '-',
+    totalRiskBudget: fmtPct(governedSnapshot.total_risk_budget),
+    totalExposureCap: fmtPct(governedSnapshot.total_exposure_cap),
+    hardMaxPositions: fmtInt(governedSnapshot.hard_max_positions),
+    effectiveMaxPositions: fmtInt(governedSnapshot.effective_max_positions),
+    drawdown: fmtPct(governedSnapshot.drawdown),
+    drawdownState: firstDefined(governedSnapshot.drawdown_state, '-') || '-',
+    recoveryState: firstDefined(governedSnapshot.recovery_state, '-') || '-',
+    cooldownState: firstDefined(governedSnapshot.cooldown_state, '-') || '-',
+    defenseFloor: fmtPct(governedSnapshot.defense_floor),
+    defenseFloorState: firstDefined(governedSnapshot.defense_floor_state, '-') || '-',
+    defenseBias: fmtPct(governedSnapshot.defense_bias),
+    budgetReasonCodes: Array.isArray(governedSnapshot.budget_reason_codes) ? governedSnapshot.budget_reason_codes : [],
+    localBudgetControls: Array.isArray(governedSnapshot.local_budget_controls) ? governedSnapshot.local_budget_controls : [],
+    sleeveBudgets: Object.entries(sleeveBudgets).map(([sleeveId, payload]) => ({
+      sleeveId,
+      systemRole: firstDefined(payload?.system_role, '-') || '-',
+      slotCap: fmtInt(payload?.slot_cap),
+      availableSlots: fmtInt(payload?.available_slots),
+      selectedCount: fmtInt(payload?.selected_count),
+      candidateCount: fmtInt(payload?.candidate_count),
+      budgetShare: fmtPct(payload?.budget_share),
+    })),
+  };
+}
+
+export function buildAttributionPanelModel(snapshot) {
+  const meta = snapshot?.artifacts?.run_meta || {};
+  const attribution = meta.attribution && typeof meta.attribution === 'object'
+    ? meta.attribution
+    : {};
+  const summary = attribution.summary && typeof attribution.summary === 'object'
+    ? attribution.summary
+    : {};
+  const reasonCodeSummary = attribution.reason_code_summary && typeof attribution.reason_code_summary === 'object'
+    ? attribution.reason_code_summary
+    : {};
+
+  return {
+    available: Boolean(Object.keys(summary).length || Object.keys(reasonCodeSummary).length),
+    summaryCards: [
+      { label: '状态日志', value: fmtInt(summary.state_log_count) },
+      { label: '预算日志', value: fmtInt(summary.budget_log_count) },
+      { label: 'Sleeve 日志', value: fmtInt(summary.sleeve_log_count) },
+      { label: '人工覆盖日志', value: fmtInt(summary.manual_override_log_count) },
+      { label: '状态切换次数', value: fmtInt(summary.state_transition_count) },
+      { label: '预算变化次数', value: fmtInt(summary.budget_change_count) },
+      { label: '原因码家族数', value: fmtInt(summary.reason_code_family_count) },
+    ],
+    latestStateDate: firstDefined(summary.latest_state_date, '-') || '-',
+    latestBudgetDate: firstDefined(summary.latest_budget_date, '-') || '-',
+    latestManualOverrideDate: firstDefined(summary.latest_manual_override_date, '-') || '-',
+    sleeves: Array.isArray(summary.sleeves) ? summary.sleeves : [],
+    stateReasonCodes: mapObjectEntries(reasonCodeSummary.state_reason_codes),
+    budgetReasonCodes: mapObjectEntries(reasonCodeSummary.budget_reason_codes, (value) => fmtInt(value)),
+    sleeveReasonCodes: mapObjectEntries(reasonCodeSummary.sleeve_reason_codes, (value) => fmtInt(value)),
+    manualOverrideReasons: mapObjectEntries(reasonCodeSummary.manual_override_reasons, (value) => fmtInt(value)),
+    refs: attribution.refs && typeof attribution.refs === 'object'
+      ? Object.entries(attribution.refs).map(([name, value]) => ({ name, value: String(value || '-') }))
+      : [],
   };
 }
 

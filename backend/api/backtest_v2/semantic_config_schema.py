@@ -443,6 +443,17 @@ class GovernedASleeveConfig(StrictModel):
     system_role: str | None = None
     legacy_anchor: str | None = None
     strategy_semantics: str | None = None
+    research_rule_family: str | None = None
+    template_id: str | None = None
+    template_asset_pool_version: str | None = None
+    template_role_map: dict[str, str] | None = None
+    template_proxy_map: dict[str, str] | None = None
+    template_target_formal_symbols: list[str] | None = None
+    proxy_replacement_mode: str | None = None
+    formal_replacement_pairs: dict[str, str] | None = None
+    core_slot_symbols: list[str] | None = None
+    growth_slot_symbols: list[str] | None = None
+    growth_seat_symbol: str | None = None
     budget_semantics: str | None = None
     total_budget_owner: str | None = None
     local_budget_controls: list[str] | None = None
@@ -451,6 +462,26 @@ class GovernedASleeveConfig(StrictModel):
     phase1_scope_mode: str | None = None
     core_beta_symbols: list[str] | None = None
     limited_defense_candidates: list[str] | None = None
+    rebalance_frequency: str | None = None
+    absolute_filter_mode: str | None = None
+    fallback_mode: str | None = None
+    fallback_symbol: str | None = None
+    relative_strength_fast_window: int | None = None
+    relative_strength_mid_window: int | None = None
+    relative_strength_slow_window: int | None = None
+    relative_strength_fast_weight: float | None = None
+    relative_strength_mid_weight: float | None = None
+    relative_strength_slow_weight: float | None = None
+    max_selected_symbols: int | None = None
+    target_exposure: float | None = None
+    min_deployable_exposure: float | None = None
+    target_exposure_by_state_5: dict[str, float] | None = None
+    min_deployable_exposure_by_state_5: dict[str, float] | None = None
+    fallback_allowed: bool | None = None
+    vol_target_window: int | None = None
+    vol_target_annualized_target: float | None = None
+    vol_target_min_scale: float | None = None
+    vol_target_max_scale: float | None = None
 
 
 class GovernedAShareConfig(StrictModel):

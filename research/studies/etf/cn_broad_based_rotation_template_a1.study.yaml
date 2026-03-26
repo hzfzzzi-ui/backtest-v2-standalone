@@ -1,0 +1,443 @@
+study_id: etf/cn_broad_based_rotation_template_a1
+title: CN Broad Based ETF Rotation Template A1
+asset_scope: cn_etf
+baseline_id: baseline_V10_2
+hypothesis: 在标准中证1000ETF与标准红利ETF已接入后，使用共同覆盖窗口重跑模板A的最小对照，验证A0的核心结论在A1标准资产池上是否仍然成立。
+change_scope:
+  modules_modified:
+    - research_entry.cn_etf.broad_based_rotation_template_a1
+variants:
+  - name: A1_GEM_TOP2_CASH
+    description: A1 标准资产池，成长位使用创业板，月频 Top2，MA200+12M>0 过滤，不过门槛时空仓
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_id
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: A1
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          159845.SZ: csi1000_standard
+          510880.SH: dividend_standard
+          159915.SZ: growth_seat
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value: {}
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: cash
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 1.0
+          LIGHT: 0.5
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.5
+          TRANS_UP: 0.5
+          LIGHT: 0.25
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+  - name: A1_STAR50_TOP2_CASH
+    description: 仅替换成长位为科创50，其余条件不变
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 588000.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_id
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: A1
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          159845.SZ: csi1000_standard
+          510880.SH: dividend_standard
+          588000.SH: growth_seat
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value: {}
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 588000.SH
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 588000.SH
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 588000.SH
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: cash
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 1.0
+          LIGHT: 0.5
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.5
+          TRANS_UP: 0.5
+          LIGHT: 0.25
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+  - name: A1_GEM_TOP1_CASH
+    description: 仅将组合构建从 Top2 收缩到 Top1，其余条件不变
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_id
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: A1
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          159845.SZ: csi1000_standard
+          510880.SH: dividend_standard
+          159915.SZ: growth_seat
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value: {}
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: cash
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 1
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 1.0
+          LIGHT: 0.5
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.5
+          TRANS_UP: 0.5
+          LIGHT: 0.25
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+  - name: A1_GEM_TOP2_BOND
+    description: 仅将 fallback 从 cash 改成 511010，其余条件不变
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+          - 511010.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_id
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: A1
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          159845.SZ: csi1000_standard
+          510880.SH: dividend_standard
+          159915.SZ: growth_seat
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value: {}
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 1.0
+          LIGHT: 0.5
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.5
+          TRANS_UP: 0.5
+          LIGHT: 0.25
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+windows:
+  - key: "2126"
+    role: main
+    start: "2021-03-31"
+    end: "2026-03-25"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: outputs/baselines/baseline_V10_2/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true
+  template_id: broad_based_rotation_template_a
+  template_versions:
+    A1:
+      status: runnable_standard_asset_pool
+      growth_seat_choices:
+        - 159915.SZ
+        - 588000.SH
+      standard_assets:
+        - 159845.SZ
+        - 510880.SH
+      overlap_window:
+        start: "2021-03-31"
+        end: "2026-03-25"

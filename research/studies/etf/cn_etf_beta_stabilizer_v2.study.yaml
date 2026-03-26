@@ -1,0 +1,265 @@
+study_id: etf/cn_etf_beta_stabilizer_v2
+title: CN ETF Beta Stabilizer V2
+asset_scope: cn_etf
+baseline_id: baseline_V10_2
+hypothesis: 在 `510300/510050` 双宽基主池下，通过提升并持上限、显式 fallback 与 Governor 部署语义，验证 ETF sleeve 收益差是否主要由长期部署不足导致。
+change_scope:
+  modules_modified:
+    - research_entry.cn_etf.beta_stabilizer_v2
+variants:
+  - name: V2_CASH_1
+    description: 双宽基主池，MA120 绝对过滤，cash fallback，单 ETF 战术部署
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510050.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510050.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: dual_momentum_basic
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510050.SH
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: weekly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma120
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: cash
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 60
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 120
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.4
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.6
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 1
+      - path: governed_a_share.etf_beta.target_exposure
+        value: 0.1
+      - path: governed_a_share.etf_beta.min_deployable_exposure
+        value: 0.1
+  - name: V2_CASH_2
+    description: 双宽基主池，MA120 绝对过滤，cash fallback，双 ETF 并持
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510050.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510050.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: dual_momentum_basic
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510050.SH
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: weekly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma120
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: cash
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 60
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 120
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.4
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.6
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.target_exposure
+        value: 0.2
+      - path: governed_a_share.etf_beta.min_deployable_exposure
+        value: 0.1
+  - name: V2_BOND_1
+    description: 双宽基主池，MA120 绝对过滤，511010 fallback，单 ETF 战术部署
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510050.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510050.SH
+          - 511010.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: dual_momentum_basic
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510050.SH
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: weekly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma120
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 60
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 120
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.4
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.6
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 1
+      - path: governed_a_share.etf_beta.target_exposure
+        value: 0.1
+      - path: governed_a_share.etf_beta.min_deployable_exposure
+        value: 0.1
+  - name: V2_BOND_2
+    description: 双宽基主池，MA120 绝对过滤，511010 fallback，双 ETF 并持
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510050.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510050.SH
+          - 511010.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: dual_momentum_basic
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510050.SH
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: weekly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma120
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 60
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 120
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.4
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.6
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.target_exposure
+        value: 0.2
+      - path: governed_a_share.etf_beta.min_deployable_exposure
+        value: 0.1
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-11-04"
+    end: "2026-03-24"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: outputs/baselines/baseline_V10_2/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

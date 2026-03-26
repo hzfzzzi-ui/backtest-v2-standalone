@@ -822,3 +822,25 @@ def test_build_rebalance_orders_moneyflow_overlay_soft_weight_uses_overlay_score
     buy_orders = [order for order in orders if order.side == Side.BUY]
     assert [order.symbol for order in buy_orders] == ["sh601011", "sh601012", "sh601013"]
     assert [round(float(order.order_value_scale), 2) for order in buy_orders] == [0.9, 1.0, 1.1]
+
+
+def test_build_rebalance_orders_respects_signal_meta_order_value_scale() -> None:
+    buy_signal = _signal("sh601101", sleeve_id="etf", alpha_id="cn_etf_beta", compose_score=0.9)
+    buy_signal.meta["order_value_scale"] = 0.4
+
+    orders = build_rebalance_orders(
+        positions={},
+        cash_available=100000.0,
+        nav_close=100000.0,
+        max_positions=1,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        next_open={"sh601101": 10.0},
+        min_positions=1,
+    )
+
+    buy_orders = [order for order in orders if order.side == Side.BUY]
+    assert len(buy_orders) == 1
+    assert round(float(buy_orders[0].order_value_scale), 2) == 0.4
+    assert int(buy_orders[0].qty) == 4000

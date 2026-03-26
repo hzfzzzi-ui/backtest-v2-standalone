@@ -282,19 +282,21 @@ function setDrawerPanel(panel) {
     const assetScope = typeof resolvePreferredAssetScope === 'function'
       ? resolvePreferredAssetScope()
       : 'cn_a_equity';
-    const isEtf = typeof isCnEtfAssetScope === 'function' ? isCnEtfAssetScope(assetScope) : assetScope === 'cn_etf';
+    const panelMeta = typeof resolveAssetScopedPanelMeta === 'function'
+      ? resolveAssetScopedPanelMeta(assetScope)
+      : {};
     const titles = {
-      s1: isEtf ? 'S1 ETF Universe' : 'S1 Universe',
-      s2: 'S2 Market Regime',
-      s3: 'S3 Signal Generation',
-      s4: 'S4 Composite Signal',
-      s5: 'S5 Ranking Score',
-      s6: 'S6 Portfolio Build',
-      s7: 'S7 Risk Budget',
-      s8: 'S8 Market Filter',
-      s9: 'S9 Exit Rules',
+      s1: panelMeta.s1?.title || '资产范围',
+      s2: panelMeta.s2?.title || 'Regime 规则',
+      s3: panelMeta.s3?.title || '资产特化范围',
+      s4: panelMeta.s4?.title || '信号逻辑',
+      s5: panelMeta.s5?.title || '排序逻辑',
+      s6: panelMeta.s6?.title || '组合构建',
+      s7: panelMeta.s7?.title || 'Governor 预算',
+      s8: panelMeta.s8?.title || '风险约束',
+      s9: panelMeta.s9?.title || '退出规则',
       json: 'JSON',
-      history: 'Experiment History',
+      history: '历史实验',
     };
     titleEl.textContent = titles[state.drawer_panel] || state.drawer_panel;
   }
@@ -1054,6 +1056,7 @@ function applyConfigToUI(cfg) {
 
   buildConfigDraft();
   updateUniverseInputVisibility();
+  if (typeof renderRunHints === 'function') renderRunHints();
   syncExitLinkage();
   updateAtrNote();
   return { unsupportedStrategy: unsupportedAdaptiveRegime ? rawStrategyName : null };

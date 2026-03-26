@@ -1,0 +1,519 @@
+study_id: etf/cn_broad_based_rotation_template_a0_core_satellite_v2
+title: CN Broad Based Rotation Template A0 Core Satellite V2
+asset_scope: cn_etf
+baseline_id: baseline_V10_2
+hypothesis: 在共同覆盖窗口内，把 A0 从自由 Top2 改成 core_slot 加 growth_slot 的结构化模板，并用最小 proxy 替换 AB 判断结构化与标准化替换分别带来什么影响。
+change_scope:
+  modules_modified:
+    - research_entry.cn_etf.broad_based_rotation_template_a0_core_satellite_v2
+variants:
+  - name: A0V2_NONE
+    description: A0 V2 控制组，保留 A0 胜出版骨架与 proxy 资产池，只把持仓构建改成 core_slot 加 growth_slot
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+          - 159915.SZ
+          - 511010.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a0_core_satellite_v2
+      - path: governed_a_share.etf_beta.template_id
+        value: broad_based_rotation_template_a0_core_satellite_v2
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: A0_V2
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          512100.SH: csi1000_proxy
+          512890.SH: dividend_proxy
+          159915.SZ: growth_seat
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value:
+          512100.SH: CSI1000_STANDARD
+          512890.SH: DIVIDEND_STANDARD
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.proxy_replacement_mode
+        value: none
+      - path: governed_a_share.etf_beta.formal_replacement_pairs
+        value:
+          512100.SH: 159845.SZ
+          512890.SH: 510880.SH
+      - path: governed_a_share.etf_beta.core_slot_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+      - path: governed_a_share.etf_beta.growth_slot_symbols
+        value:
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 1.0
+          LIGHT: 0.5
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.5
+          TRANS_UP: 0.5
+          LIGHT: 0.25
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+  - name: A0V2_CSI1000_PROXY_ONLY
+    description: 只把中证1000 proxy 替换成标准中证1000ETF，其余骨架不变
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 512890.SH
+          - 159915.SZ
+          - 511010.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a0_core_satellite_v2
+      - path: governed_a_share.etf_beta.template_id
+        value: broad_based_rotation_template_a0_core_satellite_v2
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: A0_V2
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          159845.SZ: csi1000_standard
+          512890.SH: dividend_proxy
+          159915.SZ: growth_seat
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value:
+          512890.SH: DIVIDEND_STANDARD
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.proxy_replacement_mode
+        value: csi1000_proxy_only
+      - path: governed_a_share.etf_beta.formal_replacement_pairs
+        value:
+          512100.SH: 159845.SZ
+          512890.SH: 510880.SH
+      - path: governed_a_share.etf_beta.core_slot_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 512890.SH
+      - path: governed_a_share.etf_beta.growth_slot_symbols
+        value:
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 512890.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 1.0
+          LIGHT: 0.5
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.5
+          TRANS_UP: 0.5
+          LIGHT: 0.25
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+  - name: A0V2_DIVIDEND_PROXY_ONLY
+    description: 只把红利 proxy 替换成标准红利ETF，其余骨架不变
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 510880.SH
+          - 159915.SZ
+          - 511010.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a0_core_satellite_v2
+      - path: governed_a_share.etf_beta.template_id
+        value: broad_based_rotation_template_a0_core_satellite_v2
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: A0_V2
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          512100.SH: csi1000_proxy
+          510880.SH: dividend_standard
+          159915.SZ: growth_seat
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value:
+          512100.SH: CSI1000_STANDARD
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.proxy_replacement_mode
+        value: dividend_proxy_only
+      - path: governed_a_share.etf_beta.formal_replacement_pairs
+        value:
+          512100.SH: 159845.SZ
+          512890.SH: 510880.SH
+      - path: governed_a_share.etf_beta.core_slot_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 510880.SH
+      - path: governed_a_share.etf_beta.growth_slot_symbols
+        value:
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 1.0
+          LIGHT: 0.5
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.5
+          TRANS_UP: 0.5
+          LIGHT: 0.25
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+  - name: A0V2_FULL_STANDARD_SWAP
+    description: 同时把中证1000和红利 proxy 换成标准ETF，仍然保持 A0 V2 的 core_slot 加 growth_slot 骨架
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+          - 511010.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a0_core_satellite_v2
+      - path: governed_a_share.etf_beta.template_id
+        value: broad_based_rotation_template_a0_core_satellite_v2
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: A0_V2
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          159845.SZ: csi1000_standard
+          510880.SH: dividend_standard
+          159915.SZ: growth_seat
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value: {}
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.proxy_replacement_mode
+        value: full_standard_swap
+      - path: governed_a_share.etf_beta.formal_replacement_pairs
+        value:
+          512100.SH: 159845.SZ
+          512890.SH: 510880.SH
+      - path: governed_a_share.etf_beta.core_slot_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+      - path: governed_a_share.etf_beta.growth_slot_symbols
+        value:
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 1.0
+          LIGHT: 0.5
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.5
+          TRANS_UP: 0.5
+          LIGHT: 0.25
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.fallback_allowed
+        value: true
+windows:
+  - key: "2126"
+    role: main
+    start: "2021-03-31"
+    end: "2026-03-24"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: outputs/baselines/baseline_V10_2/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true
+  parent_template_id: broad_based_rotation_template_a
+  template_id: broad_based_rotation_template_a0_core_satellite_v2
+  template_versions:
+    A0_V2:
+      status: runnable_core_satellite
+      control_variant: A0V2_NONE
+      growth_seat_choices:
+        - 159915.SZ
+      replacement_modes:
+        - NONE
+        - CSI1000_PROXY_ONLY
+        - DIVIDEND_PROXY_ONLY
+        - FULL_STANDARD_SWAP
+      overlap_window:
+        start: "2021-03-31"
+        end: "2026-03-24"

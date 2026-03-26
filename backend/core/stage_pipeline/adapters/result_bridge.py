@@ -40,6 +40,9 @@ def _build_governor_budget_audit(runtime: Any) -> dict[str, Any] | None:
     rows = [dict(row) for row in list(getattr(runtime, "daily_rows", []) or ())]
     if not rows:
         return None
+    request = getattr(runtime, "request", None)
+    asset_context = dict(getattr(request, "asset_context", {}) or {})
+    asset_scope = str(asset_context.get("asset_scope") or "").strip().lower()
     reason_counts: dict[str, int] = {}
     drawdown_state_counts: dict[str, int] = {}
     recovery_state_counts: dict[str, int] = {}
@@ -94,6 +97,61 @@ def _build_governor_budget_audit(runtime: Any) -> dict[str, Any] | None:
             )
     if latest_payload is None:
         return None
+    try:
+        current_multiplier = (
+            None
+            if latest_payload.get("risk_budget_multiplier") is None
+            else float(latest_payload.get("risk_budget_multiplier"))
+        )
+    except Exception:
+        current_multiplier = None
+    if current_multiplier is None:
+        try:
+            fallback_multiplier = (
+                None
+                if latest_payload.get("total_risk_budget") is None
+                else float(latest_payload.get("total_risk_budget"))
+            )
+        except Exception:
+            fallback_multiplier = None
+        if fallback_multiplier is not None:
+            latest_payload = dict(latest_payload)
+            latest_payload["risk_budget_multiplier"] = fallback_multiplier
+    if asset_scope == "cn_etf":
+        latest_payload = dict(latest_payload)
+        latest_payload["asset_scope"] = "cn_etf"
+        latest_payload["budget_consumer_sleeve_id"] = "cn_etf_beta"
+        latest_payload["budget_consumer_system_role"] = "market_beta_sleeve"
+        latest_payload["budget_semantics"] = "consume_governor_sleeve_budget"
+        latest_payload["phase1_boundary_excludes"] = []
+        latest_payload["local_budget_controls"] = []
+        sleeve_budgets = dict(latest_payload.get("sleeve_budgets") or {})
+        etf_sleeve_payload = dict(sleeve_budgets.get("cn_etf_beta") or {})
+        if not etf_sleeve_payload:
+            stock_like_payload = next(
+                (
+                    dict(payload)
+                    for key, payload in sleeve_budgets.items()
+                    if str(key).strip() == "cn_stock_trend_alpha_core" and isinstance(payload, dict)
+                ),
+                {},
+            )
+            etf_sleeve_payload = stock_like_payload
+        if not etf_sleeve_payload:
+            etf_sleeve_payload = {
+                "slot_cap": latest_payload.get("effective_max_positions"),
+                "available_slots": latest_payload.get("effective_max_positions"),
+                "positions_after_sell": 0,
+                "candidate_count": 0,
+                "selected_count": 0,
+                "budget_share": 1.0,
+                "raw_sleeve_ids": [],
+            }
+        etf_sleeve_payload["system_role"] = "market_beta_sleeve"
+        etf_sleeve_payload["budget_source"] = str(latest_payload.get("budget_owner") or "global_portfolio_governor")
+        etf_sleeve_payload["phase1_boundary_excludes"] = []
+        etf_sleeve_payload["local_budget_controls"] = []
+        latest_payload["sleeve_budgets"] = {"cn_etf_beta": etf_sleeve_payload}
     return {
         "contract_version": str(latest_payload.get("contract_version") or "cn_a_governor_budget@1"),
         "summary": {

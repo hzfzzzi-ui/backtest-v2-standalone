@@ -24,6 +24,14 @@ const portfolioBenchmarkCache = ref({});
 const artifacts = computed(() => props.snapshot?.artifacts || {});
 const view = computed(() => props.snapshot?.view || {});
 const symbolRows = computed(() => Array.isArray(artifacts.value.symbolPerformanceRows) ? artifacts.value.symbolPerformanceRows : []);
+const isResearchCombo = computed(() => {
+  const runMeta = artifacts.value.run_meta && typeof artifacts.value.run_meta === 'object'
+    ? artifacts.value.run_meta
+    : {};
+  const assetRole = String(runMeta?.data?.asset_role || '').trim().toLowerCase();
+  return assetRole === 'research_combo' || !!(runMeta.research_combo && typeof runMeta.research_combo === 'object');
+});
+const effectiveChartMode = computed(() => (isResearchCombo.value ? 'portfolio' : String(view.value.chartMode || 'portfolio')));
 
 const selectedSymbol = computed(() => {
   const explicit = String(view.value.selectedSymbol || '').trim().toLowerCase();
@@ -31,14 +39,15 @@ const selectedSymbol = computed(() => {
   return String(symbolRows.value[0]?.symbol || '').trim().toLowerCase();
 });
 
-const isSymbolMode = computed(() => view.value.chartMode === 'symbol' && !!selectedSymbol.value);
+const isSymbolMode = computed(() => effectiveChartMode.value === 'symbol' && !!selectedSymbol.value);
 const portfolioBenchmarkSymbol = computed(() => {
   const metaData = artifacts.value.run_meta?.data || {};
   const etfSymbols = Array.isArray(metaData.etf_symbols) ? metaData.etf_symbols : [];
   return String(metaData.benchmark || etfSymbols[0] || DEFAULT_PORTFOLIO_BENCHMARK_SYMBOL).trim() || DEFAULT_PORTFOLIO_BENCHMARK_SYMBOL;
 });
 const benchmarkToggleLabel = computed(() => (isSymbolMode.value ? '对比基准' : `对比 ${portfolioBenchmarkSymbol.value}`));
-const showPortfolioBenchmark = computed(() => !isSymbolMode.value && !!view.value.showBenchmark);
+const showPortfolioBenchmark = computed(() => !isSymbolMode.value && !isResearchCombo.value && !!view.value.showBenchmark);
+const showBenchmarkToggle = computed(() => !isResearchCombo.value);
 
 const REGIME_MODE_LABELS = {
   BULL: '牛市 / 主趋势',
@@ -104,6 +113,7 @@ const portfolioRegimeMeta = computed(() => {
 });
 
 const portfolioRegimeLegend = computed(() => {
+  if (isResearchCombo.value) return [];
   const states = Array.isArray(artifacts.value.marketStates) ? artifacts.value.marketStates : [];
   const seen = new Set();
   states.forEach((row) => {
@@ -120,6 +130,9 @@ const portfolioRegimeLegend = computed(() => {
 });
 
 const portfolioRegimeSummary = computed(() => {
+  if (isResearchCombo.value) {
+    return '研究组合锚点：当前只展示组合 NAV，不绘制市场基准绝对价格。';
+  }
   const meta = portfolioRegimeMeta.value;
   const engineLabel = meta.engine === 'market_regime_framework'
     ? '正式 Regime Framework'

@@ -21,12 +21,21 @@ def apply_universe_runtime_cfg(
     universe = cfg.setdefault("universe", {})
     wb_universe = wb_cfg.get("universe") if isinstance(wb_cfg.get("universe"), dict) else {}
     wb_filters = wb_universe.get("filters") if isinstance(wb_universe.get("filters"), dict) else {}
-    if wb_universe.get("start"):
+    asset_context = cfg.get("asset_context") if isinstance(cfg.get("asset_context"), dict) else {}
+    asset_scope = str(
+        wb_cfg.get("asset_scope")
+        or cfg.get("asset_scope")
+        or asset_context.get("asset_scope")
+        or ""
+    ).strip().lower()
+    benchmark_written = False
+    if "start" in wb_universe and wb_universe.get("start") is not None:
         universe["start"] = str(wb_universe.get("start"))
-    if wb_universe.get("end"):
+    if "end" in wb_universe and wb_universe.get("end") is not None:
         universe["end"] = str(wb_universe.get("end"))
-    if wb_universe.get("benchmark"):
+    if "benchmark" in wb_universe and wb_universe.get("benchmark") is not None:
         universe["benchmark"] = str(wb_universe.get("benchmark"))
+        benchmark_written = True
     if isinstance(wb_universe.get("symbols"), list):
         universe["symbols"] = list(wb_universe.get("symbols") or [])
     if wb_universe.get("membership_mode") is not None:
@@ -34,14 +43,18 @@ def apply_universe_runtime_cfg(
     if wb_universe.get("allow_low_fidelity_history") is not None:
         universe["allow_low_fidelity_history"] = bool(wb_universe.get("allow_low_fidelity_history"))
     if use_body_universe_fields:
-        if getattr(body, "start_date", None):
+        if getattr(body, "start_date", None) is not None:
             universe["start"] = str(getattr(body, "start_date"))
-        if getattr(body, "end_date", None):
+        if getattr(body, "end_date", None) is not None:
             universe["end"] = str(getattr(body, "end_date"))
-        if getattr(body, "benchmark", None):
+        if getattr(body, "benchmark", None) is not None:
             universe["benchmark"] = str(getattr(body, "benchmark"))
+            benchmark_written = True
         if getattr(body, "symbols", None):
             universe["symbols"] = list(getattr(body, "symbols"))
+    if asset_scope == "cn_etf" and not benchmark_written:
+        # ETF research entry must not silently inherit the stock baseline benchmark.
+        universe["benchmark"] = ""
     if wb_filters:
         filters = {
             "exclude_st": bool(wb_filters.get("exclude_st", True)),

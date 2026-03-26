@@ -215,6 +215,162 @@ def test_get_experiment_surface_and_sections(tmp_path: Path, monkeypatch) -> Non
     assert stock_names_section["data"]["sh600519"] == "贵州茅台"
 
 
+def test_get_experiment_surface_exposes_backend_combo_truth(tmp_path: Path, monkeypatch) -> None:
+    stock_dir = tmp_path / "exp_stock_component"
+    etf_dir = tmp_path / "exp_etf_component"
+    combo_dir = tmp_path / "exp_combo_anchor"
+    for path in (stock_dir, etf_dir, combo_dir):
+        path.mkdir(parents=True, exist_ok=True)
+
+    def _write_component_bundle(
+        exp_dir: Path,
+        *,
+        exp_id: str,
+        asset_scope: str,
+        benchmark: str,
+        base_state: str,
+        effective_state: str,
+        risk_budget: float,
+        budget_reason: str,
+    ) -> None:
+        _write_json(
+            exp_dir / "manifest.json",
+            {
+                "exp_id": exp_id,
+                "experiment_id": exp_id,
+                "status": "OK",
+                "created_at": "2026-03-26T09:00:00",
+                "schema_version": "backtest_v2_experiment_manifest@2",
+                "artifacts": {
+                    "perf": "perf.json",
+                    "run_meta": "run_meta.json",
+                    "config": "config.json",
+                    "nav": "nav.csv",
+                },
+                "stage_pipeline": {
+                    "route_id": "provider_breakout_runtime",
+                    "execution_shell": "stage_pipeline_shell_bridge",
+                },
+                "asset_scope": asset_scope,
+                "asset_context": {"asset_scope": asset_scope},
+            },
+        )
+        _write_json(exp_dir / "perf.json", {"cagr": 0.1, "total_return": 0.2, "max_drawdown": -0.1})
+        _write_json(
+            exp_dir / "run_meta.json",
+            {
+                "data": {
+                    "asset_scope": asset_scope,
+                    "benchmark": benchmark,
+                },
+                "regime": {
+                    "latest_state": {
+                        "base_state": base_state,
+                        "effective_state": effective_state,
+                        "effective_coarse_state": "RISK_ON",
+                    }
+                },
+                "governed_snapshot": {
+                    "budget_consumer_sleeve_id": (
+                        "cn_stock_trend_alpha_core" if asset_scope == "cn_a_equity" else "cn_etf_beta"
+                    ),
+                    "budget_consumer_system_role": (
+                        "stock_alpha_sleeve" if asset_scope == "cn_a_equity" else "market_beta_sleeve"
+                    ),
+                    "total_risk_budget": risk_budget,
+                    "budget_reason_codes": [budget_reason],
+                },
+            },
+        )
+        _write_json(exp_dir / "config.json", {"mode": "experiment", "asset_scope": asset_scope})
+        (exp_dir / "nav.csv").write_text("date,nav\n2026-03-24,1.0\n2026-03-25,1.1\n", encoding="utf-8")
+
+    _write_component_bundle(
+        stock_dir,
+        exp_id="exp_stock_component",
+        asset_scope="cn_a_equity",
+        benchmark="000300.SH",
+        base_state="TRANS_UP",
+        effective_state="BULL",
+        risk_budget=0.8,
+        budget_reason="STOCK_OK",
+    )
+    _write_component_bundle(
+        etf_dir,
+        exp_id="exp_etf_component",
+        asset_scope="cn_etf",
+        benchmark="510300.SH",
+        base_state="LIGHT",
+        effective_state="LIGHT",
+        risk_budget=0.2,
+        budget_reason="ETF_OK",
+    )
+    _write_json(
+        combo_dir / "manifest.json",
+        {
+            "exp_id": "exp_combo_anchor",
+            "experiment_id": "exp_combo_anchor",
+            "status": "OK",
+            "created_at": "2026-03-26T09:00:00",
+            "schema_version": "backtest_v2_experiment_manifest@2",
+            "artifacts": {
+                "perf": "perf.json",
+                "run_meta": "run_meta.json",
+                "config": "config.json",
+                "nav": "nav.csv",
+            },
+            "stage_pipeline": {
+                "route_id": "cn_stock_etf_research_combo",
+                "execution_shell": "read_only_combo",
+            },
+            "asset_scope": "cn_a_equity",
+            "asset_context": {"asset_scope": "cn_a_equity"},
+        },
+    )
+    _write_json(combo_dir / "perf.json", {"cagr": 0.09, "total_return": 0.3, "max_drawdown": -0.12})
+    _write_json(
+        combo_dir / "run_meta.json",
+        {
+            "data": {
+                "asset_scope": "cn_a_equity",
+                "asset_role": "research_combo",
+            },
+            "research_combo": {"mode": "daily_rebalanced_equal_weight_50_50"},
+            "combo_components": {
+                "stock_component": {"exp_id": "exp_stock_component"},
+                "etf_component": {"exp_id": "exp_etf_component"},
+            },
+        },
+    )
+    _write_json(combo_dir / "config.json", {"mode": "experiment", "asset_scope": "cn_a_equity"})
+    (combo_dir / "nav.csv").write_text("date,nav\n2026-03-24,1.0\n2026-03-25,1.02\n", encoding="utf-8")
+
+    exp_dirs = {
+        "exp_stock_component": stock_dir,
+        "exp_etf_component": etf_dir,
+        "exp_combo_anchor": combo_dir,
+    }
+    monkeypatch.setattr(
+        experiment_query_service,
+        "resolve_experiment_dir_by_id",
+        lambda exp_id: exp_dirs.get(exp_id),
+    )
+
+    surface = experiment_query_service.get_experiment_surface("exp_combo_anchor")
+    assert surface["lazy_sections"]["combo_truth"]["available"] is True
+
+    combo_truth = experiment_query_service.get_experiment_surface_section("exp_combo_anchor", "combo_truth")
+    assert combo_truth["section"] == "combo_truth"
+    assert combo_truth["data"]["contract_version"] == "research_combo_truth@1"
+    assert combo_truth["data"]["display"]["governor"]["budget_consumer_text"] == "cn_stock_trend_alpha_core + cn_etf_beta"
+    assert combo_truth["data"]["components"]["stock"]["exp_id"] == "exp_stock_component"
+    assert combo_truth["data"]["components"]["etf"]["exp_id"] == "exp_etf_component"
+    assert combo_truth["data"]["components"]["stock"]["snapshot"]["artifacts"]["run_meta"]["data"]["benchmark"] == "000300.SH"
+    assert combo_truth["data"]["components"]["etf"]["snapshot"]["artifacts"]["run_meta"]["data"]["benchmark"] == "510300.SH"
+    assert combo_truth["data"]["components"]["stock"]["snapshot"]["artifacts"]["nav"][1]["nav"] == 1.1
+    assert combo_truth["data"]["display"]["regime"]["available"] is True
+
+
 def test_list_experiments_wraps_manifest_and_perf_summary(monkeypatch) -> None:
     monkeypatch.setattr(
         experiment_query_service.experiment_history_service,

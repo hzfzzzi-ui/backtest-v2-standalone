@@ -29,6 +29,22 @@ async function readExperimentSurfaceSection(expId, section) {
   );
 }
 
+function cloneJson(value) {
+  if (Array.isArray(value)) return value.slice();
+  if (value && typeof value === 'object') return { ...value };
+  return value;
+}
+
+async function readExperimentSurfaceSectionDirect(expId, section) {
+  const normalizedExpId = String(expId || '').trim();
+  const normalizedSection = String(section || '').trim().toLowerCase();
+  if (!normalizedExpId || !normalizedSection) return null;
+  return apiRequestJson(
+    `experiment_surface_direct_${normalizedExpId}_${normalizedSection}`,
+    `/api/backtest_v2/experiments/${encodeURIComponent(normalizedExpId)}/surface/${encodeURIComponent(normalizedSection)}`,
+  );
+}
+
 function isSurfaceSectionAvailable(surface, section) {
   return !!surface?.lazy_sections?.[section]?.available;
 }
@@ -46,7 +62,14 @@ function normalizeNavRows(rows) {
     const date = String(row?.date ?? row?.datetime ?? row?.trade_date ?? '').trim();
     const nav = Number(row?.nav ?? row?.strategy_nav ?? row?.equity ?? row?.portfolio_value ?? row?.value);
     if (!date || !Number.isFinite(nav) || nav <= 0) return;
-    out.push({ date, nav });
+    const stockNav = _toFiniteNumber(row?.stock_nav);
+    const etfNav = _toFiniteNumber(row?.etf_nav);
+    out.push({
+      date,
+      nav,
+      ...(stockNav !== null ? { stock_nav: stockNav } : {}),
+      ...(etfNav !== null ? { etf_nav: etfNav } : {}),
+    });
   });
   out.sort((a, b) => (a.date < b.date ? -1 : 1));
   return out;
@@ -164,6 +187,134 @@ function normalizeSymbolPerformanceRows(rows) {
     });
     return acc;
   }, []);
+}
+
+function summarizeReasonCodes(reasonCodes, fallbackLabel = '-') {
+  const values = Array.isArray(reasonCodes)
+    ? reasonCodes.map((value) => String(value || '').trim()).filter(Boolean)
+    : [];
+  return values.length ? values.slice(0, 3).join(', ') : fallbackLabel;
+}
+
+function buildResearchComboDisplayLegacyShim(stockRunMeta, etfRunMeta, comboRunMeta) {
+  const stockLatest = stockRunMeta?.regime?.latest_state && typeof stockRunMeta.regime.latest_state === 'object'
+    ? stockRunMeta.regime.latest_state
+    : {};
+  const etfLatest = etfRunMeta?.regime?.latest_state && typeof etfRunMeta.regime.latest_state === 'object'
+    ? etfRunMeta.regime.latest_state
+    : {};
+  const stockGovernor = stockRunMeta?.governed_snapshot && typeof stockRunMeta.governed_snapshot === 'object'
+    ? stockRunMeta.governed_snapshot
+    : {};
+  const etfGovernor = etfRunMeta?.governed_snapshot && typeof etfRunMeta.governed_snapshot === 'object'
+    ? etfRunMeta.governed_snapshot
+    : {};
+  const comboMode = String(comboRunMeta?.research_combo?.mode || '').trim();
+
+  const regimeSummary = {
+    available: Boolean(
+      stockLatest.base_state
+      || stockLatest.effective_state
+      || etfLatest.base_state
+      || etfLatest.effective_state
+    ),
+    base_state: stockLatest.base_state ? `个股 ${stockLatest.base_state}` : '-',
+    effective_state: etfLatest.effective_state ? `ETF ${etfLatest.effective_state}` : '-',
+    coarse_state: [
+      stockLatest.effective_coarse_state ? `个股 ${stockLatest.effective_coarse_state}` : '',
+      etfLatest.effective_coarse_state ? `ETF ${etfLatest.effective_coarse_state}` : '',
+    ].filter(Boolean).join(' | ') || '-',
+    risk_budget_multiplier_text: [
+      stockGovernor.total_risk_budget != null ? `个股 ${pct(stockGovernor.total_risk_budget)}` : '',
+      etfGovernor.total_risk_budget != null ? `ETF ${pct(etfGovernor.total_risk_budget)}` : '',
+    ].filter(Boolean).join(' | ') || '-',
+    reason_text: [
+      stockLatest.effective_state ? `个股 ${stockLatest.effective_state}` : '',
+      etfLatest.effective_state ? `ETF ${etfLatest.effective_state}` : '',
+      comboMode ? `模式 ${comboMode}` : '',
+    ].filter(Boolean).join(' | ') || '-',
+    manual_override_text: (
+      stockLatest.manual_override?.active || etfLatest.manual_override?.active
+    )
+      ? [
+        stockLatest.manual_override?.active ? `个股 ${String(stockLatest.manual_override.reason || stockLatest.manual_override.scope || 'override').trim()}` : '',
+        etfLatest.manual_override?.active ? `ETF ${String(etfLatest.manual_override.reason || etfLatest.manual_override.scope || 'override').trim()}` : '',
+      ].filter(Boolean).join(' | ')
+      : '无',
+  };
+
+  const governorSummary = {
+    available: Boolean(
+      stockGovernor.total_risk_budget != null
+      || etfGovernor.total_risk_budget != null
+      || stockGovernor.budget_consumer_sleeve_id
+      || etfGovernor.budget_consumer_sleeve_id
+    ),
+    total_risk_budget_text: [
+      stockGovernor.total_risk_budget != null ? `个股 ${pct(stockGovernor.total_risk_budget)}` : '',
+      etfGovernor.total_risk_budget != null ? `ETF ${pct(etfGovernor.total_risk_budget)}` : '',
+    ].filter(Boolean).join(' | ') || '-',
+    total_exposure_cap_text: comboMode ? `研究组合 ${comboMode}` : '研究组合 50/50',
+    budget_consumer_text: 'cn_stock_trend_alpha_core + cn_etf_beta',
+    budget_reason_text: [
+      stockGovernor.budget_reason_codes?.length ? `个股 ${summarizeReasonCodes(stockGovernor.budget_reason_codes)}` : '',
+      etfGovernor.budget_reason_codes?.length ? `ETF ${summarizeReasonCodes(etfGovernor.budget_reason_codes)}` : '',
+    ].filter(Boolean).join(' | ') || '-',
+  };
+
+  return {
+    regime: regimeSummary,
+    governor: governorSummary,
+  };
+}
+
+async function loadResearchComboComponentLegacyShim(expId, sections) {
+  const normalizedExpId = String(expId || '').trim();
+  if (!normalizedExpId) return null;
+  const requestedSections = Array.isArray(sections) ? sections : [];
+  const payloads = await Promise.all(requestedSections.map(async (section) => {
+    try {
+      const payload = await readExperimentSurfaceSectionDirect(normalizedExpId, section);
+      return [section, payload?.data ?? null];
+    } catch (_) {
+      return [section, null];
+    }
+  }));
+  const sectionMap = Object.fromEntries(payloads);
+  const navRows = normalizeNavRows(Array.isArray(sectionMap.nav) ? sectionMap.nav : []);
+  const componentRunMeta = normalizeRunMetaCounters(sectionMap.run_meta || {});
+  return {
+    exp_id: normalizedExpId,
+    run_meta: componentRunMeta,
+    benchmarkSymbol: String(componentRunMeta?.data?.benchmark || '').trim(),
+    navRows,
+    navSeries: navRows.map((row) => ({ date: row.date, value: row.nav })),
+    symbolPerformanceRows: normalizeSymbolPerformanceRows(sectionMap.symbol_stats || []),
+    tradesRows: Array.isArray(sectionMap.trades) ? cloneJson(sectionMap.trades) || [] : [],
+    funnelRows: Array.isArray(sectionMap.stage_funnel) ? cloneJson(sectionMap.stage_funnel) || [] : [],
+    dailyRows: Array.isArray(sectionMap.daily) ? cloneJson(sectionMap.daily) || [] : [],
+    reasonRows: Array.isArray(sectionMap.reason_codes) ? cloneJson(sectionMap.reason_codes) || [] : [],
+    stockNames: sectionMap.stock_names && typeof sectionMap.stock_names === 'object'
+      ? cloneJson(sectionMap.stock_names) || {}
+      : {},
+  };
+}
+
+async function loadResearchComboComponentArtifactsLegacyShim(runMeta) {
+  const comboComponents = runMeta?.combo_components && typeof runMeta.combo_components === 'object'
+    ? runMeta.combo_components
+    : {};
+  const stockExpId = String(comboComponents.stock_component?.exp_id || '').trim();
+  const etfExpId = String(comboComponents.etf_component?.exp_id || '').trim();
+  const [stock, etf] = await Promise.all([
+    loadResearchComboComponentLegacyShim(stockExpId, ['run_meta', 'nav', 'symbol_stats', 'trades', 'stage_funnel', 'daily', 'reason_codes', 'stock_names']),
+    loadResearchComboComponentLegacyShim(etfExpId, ['run_meta', 'nav', 'symbol_stats', 'stock_names']),
+  ]);
+  return {
+    stock,
+    etf,
+    display: buildResearchComboDisplayLegacyShim(stock?.run_meta, etf?.run_meta, runMeta),
+  };
 }
 
 function stockZh(symbol) {
@@ -412,7 +563,7 @@ async function loadActiveArtifacts() {
   }
 
   const requiredSections = ['nav', 'run_meta', 'config'];
-  const optionalSections = [];
+  const optionalSections = ['drawdown', 'stage_funnel', 'trades', 'daily', 'reason_codes', 'cash_blocked_buys_recent', 'stock_names', 'symbol_stats', 'combo_truth'];
   const sectionData = {};
   const missing = [];
   const errors = [];
@@ -457,12 +608,16 @@ async function loadActiveArtifacts() {
 
   setStatusItems(statusItems);
 
-  const navRows = normalizeNavRows(Array.isArray(sectionData.nav) ? sectionData.nav : []);
-  const benchmark = await loadBenchmarkSeries(navRows);
-  const benchmarkPoints = Array.isArray(benchmark?.points) ? benchmark.points : [];
   const dailyRows = Array.isArray(sectionData.daily) ? sectionData.daily : [];
   const symbolStats = Array.isArray(sectionData.symbol_stats) ? sectionData.symbol_stats : [];
   const normalizedRunMeta = normalizeRunMetaCounters(sectionData.run_meta || {});
+  const navRows = normalizeNavRows(Array.isArray(sectionData.nav) ? sectionData.nav : []);
+  const isResearchCombo = String(normalizedRunMeta?.data?.asset_role || '').trim().toLowerCase() === 'research_combo';
+  const comboTruth = sectionData.combo_truth && typeof sectionData.combo_truth === 'object'
+    ? cloneJson(sectionData.combo_truth) || null
+    : null;
+  const benchmark = isResearchCombo ? { points: [], ohlc: [], source: 'skipped_research_combo', symbol: '' } : await loadBenchmarkSeries(navRows);
+  const benchmarkPoints = Array.isArray(benchmark?.points) ? benchmark.points : [];
   const stockNames = sectionData.stock_names && typeof sectionData.stock_names === 'object'
     ? cloneJson(sectionData.stock_names) || {}
     : {};
@@ -492,6 +647,9 @@ async function loadActiveArtifacts() {
     humanOutputs: cloneJson(surface?.human_outputs) || {},
     missing,
     errors,
+    comboTruth,
+    researchComboComponents: comboTruth?.components || null,
+    researchComboDisplay: comboTruth?.display || null,
   };
 
   const loadedConfig = state.active_artifacts?.config;
@@ -513,6 +671,7 @@ async function loadActiveArtifacts() {
   if (typeof syncLoadedSourceUI === 'function') syncLoadedSourceUI();
   if (typeof syncLoadHint === 'function') syncLoadHint(expId);
   refreshConfigPanels();
+  if (typeof syncAssetAwareShell === 'function') syncAssetAwareShell();
 }
 
 function renderSymbolPerformancePanel() {

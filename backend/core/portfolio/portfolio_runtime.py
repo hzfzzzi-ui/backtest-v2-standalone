@@ -254,6 +254,24 @@ def _build_candidate_audit_row(
     }
 
 
+def _resolve_direct_target_amount(
+    *,
+    sig_meta: dict[str, Any] | None,
+    nav_close: float,
+) -> float | None:
+    meta = dict(sig_meta or {})
+    target_exposure_per_symbol = meta.get("target_exposure_per_symbol")
+    if target_exposure_per_symbol is None:
+        return None
+    try:
+        exposure = float(target_exposure_per_symbol)
+    except Exception:
+        return None
+    if not pd.notna(exposure) or exposure <= 0.0:
+        return None
+    return float(nav_close) * float(exposure)
+
+
 def build_rebalance_orders(
     *,
     positions: dict[str, int],
@@ -469,6 +487,7 @@ def build_rebalance_orders(
                 ),
                 "baseline_strength": baseline_strength,
                 "overlay_score": _safe_float_or_none(overlay_score_map.get(sym)),
+                "order_value_scale": float(meta.get("order_value_scale", 1.0) or 1.0),
                 "selected": False,
                 "selected_rank": None,
                 "reject_reason": "",
@@ -622,7 +641,10 @@ def build_rebalance_orders(
         if order_value_scale <= 0:
             item["pre_reject_reason"] = "BLOCK_WEAK_TIER_DISABLED" if trend_tier == "WEAK" else "SKIP_QTY_ZERO"
             continue
-        if risk_amount > 0:
+        direct_target_amount = _resolve_direct_target_amount(sig_meta=sig_meta, nav_close=float(nav_close))
+        if direct_target_amount is not None:
+            target_amount_scaled = float(direct_target_amount) * float(order_value_scale)
+        elif risk_amount > 0:
             _atr_v = sig_meta.get("atr_last")
             if _atr_v is not None and float(_atr_v) > 0 and px > 0:
                 _stop_dist = float(atr_stop_k) * float(_atr_v)
@@ -773,7 +795,10 @@ def build_rebalance_orders(
         score_weight_score = item.get("score_weight_score")
         score_weight_raw_scale = float(item.get("score_weight_raw_scale", score_weight_scale) or 1.0)
         # ── 仓位计算 ──
-        if risk_amount > 0:
+        direct_target_amount = _resolve_direct_target_amount(sig_meta=sig_meta, nav_close=float(nav_close))
+        if direct_target_amount is not None:
+            target_amount_scaled = float(direct_target_amount) * float(order_value_scale)
+        elif risk_amount > 0:
             # 风险预算路径：shares = risk_amount / (k × ATR)
             _atr_v = sig_meta.get("atr_last")
             if _atr_v is not None and float(_atr_v) > 0 and px > 0:

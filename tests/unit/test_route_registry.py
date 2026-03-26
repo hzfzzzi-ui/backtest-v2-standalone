@@ -41,3 +41,15 @@ def test_route_registry_builds_provider_instances_and_runtime_route_ids() -> Non
     assert route_id == "provider_breakout_runtime"
     assert provider.__class__.__name__ == "BreakoutTrendProvider"
     assert resolve_runtime_route_id(SimpleNamespace()) == "strict_inline_runtime"
+
+
+def test_route_registry_uses_cn_etf_beta_provider_for_cn_etf_breakout_strategy() -> None:
+    breakout = BreakoutTrendStrategy.__new__(BreakoutTrendStrategy)
+
+    binding = resolve_route_binding(breakout, asset_context={"asset_scope": "cn_etf"})
+    route_id, provider = build_signal_provider_for_strategy(breakout, asset_context={"asset_scope": "cn_etf"})
+
+    assert binding.route_id == "provider_breakout_runtime"
+    assert binding.provider_cls.__name__ == "CNETFBetaSignalProvider"
+    assert route_id == "provider_breakout_runtime"
+    assert provider.__class__.__name__ == "CNETFBetaSignalProvider"

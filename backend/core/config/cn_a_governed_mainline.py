@@ -3,12 +3,35 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from backend.core.config.etf_beta_contract import (
+    CN_ETF_BETA_ABSOLUTE_FILTER_MODE,
+    CN_ETF_BETA_BUDGET_SEMANTICS,
+    CN_ETF_BETA_CORE_SYMBOLS,
+    CN_ETF_BETA_FALLBACK_MODE,
+    CN_ETF_BETA_LIMITED_DEFENSE_CANDIDATES,
+    CN_ETF_BETA_REBALANCE_FREQUENCY,
+    CN_ETF_BETA_RS_FAST_WEIGHT,
+    CN_ETF_BETA_RS_FAST_WINDOW,
+    CN_ETF_BETA_RS_MID_WEIGHT,
+    CN_ETF_BETA_RS_MID_WINDOW,
+    CN_ETF_BETA_RS_SLOW_WEIGHT,
+    CN_ETF_BETA_RS_SLOW_WINDOW,
+    CN_ETF_BETA_RULE_FAMILY,
+    CN_ETF_BETA_SLEEVE_ID,
+    CN_ETF_BETA_VOL_TARGET_ANNUALIZED_TARGET,
+    CN_ETF_BETA_VOL_TARGET_MAX_SCALE,
+    CN_ETF_BETA_VOL_TARGET_MIN_SCALE,
+    CN_ETF_BETA_VOL_TARGET_WINDOW,
+    build_default_etf_beta_contract,
+    build_etf_beta_phase1_summary as build_cn_etf_beta_phase1_summary,
+    normalize_etf_beta_contract,
+    resolve_etf_beta_exposure_semantics as resolve_cn_etf_beta_exposure_semantics,
+)
+
 GOVERNED_A_SHARE_CONTRACT_VERSION = "cn_a_governed_mainline@1"
 GOVERNED_A_SHARE_GOVERNOR_BUDGET_CONTRACT_VERSION = "cn_a_governor_budget@1"
 CN_STOCK_TREND_ALPHA_CORE_SLEEVE_ID = "cn_stock_trend_alpha_core"
-CN_ETF_BETA_SLEEVE_ID = "cn_etf_beta"
 CN_STOCK_ALPHA_CORE_BUDGET_SEMANTICS = "consume_governor_sleeve_budget"
-CN_ETF_BETA_BUDGET_SEMANTICS = "consume_governor_sleeve_budget"
 CN_STOCK_ALPHA_CORE_LOCAL_BUDGET_CONTROLS = (
     "max_positions",
     "single_stock_cap",
@@ -19,13 +42,6 @@ CN_STOCK_ALPHA_CORE_PHASE1_EXCLUDED_CAPABILITIES = (
     "cn_etf_beta",
     "insurance_overlay",
 )
-CN_ETF_BETA_CORE_SYMBOLS = (
-    "510300.SH",
-    "510500.SH",
-    "510050.SH",
-    "512100.SH",
-)
-CN_ETF_BETA_LIMITED_DEFENSE_CANDIDATES = ("512890.SH",)
 
 _CANONICAL_STATE_5_ALIASES = {
     "BULL": "BULL",
@@ -99,6 +115,51 @@ def _normalize_symbol_list(values: Any) -> list[str]:
     return out
 
 
+def _normalize_symbol_map(values: Any) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not isinstance(values, dict):
+        return out
+    for key, value in values.items():
+        symbol = _normalize_text(key).upper()
+        text = _normalize_text(value)
+        if not symbol or not text:
+            continue
+        out[symbol] = text
+    return out
+
+
+def _normalize_symbol_pairs(values: Any) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not isinstance(values, dict):
+        return out
+    for key, value in values.items():
+        symbol = _normalize_text(key).upper()
+        replacement = _normalize_symbol_list([value])
+        if not symbol or not replacement:
+            continue
+        out[symbol] = replacement[0]
+    return out
+
+
+def _normalize_choice(value: Any, *, default: str, allowed: set[str]) -> str:
+    text = _normalize_text(value).lower()
+    if text in allowed:
+        return text
+    return default
+
+
+def _normalize_reason_list(values: Any) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in list(values or ()):
+        text = _normalize_text(item)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
 def _phase1_scope_reason_codes(
     symbols: list[str],
     *,
@@ -134,6 +195,19 @@ def _safe_int(value: Any, *, default: int = 0) -> int:
             return int(default)
 
 
+def _normalize_state_float_map(values: Any) -> dict[str, float]:
+    out: dict[str, float] = {}
+    if not isinstance(values, dict):
+        return out
+    for key, raw in values.items():
+        state_5 = canonical_state_5(key) if _normalize_text(key) else ""
+        value = _safe_float(raw)
+        if not state_5 or value is None:
+            continue
+        out[state_5] = float(value)
+    return out
+
+
 def _normalized_count_map(raw: Any) -> dict[str, int]:
     out: dict[str, int] = {}
     if not isinstance(raw, dict):
@@ -165,97 +239,7 @@ def _local_budget_controls_for_sleeve(sleeve_id: str) -> list[str]:
     return []
 
 
-def build_cn_etf_beta_phase1_summary(
-    *,
-    governed_contract: dict[str, Any] | None,
-    universe_meta: dict[str, Any] | None,
-    governor_snapshot: dict[str, Any] | None = None,
-) -> dict[str, Any] | None:
-    governed_obj = dict(governed_contract or {})
-    etf_beta = dict(governed_obj.get("etf_beta") or {})
-    if not bool(etf_beta.get("enabled")):
-        return None
-
-    universe_obj = dict(universe_meta or {})
-    input_etfs = _normalize_symbol_list(universe_obj.get("etf_symbols") or [])
-    if not input_etfs:
-        return None
-
-    core_beta_symbols = _normalize_symbol_list(etf_beta.get("core_beta_symbols"))
-    limited_defense_candidates = _normalize_symbol_list(etf_beta.get("limited_defense_candidates"))
-    core_beta_scope = set(core_beta_symbols)
-    limited_defense_scope = set(limited_defense_candidates)
-
-    eligible_core_beta_etfs = [symbol for symbol in input_etfs if symbol in core_beta_scope]
-    eligible_limited_defense_etfs = [symbol for symbol in input_etfs if symbol in limited_defense_scope]
-    selected_etfs = [*eligible_core_beta_etfs, *eligible_limited_defense_etfs]
-    eligible_etfs = list(selected_etfs)
-    out_of_scope_etfs = [
-        symbol
-        for symbol in input_etfs
-        if symbol not in core_beta_scope and symbol not in limited_defense_scope
-    ]
-
-    selection_reason_codes = {
-        **_phase1_scope_reason_codes(eligible_core_beta_etfs, reason_code="FORMAL_CORE_BETA"),
-        **_phase1_scope_reason_codes(eligible_limited_defense_etfs, reason_code="LIMITED_DEFENSE_CANDIDATE"),
-    }
-    out_of_scope_reason_codes = {
-        symbol: ["OUT_OF_PHASE1_FORMAL_SCOPE", "RESEARCH_ENTRY_ONLY"]
-        for symbol in out_of_scope_etfs
-    }
-
-    sleeve_id = _normalize_text(etf_beta.get("sleeve_id")) or CN_ETF_BETA_SLEEVE_ID
-    sleeve_budget = {}
-    if isinstance(governor_snapshot, dict):
-        sleeve_budget = dict((governor_snapshot.get("sleeve_budgets") or {}).get(sleeve_id) or {})
-    sleeve_budget_used = (
-        {
-            "budget_owner": _normalize_text(governed_obj.get("governor", {}).get("owner")) or "global_portfolio_governor",
-            "total_risk_budget": _safe_float((governor_snapshot or {}).get("total_risk_budget")),
-            "total_exposure_cap": _safe_float((governor_snapshot or {}).get("total_exposure_cap")),
-            "slot_cap": _safe_int(sleeve_budget.get("slot_cap")),
-            "available_slots": _safe_int(sleeve_budget.get("available_slots")),
-            "positions_after_sell": _safe_int(sleeve_budget.get("positions_after_sell")),
-            "candidate_count": _safe_int(sleeve_budget.get("candidate_count")),
-            "selected_count": _safe_int(sleeve_budget.get("selected_count")),
-            "budget_share": _safe_float(sleeve_budget.get("budget_share")),
-            "raw_sleeve_ids": [text for text in (_normalize_text(item) for item in list(sleeve_budget.get("raw_sleeve_ids") or ())) if text],
-            "budget_reason_codes": [text for text in (_normalize_text(item) for item in list((governor_snapshot or {}).get("budget_reason_codes") or ())) if text],
-        }
-        if sleeve_budget or isinstance(governor_snapshot, dict)
-        else None
-    )
-
-    return {
-        "contract_version": "cn_etf_beta_phase1@1",
-        "sleeve_id": sleeve_id,
-        "system_role": _normalize_text(etf_beta.get("system_role")) or "market_beta_sleeve",
-        "budget_semantics": _normalize_text(etf_beta.get("budget_semantics")) or CN_ETF_BETA_BUDGET_SEMANTICS,
-        "total_budget_owner": _normalize_text(etf_beta.get("total_budget_owner")) or "global_portfolio_governor",
-        "source_entry_type": _normalize_text(etf_beta.get("source_entry_type")) or "cn_etf_research_entry",
-        "phase1_scope_mode": _normalize_text(etf_beta.get("phase1_scope_mode")) or "core_beta_plus_limited_defense",
-        "source_preset_id": _normalize_text(universe_obj.get("preset_id")) or None,
-        "source_batch_id": _normalize_text(universe_obj.get("etf_batch")) or None,
-        "input_etfs": input_etfs,
-        "formal_core_beta_symbols": core_beta_symbols,
-        "limited_defense_candidates": limited_defense_candidates,
-        "eligible_core_beta_etfs": eligible_core_beta_etfs,
-        "eligible_limited_defense_etfs": eligible_limited_defense_etfs,
-        "eligible_etfs": eligible_etfs,
-        "selected_etfs": selected_etfs,
-        "selection_scope": "phase1_formal_sleeve_universe",
-        "selection_reason_codes": selection_reason_codes,
-        "out_of_scope_etfs": out_of_scope_etfs,
-        "out_of_scope_reason_codes": out_of_scope_reason_codes,
-        "coverage_summary": {
-            "coverage_start": universe_obj.get("coverage_start"),
-            "coverage_end": universe_obj.get("coverage_end"),
-            "daily_table": universe_obj.get("daily_table"),
-            "price_series_semantics": universe_obj.get("price_series_semantics"),
-        },
-        "sleeve_budget_used": sleeve_budget_used,
-    }
+# ETF canonical owner lives in backend.core.config.etf_beta_contract.
 
 
 def _budget_reason_codes(
@@ -321,6 +305,17 @@ def build_governor_budget_snapshot(
     raw_sleeve_candidate_counts: dict[str, Any] | None = None,
     raw_sleeve_selected_counts: dict[str, Any] | None = None,
     sleeve_budget_reject_count: Any = None,
+    target_exposure: Any = None,
+    min_deployable_exposure: Any = None,
+    target_exposure_source: Any = None,
+    min_deployable_exposure_source: Any = None,
+    fallback_allowed: Any = None,
+    under_deploy_reason_codes: Any = None,
+    actual_exposure: Any = None,
+    actual_risk_exposure: Any = None,
+    actual_fallback_exposure: Any = None,
+    actual_other_exposure: Any = None,
+    deployability_gap: Any = None,
 ) -> dict[str, Any]:
     hard_positions = max(1, _safe_int(hard_max_positions, default=1))
     effective_positions = max(0, _safe_int(effective_max_positions))
@@ -375,6 +370,22 @@ def build_governor_budget_snapshot(
         available_slots_value = available_slots
         candidate_count_value = 0
         selected_count_value = 0
+    target_exposure_value = _safe_float(target_exposure)
+    if target_exposure_value is None and _normalize_text(asset_scope).lower() == "cn_etf":
+        target_exposure_value = total_exposure_cap
+    min_deployable_exposure_value = _safe_float(min_deployable_exposure)
+    if min_deployable_exposure_value is None and target_exposure_value is not None and _normalize_text(asset_scope).lower() == "cn_etf":
+        deploy_divisor = max(1, int(slot_cap_value or 1))
+        min_deployable_exposure_value = float(target_exposure_value) / float(deploy_divisor)
+    fallback_allowed_value = bool(fallback_allowed) if fallback_allowed is not None else False
+    under_deploy_reason_code_list = _normalize_reason_list(under_deploy_reason_codes)
+    target_exposure_source_text = _normalize_text(target_exposure_source) or None
+    min_deployable_exposure_source_text = _normalize_text(min_deployable_exposure_source) or None
+    actual_exposure_value = _safe_float(actual_exposure)
+    actual_risk_exposure_value = _safe_float(actual_risk_exposure)
+    actual_fallback_exposure_value = _safe_float(actual_fallback_exposure)
+    actual_other_exposure_value = _safe_float(actual_other_exposure)
+    deployability_gap_value = _safe_float(deployability_gap)
 
     snapshot = {
         "contract_version": GOVERNED_A_SHARE_GOVERNOR_BUDGET_CONTRACT_VERSION,
@@ -390,6 +401,17 @@ def build_governor_budget_snapshot(
         "regime_reason_codes": reason_code_list,
         "total_risk_budget": total_risk_budget,
         "total_exposure_cap": total_exposure_cap,
+        "target_exposure": target_exposure_value,
+        "min_deployable_exposure": min_deployable_exposure_value,
+        "target_exposure_source": target_exposure_source_text,
+        "min_deployable_exposure_source": min_deployable_exposure_source_text,
+        "fallback_allowed": fallback_allowed_value,
+        "under_deploy_reason_codes": under_deploy_reason_code_list,
+        "actual_exposure": actual_exposure_value,
+        "actual_risk_exposure": actual_risk_exposure_value,
+        "actual_fallback_exposure": actual_fallback_exposure_value,
+        "actual_other_exposure": actual_other_exposure_value,
+        "deployability_gap": deployability_gap_value,
         "hard_max_positions": hard_positions,
         "effective_max_positions": effective_positions,
         "drawdown": drawdown_value,
@@ -438,6 +460,18 @@ def build_governor_budget_snapshot(
                 "candidate_count": candidate_count_value,
                 "selected_count": selected_count_value,
                 "budget_share": 1.0,
+                "target_exposure": target_exposure_value,
+                "min_deployable_exposure": min_deployable_exposure_value,
+                "target_exposure_source": target_exposure_source_text,
+                "min_deployable_exposure_source": min_deployable_exposure_source_text,
+                "fallback_allowed": fallback_allowed_value,
+                "under_deploy_reason_codes": under_deploy_reason_code_list,
+                "actual_exposure": actual_exposure_value,
+                "actual_risk_exposure": actual_risk_exposure_value,
+                "actual_fallback_exposure": actual_fallback_exposure_value,
+                "actual_other_exposure": actual_other_exposure_value,
+                "deployability_gap": deployability_gap_value,
+                "target_selected_count": slot_cap_value if _normalize_text(asset_scope).lower() == "cn_etf" else None,
                 "raw_sleeve_ids": raw_sleeve_ids,
                 "phase1_boundary_excludes": _phase1_excluded_capabilities_for_sleeve(default_sleeve_id),
                 "local_budget_controls": _local_budget_controls_for_sleeve(default_sleeve_id),
@@ -523,6 +557,17 @@ def merge_governor_budget_snapshot(
             dict((base.get("raw_sleeve_budget") or {}).get("selected_counts") or {}),
         ),
         sleeve_budget_reject_count=kwargs.get("sleeve_budget_reject_count", base.get("sleeve_budget_reject_count")),
+        target_exposure=kwargs.get("target_exposure", base.get("target_exposure")),
+        min_deployable_exposure=kwargs.get("min_deployable_exposure", base.get("min_deployable_exposure")),
+        target_exposure_source=kwargs.get("target_exposure_source", base.get("target_exposure_source")),
+        min_deployable_exposure_source=kwargs.get("min_deployable_exposure_source", base.get("min_deployable_exposure_source")),
+        fallback_allowed=kwargs.get("fallback_allowed", base.get("fallback_allowed")),
+        under_deploy_reason_codes=kwargs.get("under_deploy_reason_codes", list(base.get("under_deploy_reason_codes") or ())),
+        actual_exposure=kwargs.get("actual_exposure", base.get("actual_exposure")),
+        actual_risk_exposure=kwargs.get("actual_risk_exposure", base.get("actual_risk_exposure")),
+        actual_fallback_exposure=kwargs.get("actual_fallback_exposure", base.get("actual_fallback_exposure")),
+        actual_other_exposure=kwargs.get("actual_other_exposure", base.get("actual_other_exposure")),
+        deployability_gap=kwargs.get("deployability_gap", base.get("deployability_gap")),
     )
     return merged
 
@@ -570,17 +615,7 @@ def _default_contract(asset_scope: str) -> dict[str, Any] | None:
             "local_budget_controls": list(CN_STOCK_ALPHA_CORE_LOCAL_BUDGET_CONTROLS),
             "phase1_excluded_capabilities": list(CN_STOCK_ALPHA_CORE_PHASE1_EXCLUDED_CAPABILITIES),
         },
-        "etf_beta": {
-            "enabled": scope == "cn_etf",
-            "sleeve_id": CN_ETF_BETA_SLEEVE_ID,
-            "system_role": "market_beta_sleeve",
-            "budget_semantics": CN_ETF_BETA_BUDGET_SEMANTICS,
-            "total_budget_owner": "global_portfolio_governor",
-            "source_entry_type": "cn_etf_research_entry",
-            "phase1_scope_mode": "core_beta_plus_limited_defense",
-            "core_beta_symbols": list(CN_ETF_BETA_CORE_SYMBOLS),
-            "limited_defense_candidates": list(CN_ETF_BETA_LIMITED_DEFENSE_CANDIDATES),
-        },
+        "etf_beta": build_default_etf_beta_contract(enabled=scope == "cn_etf"),
     }
 
 
@@ -616,18 +651,7 @@ def build_governed_a_share_contract(
         if text
     ] or ["technical", "sentiment", "macro_global"]
     merged["regime"] = regime
-    etf_beta = dict(merged.get("etf_beta") or {})
-    etf_beta["sleeve_id"] = _normalize_text(etf_beta.get("sleeve_id")) or CN_ETF_BETA_SLEEVE_ID
-    etf_beta["system_role"] = _normalize_text(etf_beta.get("system_role")) or "market_beta_sleeve"
-    etf_beta["budget_semantics"] = _normalize_text(etf_beta.get("budget_semantics")) or CN_ETF_BETA_BUDGET_SEMANTICS
-    etf_beta["total_budget_owner"] = (
-        _normalize_text(etf_beta.get("total_budget_owner")) or "global_portfolio_governor"
-    )
-    etf_beta["source_entry_type"] = _normalize_text(etf_beta.get("source_entry_type")) or "cn_etf_research_entry"
-    etf_beta["phase1_scope_mode"] = _normalize_text(etf_beta.get("phase1_scope_mode")) or "core_beta_plus_limited_defense"
-    etf_beta["core_beta_symbols"] = _normalize_symbol_list(etf_beta.get("core_beta_symbols"))
-    etf_beta["limited_defense_candidates"] = _normalize_symbol_list(etf_beta.get("limited_defense_candidates"))
-    merged["etf_beta"] = etf_beta
+    merged["etf_beta"] = normalize_etf_beta_contract(dict(merged.get("etf_beta") or {}))
     stock_alpha = dict(merged.get("stock_alpha_core") or {})
     stock_alpha["legacy_anchor"] = _normalize_text(stock_alpha.get("legacy_anchor")) or "baseline_V10.1"
     stock_alpha["sleeve_id"] = _normalize_text(stock_alpha.get("sleeve_id")) or CN_STOCK_TREND_ALPHA_CORE_SLEEVE_ID
@@ -670,6 +694,20 @@ __all__ = [
     "CN_STOCK_ALPHA_CORE_PHASE1_EXCLUDED_CAPABILITIES",
     "CN_ETF_BETA_CORE_SYMBOLS",
     "CN_ETF_BETA_LIMITED_DEFENSE_CANDIDATES",
+    "CN_ETF_BETA_RULE_FAMILY",
+    "CN_ETF_BETA_REBALANCE_FREQUENCY",
+    "CN_ETF_BETA_ABSOLUTE_FILTER_MODE",
+    "CN_ETF_BETA_FALLBACK_MODE",
+    "CN_ETF_BETA_RS_FAST_WINDOW",
+    "CN_ETF_BETA_RS_MID_WINDOW",
+    "CN_ETF_BETA_RS_SLOW_WINDOW",
+    "CN_ETF_BETA_RS_FAST_WEIGHT",
+    "CN_ETF_BETA_RS_MID_WEIGHT",
+    "CN_ETF_BETA_RS_SLOW_WEIGHT",
+    "CN_ETF_BETA_VOL_TARGET_WINDOW",
+    "CN_ETF_BETA_VOL_TARGET_ANNUALIZED_TARGET",
+    "CN_ETF_BETA_VOL_TARGET_MIN_SCALE",
+    "CN_ETF_BETA_VOL_TARGET_MAX_SCALE",
     "build_governed_a_share_contract",
     "build_cn_etf_beta_phase1_summary",
     "build_governor_budget_snapshot",
@@ -677,4 +715,5 @@ __all__ = [
     "coarse_state_from_state_5",
     "is_governed_a_share_asset_scope",
     "merge_governor_budget_snapshot",
+    "resolve_cn_etf_beta_exposure_semantics",
 ]
