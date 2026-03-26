@@ -489,3 +489,70 @@ test('results formatting builds regime and governor models from backend combo tr
   assert.equal(governorModel.totalRiskBudget, '个股 60.00% | ETF 0.00%');
   assert.equal(governorModel.sleeveBudgets.length, 2);
 });
+
+test('results formatting treats unified runtime combo as combo result instead of ordinary single-sleeve run', () => {
+  const summary = resultsFormatting.summarizeSnapshot({
+    result: {
+      exp_id: 'exp_unified_combo',
+      status: 'OK',
+      total_return: 0.12,
+      cagr: 0.08,
+      max_drawdown: -0.11,
+      sharpe: 0.76,
+    },
+    artifacts: {
+      perf: {
+        total_return: 0.12,
+        cagr: 0.08,
+        max_drawdown: -0.11,
+        sharpe: 0.76,
+      },
+      run_meta: {
+        data: {
+          asset_scope: 'cn_a_equity',
+          asset_role: 'unified_multi_sleeve_combo',
+          coverage_start: '2021-01-04',
+          coverage_end: '2026-03-24',
+          benchmark: 'CN_STOCK_ETF_50_50',
+        },
+        combo_metrics: {
+          start: '2021-01-04',
+          end: '2026-03-24',
+        },
+        combo_components: {
+          stock_component: { exp_id: 'exp_stock' },
+          etf_component: { exp_id: 'exp_etf' },
+        },
+        combo_result: {
+          type: 'unified_runtime_combo',
+          mode: 'daily_rebalanced_equal_weight_50_50',
+          assumption: 'cn_stock_etf_unified_runtime_phase1_daily_rebalanced_equal_weight_50_50',
+          stock_nav_column: 'stock_nav',
+          etf_nav_column: 'etf_nav',
+        },
+      },
+      nav: [
+        { date: '2021-01-04', nav: 1.0, stock_nav: 1.0, etf_nav: 1.0 },
+        { date: '2026-03-24', nav: 1.12, stock_nav: 1.35, etf_nav: 1.01 },
+      ],
+      navSeries: [
+        { date: '2021-01-04', value: 1.0 },
+        { date: '2026-03-24', value: 1.12 },
+      ],
+      benchmarkSeries: [],
+      tradesRows: [],
+      symbolPerformanceRows: [],
+      audit: { summary: {} },
+      missing: [],
+    },
+  });
+
+  assert.equal(summary.isResearchCombo, false);
+  assert.equal(summary.isUnifiedCombo, true);
+  assert.equal(summary.isComboResult, true);
+  assert.equal(summary.universeSectionTitle, '组合结果口径');
+  assert.equal(summary.comboMode, 'daily_rebalanced_equal_weight_50_50');
+  assert.match(summary.comboReadOnlyNote, /unified runtime/i);
+  assert.equal(summary.comboStockExpId, 'exp_stock');
+  assert.equal(summary.comboEtfExpId, 'exp_etf');
+});

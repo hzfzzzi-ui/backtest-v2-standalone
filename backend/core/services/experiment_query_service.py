@@ -596,7 +596,10 @@ def _surface_combo_truth(exp_dir: Path, manifest: dict[str, Any]) -> dict[str, A
     run_meta = _surface_run_meta(exp_dir, manifest)
     asset_role = str(((run_meta.get("data") or {}).get("asset_role")) or "").strip().lower()
     execution_shell = str(((manifest.get("stage_pipeline") or {}).get("execution_shell")) or "").strip().lower()
-    if asset_role != "research_combo" and execution_shell != "read_only_combo":
+    if asset_role not in {"research_combo", "unified_multi_sleeve_combo"} and execution_shell not in {
+        "read_only_combo",
+        "unified_combo_phase1",
+    }:
         return None
     combo_components = dict(run_meta.get("combo_components") or {})
     stock_exp_id = str(((combo_components.get("stock_component") or {}).get("exp_id")) or "").strip()

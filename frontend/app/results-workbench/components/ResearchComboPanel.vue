@@ -14,7 +14,7 @@ defineProps({
       <dl class="wb-overview-grid">
         <div>
           <dt>结果类型</dt>
-          <dd>Research Combo</dd>
+          <dd>{{ summary.isUnifiedCombo ? 'Unified Runtime Combo' : 'Research Combo' }}</dd>
         </div>
         <div>
           <dt>组合模式</dt>

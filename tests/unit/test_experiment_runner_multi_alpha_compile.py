@@ -119,6 +119,29 @@ def _breakout_config() -> dict:
     }
 
 
+def _stock_etf_unified_config() -> dict:
+    payload = _breakout_config()
+    payload["flow_script"] = {
+        "script_id": "cn_stock_etf_v1",
+        "description": "unified runtime template",
+        "recommended_preset": "A股个股+ETFV1",
+    }
+    payload["governed_a_share"] = {
+        "enabled": True,
+        "stock_alpha_core": {
+            "enabled": True,
+            "sleeve_id": "cn_stock_trend_alpha_core",
+        },
+        "etf_beta": {
+            "enabled": True,
+            "sleeve_id": "cn_etf_beta",
+            "phase1_scope_mode": "research_combo_only",
+            "core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+        },
+    }
+    return payload
+
+
 def test_compile_semantic_bundle_preserves_multi_alpha_runtime_payload() -> None:
     compiled = runner_impl._compile_semantic_config_bundle(
         base_cfg=runner_impl._load_base_config(bt_root()),
@@ -255,6 +278,32 @@ def test_compile_semantic_bundle_preserves_blank_etf_benchmark_truth() -> None:
     assert runtime_cfg["asset_context"]["asset_scope"] == "cn_etf"
     assert runtime_cfg["universe"]["benchmark"] == ""
     assert runtime_cfg["regime_engine"]["benchmark"] == ""
+
+
+def test_compile_semantic_bundle_emits_unified_stock_etf_runtime_payload() -> None:
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=_stock_etf_unified_config(),
+        config_source="config_json",
+        use_body_universe_fields=False,
+    )
+
+    unified_runtime = compiled["compiled_plan"]["unified_runtime"]
+    assert unified_runtime["enabled"] is True
+    assert unified_runtime["combo_context"]["system_asset_scope"] == "cn_a_multi_sleeve"
+    assert unified_runtime["combo_context"]["weights"] == {
+        "cn_stock_trend_alpha_core": 0.5,
+        "cn_etf_beta": 0.5,
+    }
+    stock_sleeve = unified_runtime["sleeves"]["stock_alpha_core"]
+    etf_sleeve = unified_runtime["sleeves"]["etf_beta"]
+    assert stock_sleeve["semantic_config"]["asset_scope"] == "cn_a_equity"
+    assert stock_sleeve["runtime_config"]["asset_context"]["asset_scope"] == "cn_a_equity"
+    assert etf_sleeve["semantic_config"]["asset_scope"] == "cn_etf"
+    assert etf_sleeve["semantic_config"]["universe"]["symbols"] == ["cn_etf_first_wave_core"]
+    assert etf_sleeve["runtime_config"]["asset_context"]["asset_scope"] == "cn_etf"
+    assert etf_sleeve["runtime_config"]["data_source"]["stocks_table"] == "pams_cn_etf_daily"
 
 
 def test_compile_semantic_bundle_preserves_turnover_rate_filter_fields() -> None:

@@ -25,7 +25,7 @@ const summary = computed(() => summarizeSnapshot(snapshot.value));
 const regimeModel = computed(() => buildRegimePanelModel(snapshot.value));
 const governorModel = computed(() => buildGovernorPanelModel(snapshot.value));
 const attributionModel = computed(() => buildAttributionPanelModel(snapshot.value));
-const isResearchCombo = computed(() => !!summary.value?.isResearchCombo);
+const isComboResult = computed(() => !!summary.value?.isComboResult);
 const comboTruth = computed(() => {
   const artifacts = snapshot.value?.artifacts;
   return artifacts && typeof artifacts === 'object' ? artifacts.comboTruth || null : null;
@@ -38,7 +38,7 @@ const researchComboComponents = computed(() => {
 });
 
 function resolveComboComponentSnapshot(componentKey, assetScope) {
-  if (!isResearchCombo.value) return null;
+  if (!isComboResult.value) return null;
   const component = researchComboComponents.value && typeof researchComboComponents.value === 'object'
     ? researchComboComponents.value[componentKey]
     : null;
@@ -94,10 +94,10 @@ watch(hasResult, (next) => {
 
       <section v-if="activeTab === 'performance'" class="wb-workbench-panel">
         <ResultsOverview :summary="summary" />
-        <ResearchComboChart v-if="isResearchCombo" :snapshot="snapshot" :patch-view-state="patchViewState" />
+        <ResearchComboChart v-if="isComboResult" :snapshot="snapshot" :patch-view-state="patchViewState" />
         <ResultsChart v-else :snapshot="snapshot" :patch-view-state="patchViewState" />
-        <ResearchComboPanel v-if="isResearchCombo" :summary="summary" />
-        <template v-if="isResearchCombo">
+        <ResearchComboPanel v-if="isComboResult" :summary="summary" />
+        <template v-if="isComboResult">
           <SymbolRankingPanel
             v-if="comboStockSnapshot"
             :snapshot="comboStockSnapshot"

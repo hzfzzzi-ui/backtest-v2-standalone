@@ -351,7 +351,7 @@ watch(
     <div class="wb-canvas-head">
       <div class="wb-canvas-info">
         <span class="wb-canvas-kicker">组合研究图</span>
-        <span class="wb-mini">只读 Research Combo</span>
+        <span class="wb-mini">{{ snapshot?.artifacts?.run_meta?.data?.asset_role === 'unified_multi_sleeve_combo' ? '正式 Unified Runtime' : '只读 Research Combo' }}</span>
       </div>
       <div class="wb-inline wb-canvas-tools">
         <select :value="view.chartRange || 'D'" class="formInput wb-input-sm" @change="onChartRangeChange">
@@ -412,7 +412,7 @@ watch(
     </div>
 
     <div class="wb-canvas-footer">
-      <div class="wb-mini">当前结果是只读 research combo。上图展示组合总线；下方分开展示 A股个股与 ETF 的净值和各自基准走势。</div>
+      <div class="wb-mini">{{ snapshot?.artifacts?.run_meta?.data?.asset_role === 'unified_multi_sleeve_combo' ? '当前结果来自 unified runtime 组合实验。上图展示组合总线；下方分开展示 A股个股与 ETF 的净值和各自基准走势。' : '当前结果是只读 research combo。上图展示组合总线；下方分开展示 A股个股与 ETF 的净值和各自基准走势。' }}</div>
     </div>
   </section>
 </template>

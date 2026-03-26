@@ -990,6 +990,79 @@ def evaluate_etf_beta_sleeve(
     return {"status": status, "reason": reason, "evidence": evidence, "metrics": metrics}
 
 
+def evaluate_unified_runtime_completeness(
+    *,
+    results_dir: str | Path | None,
+    run_meta: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    run_meta_obj = dict(run_meta or {})
+    data_meta = dict(run_meta_obj.get("data") or {})
+    stage_pipeline = dict(run_meta_obj.get("stage_pipeline") or {})
+    asset_role = str(data_meta.get("asset_role") or "").strip().lower()
+    execution_shell = str(stage_pipeline.get("execution_shell") or "").strip().lower()
+    if asset_role != "unified_multi_sleeve_combo" and execution_shell != "unified_combo_phase1":
+        return None
+
+    combo_components = dict(run_meta_obj.get("combo_components") or {})
+    sleeves = dict(run_meta_obj.get("sleeves") or {})
+    combo_governed = dict(run_meta_obj.get("governed_snapshot") or {})
+    combo_regime = dict((run_meta_obj.get("regime") or {}).get("latest_state") or {})
+    combo_attribution = dict(run_meta_obj.get("attribution") or {})
+    sleeve_budgets = dict(combo_governed.get("sleeve_budgets") or {})
+    stock_component = dict(combo_components.get("stock_component") or {})
+    etf_component = dict(combo_components.get("etf_component") or {})
+    stock_sleeve = dict(sleeves.get("stock_alpha_core") or {})
+    etf_sleeve = dict(sleeves.get("etf_beta") or {})
+
+    root = Path(results_dir).resolve() if results_dir is not None else None
+    refs = {}
+    if root is not None:
+        refs = {
+            "portfolio_daily": _clean_ref(root / ARTIFACT_FILENAMES["daily"], root=root),
+            "portfolio_trades": _clean_ref(root / ARTIFACT_FILENAMES["trades"], root=root),
+            "regime_audit_summary": _clean_ref(root / ARTIFACT_FILENAMES["regime_audit_summary"], root=root),
+            "attribution_audit": _clean_ref(root / ARTIFACT_FILENAMES["attribution_audit"], root=root),
+            "run_meta": _clean_ref(root / ARTIFACT_FILENAMES["run_meta"], root=root),
+        }
+
+    has_components = bool(stock_component.get("exp_id")) and bool(etf_component.get("exp_id"))
+    has_sleeve_summaries = bool(stock_sleeve) and bool(etf_sleeve)
+    has_combo_governed = bool(combo_governed.get("budget_owner")) and all(
+        key in sleeve_budgets for key in ("cn_stock_trend_alpha_core", "cn_etf_beta")
+    )
+    has_combo_regime = bool(combo_regime.get("effective_state")) and bool(combo_regime.get("base_state"))
+    attribution_summary = dict(combo_attribution.get("summary") or {})
+    has_combo_attribution = all(
+        key in attribution_summary for key in ("state_log_count", "budget_log_count", "sleeve_log_count")
+    )
+    has_daily_artifact = bool(str(refs.get("portfolio_daily") or "").strip())
+
+    metrics = {
+        "component_count": int(bool(stock_component.get("exp_id"))) + int(bool(etf_component.get("exp_id"))),
+        "has_combo_governed_snapshot": has_combo_governed,
+        "has_combo_regime": has_combo_regime,
+        "has_combo_attribution": has_combo_attribution,
+        "has_daily_artifact": has_daily_artifact,
+        "stock_component_present": bool(stock_component.get("exp_id")),
+        "etf_component_present": bool(etf_component.get("exp_id")),
+    }
+    evidence = {
+        "asset_role": asset_role,
+        "execution_shell": execution_shell,
+        "stock_component_exp_id": stock_component.get("exp_id"),
+        "etf_component_exp_id": etf_component.get("exp_id"),
+        "sleeve_budget_keys": list(sleeve_budgets.keys()),
+        "refs": refs,
+    }
+    if has_components and has_sleeve_summaries and has_combo_governed and has_combo_regime and has_combo_attribution and has_daily_artifact:
+        status = "PASS"
+        reason = "Unified runtime combo exposes combo-level and sleeve-level artifacts with complete audit traceability."
+    else:
+        status = "FAIL"
+        reason = "Unified runtime combo is missing combo/sleeve completeness evidence."
+    return {"status": status, "reason": reason, "evidence": evidence, "metrics": metrics}
+
+
 def evaluate_attribution_traceability(
     *,
     results_dir: str | Path | None,
@@ -1001,6 +1074,10 @@ def evaluate_attribution_traceability(
     governed_snapshot = dict(run_meta_obj.get("governed_snapshot") or {})
     regime_meta = dict(run_meta_obj.get("regime") or {})
     latest_regime = dict(regime_meta.get("latest_state") or {})
+    data_meta = dict(run_meta_obj.get("data") or {})
+    stage_pipeline = dict(run_meta_obj.get("stage_pipeline") or {})
+    asset_role = str(data_meta.get("asset_role") or "").strip().lower()
+    execution_shell = str(stage_pipeline.get("execution_shell") or "").strip().lower()
     should_apply = bool(governed.get("enabled")) or bool(attribution)
     if not should_apply:
         return None
@@ -1029,13 +1106,26 @@ def evaluate_attribution_traceability(
     has_reason_code_summary = any(bool(dict(reason_code_summary.get(key) or {})) for key in reason_code_summary.keys())
     has_attribution_ref = bool(str(refs.get("attribution_audit") or "").strip())
     has_regime_ref = bool(str(refs.get("regime_audit_summary") or "").strip())
+    normalized_governor_base_state = str(
+        governed_snapshot.get("base_state") or governed_snapshot.get("regime_source_state") or ""
+    ).strip()
+    normalized_governor_effective_state = str(
+        governed_snapshot.get("effective_state") or governed_snapshot.get("regime_effective_state") or ""
+    ).strip()
+    normalized_governor_coarse_state = str(governed_snapshot.get("coarse_state") or "").strip()
+    normalized_governor_effective_coarse_state = str(governed_snapshot.get("effective_coarse_state") or "").strip()
+    normalized_governor_budget_scalar = _safe_float(governed_snapshot.get("risk_budget_multiplier"))
+    if normalized_governor_budget_scalar is None and (
+        asset_role == "unified_multi_sleeve_combo" or execution_shell == "unified_combo_phase1"
+    ):
+        normalized_governor_budget_scalar = _safe_float(governed_snapshot.get("total_risk_budget"))
     has_governor_snapshot = all(
         [
-            bool(str(governed_snapshot.get("base_state") or "").strip()),
-            bool(str(governed_snapshot.get("effective_state") or "").strip()),
-            bool(str(governed_snapshot.get("coarse_state") or "").strip()),
-            bool(str(governed_snapshot.get("effective_coarse_state") or "").strip()),
-            _safe_float(governed_snapshot.get("risk_budget_multiplier")) is not None,
+            bool(normalized_governor_base_state),
+            bool(normalized_governor_effective_state),
+            bool(normalized_governor_coarse_state),
+            bool(normalized_governor_effective_coarse_state),
+            normalized_governor_budget_scalar is not None,
         ]
     )
     has_regime_snapshot = all(
@@ -1062,11 +1152,11 @@ def evaluate_attribution_traceability(
             "summary": summary,
             "reason_code_summary": reason_code_summary,
             "governed_snapshot": {
-                "base_state": governed_snapshot.get("base_state"),
-                "effective_state": governed_snapshot.get("effective_state"),
-                "coarse_state": governed_snapshot.get("coarse_state"),
-                "effective_coarse_state": governed_snapshot.get("effective_coarse_state"),
-                "risk_budget_multiplier": governed_snapshot.get("risk_budget_multiplier"),
+                "base_state": normalized_governor_base_state or None,
+                "effective_state": normalized_governor_effective_state or None,
+                "coarse_state": normalized_governor_coarse_state or None,
+                "effective_coarse_state": normalized_governor_effective_coarse_state or None,
+                "risk_budget_multiplier": normalized_governor_budget_scalar,
                 "budget_reason_codes": governed_snapshot.get("budget_reason_codes"),
             },
             "latest_regime": {
@@ -1536,6 +1626,12 @@ def build_research_audit(
             read_errors=read_errors,
         ),
     }
+    unified_runtime_gate = evaluate_unified_runtime_completeness(
+        results_dir=root,
+        run_meta=run_meta,
+    )
+    if isinstance(unified_runtime_gate, dict):
+        gates["unified_runtime_completeness"] = unified_runtime_gate
     etf_beta_gate = evaluate_etf_beta_sleeve(run_meta=run_meta, results_dir=root)
     if isinstance(etf_beta_gate, dict):
         gates["etf_beta_sleeve"] = etf_beta_gate

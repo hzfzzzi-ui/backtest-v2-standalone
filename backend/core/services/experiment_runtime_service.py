@@ -14,6 +14,7 @@ from backend.api.backtest_v2.semantic_config_compiler import (
 )
 from backend.api.shared.json_utils import sanitize_json
 from backend.core.config.asset_profiles import build_asset_context, canonical_asset_scope
+from backend.core.services.cn_stock_etf_unified_runtime_service import run_cn_stock_etf_unified_runtime
 from backend.core.services.experiment_artifact_service import stabilize_experiment_output
 from backend.core.tools.locked_candidate_presets import is_locked_candidate_preset
 from backend.core.tools.saved_config_access import resolve_runtime_config_source
@@ -329,7 +330,28 @@ def run_experiment_request_body(
     os.environ["PAMS_PG_PASSWORD"] = os.environ.get("PGPASSWORD", env_backup["PAMS_PG_PASSWORD"] or "")
 
     try:
-        result = run_experiment(str(cfg_path), requested_preset or "single", overrides, progress_hook=progress_hook)
+        unified_runtime = (
+            ((semantic_compile or {}).get("unified_runtime"))
+            if isinstance(semantic_compile, dict)
+            else None
+        )
+        if isinstance(unified_runtime, dict) and bool(unified_runtime.get("enabled")):
+            result = run_cn_stock_etf_unified_runtime(
+                bt_root=bt_root,
+                body=body,
+                base_cfg=base_cfg,
+                semantic_compile=semantic_compile or {},
+                requested_preset=requested_preset,
+                resolved_config_id=resolved_config_id,
+                resolved_config_hash=resolved_config_hash,
+                resolved_config_meta=resolved_config_meta if isinstance(resolved_config_meta, dict) else None,
+                conflict_policy=conflict_policy,
+                run_request_body=run_experiment_request_body,
+                request_model=api_module.BacktestV2ExperimentRequest,
+                progress_hook=progress_hook,
+            )
+        else:
+            result = run_experiment(str(cfg_path), requested_preset or "single", overrides, progress_hook=progress_hook)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"experiment run failed: {exc}")
     finally:
@@ -338,6 +360,22 @@ def run_experiment_request_body(
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+    if isinstance(unified_runtime, dict) and bool(unified_runtime.get("enabled")):
+        result.setdefault("exp_id", "")
+        result["experiment_id"] = str(result.get("exp_id") or "") or None
+        result.setdefault("results_dir", "")
+        result.setdefault("status", "OK")
+        result["requested_preset"] = requested_preset
+        result["resolved_config_mode"] = resolved_config_mode
+        result["resolved_config_id"] = resolved_config_id or None
+        result["resolved_config_hash"] = resolved_config_hash or None
+        result["config_conflict_policy"] = conflict_policy
+        if resolved_config_meta is not None:
+            result["resolved_config_meta"] = sanitize_json(dict(resolved_config_meta))
+            result["resolved_config_source_type"] = str(resolved_config_meta.get("source_type") or "")
+            result["resolved_config_owner"] = str(resolved_config_meta.get("owner") or "")
+        return api_module._attach_public_experiment_id(result)
 
     try:
         api_module._attach_run_profile_summary(result)

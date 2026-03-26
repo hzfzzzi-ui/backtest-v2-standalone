@@ -11,6 +11,7 @@ from backend.core.audit.research_audit import (
     evaluate_accounting_integrity,
     evaluate_attribution_traceability,
     evaluate_etf_beta_sleeve,
+    evaluate_unified_runtime_completeness,
     evaluate_execution_realism,
     evaluate_result_sanity,
     evaluate_timing_alignment,
@@ -446,6 +447,146 @@ def test_evaluate_attribution_traceability_passes_when_summary_and_refs_exist(tm
     assert gate["metrics"]["has_regime_ref"] is True
     assert gate["metrics"]["has_governor_snapshot"] is True
     assert gate["metrics"]["has_regime_snapshot"] is True
+
+
+def test_evaluate_unified_runtime_completeness_passes_when_combo_and_sleeves_are_present(tmp_path) -> None:
+    root = tmp_path / "exp_unified_combo"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "portfolio_daily.csv").write_text("date,nav\n2026-03-20,1.0\n", encoding="utf-8")
+    (root / "portfolio_trades.csv").write_text("date,symbol,side,qty,price\n2026-03-20,sh600000,BUY,100,10\n", encoding="utf-8")
+    (root / "regime_audit_summary.json").write_text(
+        json.dumps({"summary": {"base_state_5": "LIGHT", "effective_state_5": "LIGHT"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (root / "attribution_audit.json").write_text(
+        json.dumps(
+            {
+                "summary": {
+                    "state_log_count": 1,
+                    "budget_log_count": 1,
+                    "sleeve_log_count": 2,
+                    "manual_override_log_count": 0,
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    gate = evaluate_unified_runtime_completeness(
+        results_dir=root,
+        run_meta={
+            "data": {
+                "asset_role": "unified_multi_sleeve_combo",
+                "system_asset_scope": "cn_a_multi_sleeve",
+            },
+            "stage_pipeline": {
+                "execution_shell": "unified_combo_phase1",
+            },
+            "combo_components": {
+                "stock_component": {"exp_id": "exp_stock"},
+                "etf_component": {"exp_id": "exp_etf"},
+            },
+            "regime": {
+                "latest_state": {
+                    "base_state": "LIGHT",
+                    "effective_state": "LIGHT",
+                }
+            },
+            "governed_snapshot": {
+                "budget_owner": "global_portfolio_governor",
+                "sleeve_budgets": {
+                    "cn_stock_trend_alpha_core": {"slot_cap": 4},
+                    "cn_etf_beta": {"slot_cap": 2},
+                },
+            },
+            "attribution": {
+                "summary": {
+                    "state_log_count": 1,
+                    "budget_log_count": 1,
+                    "sleeve_log_count": 2,
+                }
+            },
+            "sleeves": {
+                "stock_alpha_core": {"exp_id": "exp_stock"},
+                "etf_beta": {"exp_id": "exp_etf"},
+            },
+        },
+    )
+
+    assert gate is not None
+    assert gate["status"] == "PASS"
+    assert gate["metrics"]["component_count"] == 2
+    assert gate["metrics"]["has_combo_governed_snapshot"] is True
+    assert gate["metrics"]["has_combo_regime"] is True
+
+
+def test_evaluate_attribution_traceability_passes_for_unified_combo_governor_snapshot(tmp_path) -> None:
+    root = tmp_path / "exp_unified_attr"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "regime_audit_summary.json").write_text(
+        json.dumps({"summary": {"base_state_5": "RISK_OFF", "effective_state_5": "RISK_OFF"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (root / "attribution_audit.json").write_text(
+        json.dumps(
+            {
+                "contract_version": "cn_a_attribution_audit@1",
+                "summary": {
+                    "state_log_count": 1,
+                    "budget_log_count": 1,
+                    "sleeve_log_count": 2,
+                    "manual_override_log_count": 0,
+                },
+                "reason_code_summary": {
+                    "state_reason_codes": {"STOCK::NO_REASON_CODES": 1},
+                    "budget_reason_codes": {"ETF::NO_DEPLOYABLE_SLOTS": 1},
+                    "sleeve_reason_codes": {"ETF::ETF_BETA_SLOT_CAP_ZERO": 1},
+                    "manual_override_reasons": {},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    gate = evaluate_attribution_traceability(
+        results_dir=root,
+        run_meta={
+            "data": {
+                "asset_role": "unified_multi_sleeve_combo",
+            },
+            "stage_pipeline": {
+                "execution_shell": "unified_combo_phase1",
+            },
+            "governed_a_share": {"enabled": True},
+            "governed_snapshot": {
+                "regime_source_state": "RISK_OFF",
+                "regime_effective_state": "RISK_OFF",
+                "coarse_state": "RISK_OFF",
+                "effective_coarse_state": "RISK_OFF",
+                "total_risk_budget": 0.3,
+                "budget_reason_codes": ["ETF::NO_DEPLOYABLE_SLOTS"],
+            },
+            "regime": {
+                "latest_state": {
+                    "base_state": "RISK_OFF",
+                    "effective_state": "RISK_OFF",
+                    "coarse_state": "RISK_OFF",
+                    "effective_coarse_state": "RISK_OFF",
+                    "reason_codes": ["STOCK::NO_REASON_CODES", "ETF::NO_REASON_CODES"],
+                    "manual_override": {"active": False, "reason": None, "scope": None, "actor": None},
+                }
+            },
+        },
+    )
+
+    assert gate is not None
+    assert gate["status"] == "PASS"
+    assert gate["metrics"]["has_governor_snapshot"] is True
+    assert gate["evidence"]["governed_snapshot"]["base_state"] == "RISK_OFF"
+    assert gate["evidence"]["governed_snapshot"]["risk_budget_multiplier"] == pytest.approx(0.3)
 
 
 def test_evaluate_execution_realism_flags_hard_fail_on_suspended_trade() -> None:

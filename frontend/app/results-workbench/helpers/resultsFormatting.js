@@ -572,7 +572,12 @@ export function summarizeSnapshot(snapshot) {
     ) || 'cn_a_equity',
   ).trim().toLowerCase();
   const assetRole = String(firstDefined(meta.data?.asset_role, result.asset_role, '') || '').trim().toLowerCase();
-  const isResearchCombo = assetRole === 'research_combo' || !!(meta.research_combo && typeof meta.research_combo === 'object');
+  const comboResult = meta.combo_result && typeof meta.combo_result === 'object' ? meta.combo_result : {};
+  const isUnifiedCombo = assetRole === 'unified_multi_sleeve_combo'
+    || String(comboResult.type || '').trim().toLowerCase() === 'unified_runtime_combo';
+  const isResearchCombo = assetRole === 'research_combo'
+    || (!assetRole && !!(meta.research_combo && typeof meta.research_combo === 'object'));
+  const isComboResult = isResearchCombo || isUnifiedCombo;
   const isCnEtf = assetScope === 'cn_etf';
   const etfSymbols = Array.isArray(meta.data?.etf_symbols)
     ? meta.data.etf_symbols.map((item) => String(item || '').trim()).filter(Boolean)
@@ -617,11 +622,12 @@ export function summarizeSnapshot(snapshot) {
   );
   const comboMetrics = meta.combo_metrics && typeof meta.combo_metrics === 'object' ? meta.combo_metrics : {};
   const researchCombo = meta.research_combo && typeof meta.research_combo === 'object' ? meta.research_combo : {};
+  const comboMeta = isUnifiedCombo ? comboResult : researchCombo;
   const comboComponents = meta.combo_components && typeof meta.combo_components === 'object' ? meta.combo_components : {};
   const comboStockExpId = firstDefined(comboComponents.stock_component?.exp_id, '-') || '-';
   const comboEtfExpId = firstDefined(comboComponents.etf_component?.exp_id, '-') || '-';
-  const comboStockReturn = deriveNavComponentTotalReturn(navRows, firstDefined(researchCombo.stock_nav_column, 'stock_nav'));
-  const comboEtfReturn = deriveNavComponentTotalReturn(navRows, firstDefined(researchCombo.etf_nav_column, 'etf_nav'));
+  const comboStockReturn = deriveNavComponentTotalReturn(navRows, firstDefined(comboMeta.stock_nav_column, 'stock_nav'));
+  const comboEtfReturn = deriveNavComponentTotalReturn(navRows, firstDefined(comboMeta.etf_nav_column, 'etf_nav'));
   const comboWindowStart = firstDefined(comboMetrics.start, meta.data?.coverage_start);
   const comboWindowEnd = firstDefined(comboMetrics.end, meta.data?.coverage_end);
   const comboWindow = comboWindowStart && comboWindowEnd ? `${comboWindowStart} ~ ${comboWindowEnd}` : '-';
@@ -630,8 +636,10 @@ export function summarizeSnapshot(snapshot) {
     assetScope,
     assetRole,
     isResearchCombo,
-    universeSectionTitle: isResearchCombo ? '组合研究口径' : (isCnEtf ? 'ETF研究口径' : '股票池口径'),
-    universeModeLabel: isResearchCombo ? '组合模式' : (isCnEtf ? 'ETF名单' : '股票池'),
+    isUnifiedCombo,
+    isComboResult,
+    universeSectionTitle: isUnifiedCombo ? '组合结果口径' : (isResearchCombo ? '组合研究口径' : (isCnEtf ? 'ETF研究口径' : '股票池口径')),
+    universeModeLabel: isComboResult ? '组合模式' : (isCnEtf ? 'ETF名单' : '股票池'),
     universeCountLabel: isCnEtf ? 'ETF数量' : '标的数',
     etfBatch: firstDefined(meta.data?.etf_batch, meta.data_bundle?.etf_batch, '-') || '-',
     etfSymbols: etfSymbols.length ? etfSymbols.join(', ') : '-',
@@ -641,9 +649,9 @@ export function summarizeSnapshot(snapshot) {
     status: result.status || 'WAITING',
     effectiveExecutionStartDate: effectiveExecutionStartDate || '-',
     universeRange: `${firstDefined(meta.data?.start, '-') || '-'} ~ ${firstDefined(meta.data?.end, '-') || '-'}`,
-    benchmark: isResearchCombo ? '-' : (firstDefined(meta.data?.benchmark, etfSymbols[0], '-') || '-'),
-    universeMode: isResearchCombo
-      ? (firstDefined(researchCombo.mode, meta.data?.asset_role, '-') || '-')
+    benchmark: isComboResult ? '-' : (firstDefined(meta.data?.benchmark, etfSymbols[0], '-') || '-'),
+    universeMode: isComboResult
+      ? (firstDefined(comboMeta.mode, meta.data?.asset_role, '-') || '-')
       : (firstDefined(meta.universe?.universe_mode, meta.data?.universe_mode, '-') || '-'),
     universeCount,
     hasGovernedSnapshot,
@@ -693,14 +701,16 @@ export function summarizeSnapshot(snapshot) {
     top10ProfitConcentration: fmtPct(top10ProfitConcentrationValue),
     top10AvgReturn: fmtPct(top10AvgReturn),
     tier: firstDefined(perf.tier, result.tier, meta.tier) || '-',
-    comboMode: firstDefined(researchCombo.mode, '-') || '-',
-    comboAssumption: firstDefined(researchCombo.assumption, '-') || '-',
+    comboMode: firstDefined(comboMeta.mode, '-') || '-',
+    comboAssumption: firstDefined(comboMeta.assumption, '-') || '-',
     comboWindow,
     comboStockExpId,
     comboEtfExpId,
     comboStockTotalReturn: fmtPct(comboStockReturn),
     comboEtfTotalReturn: fmtPct(comboEtfReturn),
-    comboReadOnlyNote: isResearchCombo ? '当前结果是研究组合锚点，只读展示，不代表 unified runtime 正式实验。' : '-',
+    comboReadOnlyNote: isResearchCombo
+      ? '当前结果是研究组合锚点，只读展示，不代表 unified runtime 正式实验。'
+      : (isUnifiedCombo ? '当前结果来自 unified runtime 组合实验，组合层与 sleeve 层产物已统一收口。' : '-'),
     groupLoadStatus: artifacts?.missing?.length
       ? `缺少 ${String(artifacts.missing.length)} 个产物`
       : '产物已加载',
