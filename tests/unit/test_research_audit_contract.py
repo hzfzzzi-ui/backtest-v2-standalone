@@ -121,12 +121,6 @@ def test_evaluate_etf_beta_sleeve_passes_when_phase1_scope_and_budget_are_tracea
                 "etf_beta": {
                     "enabled": True,
                     "sleeve_id": "cn_etf_beta",
-                    "template_id": "broad_based_rotation_template_a",
-                    "template_asset_pool_version": "A0",
-                    "template_role_map": {"510300.SH": "hs300", "512100.SH": "csi1000_proxy"},
-                    "template_proxy_map": {"512100.SH": "CSI1000_STANDARD"},
-                    "template_target_formal_symbols": ["510300.SH", "510500.SH", "CSI1000_STANDARD", "DIVIDEND_STANDARD"],
-                    "growth_seat_symbol": "159915.SZ",
                     "core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
                     "limited_defense_candidates": ["512890.SH"],
                 }
@@ -135,25 +129,26 @@ def test_evaluate_etf_beta_sleeve_passes_when_phase1_scope_and_budget_are_tracea
                 "asset_scope": "cn_etf",
                 "preset_id": "cn_etf_first_wave_core",
                 "etf_batch": "cn_etf_first_wave_core",
-                "etf_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH", "511010.SH"],
+                "etf_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH", "512890.SH"],
                 "coverage_start": "2013-01-04",
                 "coverage_end": "2026-03-20",
                 "daily_table": "pams_cn_etf_daily",
                 "price_series_semantics": "executable_price_only_not_total_return",
             },
             "etf_beta": {
+                "strategy_role": "auxiliary_beta_sleeve",
                 "source_entry_type": "cn_etf_research_entry",
                 "source_preset_id": "cn_etf_first_wave_core",
-                "template_id": "broad_based_rotation_template_a",
-                "template_asset_pool_version": "A0",
-                "template_role_map": {"510300.SH": "hs300", "512100.SH": "csi1000_proxy"},
-                "template_proxy_map": {"512100.SH": "CSI1000_STANDARD"},
-                "template_target_formal_symbols": ["510300.SH", "510500.SH", "CSI1000_STANDARD", "DIVIDEND_STANDARD"],
-                "proxy_replacement_mode": "csi1000_proxy_only",
-                "formal_replacement_pairs": {"512100.SH": "159845.SZ"},
-                "core_slot_symbols": ["510300.SH", "512100.SH"],
-                "growth_slot_symbols": ["159915.SZ"],
-                "growth_seat_symbol": "159915.SZ",
+                "governor_boundary_mode": "consume_governor_sleeve_budget",
+                "local_policy_mode": "legacy_beta_selection",
+                "research_rule_family": "etf_beta_v1_control",
+                "exposure_policy_family": "default",
+                "policy_scope": "general",
+                "broad_based_only": False,
+                "layering_policy": "none",
+                "layering_band": None,
+                "layering_active": False,
+                "layering_reason_codes": [],
                 "absolute_filter_mode": "ma200_and_positive_12m",
                 "fallback_mode": "cash",
                 "relative_strength_fast_window": 63,
@@ -164,24 +159,20 @@ def test_evaluate_etf_beta_sleeve_passes_when_phase1_scope_and_budget_are_tracea
                 "relative_strength_slow_weight": 0.5,
                 "formal_core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
                 "limited_defense_candidates": ["512890.SH"],
-                "input_etfs": ["510300.SH", "510500.SH", "510050.SH", "512100.SH", "511010.SH"],
+                "formal_alignment_reference": "A股ETF子系统策略思路md",
+                "formal_alignment_status": "formal_mainline",
+                "formal_mainline_compatible": True,
+                "formal_alignment_reason_codes": [],
+                "formal_alignment_evidence": {"reference_doc": "A股ETF子系统策略思路md"},
+                "input_etfs": ["510300.SH", "510500.SH", "510050.SH", "512100.SH", "512890.SH"],
                 "eligible_etfs": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
-                "selected_etfs": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                "selected_etfs": ["510300.SH", "510500.SH"],
                 "selection_reason_codes": {
                     "510300.SH": ["FORMAL_CORE_BETA"],
                     "510500.SH": ["FORMAL_CORE_BETA"],
-                    "510050.SH": ["FORMAL_CORE_BETA"],
-                    "512100.SH": ["FORMAL_CORE_BETA"],
                 },
-                "core_slot_selected_symbol": "510300.SH",
-                "growth_slot_selected_symbol": "159915.SZ",
-                "slot_selection_reason_codes": {
-                    "core_slot": ["SELECTED::510300.SH"],
-                    "growth_slot": ["SELECTED::159915.SZ"],
-                },
-                "slot_under_deploy_reason_codes": {},
-                "out_of_scope_etfs": ["511010.SH"],
-                "out_of_scope_reason_codes": {"511010.SH": ["OUT_OF_PHASE1_FORMAL_SCOPE"]},
+                "out_of_scope_etfs": [],
+                "out_of_scope_reason_codes": {},
                 "coverage_summary": {
                     "coverage_start": "2013-01-04",
                     "coverage_end": "2026-03-20",
@@ -192,7 +183,7 @@ def test_evaluate_etf_beta_sleeve_passes_when_phase1_scope_and_budget_are_tracea
                     "budget_owner": "global_portfolio_governor",
                     "total_risk_budget": 0.7,
                     "slot_cap": 4,
-                    "selected_count": 4,
+                    "selected_count": 2,
                 },
             },
         }
@@ -201,17 +192,15 @@ def test_evaluate_etf_beta_sleeve_passes_when_phase1_scope_and_budget_are_tracea
     assert gate is not None
     assert gate["status"] == "PASS"
     assert gate["metrics"]["eligible_count"] == 4
-    assert gate["evidence"]["proxy_replacement_mode"] == "csi1000_proxy_only"
-    assert gate["evidence"]["core_slot_selected_symbol"] == "510300.SH"
-    assert gate["evidence"]["growth_slot_selected_symbol"] == "159915.SZ"
-    assert gate["metrics"]["out_of_scope_count"] == 1
+    assert gate["metrics"]["out_of_scope_count"] == 0
     assert gate["metrics"]["order_count"] == 8
     assert gate["metrics"]["trade_count"] == 4
-    assert gate["evidence"]["template_id"] == "broad_based_rotation_template_a"
-    assert gate["evidence"]["template_asset_pool_version"] == "A0"
-    assert gate["evidence"]["template_proxy_map"]["512100.SH"] == "CSI1000_STANDARD"
+    assert gate["metrics"]["formal_alignment_status"] == "formal_mainline"
+    assert gate["metrics"]["formal_mainline_compatible"] is True
     assert gate["evidence"]["relative_strength_windows"]["mid"] == 126
     assert gate["evidence"]["absolute_filter_mode"] == "ma200_and_positive_12m"
+    assert gate["evidence"]["strategy_role"] == "auxiliary_beta_sleeve"
+    assert gate["evidence"]["formal_alignment_reference"] == "A股ETF子系统策略思路md"
 
 
 def test_evaluate_etf_beta_sleeve_fails_when_smoke_has_zero_orders_or_trades() -> None:
@@ -268,7 +257,26 @@ def test_evaluate_etf_beta_sleeve_warns_when_deployment_is_traceable_but_underde
                         "target_exposure": 0.2,
                         "min_deployable_exposure": 0.1,
                         "fallback_allowed": False,
+                        "layering_band": "LIGHT_ACCUMULATE",
                         "under_deploy_reason_codes": ["ETF_BETA_NO_ELIGIBLE_AFTER_ABSOLUTE_FILTER"],
+                    },
+                    ensure_ascii=False,
+                ),
+                "diagnostics_input_json": json.dumps(
+                    {
+                        "diagnostics": {
+                            "etf_beta_absolute_filter_reject_count": 2,
+                            "etf_beta_absolute_filter_reject_reason_counts": {
+                                "ABSOLUTE_MA200_NOT_ABOVE": 2,
+                            },
+                            "etf_beta_candidate_pool_reject_reason_counts": {
+                                "POOL_PROFILE_EXCLUDED::DIVIDEND_STANDARD": 1,
+                            },
+                            "etf_beta_selection_chain_winner_counts": {
+                                "eligible_after_selection_chain": 0,
+                            },
+                            "etf_beta_selection_chain_reject_reason_counts": {},
+                        }
                     },
                     ensure_ascii=False,
                 ),
@@ -287,7 +295,26 @@ def test_evaluate_etf_beta_sleeve_warns_when_deployment_is_traceable_but_underde
                         "target_exposure": 0.2,
                         "min_deployable_exposure": 0.1,
                         "fallback_allowed": False,
+                        "layering_band": "CONTROLLED_TRANS_DOWN",
                         "under_deploy_reason_codes": ["ETF_BETA_UNDERFILLED_DEPLOYMENT"],
+                    },
+                    ensure_ascii=False,
+                ),
+                "diagnostics_input_json": json.dumps(
+                    {
+                        "diagnostics": {
+                            "etf_beta_absolute_filter_reject_count": 1,
+                            "etf_beta_absolute_filter_reject_reason_counts": {
+                                "ABSOLUTE_RET12_NON_POSITIVE": 1,
+                            },
+                            "etf_beta_selection_chain_winner_counts": {
+                                "eligible_after_selection_chain": 1,
+                                "selected_count": 1,
+                            },
+                            "etf_beta_selection_chain_reject_reason_counts": {
+                                "SELECTION_CHAIN_RANK_BELOW_CUTOFF": 1,
+                            },
+                        }
                     },
                     ensure_ascii=False,
                 ),
@@ -306,7 +333,23 @@ def test_evaluate_etf_beta_sleeve_warns_when_deployment_is_traceable_but_underde
                         "target_exposure": 0.2,
                         "min_deployable_exposure": 0.1,
                         "fallback_allowed": False,
+                        "layering_band": "CONTROLLED_TRANS_DOWN",
                         "under_deploy_reason_codes": ["ETF_BETA_UNDERFILLED_DEPLOYMENT"],
+                    },
+                    ensure_ascii=False,
+                ),
+                "diagnostics_input_json": json.dumps(
+                    {
+                        "diagnostics": {
+                            "etf_beta_absolute_filter_reject_count": 0,
+                            "etf_beta_selection_chain_winner_counts": {
+                                "eligible_after_selection_chain": 1,
+                                "selected_count": 1,
+                            },
+                            "etf_beta_selection_chain_reject_reason_counts": {
+                                "SELECTION_CHAIN_RANK_BELOW_CUTOFF": 2,
+                            },
+                        }
                     },
                     ensure_ascii=False,
                 ),
@@ -346,6 +389,18 @@ def test_evaluate_etf_beta_sleeve_warns_when_deployment_is_traceable_but_underde
                 "out_of_scope_etfs": [],
                 "out_of_scope_reason_codes": {},
                 "coverage_summary": {"daily_table": "pams_cn_etf_daily"},
+                "absolute_filter_profile": "ma200_ret12",
+                "candidate_pool_profile": "a0_proxy_pool",
+                "selection_chain_profile": "global_top2_12_6_3",
+                "exposure_policy_family": "broad_based_governed_v1",
+                "policy_scope": "broad_based_only",
+                "broad_based_only": True,
+                "layering_policy": "light_trans_down_accumulate",
+                "layering_band": "CONTROLLED_TRANS_DOWN",
+                "layering_active": True,
+                "layering_reason_codes": ["ETF_BETA_LAYERING_CONTROLLED_TRANS_DOWN"],
+                "target_selected_count_source": "state_target_selected_count",
+                "fallback_allowed_source": "state_fallback_allowed",
                 "target_exposure": 0.2,
                 "min_deployable_exposure": 0.1,
                 "fallback_allowed": False,
@@ -356,6 +411,7 @@ def test_evaluate_etf_beta_sleeve_warns_when_deployment_is_traceable_but_underde
                     "target_exposure": 0.2,
                     "min_deployable_exposure": 0.1,
                     "fallback_allowed": False,
+                    "layering_band": "CONTROLLED_TRANS_DOWN",
                     "under_deploy_reason_codes": ["ETF_BETA_UNDERFILLED_DEPLOYMENT"],
                 },
             },
@@ -374,6 +430,211 @@ def test_evaluate_etf_beta_sleeve_warns_when_deployment_is_traceable_but_underde
     assert gate["metrics"]["fallback_buy_count"] == 0
     assert gate["metrics"]["deployment_assessment"] == "UNDERDEPLOYED"
     assert gate["metrics"]["under_deploy_reason_counts"]["ETF_BETA_UNDERFILLED_DEPLOYMENT"] == 2
+    assert gate["metrics"]["absolute_filter_reject_day_count"] == 2
+    assert gate["metrics"]["absolute_filter_reject_reason_counts"]["ABSOLUTE_MA200_NOT_ABOVE"] == 2
+    assert gate["metrics"]["selection_chain_reject_reason_counts"]["SELECTION_CHAIN_RANK_BELOW_CUTOFF"] == 3
+    assert gate["metrics"]["primary_bottleneck_layer"] == "absolute_filter"
+    assert gate["metrics"]["layering_band_counts"]["CONTROLLED_TRANS_DOWN"] == 2
+    assert gate["metrics"]["layering_band_counts"]["LIGHT_ACCUMULATE"] == 1
+    assert gate["evidence"]["layering_band"] == "CONTROLLED_TRANS_DOWN"
+    assert gate["evidence"]["exposure_policy_family"] == "broad_based_governed_v1"
+    assert gate["evidence"]["absolute_filter_profile"] == "ma200_ret12"
+
+
+def test_evaluate_etf_beta_sleeve_passes_for_governed_broad_based_standalone_mainline(tmp_path) -> None:
+    root = tmp_path / "exp_etf_standalone_mainline"
+    root.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "date": "2026-03-18",
+                "gross_exposure": 0.42,
+                "etf_target_exposure": 0.45,
+                "etf_actual_exposure": 0.42,
+                "etf_actual_risk_exposure": 0.34,
+                "etf_actual_fallback_exposure": 0.08,
+                "etf_actual_other_exposure": 0.0,
+                "etf_deployability_gap": 0.03,
+                "governor_budget_json": json.dumps(
+                    {
+                        "target_exposure": 0.45,
+                        "min_deployable_exposure": 0.2,
+                        "fallback_allowed": True,
+                        "layering_band": "CONTROLLED_TRANS_DOWN",
+                        "under_deploy_reason_codes": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "diagnostics_input_json": json.dumps(
+                    {
+                        "diagnostics": {
+                            "etf_beta_layering_band": "CONTROLLED_TRANS_DOWN",
+                            "etf_beta_under_deploy_reason_codes": [],
+                            "etf_beta_controlled_accumulation_mode": "light_and_controlled_trans_down",
+                            "etf_beta_absolute_filter_profile": "ma200_only",
+                            "etf_beta_candidate_pool_profile": "proxy_expanded_pool",
+                            "etf_beta_selection_chain_profile": "global_top2_6_3_1",
+                            "etf_beta_absolute_filter_reject_count": 1,
+                            "etf_beta_absolute_filter_reject_reason_counts": {"ABSOLUTE_MA200_NOT_ABOVE": 1},
+                            "etf_beta_candidate_pool_reject_reason_counts": {"POOL_PROFILE_EXCLUDED::DIVIDEND_STANDARD": 1},
+                            "etf_beta_selection_chain_winner_counts": {"selected_count": 2},
+                            "etf_beta_selection_chain_reject_reason_counts": {"SELECTION_CHAIN_RANK_BELOW_CUTOFF": 1},
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            {
+                "date": "2026-03-19",
+                "gross_exposure": 0.38,
+                "etf_target_exposure": 0.45,
+                "etf_actual_exposure": 0.38,
+                "etf_actual_risk_exposure": 0.30,
+                "etf_actual_fallback_exposure": 0.08,
+                "etf_actual_other_exposure": 0.0,
+                "etf_deployability_gap": 0.07,
+                "governor_budget_json": json.dumps(
+                    {
+                        "target_exposure": 0.45,
+                        "min_deployable_exposure": 0.2,
+                        "fallback_allowed": True,
+                        "layering_band": "CONTROLLED_TRANS_DOWN",
+                        "under_deploy_reason_codes": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "diagnostics_input_json": json.dumps(
+                    {
+                        "diagnostics": {
+                            "etf_beta_layering_band": "CONTROLLED_TRANS_DOWN",
+                            "etf_beta_under_deploy_reason_codes": [],
+                            "etf_beta_controlled_accumulation_mode": "light_and_controlled_trans_down",
+                            "etf_beta_absolute_filter_profile": "ma200_only",
+                            "etf_beta_candidate_pool_profile": "proxy_expanded_pool",
+                            "etf_beta_selection_chain_profile": "global_top2_6_3_1",
+                            "etf_beta_absolute_filter_reject_count": 0,
+                            "etf_beta_selection_chain_winner_counts": {"selected_count": 2},
+                            "etf_beta_selection_chain_reject_reason_counts": {"SELECTION_CHAIN_RANK_BELOW_CUTOFF": 1},
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+    ).to_csv(root / "portfolio_daily.csv", index=False)
+    pd.DataFrame(
+        [
+            {"date": "2026-03-18", "reason_code": "ETF_BETA_WEEKLY_RS"},
+            {"date": "2026-03-19", "reason_code": "ETF_BETA_FALLBACK_BUY"},
+            {"date": "2026-03-20", "reason_code": "ETF_BETA_REBALANCE_EXIT"},
+        ]
+    ).to_csv(root / "orders.csv", index=False)
+
+    gate = evaluate_etf_beta_sleeve(
+        results_dir=root,
+        run_meta={
+            "data": {"asset_scope": "cn_etf"},
+            "counters": {"orders": 3, "closed_trades": 2},
+            "governed_a_share": {
+                "etf_beta": {
+                    "enabled": True,
+                    "sleeve_id": "cn_etf_beta",
+                    "core_beta_symbols": ["510300.SH", "510500.SH", "159915.SZ"],
+                    "limited_defense_candidates": [],
+                }
+            },
+            "etf_beta": {
+                "strategy_role": "governed_broad_based_standalone_mainline",
+                "source_entry_type": "cn_etf_broad_based_standalone_mainline_entry",
+                "governor_boundary_mode": "consume_governor_state_and_budget",
+                "local_policy_mode": "broad_based_rotation_mainline",
+                "controlled_accumulation_mode": "light_and_controlled_trans_down",
+                "formal_alignment_reference": "A股ETF子系统策略思路md",
+                "formal_alignment_status": "do_not_promote",
+                "formal_mainline_compatible": False,
+                "formal_alignment_reason_codes": [
+                    "FORMAL_EXCLUDED_ASSET_USED::input_etfs::159915.SZ",
+                    "FORMAL_EXCLUDED_ASSET_USED::input_etfs::511010.SH",
+                    "SIGNAL_SEMANTICS_OUT_OF_SCOPE::research_rule_family::broad_based_rotation_template_a",
+                ],
+                "formal_alignment_evidence": {"reference_doc": "A股ETF子系统策略思路md"},
+                "formal_core_beta_symbols": ["510300.SH", "510500.SH", "159915.SZ"],
+                "limited_defense_candidates": [],
+                "input_etfs": ["510300.SH", "510500.SH", "159915.SZ", "511010.SH"],
+                "eligible_etfs": ["510300.SH", "510500.SH", "159915.SZ"],
+                "selected_etfs": ["510500.SH", "159915.SZ"],
+                "selection_reason_codes": {
+                    "510500.SH": ["RS_TOP2", "ABSOLUTE_FILTER_PASS"],
+                    "159915.SZ": ["GROWTH_SLOT", "ABSOLUTE_FILTER_PASS"],
+                },
+                "out_of_scope_etfs": [],
+                "out_of_scope_reason_codes": {},
+                "coverage_summary": {"daily_table": "pams_cn_etf_daily"},
+                "absolute_filter_profile": "ma200_only",
+                "candidate_pool_profile": "proxy_expanded_pool",
+                "selection_chain_profile": "global_top2_6_3_1",
+                "exposure_policy_family": "broad_based_standalone_mainline_v1",
+                "policy_scope": "broad_based_only",
+                "broad_based_only": True,
+                "layering_policy": "light_trans_down_accumulate",
+                "layering_band": "CONTROLLED_TRANS_DOWN",
+                "layering_active": True,
+                "layering_reason_codes": ["ETF_BETA_LAYERING_CONTROLLED_TRANS_DOWN"],
+                "target_selected_count_source": "state_map::TRANS_DOWN",
+                "fallback_allowed_source": "state_map::TRANS_DOWN",
+                "target_exposure": 0.45,
+                "min_deployable_exposure": 0.2,
+                "fallback_allowed": True,
+                "under_deploy_reason_codes": [],
+                "governor_boundary": {
+                    "effective_state_5": "TRANS_DOWN",
+                    "budget_owner": "global_portfolio_governor",
+                    "budget_reason_codes": ["BUDGET_OK"],
+                    "target_exposure": 0.45,
+                },
+                "local_policy_decision": {
+                    "strategy_role": "governed_broad_based_standalone_mainline",
+                    "local_policy_mode": "broad_based_rotation_mainline",
+                    "controlled_accumulation_mode": "light_and_controlled_trans_down",
+                    "selected_etfs": ["510500.SH", "159915.SZ"],
+                    "runtime_reason_codes": ["ETF_BETA_STANDALONE_MAINLINE_ACTIVE"],
+                    "under_deploy_reason_codes": [],
+                    "fallback_mode": "single_symbol",
+                    "fallback_symbol": "511010.SH",
+                },
+                "sleeve_budget_used": {
+                    "budget_owner": "global_portfolio_governor",
+                    "slot_cap": 2,
+                    "target_exposure": 0.45,
+                    "min_deployable_exposure": 0.2,
+                    "fallback_allowed": True,
+                    "actual_exposure": 0.38,
+                    "actual_risk_exposure": 0.30,
+                    "actual_fallback_exposure": 0.08,
+                    "deployability_gap": 0.07,
+                },
+            },
+        },
+    )
+
+    assert gate is not None
+    assert gate["status"] == "FAIL"
+    assert gate["metrics"]["formal_alignment_status"] == "do_not_promote"
+    assert gate["metrics"]["formal_mainline_compatible"] is False
+    assert gate["metrics"]["has_governor_boundary_split"] is True
+    assert gate["metrics"]["has_local_policy_split"] is True
+    assert gate["metrics"]["fallback_exposure_day_count"] == 2
+    assert gate["metrics"]["controlled_accumulation_day_count"] == 2
+    assert gate["metrics"]["absolute_filter_reject_day_count"] == 1
+    assert gate["metrics"]["selection_chain_reject_reason_counts"]["SELECTION_CHAIN_RANK_BELOW_CUTOFF"] == 2
+    assert gate["evidence"]["strategy_role"] == "governed_broad_based_standalone_mainline"
+    assert gate["evidence"]["absolute_filter_profile"] == "ma200_only"
+    assert gate["evidence"]["candidate_pool_profile"] == "proxy_expanded_pool"
+    assert gate["evidence"]["selection_chain_profile"] == "global_top2_6_3_1"
+    assert gate["evidence"]["formal_alignment_reference"] == "A股ETF子系统策略思路md"
+    assert gate["evidence"]["source_entry_type"] == "cn_etf_broad_based_standalone_mainline_entry"
+    assert gate["evidence"]["governor_boundary"]["effective_state_5"] == "TRANS_DOWN"
+    assert gate["evidence"]["local_policy_decision"]["local_policy_mode"] == "broad_based_rotation_mainline"
 
 
 def test_evaluate_attribution_traceability_passes_when_summary_and_refs_exist(tmp_path) -> None:

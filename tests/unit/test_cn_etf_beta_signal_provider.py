@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from backend.core.engine_vector.breakout_signal_provider import BreakoutTrendProvider
 from backend.core.engine_vector.cn_etf_beta_signal_provider import CNETFBetaSignalProvider
@@ -586,6 +587,429 @@ def test_cn_etf_beta_a0_core_satellite_v2_light_state_only_keeps_core_slot(monke
     assert provider._etf_beta_growth_slot_selected_symbol_arr[-1] is None
     slot_under_deploy = provider._etf_beta_slot_under_deploy_reason_codes_arr[-1]
     assert "ETF_BETA_GROWTH_SLOT_SUPPRESSED_BY_SLOT_CAP" in slot_under_deploy["growth_slot"]
+
+
+def test_cn_etf_beta_precompute_supports_broad_based_governed_policy(monkeypatch) -> None:
+    trading_days = [pd.Timestamp(day).date() for day in pd.bdate_range("2024-01-02", periods=320)]
+
+    def _fake_super_precompute(self, **_kwargs) -> None:
+        close_510300 = np.linspace(4.0, 5.9, len(trading_days), dtype=float)
+        close_510500 = np.linspace(3.0, 6.1, len(trading_days), dtype=float)
+        close_159915 = np.linspace(3.2, 6.4, len(trading_days), dtype=float)
+        close_511010 = np.linspace(3.0, 3.3, len(trading_days), dtype=float)
+        self._mx = SimpleNamespace(
+            dates=trading_days,
+            symbols=["510300.sh", "510500.sh", "159915.sz", "511010.sh"],
+            close=np.column_stack([close_510300, close_510500, close_159915, close_511010]),
+        )
+        self._feats = SimpleNamespace(
+            trend_fast_ma=np.column_stack(
+                [
+                    close_510300 - 0.1,
+                    close_510500 - 0.1,
+                    close_159915 - 0.12,
+                    close_511010 - 0.03,
+                ]
+            )
+        )
+        self._market_state = np.array([], dtype=np.int8)
+        self._trade_mode = np.array([], dtype=np.int8)
+        self._market_state_name_arr = np.array([], dtype=object)
+        self._trade_mode_name_arr = np.array([], dtype=object)
+        self._market_state_raw_name_arr = np.array([], dtype=object)
+        self._market_state_smoothed_name_arr = np.array([], dtype=object)
+        self._base_state_5_arr = np.array(["TRANS_DOWN"] * len(trading_days), dtype=object)
+        self._effective_state_5_arr = np.array(["TRANS_DOWN"] * len(trading_days), dtype=object)
+        self._regime_risk_budget_multiplier_arr = np.full(len(trading_days), 0.4, dtype=float)
+        self._risk_budget_multiplier_arr = np.full(len(trading_days), 0.4, dtype=float)
+
+    monkeypatch.setattr(BreakoutTrendProvider, "precompute", _fake_super_precompute)
+
+    provider = CNETFBetaSignalProvider()
+    provider.precompute(
+        history=pd.DataFrame(),
+        benchmark=pd.DataFrame({"date": pd.to_datetime(trading_days), "close": np.linspace(100.0, 110.0, len(trading_days), dtype=float)}),
+        raw_history=pd.DataFrame(),
+        trading_days=trading_days,
+        strategy=SimpleNamespace(),
+        governed_a_share={
+            "etf_beta": {
+                "research_rule_family": "broad_based_rotation_template_a",
+                "template_id": "broad_based_governed_exposure_policy",
+                "template_asset_pool_version": "A0_GOVERNED",
+                "template_role_map": {
+                    "510300.SH": "hs300",
+                    "510500.SH": "csi500",
+                    "159915.SZ": "growth_style",
+                },
+                "core_beta_symbols": ["510300.SH", "510500.SH", "159915.SZ"],
+                "limited_defense_candidates": [],
+                "rebalance_frequency": "monthly",
+                "absolute_filter_mode": "ma200_and_positive_12m",
+                "fallback_mode": "single_symbol",
+                "fallback_symbol": "511010.SH",
+                "relative_strength_fast_window": 63,
+                "relative_strength_mid_window": 126,
+                "relative_strength_slow_window": 252,
+                "relative_strength_fast_weight": 0.2,
+                "relative_strength_mid_weight": 0.3,
+                "relative_strength_slow_weight": 0.5,
+                "max_selected_symbols": 2,
+                "exposure_policy_family": "broad_based_governed_v1",
+                "policy_scope": "broad_based_only",
+                "broad_based_only": True,
+                "layering_policy": "light_trans_down_accumulate",
+                "target_exposure_by_state_5": {
+                    "BULL": 1.0,
+                    "TRANS_UP": 0.9,
+                    "LIGHT": 0.7,
+                    "TRANS_DOWN": 0.3,
+                    "RISK_OFF": 0.0,
+                },
+                "min_deployable_exposure_by_state_5": {
+                    "BULL": 0.5,
+                    "TRANS_UP": 0.4,
+                    "LIGHT": 0.25,
+                    "TRANS_DOWN": 0.15,
+                    "RISK_OFF": 0.0,
+                },
+                "target_selected_count_by_state_5": {
+                    "BULL": 2,
+                    "TRANS_UP": 2,
+                    "LIGHT": 2,
+                    "TRANS_DOWN": 1,
+                    "RISK_OFF": 0,
+                },
+                "fallback_allowed_by_state_5": {
+                    "BULL": True,
+                    "TRANS_UP": True,
+                    "LIGHT": True,
+                    "TRANS_DOWN": True,
+                    "RISK_OFF": False,
+                },
+            }
+        },
+    )
+
+    assert provider._etf_beta_slot_cap_arr[-1] == 1
+    assert provider._etf_beta_target_selected_count_arr[-1] == 1
+    assert provider._etf_beta_exposure_policy_family_arr[-1] == "broad_based_governed_v1"
+    assert provider._etf_beta_policy_scope_arr[-1] == "broad_based_only"
+    assert bool(provider._etf_beta_broad_based_only_arr[-1]) is True
+    assert provider._etf_beta_layering_policy_arr[-1] == "light_trans_down_accumulate"
+    assert provider._etf_beta_layering_band_arr[-1] == "CONTROLLED_TRANS_DOWN"
+    assert bool(provider._etf_beta_layering_active_arr[-1]) is True
+    assert "ETF_BETA_LAYERING_CONTROLLED_TRANS_DOWN" in provider._etf_beta_layering_reason_codes_arr[-1]
+    assert provider._etf_beta_target_selected_count_source_arr[-1] == "state_map::TRANS_DOWN"
+    assert provider._etf_beta_fallback_allowed_source_arr[-1] == "state_map::TRANS_DOWN"
+
+    ctx = DayContext(
+        positions={},
+        position_avg_cost={},
+        cash=100000.0,
+        nav=100000.0,
+        base_order_value=10000.0,
+        max_positions=1,
+        close_idx={},
+        open_idx={},
+        next_day=None,
+        holding_sources={},
+        asset_context={"asset_scope": "cn_etf"},
+        risk_on=False,
+        market_state="TRANS_DOWN",
+    )
+
+    day_signals = provider.day_signals(trading_days[-1], len(trading_days) - 1, ctx)
+
+    assert day_signals.diagnostics["etf_beta_exposure_policy_family"] == "broad_based_governed_v1"
+    assert day_signals.diagnostics["etf_beta_policy_scope"] == "broad_based_only"
+    assert day_signals.diagnostics["etf_beta_broad_based_only"] is True
+    assert day_signals.diagnostics["etf_beta_layering_policy"] == "light_trans_down_accumulate"
+    assert day_signals.diagnostics["etf_beta_layering_band"] == "CONTROLLED_TRANS_DOWN"
+    assert day_signals.diagnostics["etf_beta_layering_active"] is True
+    assert "ETF_BETA_LAYERING_CONTROLLED_TRANS_DOWN" in day_signals.diagnostics["etf_beta_layering_reason_codes"]
+    assert day_signals.diagnostics["etf_beta_target_selected_count_source"] == "state_map::TRANS_DOWN"
+    assert day_signals.diagnostics["etf_beta_fallback_allowed_source"] == "state_map::TRANS_DOWN"
+    assert "ETF_BETA_BROAD_BASED_GOVERNED_POLICY_ACTIVE" in day_signals.diagnostics["etf_beta_runtime_reason_codes"]
+
+
+def test_cn_etf_beta_precompute_supports_governed_broad_based_standalone_mainline(monkeypatch) -> None:
+    trading_days = [pd.Timestamp(day).date() for day in pd.bdate_range("2024-01-02", periods=320)]
+
+    def _fake_super_precompute(self, **_kwargs) -> None:
+        close_510300 = np.linspace(4.0, 5.7, len(trading_days), dtype=float)
+        close_510500 = np.linspace(3.0, 6.0, len(trading_days), dtype=float)
+        close_159915 = np.linspace(3.2, 6.2, len(trading_days), dtype=float)
+        close_511010 = np.linspace(3.0, 3.3, len(trading_days), dtype=float)
+        self._mx = SimpleNamespace(
+            dates=trading_days,
+            symbols=["510300.sh", "510500.sh", "159915.sz", "511010.sh"],
+            close=np.column_stack([close_510300, close_510500, close_159915, close_511010]),
+        )
+        self._feats = SimpleNamespace(
+            trend_fast_ma=np.column_stack(
+                [
+                    close_510300 - 0.12,
+                    close_510500 - 0.12,
+                    close_159915 - 0.15,
+                    close_511010 - 0.04,
+                ]
+            )
+        )
+        self._market_state = np.array([], dtype=np.int8)
+        self._trade_mode = np.array([], dtype=np.int8)
+        self._market_state_name_arr = np.array([], dtype=object)
+        self._trade_mode_name_arr = np.array([], dtype=object)
+        self._market_state_raw_name_arr = np.array([], dtype=object)
+        self._market_state_smoothed_name_arr = np.array([], dtype=object)
+        self._base_state_5_arr = np.array(["TRANS_DOWN"] * len(trading_days), dtype=object)
+        self._effective_state_5_arr = np.array(["TRANS_DOWN"] * len(trading_days), dtype=object)
+        self._regime_risk_budget_multiplier_arr = np.full(len(trading_days), 0.35, dtype=float)
+        self._risk_budget_multiplier_arr = np.full(len(trading_days), 0.35, dtype=float)
+
+    monkeypatch.setattr(BreakoutTrendProvider, "precompute", _fake_super_precompute)
+
+    provider = CNETFBetaSignalProvider()
+    provider.precompute(
+        history=pd.DataFrame(),
+        benchmark=pd.DataFrame({"date": pd.to_datetime(trading_days), "close": np.linspace(100.0, 110.0, len(trading_days), dtype=float)}),
+        raw_history=pd.DataFrame(),
+        trading_days=trading_days,
+        strategy=SimpleNamespace(),
+        governed_a_share={
+            "etf_beta": {
+                "strategy_role": "governed_broad_based_standalone_mainline",
+                "source_entry_type": "cn_etf_broad_based_standalone_mainline_entry",
+                "governor_boundary_mode": "consume_governor_state_and_budget",
+                "local_policy_mode": "broad_based_rotation_mainline",
+                "controlled_accumulation_mode": "light_and_controlled_trans_down",
+                "research_rule_family": "broad_based_rotation_template_a",
+                "template_id": "cn_broad_based_standalone_mainline",
+                "template_asset_pool_version": "MAINLINE_V1",
+                "absolute_filter_profile": "ma200_ret12",
+                "candidate_pool_profile": "a0_proxy_pool",
+                "selection_chain_profile": "global_top2_12_6_3",
+                "template_role_map": {
+                    "510300.SH": "hs300",
+                    "510500.SH": "csi500",
+                    "159915.SZ": "growth_style",
+                },
+                "core_beta_symbols": ["510300.SH", "510500.SH", "159915.SZ"],
+                "limited_defense_candidates": [],
+                "rebalance_frequency": "monthly",
+                "absolute_filter_mode": "ma200_and_positive_12m",
+                "fallback_mode": "single_symbol",
+                "fallback_symbol": "511010.SH",
+                "relative_strength_fast_window": 63,
+                "relative_strength_mid_window": 126,
+                "relative_strength_slow_window": 252,
+                "relative_strength_fast_weight": 0.2,
+                "relative_strength_mid_weight": 0.3,
+                "relative_strength_slow_weight": 0.5,
+                "max_selected_symbols": 2,
+                "exposure_policy_family": "broad_based_standalone_mainline_v1",
+                "policy_scope": "broad_based_only",
+                "broad_based_only": True,
+                "target_exposure_by_state_5": {
+                    "BULL": 1.0,
+                    "TRANS_UP": 0.9,
+                    "LIGHT": 0.75,
+                    "TRANS_DOWN": 0.35,
+                    "RISK_OFF": 0.0,
+                },
+                "min_deployable_exposure_by_state_5": {
+                    "BULL": 0.45,
+                    "TRANS_UP": 0.35,
+                    "LIGHT": 0.2,
+                    "TRANS_DOWN": 0.1,
+                    "RISK_OFF": 0.0,
+                },
+                "target_selected_count_by_state_5": {
+                    "BULL": 2,
+                    "TRANS_UP": 2,
+                    "LIGHT": 2,
+                    "TRANS_DOWN": 1,
+                    "RISK_OFF": 0,
+                },
+                "fallback_allowed_by_state_5": {
+                    "BULL": True,
+                    "TRANS_UP": True,
+                    "LIGHT": True,
+                    "TRANS_DOWN": True,
+                    "RISK_OFF": False,
+                },
+            }
+        },
+    )
+
+    assert provider._etf_beta_strategy_role == "governed_broad_based_standalone_mainline"
+    assert provider._etf_beta_governor_boundary_mode == "consume_governor_state_and_budget"
+    assert provider._etf_beta_local_policy_mode == "broad_based_rotation_mainline"
+    assert provider._etf_beta_controlled_accumulation_mode == "light_and_controlled_trans_down"
+    assert provider._etf_beta_exposure_policy_family_arr[-1] == "broad_based_standalone_mainline_v1"
+    assert provider._etf_beta_absolute_filter_profile == "ma200_ret12"
+    assert provider._etf_beta_candidate_pool_profile == "a0_proxy_pool"
+    assert provider._etf_beta_selection_chain_profile == "global_top2_12_6_3"
+
+    ctx = DayContext(
+        positions={},
+        position_avg_cost={},
+        cash=100000.0,
+        nav=100000.0,
+        base_order_value=10000.0,
+        max_positions=2,
+        close_idx={},
+        open_idx={},
+        next_day=None,
+        holding_sources={},
+        asset_context={"asset_scope": "cn_etf"},
+        risk_on=False,
+        market_state="TRANS_DOWN",
+    )
+    day_signals = provider.day_signals(trading_days[-1], len(trading_days) - 1, ctx)
+
+    assert day_signals.diagnostics["etf_beta_strategy_role"] == "governed_broad_based_standalone_mainline"
+    assert day_signals.diagnostics["etf_beta_governor_boundary_mode"] == "consume_governor_state_and_budget"
+    assert day_signals.diagnostics["etf_beta_local_policy_mode"] == "broad_based_rotation_mainline"
+    assert day_signals.diagnostics["etf_beta_controlled_accumulation_mode"] == "light_and_controlled_trans_down"
+    assert day_signals.diagnostics["etf_beta_absolute_filter_profile"] == "ma200_ret12"
+    assert day_signals.diagnostics["etf_beta_candidate_pool_profile"] == "a0_proxy_pool"
+    assert day_signals.diagnostics["etf_beta_selection_chain_profile"] == "global_top2_12_6_3"
+    assert "eligible_after_selection_chain" in day_signals.diagnostics["etf_beta_selection_chain_winner_counts"]
+    assert "ETF_BETA_STANDALONE_MAINLINE_ACTIVE" in day_signals.diagnostics["etf_beta_runtime_reason_codes"]
+    assert any(code.startswith("GOVERNOR_BOUNDARY_MODE::CONSUME_GOVERNOR_STATE_AND_BUDGET") for code in day_signals.diagnostics["etf_beta_governor_boundary_reason_codes"])
+    assert any(code.startswith("ETF_BETA_CONTROLLED_ACCUMULATION_MODE::LIGHT_AND_CONTROLLED_TRANS_DOWN") for code in day_signals.diagnostics["etf_beta_local_policy_reason_codes"])
+
+
+def test_cn_etf_beta_precompute_supports_bottleneck_profiles(monkeypatch) -> None:
+    trading_days = [pd.Timestamp(day).date() for day in pd.bdate_range("2024-01-02", periods=320)]
+
+    def _fake_super_precompute(self, **_kwargs) -> None:
+        close_510300 = np.linspace(4.0, 6.0, len(trading_days), dtype=float)
+        close_159845 = np.linspace(2.0, 3.2, len(trading_days), dtype=float)
+        close_510880 = np.linspace(2.5, 3.4, len(trading_days), dtype=float)
+        close_159915 = np.linspace(3.0, 5.8, len(trading_days), dtype=float)
+        close_512100 = np.linspace(2.0, 4.0, len(trading_days), dtype=float)
+        close_512890 = np.linspace(2.0, 3.0, len(trading_days), dtype=float)
+        self._mx = SimpleNamespace(
+            dates=trading_days,
+            symbols=["510300.sh", "159845.sz", "510880.sh", "159915.sz", "512100.sh", "512890.sh"],
+            close=np.column_stack([close_510300, close_159845, close_510880, close_159915, close_512100, close_512890]),
+        )
+        self._feats = SimpleNamespace(
+            trend_fast_ma=np.column_stack(
+                [
+                    close_510300 - 0.1,
+                    close_159845 - 0.08,
+                    close_510880 - 0.05,
+                    close_159915 - 0.12,
+                    close_512100 - 0.1,
+                    close_512890 - 0.05,
+                ]
+            )
+        )
+        self._market_state = np.array([], dtype=np.int8)
+        self._trade_mode = np.array([], dtype=np.int8)
+        self._market_state_name_arr = np.array([], dtype=object)
+        self._trade_mode_name_arr = np.array([], dtype=object)
+        self._market_state_raw_name_arr = np.array([], dtype=object)
+        self._market_state_smoothed_name_arr = np.array([], dtype=object)
+        self._base_state_5_arr = np.array([], dtype=object)
+        self._effective_state_5_arr = np.array([], dtype=object)
+        self._regime_risk_budget_multiplier_arr = np.array([], dtype=float)
+        self._risk_budget_multiplier_arr = np.array([], dtype=float)
+
+    monkeypatch.setattr(BreakoutTrendProvider, "precompute", _fake_super_precompute)
+
+    provider = CNETFBetaSignalProvider()
+    provider.precompute(
+        history=pd.DataFrame(),
+        benchmark=pd.DataFrame({"date": pd.to_datetime(trading_days), "close": np.linspace(100.0, 120.0, len(trading_days), dtype=float)}),
+        raw_history=pd.DataFrame(),
+        trading_days=trading_days,
+        strategy=SimpleNamespace(),
+        market_filter_cfg={
+            "enabled": True,
+            "long_ma_window": 5,
+            "slope_window": 1,
+            "slope_ma_period": 3,
+            "bull_multiplier": 1.0,
+            "light_multiplier": 0.5,
+            "trans_down_multiplier": 0.25,
+            "trans_up_multiplier": 0.75,
+            "bear_multiplier": 0.0,
+        },
+        governed_a_share={
+            "etf_beta": {
+                "research_rule_family": "broad_based_rotation_template_a",
+                "absolute_filter_profile": "ma150_ret12",
+                "candidate_pool_profile": "standard_overlap_pool",
+                "selection_chain_profile": "global_top2_6_3_1",
+                "core_beta_symbols": ["510300.SH", "159845.SZ", "510880.SH", "159915.SZ"],
+                "fallback_mode": "cash",
+            }
+        },
+    )
+
+    assert provider._etf_beta_absolute_filter_mode == "ma150_and_positive_12m"
+    assert provider._etf_beta_candidate_pool_symbols == ["510300.SH", "159845.SZ", "510880.SH", "159915.SZ"]
+    assert provider._etf_beta_rs_fast_window == 21
+    assert provider._etf_beta_rs_mid_window == 63
+    assert provider._etf_beta_rs_slow_window == 126
+    assert provider._etf_beta_max_selected_symbols == 2
+    assert provider._etf_beta_candidate_pool_reject_reason_counts["POOL_PROFILE_EXCLUDED::SMALL_CAP_EQUITY"] >= 1
+
+
+def test_cn_etf_beta_precompute_rejects_non_broad_based_symbol_for_standalone_mainline(monkeypatch) -> None:
+    trading_days = [pd.Timestamp(day).date() for day in pd.bdate_range("2024-01-02", periods=260)]
+
+    def _fake_super_precompute(self, **_kwargs) -> None:
+        close_510300 = np.linspace(4.0, 5.0, len(trading_days), dtype=float)
+        close_518880 = np.linspace(3.0, 4.0, len(trading_days), dtype=float)
+        close_511010 = np.linspace(3.0, 3.1, len(trading_days), dtype=float)
+        self._mx = SimpleNamespace(
+            dates=trading_days,
+            symbols=["510300.sh", "518880.sh", "511010.sh"],
+            close=np.column_stack([close_510300, close_518880, close_511010]),
+        )
+        self._feats = SimpleNamespace(
+            trend_fast_ma=np.column_stack([close_510300 - 0.1, close_518880 - 0.1, close_511010 - 0.02]),
+        )
+        self._market_state = np.array([], dtype=np.int8)
+        self._trade_mode = np.array([], dtype=np.int8)
+        self._market_state_name_arr = np.array([], dtype=object)
+        self._trade_mode_name_arr = np.array([], dtype=object)
+        self._market_state_raw_name_arr = np.array([], dtype=object)
+        self._market_state_smoothed_name_arr = np.array([], dtype=object)
+        self._base_state_5_arr = np.array([], dtype=object)
+        self._effective_state_5_arr = np.array([], dtype=object)
+        self._regime_risk_budget_multiplier_arr = np.array([], dtype=float)
+        self._risk_budget_multiplier_arr = np.array([], dtype=float)
+
+    monkeypatch.setattr(BreakoutTrendProvider, "precompute", _fake_super_precompute)
+
+    provider = CNETFBetaSignalProvider()
+    with pytest.raises(ValueError, match="rejects non-broad-based ETF symbols"):
+        provider.precompute(
+            history=pd.DataFrame(),
+            benchmark=pd.DataFrame({"date": pd.to_datetime(trading_days), "close": np.linspace(100.0, 110.0, len(trading_days), dtype=float)}),
+            raw_history=pd.DataFrame(),
+            trading_days=trading_days,
+            strategy=SimpleNamespace(),
+            governed_a_share={
+                "etf_beta": {
+                    "strategy_role": "governed_broad_based_standalone_mainline",
+                    "source_entry_type": "cn_etf_broad_based_standalone_mainline_entry",
+                    "governor_boundary_mode": "consume_governor_state_and_budget",
+                    "local_policy_mode": "broad_based_rotation_mainline",
+                    "research_rule_family": "broad_based_rotation_template_a",
+                    "core_beta_symbols": ["510300.SH", "518880.SH"],
+                    "fallback_mode": "single_symbol",
+                    "fallback_symbol": "511010.SH",
+                    "exposure_policy_family": "broad_based_standalone_mainline_v1",
+                }
+            },
+        )
 
 
 def test_cn_etf_beta_day_signals_exposes_vol_target_scale(monkeypatch) -> None:

@@ -709,6 +709,23 @@ def evaluate_etf_beta_sleeve(
             "evidence": {"asset_scope": asset_scope},
             "metrics": {"input_count": 0, "eligible_count": 0, "selected_count": 0, "out_of_scope_count": 0},
         }
+    if not str(summary_obj.get("formal_alignment_status") or "").strip():
+        rebuilt_summary = build_cn_etf_beta_phase1_summary(
+            governed_contract=governed_meta,
+            universe_meta=universe_meta,
+            governor_snapshot=run_meta_obj.get("governed_snapshot") if isinstance(run_meta_obj.get("governed_snapshot"), Mapping) else None,
+        )
+        if isinstance(rebuilt_summary, Mapping):
+            rebuilt_obj = dict(rebuilt_summary)
+            for key in (
+                "formal_alignment_reference",
+                "formal_alignment_status",
+                "formal_mainline_compatible",
+                "formal_alignment_reason_codes",
+                "formal_alignment_evidence",
+            ):
+                if key not in summary_obj or summary_obj.get(key) in (None, "", [], {}):
+                    summary_obj[key] = rebuilt_obj.get(key)
 
     input_etfs = [str(item).strip().upper() for item in list(summary_obj.get("input_etfs") or ()) if str(item).strip()]
     eligible_etfs = [str(item).strip().upper() for item in list(summary_obj.get("eligible_etfs") or ()) if str(item).strip()]
@@ -735,12 +752,42 @@ def evaluate_etf_beta_sleeve(
     sleeve_budget_used = dict(summary_obj.get("sleeve_budget_used") or {})
     vol_target = dict(summary_obj.get("vol_target") or {})
     source_entry_type = str(summary_obj.get("source_entry_type") or "").strip()
+    strategy_role = str(summary_obj.get("strategy_role") or "").strip()
+    governor_boundary_mode = str(summary_obj.get("governor_boundary_mode") or "").strip()
+    local_policy_mode = str(summary_obj.get("local_policy_mode") or "").strip()
+    controlled_accumulation_mode = str(summary_obj.get("controlled_accumulation_mode") or "").strip()
+    governor_boundary = dict(summary_obj.get("governor_boundary") or {})
+    local_policy_decision = dict(summary_obj.get("local_policy_decision") or {})
+    formal_alignment_reference = str(summary_obj.get("formal_alignment_reference") or "").strip() or None
+    formal_alignment_status = str(summary_obj.get("formal_alignment_status") or "").strip().lower()
+    if formal_alignment_status not in {"formal_mainline", "research_only", "do_not_promote"}:
+        formal_alignment_status = "research_only" if summary_obj.get("formal_alignment_status") else "unknown"
+    formal_mainline_compatible = _coerce_bool(summary_obj.get("formal_mainline_compatible"))
+    formal_alignment_reason_codes = [
+        str(code).strip()
+        for code in list(summary_obj.get("formal_alignment_reason_codes") or ())
+        if str(code).strip()
+    ]
+    formal_alignment_evidence = dict(summary_obj.get("formal_alignment_evidence") or {})
     counters = dict(run_meta_obj.get("counters") or {})
     order_count = _safe_int(counters.get("orders"))
     trade_count = _safe_int(counters.get("closed_trades"))
     target_exposure = _safe_float(summary_obj.get("target_exposure"))
     min_deployable_exposure = _safe_float(summary_obj.get("min_deployable_exposure"))
     fallback_allowed = bool(summary_obj.get("fallback_allowed", False))
+    exposure_policy_family = str(summary_obj.get("exposure_policy_family") or "").strip()
+    policy_scope = str(summary_obj.get("policy_scope") or "").strip()
+    broad_based_only = bool(summary_obj.get("broad_based_only", False))
+    layering_policy = str(summary_obj.get("layering_policy") or "").strip()
+    layering_band = str(summary_obj.get("layering_band") or "").strip()
+    layering_active = bool(summary_obj.get("layering_active", False))
+    layering_reason_codes = [
+        str(code).strip()
+        for code in list(summary_obj.get("layering_reason_codes") or ())
+        if str(code).strip()
+    ]
+    target_selected_count_source = str(summary_obj.get("target_selected_count_source") or "").strip()
+    fallback_allowed_source = str(summary_obj.get("fallback_allowed_source") or "").strip()
     configured_under_deploy_reason_codes = [
         str(code).strip()
         for code in list(summary_obj.get("under_deploy_reason_codes") or ())
@@ -758,12 +805,26 @@ def evaluate_etf_beta_sleeve(
         "avg_actual_fallback_exposure": None,
         "avg_actual_other_exposure": None,
         "avg_deployability_gap": None,
+        "fallback_exposure_day_count": 0,
+        "fallback_exposure_day_ratio": None,
+        "fallback_exposure_longest_streak": 0,
+        "controlled_accumulation_day_count": 0,
+        "controlled_accumulation_day_ratio": None,
         "target_exposure": target_exposure,
         "min_deployable_exposure": min_deployable_exposure,
         "fallback_buy_count": 0,
         "fallback_buy_day_count": 0,
         "under_deploy_reason_counts": {},
+        "layering_band_counts": {},
+        "absolute_filter_reject_day_count": 0,
+        "absolute_filter_reject_reason_counts": {},
+        "candidate_pool_reject_reason_counts": {},
+        "selection_chain_winner_counts": {},
+        "selection_chain_reject_reason_counts": {},
+        "primary_bottleneck_layer": None,
         "deployment_assessment": "UNKNOWN",
+        "has_governor_boundary_split": bool(governor_boundary),
+        "has_local_policy_split": bool(local_policy_decision),
     }
     deployment_evidence: dict[str, Any] = {}
     root = Path(results_dir).resolve() if results_dir is not None else None
@@ -782,8 +843,10 @@ def evaluate_etf_beta_sleeve(
             deployability_gap_series = _series_numeric(portfolio_daily, "etf_deployability_gap")
             valid_exposure = actual_exposure_series.dropna()
             invested_mask = actual_exposure_series.fillna(0.0) > 1e-9
+            fallback_exposure_mask = actual_fallback_exposure_series.fillna(0.0) > 1e-9
             observed_day_count = int(len(portfolio_daily.index))
             invested_day_count = int(invested_mask.sum())
+            fallback_exposure_day_count = int(fallback_exposure_mask.sum())
             avg_actual_exposure = float(valid_exposure.mean()) if not valid_exposure.empty else None
             avg_actual_on_invested = (
                 float(actual_exposure_series.loc[invested_mask].mean()) if bool(invested_mask.any()) else None
@@ -812,6 +875,15 @@ def evaluate_etf_beta_sleeve(
                 else None
             )
             under_deploy_counter: Counter[str] = Counter()
+            layering_band_counter: Counter[str] = Counter()
+            absolute_filter_reject_counter: Counter[str] = Counter()
+            selection_chain_winner_counter: Counter[str] = Counter()
+            selection_chain_reject_counter: Counter[str] = Counter()
+            candidate_pool_reject_counter: Counter[str] = Counter()
+            controlled_accumulation_day_count = 0
+            absolute_filter_reject_day_count = 0
+            current_fallback_streak = 0
+            longest_fallback_streak = 0
             latest_governor_snapshot: dict[str, Any] | None = None
             latest_diagnostics_snapshot: dict[str, Any] | None = None
             for _idx, row in portfolio_daily.iterrows():
@@ -836,17 +908,73 @@ def evaluate_etf_beta_sleeve(
                         text = str(code).strip()
                         if text:
                             under_deploy_counter[text] += 1
+                    governor_layering_band = str(governor_payload.get("layering_band") or "").strip()
+                    if governor_layering_band:
+                        layering_band_counter[governor_layering_band] += 1
+                        if governor_layering_band in {"LIGHT_ACCUMULATE", "CONTROLLED_TRANS_DOWN"}:
+                            controlled_accumulation_day_count += 1
                 if diagnostics_payload:
                     latest_diagnostics_snapshot = diagnostics_payload
                     for code in list(diagnostics_payload.get("etf_beta_under_deploy_reason_codes") or ()):
                         text = str(code).strip()
                         if text:
                             under_deploy_counter[text] += 1
+                    filter_reject_count = int(_safe_float(diagnostics_payload.get("etf_beta_absolute_filter_reject_count")) or 0)
+                    if filter_reject_count > 0:
+                        absolute_filter_reject_day_count += 1
+                    for code, count in dict(diagnostics_payload.get("etf_beta_absolute_filter_reject_reason_counts") or {}).items():
+                        text = str(code).strip()
+                        value = int(_safe_float(count) or 0)
+                        if text and value > 0:
+                            absolute_filter_reject_counter[text] += value
+                    for code, count in dict(diagnostics_payload.get("etf_beta_candidate_pool_reject_reason_counts") or {}).items():
+                        text = str(code).strip()
+                        value = int(_safe_float(count) or 0)
+                        if text and value > 0:
+                            candidate_pool_reject_counter[text] = max(candidate_pool_reject_counter.get(text, 0), value)
+                    for code, count in dict(diagnostics_payload.get("etf_beta_selection_chain_winner_counts") or {}).items():
+                        text = str(code).strip()
+                        value = int(_safe_float(count) or 0)
+                        if text and value > 0:
+                            selection_chain_winner_counter[text] += value
+                    for code, count in dict(diagnostics_payload.get("etf_beta_selection_chain_reject_reason_counts") or {}).items():
+                        text = str(code).strip()
+                        value = int(_safe_float(count) or 0)
+                        if text and value > 0:
+                            selection_chain_reject_counter[text] += value
+                    diagnostics_layering_band = str(diagnostics_payload.get("etf_beta_layering_band") or "").strip()
+                    if diagnostics_layering_band:
+                        layering_band_counter[diagnostics_layering_band] += 1
+                        if (
+                            diagnostics_layering_band in {"LIGHT_ACCUMULATE", "CONTROLLED_TRANS_DOWN"}
+                            and not governor_payload
+                        ):
+                            controlled_accumulation_day_count += 1
+                if bool(fallback_exposure_mask.iloc[_idx]):
+                    current_fallback_streak += 1
+                    longest_fallback_streak = max(longest_fallback_streak, current_fallback_streak)
+                else:
+                    current_fallback_streak = 0
 
             if target_exposure is None and latest_governor_snapshot is not None:
                 target_exposure = _safe_float(latest_governor_snapshot.get("target_exposure"))
             if min_deployable_exposure is None and latest_governor_snapshot is not None:
                 min_deployable_exposure = _safe_float(latest_governor_snapshot.get("min_deployable_exposure"))
+            if latest_governor_snapshot is not None:
+                exposure_policy_family = exposure_policy_family or str(latest_governor_snapshot.get("exposure_policy_family") or "").strip()
+                policy_scope = policy_scope or str(latest_governor_snapshot.get("policy_scope") or "").strip()
+                broad_based_only = bool(latest_governor_snapshot.get("broad_based_only", broad_based_only))
+                layering_policy = layering_policy or str(latest_governor_snapshot.get("layering_policy") or "").strip()
+                layering_band = layering_band or str(latest_governor_snapshot.get("layering_band") or "").strip()
+                layering_active = bool(latest_governor_snapshot.get("layering_active", layering_active))
+                if not layering_reason_codes:
+                    layering_reason_codes = [
+                        str(code).strip()
+                        for code in list(latest_governor_snapshot.get("layering_reason_codes") or ())
+                        if str(code).strip()
+                    ]
+                fallback_allowed_source = fallback_allowed_source or str(latest_governor_snapshot.get("fallback_allowed_source") or "").strip()
+                target_selected_count_source = target_selected_count_source or str(latest_governor_snapshot.get("target_selected_count_source") or "").strip()
             if avg_target_exposure is None:
                 avg_target_exposure = target_exposure
             if latest_governor_snapshot is not None:
@@ -854,6 +982,21 @@ def evaluate_etf_beta_sleeve(
             if latest_diagnostics_snapshot is not None and not fallback_allowed:
                 fallback_mode_text = str(latest_diagnostics_snapshot.get("etf_beta_fallback_mode") or "").strip().lower()
                 fallback_allowed = fallback_mode_text in {"cash", "single_symbol"}
+            if latest_diagnostics_snapshot is not None:
+                exposure_policy_family = exposure_policy_family or str(latest_diagnostics_snapshot.get("etf_beta_exposure_policy_family") or "").strip()
+                policy_scope = policy_scope or str(latest_diagnostics_snapshot.get("etf_beta_policy_scope") or "").strip()
+                broad_based_only = bool(latest_diagnostics_snapshot.get("etf_beta_broad_based_only", broad_based_only))
+                layering_policy = layering_policy or str(latest_diagnostics_snapshot.get("etf_beta_layering_policy") or "").strip()
+                layering_band = layering_band or str(latest_diagnostics_snapshot.get("etf_beta_layering_band") or "").strip()
+                layering_active = bool(latest_diagnostics_snapshot.get("etf_beta_layering_active", layering_active))
+                if not layering_reason_codes:
+                    layering_reason_codes = [
+                        str(code).strip()
+                        for code in list(latest_diagnostics_snapshot.get("etf_beta_layering_reason_codes") or ())
+                        if str(code).strip()
+                    ]
+                fallback_allowed_source = fallback_allowed_source or str(latest_diagnostics_snapshot.get("etf_beta_fallback_allowed_source") or "").strip()
+                target_selected_count_source = target_selected_count_source or str(latest_diagnostics_snapshot.get("etf_beta_target_selected_count_source") or "").strip()
 
             deployment_assessment = "TRACEABLE"
             if invested_day_count <= 0:
@@ -866,6 +1009,16 @@ def evaluate_etf_beta_sleeve(
                 and avg_actual_on_invested < float(min_deployable_exposure)
             ):
                 deployment_assessment = "UNDERDEPLOYED"
+            absolute_filter_total = int(sum(absolute_filter_reject_counter.values()))
+            selection_chain_total = int(sum(selection_chain_reject_counter.values()))
+            candidate_pool_total = int(sum(candidate_pool_reject_counter.values()))
+            primary_bottleneck_layer: str | None = None
+            if absolute_filter_total >= max(selection_chain_total, candidate_pool_total, 1):
+                primary_bottleneck_layer = "absolute_filter"
+            elif selection_chain_total >= max(candidate_pool_total, 1):
+                primary_bottleneck_layer = "selection_chain"
+            elif candidate_pool_total > 0:
+                primary_bottleneck_layer = "candidate_pool"
 
             deployment_metrics.update(
                 {
@@ -879,9 +1032,29 @@ def evaluate_etf_beta_sleeve(
                     "avg_actual_fallback_exposure": avg_actual_fallback_exposure,
                     "avg_actual_other_exposure": avg_actual_other_exposure,
                     "avg_deployability_gap": avg_deployability_gap,
+                    "fallback_exposure_day_count": fallback_exposure_day_count,
+                    "fallback_exposure_day_ratio": (
+                        float(fallback_exposure_day_count) / float(observed_day_count)
+                        if observed_day_count > 0
+                        else None
+                    ),
+                    "fallback_exposure_longest_streak": longest_fallback_streak,
+                    "controlled_accumulation_day_count": controlled_accumulation_day_count,
+                    "controlled_accumulation_day_ratio": (
+                        float(controlled_accumulation_day_count) / float(observed_day_count)
+                        if observed_day_count > 0
+                        else None
+                    ),
                     "target_exposure": target_exposure,
                     "min_deployable_exposure": min_deployable_exposure,
                     "under_deploy_reason_counts": dict(sorted(under_deploy_counter.items())),
+                    "layering_band_counts": dict(sorted(layering_band_counter.items())),
+                    "absolute_filter_reject_day_count": absolute_filter_reject_day_count,
+                    "absolute_filter_reject_reason_counts": dict(sorted(absolute_filter_reject_counter.items())),
+                    "candidate_pool_reject_reason_counts": dict(sorted(candidate_pool_reject_counter.items())),
+                    "selection_chain_winner_counts": dict(sorted(selection_chain_winner_counter.items())),
+                    "selection_chain_reject_reason_counts": dict(sorted(selection_chain_reject_counter.items())),
+                    "primary_bottleneck_layer": primary_bottleneck_layer,
                     "deployment_assessment": deployment_assessment,
                 }
             )
@@ -902,9 +1075,33 @@ def evaluate_etf_beta_sleeve(
                 deployment_metrics["fallback_buy_count"] = 0
                 deployment_metrics["fallback_buy_day_count"] = 0
 
-    if source_entry_type != "cn_etf_research_entry":
+    standalone_entry_types = {
+        "cn_etf_research_entry",
+        "cn_etf_broad_based_standalone_mainline_entry",
+    }
+    has_governor_boundary_split = bool(governor_boundary)
+    has_local_policy_split = bool(local_policy_decision)
+    deployment_metrics["has_governor_boundary_split"] = has_governor_boundary_split
+    deployment_metrics["has_local_policy_split"] = has_local_policy_split
+
+    if source_entry_type not in standalone_entry_types:
         status = "FAIL"
-        reason = "ETF beta sleeve source entry type is not cn_etf research entry."
+        reason = "ETF beta sleeve source entry type is not a supported cn_etf research entry."
+    elif formal_alignment_status == "do_not_promote":
+        status = "FAIL"
+        reason = "ETF beta sleeve is explicitly classified as do_not_promote against the formal Phase 1 mainline."
+    elif formal_alignment_status == "research_only":
+        status = "WARN"
+        reason = "ETF beta sleeve is a research-only branch and must not be promoted as the formal Phase 1 mainline."
+    elif (
+        strategy_role == "governed_broad_based_standalone_mainline"
+        and source_entry_type != "cn_etf_broad_based_standalone_mainline_entry"
+    ):
+        status = "FAIL"
+        reason = "Governed broad-based standalone mainline must use the standalone mainline source entry type."
+    elif strategy_role == "governed_broad_based_standalone_mainline" and (not has_governor_boundary_split or not has_local_policy_split):
+        status = "FAIL"
+        reason = "Standalone broad-based ETF mainline is missing the Governor boundary/local policy split."
     elif invalid_selected:
         status = "FAIL"
         reason = "ETF beta sleeve selected symbols outside Phase 1 formal scope."
@@ -925,6 +1122,10 @@ def evaluate_etf_beta_sleeve(
         reason = "ETF beta sleeve scope, governor budget usage, and deployment evidence are traceable."
 
     evidence = {
+        "strategy_role": strategy_role or None,
+        "governor_boundary_mode": governor_boundary_mode or None,
+        "local_policy_mode": local_policy_mode or None,
+        "controlled_accumulation_mode": controlled_accumulation_mode or None,
         "source_entry_type": source_entry_type,
         "source_preset_id": summary_obj.get("source_preset_id"),
         "source_batch_id": summary_obj.get("source_batch_id"),
@@ -948,6 +1149,11 @@ def evaluate_etf_beta_sleeve(
         "growth_slot_target_actual_exposure": summary_obj.get("growth_slot_target_actual_exposure"),
         "formal_core_beta_symbols": list(summary_obj.get("formal_core_beta_symbols") or []),
         "limited_defense_candidates": list(summary_obj.get("limited_defense_candidates") or []),
+        "formal_alignment_reference": formal_alignment_reference,
+        "formal_alignment_status": formal_alignment_status,
+        "formal_mainline_compatible": formal_mainline_compatible,
+        "formal_alignment_reason_codes": list(formal_alignment_reason_codes),
+        "formal_alignment_evidence": formal_alignment_evidence,
         "eligible_etfs": eligible_etfs,
         "selected_etfs": selected_etfs,
         "selection_reason_codes": selection_reason_codes,
@@ -967,9 +1173,32 @@ def evaluate_etf_beta_sleeve(
             "slow": summary_obj.get("relative_strength_slow_weight"),
         },
         "absolute_filter_mode": summary_obj.get("absolute_filter_mode"),
+        "absolute_filter_profile": summary_obj.get("absolute_filter_profile"),
+        "candidate_pool_profile": summary_obj.get("candidate_pool_profile"),
+        "selection_chain_profile": summary_obj.get("selection_chain_profile"),
+        "absolute_filter_reject_count": summary_obj.get("absolute_filter_reject_count"),
+        "absolute_filter_reject_reason_counts": dict(summary_obj.get("absolute_filter_reject_reason_counts") or {}),
+        "candidate_pool_symbols": list(summary_obj.get("candidate_pool_symbols") or []),
+        "candidate_pool_coverage_summary": dict(summary_obj.get("candidate_pool_coverage_summary") or {}),
+        "candidate_pool_reject_reason_counts": dict(summary_obj.get("candidate_pool_reject_reason_counts") or {}),
+        "selection_chain_winner_counts": dict(summary_obj.get("selection_chain_winner_counts") or {}),
+        "selection_chain_reject_reason_counts": dict(summary_obj.get("selection_chain_reject_reason_counts") or {}),
+        "exposure_policy_family": exposure_policy_family or None,
+        "policy_scope": policy_scope or None,
+        "broad_based_only": bool(broad_based_only),
+        "layering_policy": layering_policy or None,
+        "layering_band": layering_band or None,
+        "layering_active": bool(layering_active),
+        "layering_reason_codes": list(layering_reason_codes),
         "fallback_mode": summary_obj.get("fallback_mode"),
         "fallback_symbol": summary_obj.get("fallback_symbol"),
+        "target_selected_count_source": target_selected_count_source or None,
+        "fallback_allowed_source": fallback_allowed_source or None,
+        "target_selected_count_by_state_5": dict(summary_obj.get("target_selected_count_by_state_5") or {}),
+        "fallback_allowed_by_state_5": dict(summary_obj.get("fallback_allowed_by_state_5") or {}),
         "deployment_evidence": deployment_evidence,
+        "governor_boundary": governor_boundary,
+        "local_policy_decision": local_policy_decision,
         "fallback_allowed": fallback_allowed,
         "configured_under_deploy_reason_codes": configured_under_deploy_reason_codes,
     }
@@ -981,6 +1210,9 @@ def evaluate_etf_beta_sleeve(
         "invalid_selected_count": len(invalid_selected),
         "missing_selected_reason_count": len(missing_selected_reasons),
         "missing_out_of_scope_reason_count": len(missing_out_of_scope_reasons),
+        "formal_mainline_compatible": formal_mainline_compatible,
+        "formal_alignment_status": formal_alignment_status,
+        "formal_alignment_reason_count": len(formal_alignment_reason_codes),
         "order_count": order_count,
         "trade_count": trade_count,
         "vol_target_active": bool(vol_target.get("active", False)),

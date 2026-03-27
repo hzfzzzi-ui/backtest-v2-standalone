@@ -6,6 +6,14 @@ hypothesis: 以宽基轮动模板 A 验证月频 Top2 宽基 beta 层是否比�
 change_scope:
   modules_modified:
     - research_entry.cn_etf.broad_based_rotation_template_a
+metadata:
+  formal_alignment_classification: do_not_promote
+  formal_alignment_reference: A股ETF子系统策略思路md
+  formal_alignment_reason_codes:
+    - FORMAL_EXCLUDED_ASSET_USED::input_etfs::159915.SZ
+    - FORMAL_EXCLUDED_ASSET_USED::input_etfs::588000.SH
+    - SIGNAL_SEMANTICS_OUT_OF_SCOPE::research_rule_family::broad_based_rotation_template_a
+    - OUTPUT_CONTRACT_OUT_OF_SCOPE::template_proxy_map
 variants:
   - name: A0_GEM_TOP2_CASH
     description: A0 当前可直跑版，成长位使用创业板，月频 Top2，MA200+12M>0 过滤，不过门槛时空仓

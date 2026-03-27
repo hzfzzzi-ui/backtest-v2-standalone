@@ -1,0 +1,573 @@
+study_id: etf/cn_broad_based_standalone_mainline
+title: CN Broad Based ETF Standalone Mainline
+asset_scope: cn_etf
+baseline_id: baseline_V10_2
+hypothesis: 在统一 Governor/CTA 真相下，将宽基 ETF 明确定义为独立宽基轮动主线而非辅助 beta sleeve，允许它使用自己的 enter/exit、deployability 与受控承接逻辑，有机会显著提升实际暴露连续性与独立 ETF CAGR。
+change_scope:
+  modules_modified:
+    - research_entry.cn_etf.broad_based_standalone_mainline
+metadata:
+  formal_alignment_classification: do_not_promote
+  formal_alignment_reference: A股ETF子系统策略思路md
+  formal_alignment_reason_codes:
+    - FORMAL_EXCLUDED_ASSET_USED::input_etfs::159915.SZ
+    - FORMAL_EXCLUDED_ASSET_USED::input_etfs::511010.SH
+    - SIGNAL_SEMANTICS_OUT_OF_SCOPE::local_policy_mode::broad_based_rotation_mainline
+    - GOVERNOR_BOUNDARY_OUT_OF_SCOPE::source_entry_type::cn_etf_broad_based_standalone_mainline_entry
+variants:
+  - name: CTRL_A0_TOP2_BOND
+    description: 旧 A0 胜出版控制组，仍作为辅助 sleeve 口径，仅用于与新独立主线做可归因对照。
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+          - 159915.SZ
+          - 511010.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_id
+        value: cn_broad_based_standalone_mainline
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: MAINLINE_CTRL_A0
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          512100.SH: csi1000_proxy
+          512890.SH: dividend_proxy
+          159915.SZ: growth_style
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value:
+          512100.SH: CSI1000_STANDARD
+          512890.SH: DIVIDEND_STANDARD
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - CSI1000_STANDARD
+          - DIVIDEND_STANDARD
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.strategy_role
+        value: auxiliary_beta_sleeve
+      - path: governed_a_share.etf_beta.source_entry_type
+        value: cn_etf_research_entry
+      - path: governed_a_share.etf_beta.governor_boundary_mode
+        value: consume_governor_sleeve_budget
+      - path: governed_a_share.etf_beta.local_policy_mode
+        value: legacy_beta_selection
+      - path: governed_a_share.etf_beta.controlled_accumulation_mode
+        value: none
+      - path: governed_a_share.etf_beta.exposure_policy_family
+        value: default
+      - path: governed_a_share.etf_beta.policy_scope
+        value: broad_based_only
+      - path: governed_a_share.etf_beta.broad_based_only
+        value: true
+      - path: governed_a_share.etf_beta.layering_policy
+        value: none
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 1.0
+          LIGHT: 0.5
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.5
+          TRANS_UP: 0.5
+          LIGHT: 0.25
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.target_selected_count_by_state_5
+        value:
+          BULL: 2
+          TRANS_UP: 2
+          LIGHT: 1
+          TRANS_DOWN: 0
+          RISK_OFF: 0
+      - path: governed_a_share.etf_beta.fallback_allowed_by_state_5
+        value:
+          BULL: true
+          TRANS_UP: true
+          LIGHT: true
+          TRANS_DOWN: false
+          RISK_OFF: false
+  - name: MAINLINE_LIGHT_BOND
+    description: 独立宽基轮动主线，Governor 统一给边界，但本地只在 LIGHT 允许受控承接，保留 511010 fallback。
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+          - 159915.SZ
+          - 511010.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_id
+        value: cn_broad_based_standalone_mainline
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: MAINLINE_V1
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          512100.SH: csi1000_proxy
+          512890.SH: dividend_proxy
+          159915.SZ: growth_style
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value:
+          512100.SH: CSI1000_STANDARD
+          512890.SH: DIVIDEND_STANDARD
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - CSI1000_STANDARD
+          - DIVIDEND_STANDARD
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.strategy_role
+        value: governed_broad_based_standalone_mainline
+      - path: governed_a_share.etf_beta.source_entry_type
+        value: cn_etf_broad_based_standalone_mainline_entry
+      - path: governed_a_share.etf_beta.governor_boundary_mode
+        value: consume_governor_state_and_budget
+      - path: governed_a_share.etf_beta.local_policy_mode
+        value: broad_based_rotation_mainline
+      - path: governed_a_share.etf_beta.controlled_accumulation_mode
+        value: light_only
+      - path: governed_a_share.etf_beta.exposure_policy_family
+        value: broad_based_standalone_mainline_v1
+      - path: governed_a_share.etf_beta.policy_scope
+        value: broad_based_only
+      - path: governed_a_share.etf_beta.broad_based_only
+        value: true
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 0.9
+          LIGHT: 0.75
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.45
+          TRANS_UP: 0.35
+          LIGHT: 0.2
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.target_selected_count_by_state_5
+        value:
+          BULL: 2
+          TRANS_UP: 2
+          LIGHT: 2
+          TRANS_DOWN: 0
+          RISK_OFF: 0
+      - path: governed_a_share.etf_beta.fallback_allowed_by_state_5
+        value:
+          BULL: true
+          TRANS_UP: true
+          LIGHT: true
+          TRANS_DOWN: false
+          RISK_OFF: false
+  - name: MAINLINE_LIGHT_TD_BOND
+    description: 独立宽基轮动主线，允许 LIGHT 与受控 TRANS_DOWN 分层承接，保留 511010 fallback。
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+          - 159915.SZ
+          - 511010.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_id
+        value: cn_broad_based_standalone_mainline
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: MAINLINE_V1
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          512100.SH: csi1000_proxy
+          512890.SH: dividend_proxy
+          159915.SZ: growth_style
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value:
+          512100.SH: CSI1000_STANDARD
+          512890.SH: DIVIDEND_STANDARD
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - CSI1000_STANDARD
+          - DIVIDEND_STANDARD
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.strategy_role
+        value: governed_broad_based_standalone_mainline
+      - path: governed_a_share.etf_beta.source_entry_type
+        value: cn_etf_broad_based_standalone_mainline_entry
+      - path: governed_a_share.etf_beta.governor_boundary_mode
+        value: consume_governor_state_and_budget
+      - path: governed_a_share.etf_beta.local_policy_mode
+        value: broad_based_rotation_mainline
+      - path: governed_a_share.etf_beta.controlled_accumulation_mode
+        value: light_and_controlled_trans_down
+      - path: governed_a_share.etf_beta.exposure_policy_family
+        value: broad_based_standalone_mainline_v1
+      - path: governed_a_share.etf_beta.policy_scope
+        value: broad_based_only
+      - path: governed_a_share.etf_beta.broad_based_only
+        value: true
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 0.9
+          LIGHT: 0.75
+          TRANS_DOWN: 0.35
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.45
+          TRANS_UP: 0.35
+          LIGHT: 0.2
+          TRANS_DOWN: 0.1
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.target_selected_count_by_state_5
+        value:
+          BULL: 2
+          TRANS_UP: 2
+          LIGHT: 2
+          TRANS_DOWN: 1
+          RISK_OFF: 0
+      - path: governed_a_share.etf_beta.fallback_allowed_by_state_5
+        value:
+          BULL: true
+          TRANS_UP: true
+          LIGHT: true
+          TRANS_DOWN: true
+          RISK_OFF: false
+  - name: MAINLINE_LIGHT_TD_CASH
+    description: 与受控 TRANS_DOWN 承接版本相同，但改为 cash fallback，用于验证防守连续性对收益与回撤的影响。
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+          - 159915.SZ
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_id
+        value: cn_broad_based_standalone_mainline
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: MAINLINE_V1
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: hs300
+          510500.SH: csi500
+          512100.SH: csi1000_proxy
+          512890.SH: dividend_proxy
+          159915.SZ: growth_style
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value:
+          512100.SH: CSI1000_STANDARD
+          512890.SH: DIVIDEND_STANDARD
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - CSI1000_STANDARD
+          - DIVIDEND_STANDARD
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+          - 159915.SZ
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: cash
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.strategy_role
+        value: governed_broad_based_standalone_mainline
+      - path: governed_a_share.etf_beta.source_entry_type
+        value: cn_etf_broad_based_standalone_mainline_entry
+      - path: governed_a_share.etf_beta.governor_boundary_mode
+        value: consume_governor_state_and_budget
+      - path: governed_a_share.etf_beta.local_policy_mode
+        value: broad_based_rotation_mainline
+      - path: governed_a_share.etf_beta.controlled_accumulation_mode
+        value: light_and_controlled_trans_down
+      - path: governed_a_share.etf_beta.exposure_policy_family
+        value: broad_based_standalone_mainline_v1
+      - path: governed_a_share.etf_beta.policy_scope
+        value: broad_based_only
+      - path: governed_a_share.etf_beta.broad_based_only
+        value: true
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 0.9
+          LIGHT: 0.75
+          TRANS_DOWN: 0.35
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.45
+          TRANS_UP: 0.35
+          LIGHT: 0.2
+          TRANS_DOWN: 0.1
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.target_selected_count_by_state_5
+        value:
+          BULL: 2
+          TRANS_UP: 2
+          LIGHT: 2
+          TRANS_DOWN: 1
+          RISK_OFF: 0
+      - path: governed_a_share.etf_beta.fallback_allowed_by_state_5
+        value:
+          BULL: true
+          TRANS_UP: true
+          LIGHT: true
+          TRANS_DOWN: true
+          RISK_OFF: false
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-11-04"
+    end: "2026-03-24"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: outputs/baselines/baseline_V10_2/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true
+  template_id: cn_broad_based_standalone_mainline
+  policy_scope: broad_based_only
+  excludes_sector_etf: true
+  notes:
+    - only broad-based and broad-style ETFs are allowed in this study
+    - sector ETF and thematic ETF are explicitly out of scope
+    - this study treats ETF as a governed standalone mainline, not an auxiliary beta sleeve

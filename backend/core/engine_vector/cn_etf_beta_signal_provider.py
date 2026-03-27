@@ -1,19 +1,29 @@
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from backend.core.data.cn_etf_catalog import get_catalog_entry
 from backend.core.config.cn_a_governed_mainline import (
     canonical_state_5,
     coarse_state_from_state_5,
 )
 from backend.core.config.etf_beta_contract import (
     CN_ETF_BETA_ABSOLUTE_FILTER_MODE,
+    CN_ETF_BETA_ABSOLUTE_FILTER_PROFILE,
+    CN_ETF_BETA_CANDIDATE_POOL_PROFILE,
     CN_ETF_BETA_CORE_SYMBOLS,
+    CN_ETF_BETA_CONTROLLED_ACCUMULATION_MODE,
+    CN_ETF_BETA_EXPOSURE_POLICY_FAMILY,
     CN_ETF_BETA_FALLBACK_MODE,
+    CN_ETF_BETA_GOVERNOR_BOUNDARY_MODE,
+    CN_ETF_BETA_LAYERING_POLICY,
+    CN_ETF_BETA_LOCAL_POLICY_MODE,
+    CN_ETF_BETA_POLICY_SCOPE,
     CN_ETF_BETA_REBALANCE_FREQUENCY,
     CN_ETF_BETA_RS_FAST_WEIGHT,
     CN_ETF_BETA_RS_FAST_WINDOW,
@@ -22,10 +32,16 @@ from backend.core.config.etf_beta_contract import (
     CN_ETF_BETA_RS_SLOW_WEIGHT,
     CN_ETF_BETA_RS_SLOW_WINDOW,
     CN_ETF_BETA_RULE_FAMILY,
+    CN_ETF_BETA_SELECTION_CHAIN_PROFILE,
+    CN_ETF_BETA_STRATEGY_ROLE,
     CN_ETF_BETA_VOL_TARGET_ANNUALIZED_TARGET,
     CN_ETF_BETA_VOL_TARGET_MAX_SCALE,
     CN_ETF_BETA_VOL_TARGET_MIN_SCALE,
     CN_ETF_BETA_VOL_TARGET_WINDOW,
+    _invalid_broad_based_mainline_symbols,
+    _normalize_controlled_accumulation_mode,
+    _controlled_accumulation_mode_from_layering_policy,
+    _layering_policy_from_controlled_accumulation_mode,
     resolve_etf_beta_exposure_semantics as resolve_cn_etf_beta_exposure_semantics,
 )
 from backend.core.core.models import Signal
@@ -76,6 +92,15 @@ def _normalize_choice(value: Any, *, default: str, allowed: set[str]) -> str:
     return default
 
 
+def _normalize_optional_choice(value: Any, *, allowed: set[str]) -> str | None:
+    text = _normalize_text(value).lower()
+    if not text:
+        return None
+    if text in allowed:
+        return text
+    return None
+
+
 def _normalize_symbol_map(value: Any) -> dict[str, str]:
     out: dict[str, str] = {}
     if not isinstance(value, dict):
@@ -105,6 +130,10 @@ def _normalize_symbol_pairs(value: Any) -> dict[str, str]:
 def _absolute_filter_reason_codes(mode: str) -> list[str]:
     if mode == "positive_12m":
         return ["ABSOLUTE_RET12_PASS"]
+    if mode == "ma200_only":
+        return ["ABSOLUTE_MA200_PASS"]
+    if mode == "ma150_and_positive_12m":
+        return ["ABSOLUTE_MA150_PASS", "ABSOLUTE_RET12_PASS"]
     if mode == "ma200_and_positive_12m":
         return ["ABSOLUTE_MA200_PASS", "ABSOLUTE_RET12_PASS"]
     return ["ABSOLUTE_MA120_PASS"]
@@ -155,6 +184,32 @@ _STATE_SLOT_CAPS = {
     "TRANS_DOWN": 0,
     "RISK_OFF": 0,
 }
+_ABSOLUTE_FILTER_PROFILE_TO_MODE = {
+    "ma200_ret12": "ma200_and_positive_12m",
+    "ma200_only": "ma200_only",
+    "ma150_ret12": "ma150_and_positive_12m",
+}
+_PROXY_EXPANDED_BUCKETS = {
+    "broad_equity",
+    "large_cap_equity",
+    "mid_cap_equity",
+    "small_cap_equity",
+    "dividend_low_vol",
+    "growth_equity",
+    "technology_growth",
+}
+_STANDARD_OVERLAP_BUCKETS = {
+    "broad_equity",
+    "large_cap_equity",
+    "mid_cap_equity",
+    "small_cap_equity_standard",
+    "dividend_standard",
+    "growth_equity",
+    "technology_growth",
+}
+_GROWTH_BUCKETS = {"growth_equity", "technology_growth"}
+_STANDARD_BUCKETS = {"small_cap_equity_standard", "dividend_standard"}
+_PROXY_BUCKETS = {"small_cap_equity", "dividend_low_vol"}
 
 def _sequence_payload(value: Any) -> list[Any]:
     if value is None:
@@ -248,6 +303,86 @@ def _has_text_payload(arr: Any) -> bool:
     return False
 
 
+def _symbol_bucket(symbol: Any) -> str:
+    entry = get_catalog_entry(symbol)
+    if entry is None:
+        return ""
+    return str(entry.exposure_bucket or "").strip().lower()
+
+
+def _candidate_pool_reason_codes(
+    *,
+    symbol: str,
+    profile: str | None,
+    configured_scope: set[str],
+) -> tuple[bool, list[str]]:
+    bucket = _symbol_bucket(symbol)
+    profile_excluded_reason = f"POOL_PROFILE_EXCLUDED::{bucket.upper()}" if bucket else "POOL_PROFILE_EXCLUDED::UNSUPPORTED_SYMBOL"
+    if profile == "a0_proxy_pool":
+        if symbol.upper() in configured_scope:
+            return True, ["POOL::A0_PROXY_SCOPE"]
+        if not bucket:
+            return False, [profile_excluded_reason, "POOL_EXCLUDED_UNSUPPORTED_SYMBOL"]
+        return False, [profile_excluded_reason, "POOL_EXCLUDED_NOT_IN_A0_PROXY_SCOPE"]
+    if profile == "proxy_expanded_pool":
+        if bucket in _PROXY_EXPANDED_BUCKETS:
+            return True, [f"POOL_BUCKET::{bucket.upper()}"]
+        if not bucket:
+            return False, [profile_excluded_reason, "POOL_EXCLUDED_UNSUPPORTED_SYMBOL"]
+        if bucket in _STANDARD_BUCKETS:
+            return False, [profile_excluded_reason, "POOL_EXCLUDED_STANDARD_ONLY_SYMBOL"]
+        return False, [profile_excluded_reason, f"POOL_EXCLUDED_BUCKET::{bucket.upper()}"]
+    if profile == "standard_overlap_pool":
+        if bucket in _STANDARD_OVERLAP_BUCKETS:
+            return True, [f"POOL_BUCKET::{bucket.upper()}"]
+        if not bucket:
+            return False, [profile_excluded_reason, "POOL_EXCLUDED_UNSUPPORTED_SYMBOL"]
+        if bucket in _PROXY_BUCKETS:
+            return False, [profile_excluded_reason, "POOL_EXCLUDED_PROXY_ONLY_SYMBOL"]
+        return False, [profile_excluded_reason, f"POOL_EXCLUDED_BUCKET::{bucket.upper()}"]
+    return symbol.upper() in configured_scope, ["POOL::CONFIGURED_SCOPE"] if symbol.upper() in configured_scope else [profile_excluded_reason, "POOL_EXCLUDED_NOT_IN_CONFIGURED_SCOPE"]
+
+
+def _candidate_pool_coverage_summary(
+    *,
+    candidate_pool_symbols: list[str],
+    close: np.ndarray,
+    dates: list[Any],
+    sym_to_col: dict[str, int],
+) -> dict[str, Any]:
+    if not candidate_pool_symbols:
+        return {}
+    starts: list[str] = []
+    ends: list[str] = []
+    proxy_symbol_count = 0
+    standard_symbol_count = 0
+    growth_symbol_count = 0
+    for symbol in candidate_pool_symbols:
+        bucket = _symbol_bucket(symbol)
+        if bucket in _PROXY_BUCKETS:
+            proxy_symbol_count += 1
+        if bucket in _STANDARD_BUCKETS:
+            standard_symbol_count += 1
+        if bucket in _GROWTH_BUCKETS:
+            growth_symbol_count += 1
+        col_idx = sym_to_col.get(_normalize_etf_symbol_key(symbol))
+        if col_idx is None:
+            continue
+        finite_idx = np.where(np.isfinite(close[:, col_idx]))[0]
+        if finite_idx.size <= 0:
+            continue
+        starts.append(str(_coerce_day(dates[int(finite_idx[0])]).isoformat()))
+        ends.append(str(_coerce_day(dates[int(finite_idx[-1])]).isoformat()))
+    return {
+        "symbol_count": len(candidate_pool_symbols),
+        "proxy_symbol_count": proxy_symbol_count,
+        "standard_symbol_count": standard_symbol_count,
+        "growth_symbol_count": growth_symbol_count,
+        "overlap_start": max(starts) if starts else None,
+        "overlap_end": min(ends) if ends else None,
+    }
+
+
 class CNETFBetaSignalProvider(BreakoutTrendProvider):
     def __init__(self) -> None:
         super().__init__()
@@ -271,10 +406,21 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
         self._etf_beta_core_slot_symbols: list[str] = []
         self._etf_beta_growth_slot_symbols: list[str] = []
         self._etf_beta_growth_seat_symbol = ""
+        self._etf_beta_absolute_filter_profile = CN_ETF_BETA_ABSOLUTE_FILTER_PROFILE
+        self._etf_beta_candidate_pool_profile = CN_ETF_BETA_CANDIDATE_POOL_PROFILE
+        self._etf_beta_selection_chain_profile = CN_ETF_BETA_SELECTION_CHAIN_PROFILE
         self._etf_beta_rebalance_frequency = CN_ETF_BETA_REBALANCE_FREQUENCY
         self._etf_beta_absolute_filter_mode = CN_ETF_BETA_ABSOLUTE_FILTER_MODE
         self._etf_beta_fallback_mode = CN_ETF_BETA_FALLBACK_MODE
         self._etf_beta_fallback_symbol = ""
+        self._etf_beta_strategy_role = CN_ETF_BETA_STRATEGY_ROLE
+        self._etf_beta_governor_boundary_mode = CN_ETF_BETA_GOVERNOR_BOUNDARY_MODE
+        self._etf_beta_local_policy_mode = CN_ETF_BETA_LOCAL_POLICY_MODE
+        self._etf_beta_exposure_policy_family = CN_ETF_BETA_EXPOSURE_POLICY_FAMILY
+        self._etf_beta_policy_scope = CN_ETF_BETA_POLICY_SCOPE
+        self._etf_beta_broad_based_only = False
+        self._etf_beta_layering_policy = CN_ETF_BETA_LAYERING_POLICY
+        self._etf_beta_controlled_accumulation_mode = CN_ETF_BETA_CONTROLLED_ACCUMULATION_MODE
         self._etf_beta_rs_fast_window = CN_ETF_BETA_RS_FAST_WINDOW
         self._etf_beta_rs_mid_window: int | None = None
         self._etf_beta_rs_slow_window = CN_ETF_BETA_RS_SLOW_WINDOW
@@ -296,6 +442,15 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
         self._etf_beta_target_actual_exposure_arr: np.ndarray = np.array([], dtype=float)
         self._etf_beta_target_deployability_gap_arr: np.ndarray = np.array([], dtype=float)
         self._etf_beta_fallback_allowed_arr: np.ndarray = np.array([], dtype=bool)
+        self._etf_beta_exposure_policy_family_arr: np.ndarray = np.array([], dtype=object)
+        self._etf_beta_policy_scope_arr: np.ndarray = np.array([], dtype=object)
+        self._etf_beta_broad_based_only_arr: np.ndarray = np.array([], dtype=bool)
+        self._etf_beta_layering_policy_arr: np.ndarray = np.array([], dtype=object)
+        self._etf_beta_layering_band_arr: np.ndarray = np.array([], dtype=object)
+        self._etf_beta_layering_active_arr: np.ndarray = np.array([], dtype=bool)
+        self._etf_beta_layering_reason_codes_arr: np.ndarray = np.array([], dtype=object)
+        self._etf_beta_target_selected_count_source_arr: np.ndarray = np.array([], dtype=object)
+        self._etf_beta_fallback_allowed_source_arr: np.ndarray = np.array([], dtype=object)
         self._etf_beta_core_slot_selected_symbol_arr: np.ndarray = np.array([], dtype=object)
         self._etf_beta_growth_slot_selected_symbol_arr: np.ndarray = np.array([], dtype=object)
         self._etf_beta_slot_selection_reason_codes_arr: np.ndarray = np.array([], dtype=object)
@@ -304,6 +459,13 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
         self._etf_beta_growth_slot_target_exposure_arr: np.ndarray = np.array([], dtype=float)
         self._etf_beta_core_slot_target_actual_exposure_arr: np.ndarray = np.array([], dtype=float)
         self._etf_beta_growth_slot_target_actual_exposure_arr: np.ndarray = np.array([], dtype=float)
+        self._etf_beta_absolute_filter_reject_count_arr: np.ndarray = np.array([], dtype=np.int32)
+        self._etf_beta_absolute_filter_reject_reason_counts_arr: np.ndarray = np.array([], dtype=object)
+        self._etf_beta_candidate_pool_symbols: list[str] = []
+        self._etf_beta_candidate_pool_coverage_summary: dict[str, Any] = {}
+        self._etf_beta_candidate_pool_reject_reason_counts: dict[str, int] = {}
+        self._etf_beta_selection_chain_winner_counts_arr: np.ndarray = np.array([], dtype=object)
+        self._etf_beta_selection_chain_reject_reason_counts_arr: np.ndarray = np.array([], dtype=object)
 
     def precompute(
         self,
@@ -371,6 +533,18 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                 "broad_based_rotation_template_a0_core_satellite_v2",
             },
         )
+        self._etf_beta_absolute_filter_profile = _normalize_optional_choice(
+            etf_beta_cfg.get("absolute_filter_profile"),
+            allowed=set(_ABSOLUTE_FILTER_PROFILE_TO_MODE.keys()),
+        )
+        self._etf_beta_candidate_pool_profile = _normalize_optional_choice(
+            etf_beta_cfg.get("candidate_pool_profile"),
+            allowed={"a0_proxy_pool", "proxy_expanded_pool", "standard_overlap_pool"},
+        )
+        self._etf_beta_selection_chain_profile = _normalize_optional_choice(
+            etf_beta_cfg.get("selection_chain_profile"),
+            allowed={"global_top2_12_6_3", "global_top2_6_3_1", "core_growth_slot"},
+        )
         self._etf_beta_rebalance_frequency = _normalize_choice(
             etf_beta_cfg.get("rebalance_frequency"),
             default=CN_ETF_BETA_REBALANCE_FREQUENCY,
@@ -379,14 +553,62 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
         self._etf_beta_absolute_filter_mode = _normalize_choice(
             etf_beta_cfg.get("absolute_filter_mode"),
             default=CN_ETF_BETA_ABSOLUTE_FILTER_MODE,
-            allowed={"ma120", "positive_12m", "ma200_and_positive_12m"},
+            allowed={"ma120", "positive_12m", "ma200_and_positive_12m", "ma200_only", "ma150_and_positive_12m"},
         )
+        if self._etf_beta_absolute_filter_profile:
+            self._etf_beta_absolute_filter_mode = _ABSOLUTE_FILTER_PROFILE_TO_MODE[self._etf_beta_absolute_filter_profile]
         self._etf_beta_fallback_mode = _normalize_choice(
             etf_beta_cfg.get("fallback_mode"),
             default=CN_ETF_BETA_FALLBACK_MODE,
             allowed={"none", "cash", "single_symbol"},
         )
         self._etf_beta_fallback_symbol = _normalize_etf_symbol_key(etf_beta_cfg.get("fallback_symbol"))
+        self._etf_beta_strategy_role = _normalize_choice(
+            etf_beta_cfg.get("strategy_role"),
+            default=CN_ETF_BETA_STRATEGY_ROLE,
+            allowed={"auxiliary_beta_sleeve", "governed_broad_based_standalone_mainline"},
+        )
+        self._etf_beta_governor_boundary_mode = _normalize_choice(
+            etf_beta_cfg.get("governor_boundary_mode"),
+            default=CN_ETF_BETA_GOVERNOR_BOUNDARY_MODE,
+            allowed={"consume_governor_sleeve_budget", "consume_governor_state_and_budget"},
+        )
+        self._etf_beta_local_policy_mode = _normalize_choice(
+            etf_beta_cfg.get("local_policy_mode"),
+            default=CN_ETF_BETA_LOCAL_POLICY_MODE,
+            allowed={"legacy_beta_selection", "broad_based_rotation_mainline"},
+        )
+        self._etf_beta_exposure_policy_family = _normalize_choice(
+            etf_beta_cfg.get("exposure_policy_family"),
+            default=CN_ETF_BETA_EXPOSURE_POLICY_FAMILY,
+            allowed={"default", "broad_based_governed_v1", "broad_based_standalone_mainline_v1"},
+        )
+        self._etf_beta_policy_scope = _normalize_choice(
+            etf_beta_cfg.get("policy_scope"),
+            default=CN_ETF_BETA_POLICY_SCOPE,
+            allowed={"general", "broad_based_only"},
+        )
+        self._etf_beta_broad_based_only = (
+            bool(etf_beta_cfg.get("broad_based_only"))
+            if etf_beta_cfg.get("broad_based_only") is not None
+            else self._etf_beta_policy_scope == "broad_based_only"
+        )
+        self._etf_beta_layering_policy = _normalize_choice(
+            etf_beta_cfg.get("layering_policy"),
+            default=CN_ETF_BETA_LAYERING_POLICY,
+            allowed={"none", "light_accumulate", "light_trans_down_accumulate"},
+        )
+        self._etf_beta_controlled_accumulation_mode = _normalize_controlled_accumulation_mode(
+            etf_beta_cfg.get("controlled_accumulation_mode")
+        )
+        if _normalize_text(etf_beta_cfg.get("controlled_accumulation_mode")):
+            self._etf_beta_layering_policy = _layering_policy_from_controlled_accumulation_mode(
+                self._etf_beta_controlled_accumulation_mode
+            )
+        else:
+            self._etf_beta_controlled_accumulation_mode = _controlled_accumulation_mode_from_layering_policy(
+                self._etf_beta_layering_policy
+            )
         self._etf_beta_rs_fast_window = max(2, int(etf_beta_cfg.get("relative_strength_fast_window") or CN_ETF_BETA_RS_FAST_WINDOW))
         mid_window = int(etf_beta_cfg.get("relative_strength_mid_window") or CN_ETF_BETA_RS_MID_WINDOW or 0)
         self._etf_beta_rs_mid_window = max(2, mid_window) if mid_window >= 2 else None
@@ -406,11 +628,37 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             fast_weight = CN_ETF_BETA_RS_FAST_WEIGHT
             mid_weight = CN_ETF_BETA_RS_MID_WEIGHT
             slow_weight = CN_ETF_BETA_RS_SLOW_WEIGHT
+        if self._etf_beta_selection_chain_profile == "global_top2_12_6_3":
+            self._etf_beta_rs_fast_window = 63
+            self._etf_beta_rs_mid_window = 126
+            self._etf_beta_rs_slow_window = 252
+            fast_weight = 0.2
+            mid_weight = 0.3
+            slow_weight = 0.5
+            self._etf_beta_max_selected_symbols = 2
+        elif self._etf_beta_selection_chain_profile == "global_top2_6_3_1":
+            self._etf_beta_rs_fast_window = 21
+            self._etf_beta_rs_mid_window = 63
+            self._etf_beta_rs_slow_window = 126
+            fast_weight = 0.2
+            mid_weight = 0.3
+            slow_weight = 0.5
+            self._etf_beta_max_selected_symbols = 2
+        elif self._etf_beta_selection_chain_profile == "core_growth_slot":
+            self._etf_beta_rs_fast_window = 63
+            self._etf_beta_rs_mid_window = 126
+            self._etf_beta_rs_slow_window = 252
+            fast_weight = 0.2
+            mid_weight = 0.3
+            slow_weight = 0.5
+            self._etf_beta_max_selected_symbols = 2
         self._etf_beta_rs_fast_weight = fast_weight
         self._etf_beta_rs_mid_weight = mid_weight
         self._etf_beta_rs_slow_weight = slow_weight
         max_selected_symbols = int(etf_beta_cfg.get("max_selected_symbols") or 0)
         self._etf_beta_max_selected_symbols = max_selected_symbols if max_selected_symbols > 0 else None
+        if self._etf_beta_selection_chain_profile in {"global_top2_12_6_3", "global_top2_6_3_1", "core_growth_slot"}:
+            self._etf_beta_max_selected_symbols = 2
         self._etf_beta_vol_target_window = max(
             5,
             int(etf_beta_cfg.get("vol_target_window") or CN_ETF_BETA_VOL_TARGET_WINDOW),
@@ -437,9 +685,44 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             for symbol in configured_core_scope_source
             if _normalize_etf_symbol_key(symbol)
         ]
+        if self._etf_beta_strategy_role == "governed_broad_based_standalone_mainline":
+            invalid_universe_scope = _invalid_broad_based_mainline_symbols(
+                [_display_etf_symbol(symbol).upper() for symbol in display_symbols],
+                allow_fallback_buckets=bool(self._etf_beta_fallback_symbol),
+            )
+            if invalid_universe_scope:
+                invalid_scope_text = ", ".join(sorted({str(symbol).upper() for symbol in invalid_universe_scope}))
+                raise ValueError(
+                    "governed broad-based standalone mainline rejects non-broad-based ETF symbols"
+                    f": {invalid_scope_text}"
+                )
         scope_set = set(configured_core_scope or _FORMAL_CORE_SCOPE)
         scope_cols = [idx for idx, symbol in enumerate(symbols) if symbol in scope_set]
+        candidate_pool_profile = self._etf_beta_candidate_pool_profile
+        candidate_pool_cols = list(scope_cols)
+        candidate_pool_reason_counter: Counter[str] = Counter()
+        if candidate_pool_profile:
+            configured_scope_display = {_display_etf_symbol(symbol).upper() for symbol in scope_set}
+            candidate_pool_cols = []
+            for col_idx, symbol_text in enumerate(display_symbols):
+                include_symbol, reason_codes = _candidate_pool_reason_codes(
+                    symbol=symbol_text,
+                    profile=candidate_pool_profile,
+                    configured_scope=configured_scope_display,
+                )
+                for code in reason_codes:
+                    candidate_pool_reason_counter[str(code).strip()] += 1
+                if include_symbol:
+                    candidate_pool_cols.append(col_idx)
+        self._etf_beta_candidate_pool_symbols = [display_symbols[idx] for idx in candidate_pool_cols]
         self._etf_beta_formal_scope_symbols = [display_symbols[idx] for idx in scope_cols]
+        self._etf_beta_candidate_pool_coverage_summary = _candidate_pool_coverage_summary(
+            candidate_pool_symbols=self._etf_beta_candidate_pool_symbols,
+            close=np.asarray(mx.close, dtype=float),
+            dates=dates,
+            sym_to_col={str(symbol).upper(): idx for idx, symbol in enumerate(display_symbols)},
+        )
+        self._etf_beta_candidate_pool_reject_reason_counts = dict(sorted(candidate_pool_reason_counter.items()))
         day_count = len(dates)
 
         source_state_name_arr = getattr(self, "_market_state_name_arr", None)
@@ -575,15 +858,17 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
         self._market_state_name_map = {day: str(state_5_arr[idx] or "") for idx, day in enumerate(dates)}
         self._trade_mode_name_map = {day: str(trade_mode_arr[idx] or "") for idx, day in enumerate(dates)}
         self._etf_beta_rebalance_flag_arr = _rebalance_flags(dates, frequency=self._etf_beta_rebalance_frequency)
-        self._etf_beta_slot_cap_arr = np.array(
+        governor_slot_cap_arr = np.array(
             [_STATE_SLOT_CAPS.get(str(state).strip().upper(), 0) for state in state_5_arr],
             dtype=np.int32,
         )
 
         close = np.asarray(mx.close, dtype=float)
         ma120 = np.asarray(feats.trend_fast_ma, dtype=float)
+        ma150 = np.full_like(close, np.nan, dtype=float)
         ma200 = np.full_like(close, np.nan, dtype=float)
-        for col_idx in scope_cols:
+        for col_idx in candidate_pool_cols:
+            ma150[:, col_idx] = pd.Series(close[:, col_idx]).rolling(150, min_periods=150).mean().to_numpy(dtype=float)
             ma200[:, col_idx] = pd.Series(close[:, col_idx]).rolling(200, min_periods=200).mean().to_numpy(dtype=float)
         score_windows: list[tuple[int, float]] = [
             (int(self._etf_beta_rs_slow_window), float(self._etf_beta_rs_slow_weight)),
@@ -592,21 +877,21 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             score_windows.append((int(self._etf_beta_rs_mid_window), float(self._etf_beta_rs_mid_weight)))
         score_windows.append((int(self._etf_beta_rs_fast_window), float(self._etf_beta_rs_fast_weight)))
         windows_needed = {window for window, _weight in score_windows}
-        if self._etf_beta_absolute_filter_mode in {"positive_12m", "ma200_and_positive_12m"}:
+        if self._etf_beta_absolute_filter_mode in {"positive_12m", "ma200_and_positive_12m", "ma150_and_positive_12m"}:
             windows_needed.add(252)
         returns_by_window = {
             window: np.full_like(close, np.nan, dtype=float)
             for window in sorted(windows_needed)
         }
         for row_idx in range(day_count):
-            for col_idx in scope_cols:
+            for col_idx in candidate_pool_cols:
                 close_now = float(close[row_idx, col_idx])
                 for window, arr in returns_by_window.items():
                     if row_idx >= window:
                         arr[row_idx, col_idx] = _safe_return(close_now, float(close[row_idx - window, col_idx]))
         daily_returns = np.full_like(close, np.nan, dtype=float)
         for row_idx in range(1, day_count):
-            for col_idx in scope_cols:
+            for col_idx in candidate_pool_cols:
                 daily_returns[row_idx, col_idx] = _safe_return(float(close[row_idx, col_idx]), float(close[row_idx - 1, col_idx]))
 
         eligible_rows: list[list[str]] = []
@@ -623,6 +908,15 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
         target_actual_exposure_rows = np.full(day_count, np.nan, dtype=float)
         target_deployability_gap_rows = np.full(day_count, np.nan, dtype=float)
         fallback_allowed_rows = np.zeros(day_count, dtype=bool)
+        exposure_policy_family_rows = np.full(day_count, "", dtype=object)
+        policy_scope_rows = np.full(day_count, "", dtype=object)
+        broad_based_only_rows = np.zeros(day_count, dtype=bool)
+        layering_policy_rows = np.full(day_count, "", dtype=object)
+        layering_band_rows = np.full(day_count, "", dtype=object)
+        layering_active_rows = np.zeros(day_count, dtype=bool)
+        layering_reason_rows: list[list[str]] = []
+        target_selected_count_source_rows = np.full(day_count, "", dtype=object)
+        fallback_allowed_source_rows = np.full(day_count, "", dtype=object)
         core_slot_selected_rows: list[str | None] = [None] * day_count
         growth_slot_selected_rows: list[str | None] = [None] * day_count
         slot_selection_reason_rows: list[dict[str, list[str]]] = [{} for _ in range(day_count)]
@@ -631,36 +925,88 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
         growth_slot_target_exposure_rows = np.full(day_count, np.nan, dtype=float)
         core_slot_target_actual_exposure_rows = np.full(day_count, np.nan, dtype=float)
         growth_slot_target_actual_exposure_rows = np.full(day_count, np.nan, dtype=float)
+        absolute_filter_reject_count_rows = np.zeros(day_count, dtype=np.int32)
+        absolute_filter_reject_reason_rows: list[dict[str, int]] = []
+        selection_chain_winner_rows: list[dict[str, int]] = []
+        selection_chain_reject_reason_rows: list[dict[str, int]] = []
         for row_idx in range(day_count):
-            slot_cap = int(self._etf_beta_slot_cap_arr[row_idx]) if row_idx < len(self._etf_beta_slot_cap_arr) else 0
+            governor_slot_cap = int(governor_slot_cap_arr[row_idx]) if row_idx < len(governor_slot_cap_arr) else 0
             rebalance_day = bool(self._etf_beta_rebalance_flag_arr[row_idx]) if row_idx < len(self._etf_beta_rebalance_flag_arr) else False
             eligible_scores_by_window: dict[int, dict[int, float]] = {window: {} for window, _weight in score_windows}
-            for col_idx in scope_cols:
+            absolute_filter_reject_counter: Counter[str] = Counter()
+            selection_chain_reject_counter: Counter[str] = Counter()
+            selection_chain_winner_counter: Counter[str] = Counter()
+            eligible_after_absolute_cols: list[int] = []
+            for col_idx in candidate_pool_cols:
                 close_now = float(close[row_idx, col_idx])
                 ma120_now = float(ma120[row_idx, col_idx])
+                ma150_now = float(ma150[row_idx, col_idx])
                 ma200_now = float(ma200[row_idx, col_idx])
-                if close_now != close_now or ma120_now != ma120_now:
+                absolute_pass = False
+                reject_codes: list[str] = []
+                if close_now != close_now:
+                    reject_codes.append("ABSOLUTE_PRICE_UNAVAILABLE")
+                elif self._etf_beta_absolute_filter_mode == "positive_12m":
+                    ret12 = float(returns_by_window[252][row_idx, col_idx])
+                    if ret12 != ret12:
+                        reject_codes.append("ABSOLUTE_RET12_HISTORY_UNAVAILABLE")
+                    elif ret12 <= 0.0:
+                        reject_codes.append("ABSOLUTE_RET12_NON_POSITIVE")
+                    else:
+                        absolute_pass = True
+                elif self._etf_beta_absolute_filter_mode == "ma200_and_positive_12m":
+                    ret12 = float(returns_by_window[252][row_idx, col_idx])
+                    if ma200_now != ma200_now:
+                        reject_codes.append("ABSOLUTE_MA200_HISTORY_UNAVAILABLE")
+                    elif close_now <= ma200_now:
+                        reject_codes.append("ABSOLUTE_MA200_NOT_ABOVE")
+                    if ret12 != ret12:
+                        reject_codes.append("ABSOLUTE_RET12_HISTORY_UNAVAILABLE")
+                    elif ret12 <= 0.0:
+                        reject_codes.append("ABSOLUTE_RET12_NON_POSITIVE")
+                    if not reject_codes:
+                        absolute_pass = True
+                elif self._etf_beta_absolute_filter_mode == "ma200_only":
+                    if ma200_now != ma200_now:
+                        reject_codes.append("ABSOLUTE_MA200_HISTORY_UNAVAILABLE")
+                    elif close_now <= ma200_now:
+                        reject_codes.append("ABSOLUTE_MA200_NOT_ABOVE")
+                    else:
+                        absolute_pass = True
+                elif self._etf_beta_absolute_filter_mode == "ma150_and_positive_12m":
+                    ret12 = float(returns_by_window[252][row_idx, col_idx])
+                    if ma150_now != ma150_now:
+                        reject_codes.append("ABSOLUTE_MA150_HISTORY_UNAVAILABLE")
+                    elif close_now <= ma150_now:
+                        reject_codes.append("ABSOLUTE_MA150_NOT_ABOVE")
+                    if ret12 != ret12:
+                        reject_codes.append("ABSOLUTE_RET12_HISTORY_UNAVAILABLE")
+                    elif ret12 <= 0.0:
+                        reject_codes.append("ABSOLUTE_RET12_NON_POSITIVE")
+                    if not reject_codes:
+                        absolute_pass = True
+                else:
+                    if ma120_now != ma120_now:
+                        reject_codes.append("ABSOLUTE_MA120_HISTORY_UNAVAILABLE")
+                    elif close_now <= ma120_now:
+                        reject_codes.append("ABSOLUTE_MA120_NOT_ABOVE")
+                    else:
+                        absolute_pass = True
+                if not absolute_pass:
+                    for code in reject_codes or ["ABSOLUTE_FILTER_UNSPECIFIED_REJECT"]:
+                        absolute_filter_reject_counter[str(code).strip()] += 1
                     continue
+                eligible_after_absolute_cols.append(col_idx)
                 window_returns: dict[int, float] = {}
                 has_all_returns = True
                 for window, _weight in score_windows:
                     value = float(returns_by_window[window][row_idx, col_idx])
                     if value != value:
+                        selection_chain_reject_counter[f"SELECTION_CHAIN_WINDOW_{int(window)}_INSUFFICIENT_HISTORY"] += 1
                         has_all_returns = False
                         break
                     window_returns[int(window)] = float(value)
                 if not has_all_returns:
-                    continue
-                absolute_pass = False
-                if self._etf_beta_absolute_filter_mode == "positive_12m":
-                    ret12 = float(returns_by_window[252][row_idx, col_idx])
-                    absolute_pass = ret12 == ret12 and ret12 > 0.0
-                elif self._etf_beta_absolute_filter_mode == "ma200_and_positive_12m":
-                    ret12 = float(returns_by_window[252][row_idx, col_idx])
-                    absolute_pass = ma200_now == ma200_now and close_now > ma200_now and ret12 == ret12 and ret12 > 0.0
-                else:
-                    absolute_pass = close_now > ma120_now
-                if not absolute_pass:
                     continue
                 for window, _weight in score_windows:
                     eligible_scores_by_window[int(window)][col_idx] = float(window_returns[int(window)])
@@ -689,15 +1035,31 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                     symbols[col_idx],
                 ),
             )
-            selected_cap = int(slot_cap)
-            if self._etf_beta_max_selected_symbols is not None:
-                selected_cap = min(selected_cap, int(self._etf_beta_max_selected_symbols))
             exposure_semantics = resolve_cn_etf_beta_exposure_semantics(
                 etf_beta_contract=etf_beta_cfg,
                 effective_state_5=state_5_arr[row_idx],
-                slot_cap=selected_cap,
-                target_selected_count=selected_cap,
+                slot_cap=governor_slot_cap,
+                target_selected_count=governor_slot_cap,
             )
+            strategy_role = str(exposure_semantics.get("strategy_role") or self._etf_beta_strategy_role).strip()
+            governor_boundary_mode = str(
+                exposure_semantics.get("governor_boundary_mode") or self._etf_beta_governor_boundary_mode
+            ).strip()
+            local_policy_mode = str(exposure_semantics.get("local_policy_mode") or self._etf_beta_local_policy_mode).strip()
+            exposure_policy_family = str(exposure_semantics.get("exposure_policy_family") or self._etf_beta_exposure_policy_family).strip()
+            policy_scope = str(exposure_semantics.get("policy_scope") or self._etf_beta_policy_scope).strip()
+            broad_based_only = bool(exposure_semantics.get("broad_based_only", self._etf_beta_broad_based_only))
+            layering_policy = str(exposure_semantics.get("layering_policy") or self._etf_beta_layering_policy).strip()
+            controlled_accumulation_mode = str(
+                exposure_semantics.get("controlled_accumulation_mode") or self._etf_beta_controlled_accumulation_mode
+            ).strip()
+            layering_band = str(exposure_semantics.get("layering_band") or "").strip()
+            layering_active = bool(exposure_semantics.get("layering_active", False))
+            layering_reason_codes = [
+                str(code).strip()
+                for code in list(exposure_semantics.get("layering_reason_codes") or ())
+                if str(code).strip()
+            ]
             target_exposure = (
                 float(exposure_semantics.get("target_exposure"))
                 if exposure_semantics.get("target_exposure") is not None
@@ -710,30 +1072,42 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                 else None
             )
             min_deployable_exposure_source = str(exposure_semantics.get("min_deployable_exposure_source") or "").strip()
-            target_selected_count = int(exposure_semantics.get("target_selected_count") or max(selected_cap, 1))
-            if target_selected_count <= 0:
-                target_selected_count = max(selected_cap, 1)
+            target_selected_count = int(exposure_semantics.get("target_selected_count") or 0)
+            target_selected_count_source = str(exposure_semantics.get("target_selected_count_source") or "").strip()
+            if self._etf_beta_max_selected_symbols is not None and target_selected_count > 0:
+                target_selected_count = min(target_selected_count, int(self._etf_beta_max_selected_symbols))
+            selected_cap = max(0, int(target_selected_count))
+            slot_cap = int(selected_cap)
             target_exposure_per_symbol = (
                 float(target_exposure) / float(max(target_selected_count, 1))
                 if target_exposure is not None
                 else None
             )
             fallback_allowed = bool(exposure_semantics.get("fallback_allowed", False))
-            is_a0_core_satellite_v2 = self._etf_beta_rule_family == "broad_based_rotation_template_a0_core_satellite_v2"
+            fallback_allowed_source = str(exposure_semantics.get("fallback_allowed_source") or "").strip()
+            is_a0_core_satellite_v2 = (
+                self._etf_beta_rule_family == "broad_based_rotation_template_a0_core_satellite_v2"
+                or self._etf_beta_selection_chain_profile == "core_growth_slot"
+            )
             core_slot_display_symbols = (
                 list(self._etf_beta_core_slot_symbols)
                 if self._etf_beta_core_slot_symbols
                 else [
                     symbol.upper()
-                    for symbol in display_symbols
+                    for symbol in self._etf_beta_candidate_pool_symbols
                     if symbol.upper() not in set(self._etf_beta_growth_slot_symbols)
                     and symbol.upper() != self._etf_beta_growth_seat_symbol
+                    and _symbol_bucket(symbol) not in _GROWTH_BUCKETS
                 ]
             )
             growth_slot_display_symbols = (
                 list(self._etf_beta_growth_slot_symbols)
                 if self._etf_beta_growth_slot_symbols
-                else [self._etf_beta_growth_seat_symbol] if self._etf_beta_growth_seat_symbol else []
+                else [self._etf_beta_growth_seat_symbol] if self._etf_beta_growth_seat_symbol else [
+                    symbol.upper()
+                    for symbol in self._etf_beta_candidate_pool_symbols
+                    if _symbol_bucket(symbol) in _GROWTH_BUCKETS
+                ]
             )
             core_slot_set = {symbol.upper() for symbol in core_slot_display_symbols if symbol}
             growth_slot_set = {symbol.upper() for symbol in growth_slot_display_symbols if symbol}
@@ -785,8 +1159,26 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                         f"STATE::{str(state_5_arr[row_idx]).upper()}",
                         f"REBALANCE::{self._etf_beta_rebalance_frequency.upper()}",
                     ]
+                for col_idx in ranked_cols:
+                    symbol_text = display_symbols[col_idx].upper()
+                    if symbol_text in core_slot_set and core_slot_selected_col is not None and col_idx != core_slot_selected_col:
+                        selection_chain_reject_counter["SELECTION_CHAIN_CORE_SLOT_RANK_LOSS"] += 1
+                    elif symbol_text in growth_slot_set and growth_slot_selected_col is not None and col_idx != growth_slot_selected_col:
+                        selection_chain_reject_counter["SELECTION_CHAIN_GROWTH_SLOT_RANK_LOSS"] += 1
+                    elif symbol_text not in core_slot_set and symbol_text not in growth_slot_set:
+                        selection_chain_reject_counter["SELECTION_CHAIN_OUTSIDE_SLOT_POOL"] += 1
             else:
                 selected_cols = ranked_cols[:selected_cap] if selected_cap > 0 else []
+                if selected_cap > 0 and len(ranked_cols) > len(selected_cols):
+                    selection_chain_reject_counter["SELECTION_CHAIN_RANK_BELOW_CUTOFF"] += int(len(ranked_cols) - len(selected_cols))
+            selection_chain_winner_counter["candidate_pool_count"] = int(len(candidate_pool_cols))
+            selection_chain_winner_counter["eligible_after_absolute_filter"] = int(len(eligible_after_absolute_cols))
+            selection_chain_winner_counter["eligible_after_selection_chain"] = int(len(ranked_cols))
+            selection_chain_winner_counter["selected_count"] = int(len(selected_cols))
+            if core_slot_selected_col is not None:
+                selection_chain_winner_counter["core_slot_selected"] = 1
+            if growth_slot_selected_col is not None:
+                selection_chain_winner_counter["growth_slot_selected"] = 1
 
             core_slot_target_exposure = (
                 float(target_exposure_per_symbol)
@@ -803,6 +1195,9 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                     "ETF_BETA_CORE_SCOPE",
                     *list(_absolute_filter_reason_codes(self._etf_beta_absolute_filter_mode)),
                     *[f"RS{int(window)}_RANK_PASS" for window, _weight in score_windows],
+                    f"FILTER_PROFILE::{self._etf_beta_absolute_filter_profile.upper()}" if self._etf_beta_absolute_filter_profile else "",
+                    f"POOL_PROFILE::{self._etf_beta_candidate_pool_profile.upper()}" if self._etf_beta_candidate_pool_profile else "",
+                    f"SELECTION_PROFILE::{self._etf_beta_selection_chain_profile.upper()}" if self._etf_beta_selection_chain_profile else "",
                     f"STATE::{str(state_5_arr[row_idx]).upper()}",
                     f"RULE_FAMILY::{self._etf_beta_rule_family.upper()}",
                     f"REBALANCE::{self._etf_beta_rebalance_frequency.upper()}",
@@ -810,9 +1205,17 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                 ]
                 for col_idx in selected_cols
             }
+            selection_reason_codes = {
+                symbol_text: [code for code in list(codes or []) if str(code).strip()]
+                for symbol_text, codes in selection_reason_codes.items()
+            }
             for symbol_text, codes in selection_reason_codes.items():
                 role_text = self._etf_beta_template_role_map.get(symbol_text.upper())
                 proxy_text = self._etf_beta_template_proxy_map.get(symbol_text.upper())
+                if strategy_role:
+                    codes.append(f"STRATEGY_ROLE::{strategy_role.upper()}")
+                if local_policy_mode:
+                    codes.append(f"LOCAL_POLICY::{local_policy_mode.upper()}")
                 if self._etf_beta_template_id:
                     codes.append(f"TEMPLATE::{self._etf_beta_template_id.upper()}")
                 if self._etf_beta_template_asset_pool_version:
@@ -828,6 +1231,18 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                         codes.append("SLOT::GROWTH_SLOT")
                     if self._etf_beta_proxy_replacement_mode:
                         codes.append(f"PROXY_REPLACEMENT_MODE::{self._etf_beta_proxy_replacement_mode.upper()}")
+                if layering_band:
+                    codes.append(f"LAYERING::{layering_band}")
+                codes.extend(layering_reason_codes)
+            governor_boundary_reason_codes = [
+                f"GOVERNOR_STATE::{str(state_5_arr[row_idx]).upper()}",
+                f"GOVERNOR_BOUNDARY_MODE::{governor_boundary_mode.upper()}" if governor_boundary_mode else "",
+                f"GOVERNOR_TARGET_EXPOSURE_SOURCE::{target_exposure_source.upper()}" if target_exposure_source else "",
+                f"GOVERNOR_TARGET_SELECTED_COUNT_SOURCE::{target_selected_count_source.upper()}" if target_selected_count_source else "",
+                f"GOVERNOR_FALLBACK_ALLOWED_SOURCE::{fallback_allowed_source.upper()}" if fallback_allowed_source else "",
+                f"GOVERNOR_LAYERING_BAND::{layering_band}" if layering_band else "",
+            ]
+            governor_boundary_reason_codes = [code for code in governor_boundary_reason_codes if code]
             runtime_reason_codes: list[str] = []
             selected_display_symbols = [display_symbols[col_idx] for col_idx in selected_cols]
             fallback_active = False
@@ -874,12 +1289,23 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                 runtime_reason_codes.append("ETF_BETA_VOL_TARGET_ACTIVE")
                 if scale_changed:
                     runtime_reason_codes.append("ETF_BETA_VOL_TARGET_SCALED_DOWN")
+            if exposure_policy_family == "broad_based_governed_v1":
+                runtime_reason_codes.append("ETF_BETA_BROAD_BASED_GOVERNED_POLICY_ACTIVE")
+            if exposure_policy_family == "broad_based_standalone_mainline_v1":
+                runtime_reason_codes.append("ETF_BETA_STANDALONE_MAINLINE_POLICY_ACTIVE")
+            if strategy_role == "governed_broad_based_standalone_mainline":
+                runtime_reason_codes.append("ETF_BETA_STANDALONE_MAINLINE_ACTIVE")
+            if broad_based_only:
+                runtime_reason_codes.append("ETF_BETA_BROAD_BASED_ONLY_SCOPE")
+            runtime_reason_codes.extend(layering_reason_codes)
             if slot_cap <= 0:
                 runtime_reason_codes.append("ETF_BETA_SLOT_CAP_ZERO")
             elif not rebalance_day:
                 runtime_reason_codes.append(_await_rebalance_reason_code(self._etf_beta_rebalance_frequency))
-            if slot_cap > 0 and not eligible_cols:
+            if slot_cap > 0 and not eligible_after_absolute_cols:
                 runtime_reason_codes.append("ETF_BETA_NO_ELIGIBLE_AFTER_ABSOLUTE_FILTER")
+            elif slot_cap > 0 and eligible_after_absolute_cols and not eligible_cols:
+                runtime_reason_codes.append("ETF_BETA_NO_ELIGIBLE_AFTER_SELECTION_CHAIN")
             if slot_cap > 0 and rebalance_day and selected_cols:
                 runtime_reason_codes.append(_selection_active_reason_code(self._etf_beta_rebalance_frequency))
             if is_a0_core_satellite_v2:
@@ -890,6 +1316,7 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                 slot_cap > 0
                 and rebalance_day
                 and self._etf_beta_fallback_mode == "single_symbol"
+                and fallback_allowed
                 and self._etf_beta_fallback_symbol
                 and self._etf_beta_fallback_symbol in self._sym_to_col
                 and len(selected_display_symbols) < selected_cap
@@ -917,6 +1344,9 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                 and len(selected_display_symbols) < selected_cap
             ):
                 runtime_reason_codes.append("ETF_BETA_UNDERFILLED_DEPLOYMENT")
+            local_policy_reason_codes = list(runtime_reason_codes)
+            if controlled_accumulation_mode != "none":
+                local_policy_reason_codes.append(f"ETF_BETA_CONTROLLED_ACCUMULATION_MODE::{controlled_accumulation_mode.upper()}")
             actual_target_exposure = (
                 float(target_exposure_per_symbol) * float(len(selected_display_symbols))
                 if target_exposure_per_symbol is not None
@@ -957,6 +1387,15 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             if deployability_gap is not None:
                 target_deployability_gap_rows[row_idx] = float(deployability_gap)
             fallback_allowed_rows[row_idx] = bool(fallback_allowed)
+            target_selected_count_source_rows[row_idx] = target_selected_count_source
+            fallback_allowed_source_rows[row_idx] = fallback_allowed_source
+            exposure_policy_family_rows[row_idx] = exposure_policy_family
+            policy_scope_rows[row_idx] = policy_scope
+            broad_based_only_rows[row_idx] = bool(broad_based_only)
+            layering_policy_rows[row_idx] = layering_policy
+            layering_band_rows[row_idx] = layering_band
+            layering_active_rows[row_idx] = bool(layering_active)
+            layering_reason_rows.append(list(layering_reason_codes))
             core_slot_selected_rows[row_idx] = (
                 display_symbols[core_slot_selected_col]
                 if core_slot_selected_col is not None
@@ -987,7 +1426,12 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             selection_reason_rows.append(selection_reason_codes)
             runtime_reason_rows.append(runtime_reason_codes)
             vol_target_rows.append(vol_target_payload)
+            absolute_filter_reject_count_rows[row_idx] = int(sum(absolute_filter_reject_counter.values()))
+            absolute_filter_reject_reason_rows.append(dict(sorted(absolute_filter_reject_counter.items())))
+            selection_chain_winner_rows.append(dict(selection_chain_winner_counter))
+            selection_chain_reject_reason_rows.append(dict(sorted(selection_chain_reject_counter.items())))
 
+        self._etf_beta_slot_cap_arr = target_selected_count_rows.astype(np.int32, copy=False)
         self._etf_beta_eligible_symbols_arr = np.empty(day_count, dtype=object)
         self._etf_beta_selected_symbols_arr = np.empty(day_count, dtype=object)
         self._etf_beta_selection_reason_codes_arr = np.empty(day_count, dtype=object)
@@ -1002,6 +1446,15 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
         self._etf_beta_target_actual_exposure_arr = target_actual_exposure_rows
         self._etf_beta_target_deployability_gap_arr = target_deployability_gap_rows
         self._etf_beta_fallback_allowed_arr = fallback_allowed_rows
+        self._etf_beta_exposure_policy_family_arr = exposure_policy_family_rows
+        self._etf_beta_policy_scope_arr = policy_scope_rows
+        self._etf_beta_broad_based_only_arr = broad_based_only_rows
+        self._etf_beta_layering_policy_arr = layering_policy_rows
+        self._etf_beta_layering_band_arr = layering_band_rows
+        self._etf_beta_layering_active_arr = layering_active_rows
+        self._etf_beta_layering_reason_codes_arr = np.empty(day_count, dtype=object)
+        self._etf_beta_target_selected_count_source_arr = target_selected_count_source_rows
+        self._etf_beta_fallback_allowed_source_arr = fallback_allowed_source_rows
         self._etf_beta_core_slot_selected_symbol_arr = np.empty(day_count, dtype=object)
         self._etf_beta_growth_slot_selected_symbol_arr = np.empty(day_count, dtype=object)
         self._etf_beta_slot_selection_reason_codes_arr = np.empty(day_count, dtype=object)
@@ -1010,16 +1463,24 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
         self._etf_beta_growth_slot_target_exposure_arr = growth_slot_target_exposure_rows
         self._etf_beta_core_slot_target_actual_exposure_arr = core_slot_target_actual_exposure_rows
         self._etf_beta_growth_slot_target_actual_exposure_arr = growth_slot_target_actual_exposure_rows
+        self._etf_beta_absolute_filter_reject_count_arr = absolute_filter_reject_count_rows
+        self._etf_beta_absolute_filter_reject_reason_counts_arr = np.empty(day_count, dtype=object)
+        self._etf_beta_selection_chain_winner_counts_arr = np.empty(day_count, dtype=object)
+        self._etf_beta_selection_chain_reject_reason_counts_arr = np.empty(day_count, dtype=object)
         for row_idx in range(day_count):
             self._etf_beta_eligible_symbols_arr[row_idx] = list(eligible_rows[row_idx])
             self._etf_beta_selected_symbols_arr[row_idx] = list(selected_rows[row_idx])
             self._etf_beta_selection_reason_codes_arr[row_idx] = dict(selection_reason_rows[row_idx])
             self._etf_beta_runtime_reason_codes_arr[row_idx] = list(runtime_reason_rows[row_idx])
             self._etf_beta_vol_target_info_arr[row_idx] = dict(vol_target_rows[row_idx])
+            self._etf_beta_layering_reason_codes_arr[row_idx] = list(layering_reason_rows[row_idx])
             self._etf_beta_core_slot_selected_symbol_arr[row_idx] = core_slot_selected_rows[row_idx]
             self._etf_beta_growth_slot_selected_symbol_arr[row_idx] = growth_slot_selected_rows[row_idx]
             self._etf_beta_slot_selection_reason_codes_arr[row_idx] = dict(slot_selection_reason_rows[row_idx])
             self._etf_beta_slot_under_deploy_reason_codes_arr[row_idx] = dict(slot_under_deploy_reason_rows[row_idx])
+            self._etf_beta_absolute_filter_reject_reason_counts_arr[row_idx] = dict(absolute_filter_reject_reason_rows[row_idx])
+            self._etf_beta_selection_chain_winner_counts_arr[row_idx] = dict(selection_chain_winner_rows[row_idx])
+            self._etf_beta_selection_chain_reject_reason_counts_arr[row_idx] = dict(selection_chain_reject_reason_rows[row_idx])
 
     def day_signals(self, day: date, day_idx: int, ctx: DayContext) -> DaySignals:
         held_symbols = {
@@ -1124,6 +1585,55 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             if day_idx < len(self._etf_beta_fallback_allowed_arr)
             else False
         )
+        exposure_policy_family = (
+            str(self._etf_beta_exposure_policy_family_arr[day_idx] or "").strip()
+            if day_idx < len(self._etf_beta_exposure_policy_family_arr)
+            else self._etf_beta_exposure_policy_family
+        )
+        policy_scope = (
+            str(self._etf_beta_policy_scope_arr[day_idx] or "").strip()
+            if day_idx < len(self._etf_beta_policy_scope_arr)
+            else self._etf_beta_policy_scope
+        )
+        broad_based_only = (
+            bool(self._etf_beta_broad_based_only_arr[day_idx])
+            if day_idx < len(self._etf_beta_broad_based_only_arr)
+            else bool(self._etf_beta_broad_based_only)
+        )
+        strategy_role = str(self._etf_beta_strategy_role or "").strip()
+        governor_boundary_mode = str(self._etf_beta_governor_boundary_mode or "").strip()
+        local_policy_mode = str(self._etf_beta_local_policy_mode or "").strip()
+        layering_policy = (
+            str(self._etf_beta_layering_policy_arr[day_idx] or "").strip()
+            if day_idx < len(self._etf_beta_layering_policy_arr)
+            else self._etf_beta_layering_policy
+        )
+        controlled_accumulation_mode = str(self._etf_beta_controlled_accumulation_mode or "").strip()
+        layering_band = (
+            str(self._etf_beta_layering_band_arr[day_idx] or "").strip()
+            if day_idx < len(self._etf_beta_layering_band_arr)
+            else ""
+        )
+        layering_active = (
+            bool(self._etf_beta_layering_active_arr[day_idx])
+            if day_idx < len(self._etf_beta_layering_active_arr)
+            else False
+        )
+        layering_reason_codes = (
+            [str(code).strip() for code in _sequence_payload(self._etf_beta_layering_reason_codes_arr[day_idx]) if str(code).strip()]
+            if day_idx < len(self._etf_beta_layering_reason_codes_arr)
+            else []
+        )
+        target_selected_count_source = (
+            str(self._etf_beta_target_selected_count_source_arr[day_idx] or "").strip()
+            if day_idx < len(self._etf_beta_target_selected_count_source_arr)
+            else ""
+        )
+        fallback_allowed_source = (
+            str(self._etf_beta_fallback_allowed_source_arr[day_idx] or "").strip()
+            if day_idx < len(self._etf_beta_fallback_allowed_source_arr)
+            else ""
+        )
         core_slot_selected_symbol = (
             str(self._etf_beta_core_slot_selected_symbol_arr[day_idx] or "").strip().upper()
             if day_idx < len(self._etf_beta_core_slot_selected_symbol_arr)
@@ -1168,6 +1678,26 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             and np.isfinite(self._etf_beta_growth_slot_target_actual_exposure_arr[day_idx])
             else None
         )
+        absolute_filter_reject_count = (
+            int(self._etf_beta_absolute_filter_reject_count_arr[day_idx])
+            if day_idx < len(self._etf_beta_absolute_filter_reject_count_arr)
+            else 0
+        )
+        absolute_filter_reject_reason_counts = (
+            dict(self._etf_beta_absolute_filter_reject_reason_counts_arr[day_idx] or {})
+            if day_idx < len(self._etf_beta_absolute_filter_reject_reason_counts_arr)
+            else {}
+        )
+        selection_chain_winner_counts = (
+            dict(self._etf_beta_selection_chain_winner_counts_arr[day_idx] or {})
+            if day_idx < len(self._etf_beta_selection_chain_winner_counts_arr)
+            else {}
+        )
+        selection_chain_reject_reason_counts = (
+            dict(self._etf_beta_selection_chain_reject_reason_counts_arr[day_idx] or {})
+            if day_idx < len(self._etf_beta_selection_chain_reject_reason_counts_arr)
+            else {}
+        )
         configured_max_selected = (
             int(self._etf_beta_max_selected_symbols)
             if self._etf_beta_max_selected_symbols is not None and int(self._etf_beta_max_selected_symbols) > 0
@@ -1181,6 +1711,15 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             for codes in selection_reason_codes.values()
         )
         entry_reason_code = _entry_reason_code(self._etf_beta_rebalance_frequency)
+        governor_boundary_reason_codes = [
+            f"GOVERNOR_STATE::{state_5}",
+            f"GOVERNOR_BOUNDARY_MODE::{governor_boundary_mode.upper()}" if governor_boundary_mode else "",
+            f"GOVERNOR_TARGET_EXPOSURE_SOURCE::{target_exposure_source.upper()}" if target_exposure_source else "",
+            f"GOVERNOR_TARGET_SELECTED_COUNT_SOURCE::{target_selected_count_source.upper()}" if target_selected_count_source else "",
+            f"GOVERNOR_FALLBACK_ALLOWED_SOURCE::{fallback_allowed_source.upper()}" if fallback_allowed_source else "",
+            f"GOVERNOR_LAYERING_BAND::{layering_band}" if layering_band else "",
+        ]
+        governor_boundary_reason_codes = [code for code in governor_boundary_reason_codes if code]
 
         selected_lower = {_normalize_etf_symbol_key(symbol) for symbol in selected_symbols}
         strength_map: dict[str, float] = {}
@@ -1275,18 +1814,37 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                     "growth_slot_symbols": list(self._etf_beta_growth_slot_symbols),
                     "core_slot_selected_symbol": core_slot_selected_symbol or None,
                     "growth_slot_selected_symbol": growth_slot_selected_symbol or None,
+                    "absolute_filter_profile": self._etf_beta_absolute_filter_profile,
+                    "candidate_pool_profile": self._etf_beta_candidate_pool_profile,
+                    "selection_chain_profile": self._etf_beta_selection_chain_profile,
                     "absolute_filter_mode": self._etf_beta_absolute_filter_mode,
                     "fallback_mode": self._etf_beta_fallback_mode,
                     "fallback_symbol": _display_etf_symbol(self._etf_beta_fallback_symbol) if self._etf_beta_fallback_symbol else None,
+                    "candidate_pool_symbols": list(self._etf_beta_candidate_pool_symbols),
+                    "candidate_pool_coverage_summary": dict(self._etf_beta_candidate_pool_coverage_summary),
+                    "candidate_pool_reject_reason_counts": dict(self._etf_beta_candidate_pool_reject_reason_counts),
+                    "absolute_filter_reject_count": absolute_filter_reject_count,
+                    "absolute_filter_reject_reason_counts": dict(absolute_filter_reject_reason_counts),
+                    "selection_chain_winner_counts": dict(selection_chain_winner_counts),
+                    "selection_chain_reject_reason_counts": dict(selection_chain_reject_reason_counts),
                     "target_exposure": target_exposure,
                     "target_exposure_source": target_exposure_source or None,
                     "min_deployable_exposure": min_deployable_exposure,
                     "min_deployable_exposure_source": min_deployable_exposure_source or None,
                     "target_selected_count": int(target_selected_count),
+                    "target_selected_count_source": target_selected_count_source or None,
                     "target_exposure_per_symbol": target_exposure_per_symbol,
                     "target_actual_exposure": target_actual_exposure,
                     "deployability_gap": target_deployability_gap,
                     "fallback_allowed": bool(fallback_allowed),
+                    "fallback_allowed_source": fallback_allowed_source or None,
+                    "exposure_policy_family": exposure_policy_family or None,
+                    "policy_scope": policy_scope or None,
+                    "broad_based_only": bool(broad_based_only),
+                    "layering_policy": layering_policy or None,
+                    "layering_band": layering_band or None,
+                    "layering_active": bool(layering_active),
+                    "layering_reason_codes": list(layering_reason_codes),
                     "order_value_scale": order_value_scale,
                     "vol_target_active": bool(vol_target_info.get("active", False)),
                     "vol_target_window": vol_target_info.get("window"),
@@ -1316,6 +1874,10 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                 reason_counter_key = "ETF_BETA_FALLBACK_BUY" if is_fallback_buy else entry_reason_code
                 self.diag_reason_counts[reason_counter_key] = int(self.diag_reason_counts.get(reason_counter_key, 0)) + 1
 
+        local_policy_reason_codes = list(runtime_reason_codes)
+        if controlled_accumulation_mode != "none":
+            local_policy_reason_codes.append(f"ETF_BETA_CONTROLLED_ACCUMULATION_MODE::{controlled_accumulation_mode.upper()}")
+
         diagnostics = {
             "composition_enabled": False,
             "market_state": state_5,
@@ -1331,6 +1893,9 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             "etf_beta_selection_reason_codes": selection_reason_codes,
             "etf_beta_runtime_reason_codes": list(runtime_reason_codes),
             "etf_beta_rule_family": self._etf_beta_rule_family,
+            "etf_beta_strategy_role": strategy_role or None,
+            "etf_beta_governor_boundary_mode": governor_boundary_mode or None,
+            "etf_beta_local_policy_mode": local_policy_mode or None,
             "etf_beta_template_id": self._etf_beta_template_id or None,
             "etf_beta_template_asset_pool_version": self._etf_beta_template_asset_pool_version or None,
             "etf_beta_template_role_map": dict(self._etf_beta_template_role_map),
@@ -1349,7 +1914,15 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             "etf_beta_growth_slot_target_exposure": growth_slot_target_exposure,
             "etf_beta_core_slot_target_actual_exposure": core_slot_target_actual_exposure,
             "etf_beta_growth_slot_target_actual_exposure": growth_slot_target_actual_exposure,
+            "etf_beta_absolute_filter_profile": self._etf_beta_absolute_filter_profile,
+            "etf_beta_candidate_pool_profile": self._etf_beta_candidate_pool_profile,
+            "etf_beta_selection_chain_profile": self._etf_beta_selection_chain_profile,
             "etf_beta_absolute_filter_mode": self._etf_beta_absolute_filter_mode,
+            "etf_beta_absolute_filter_reject_count": absolute_filter_reject_count,
+            "etf_beta_absolute_filter_reject_reason_counts": dict(absolute_filter_reject_reason_counts),
+            "etf_beta_candidate_pool_symbols": list(self._etf_beta_candidate_pool_symbols),
+            "etf_beta_candidate_pool_coverage_summary": dict(self._etf_beta_candidate_pool_coverage_summary),
+            "etf_beta_candidate_pool_reject_reason_counts": dict(self._etf_beta_candidate_pool_reject_reason_counts),
             "etf_beta_rebalance_frequency": self._etf_beta_rebalance_frequency,
             "etf_beta_relative_strength_fast_window": self._etf_beta_rs_fast_window,
             "etf_beta_relative_strength_mid_window": self._etf_beta_rs_mid_window,
@@ -1357,6 +1930,8 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             "etf_beta_relative_strength_fast_weight": self._etf_beta_rs_fast_weight,
             "etf_beta_relative_strength_mid_weight": self._etf_beta_rs_mid_weight,
             "etf_beta_relative_strength_slow_weight": self._etf_beta_rs_slow_weight,
+            "etf_beta_selection_chain_winner_counts": dict(selection_chain_winner_counts),
+            "etf_beta_selection_chain_reject_reason_counts": dict(selection_chain_reject_reason_counts),
             "etf_beta_max_selected_symbols": self._etf_beta_max_selected_symbols,
             "etf_beta_selected_cap": int(selected_cap),
             "etf_beta_target_exposure": target_exposure,
@@ -1364,12 +1939,24 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
             "etf_beta_min_deployable_exposure": min_deployable_exposure,
             "etf_beta_min_deployable_exposure_source": min_deployable_exposure_source or None,
             "etf_beta_target_selected_count": int(target_selected_count),
+            "etf_beta_target_selected_count_source": target_selected_count_source or None,
             "etf_beta_target_exposure_per_symbol": target_exposure_per_symbol,
             "etf_beta_target_actual_exposure": target_actual_exposure,
             "etf_beta_target_deployability_gap": target_deployability_gap,
+            "etf_beta_exposure_policy_family": exposure_policy_family or None,
+            "etf_beta_policy_scope": policy_scope or None,
+            "etf_beta_broad_based_only": bool(broad_based_only),
+            "etf_beta_layering_policy": layering_policy or None,
+            "etf_beta_controlled_accumulation_mode": controlled_accumulation_mode or None,
+            "etf_beta_layering_band": layering_band or None,
+            "etf_beta_layering_active": bool(layering_active),
+            "etf_beta_layering_reason_codes": list(layering_reason_codes),
+            "etf_beta_governor_boundary_reason_codes": list(governor_boundary_reason_codes),
+            "etf_beta_local_policy_reason_codes": list(local_policy_reason_codes),
             "etf_beta_fallback_mode": self._etf_beta_fallback_mode,
             "etf_beta_fallback_symbol": _display_etf_symbol(self._etf_beta_fallback_symbol) if self._etf_beta_fallback_symbol else None,
             "etf_beta_fallback_allowed": bool(fallback_allowed),
+            "etf_beta_fallback_allowed_source": fallback_allowed_source or None,
             "etf_beta_fallback_active": bool(fallback_active),
             "etf_beta_under_deploy_reason_codes": [
                 code
@@ -1378,6 +1965,7 @@ class CNETFBetaSignalProvider(BreakoutTrendProvider):
                 in {
                     "ETF_BETA_SLOT_CAP_ZERO",
                     "ETF_BETA_NO_ELIGIBLE_AFTER_ABSOLUTE_FILTER",
+                    "ETF_BETA_NO_ELIGIBLE_AFTER_SELECTION_CHAIN",
                     "ETF_BETA_UNDERFILLED_DEPLOYMENT",
                     "ETF_BETA_MIN_DEPLOYABLE_EXPOSURE_UNMET",
                     "ETF_BETA_FALLBACK_PARTIAL_FILL_ACTIVE",

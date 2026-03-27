@@ -1,0 +1,421 @@
+ETF 配置主线策略（Phase 1 正式稿）
+0. 文档定位
+
+本文档定义 A 股子系统中 cn_etf_beta 的正式策略口径。
+
+本文档不是研究备忘录，也不是某个单实验参数说明。
+目标是回答四件事：
+
+ETF 配置主线在总系统中到底承担什么职责
+它的决策链应该如何受 market_regime_engine 和 global_portfolio_governor 约束
+Phase 1 应采用什么样的最小可执行策略骨架
+哪些做法明确不属于当前 ETF 配置主线
+1. 正式定位
+
+cn_etf_beta 在 A 股子系统中的正式定位是：
+
+Governor 约束下的 A 股 ETF beta 配置主线。
+
+它不是：
+
+个股趋势 alpha 的 ETF 翻版
+另一个独立市场状态系统
+一个高频 ETF 轮动器
+一个追求表面高弹性的战术进攻模块
+
+它是：
+
+A 股子系统里的 beta 承接层
+个股 alpha sleeve 之外的 标准化市场暴露容器
+风险资产与有限防守倾向之间的 连续配置层
+在大多数环境下回答“资金应该去哪”的 配置引擎
+
+这一定义与当前系统总原则保持一致：
+
+信号可以分层，仓位不能分家。
+ETF 配置主线只能在统一状态、统一预算、统一审计链之下工作，不能另起一套上游状态或全组合总风控语义。
+
+2. 在总系统中的职责边界
+2.1 上游关系
+
+ETF 配置主线的合法调用链必须是：
+
+market_regime_engine -> global_portfolio_governor -> cn_etf_beta -> attribution_audit
+
+它只能消费：
+
+上游五状态 / 三状态派生结果
+Governor 下发的 sleeve budget
+Governor 下发的 exposure cap / defense bias / execution flags
+
+它无权：
+
+自己重建一套 regime engine
+自己改写全组合总预算
+绕过 Governor 独立上仓
+直接把局部 ETF 判断上升为系统总状态
+
+这条边界必须和个股 sleeve 完全一致。
+
+2.2 与个股层的关系
+
+cn_stock_trend_alpha_core 负责抓个股 alpha。
+cn_etf_beta 不替代它，也不与它争夺“谁是主收益引擎”。
+
+ETF 配置主线的职责是：
+
+在个股 alpha 机会不足时承接 beta
+在市场允许参与但不适合重押个股时提供更平滑暴露
+降低全组合净值路径对少数个股信号的单点依赖
+为未来跨市场 ETF / 防守资产 / overlay 接入保留统一资产语法
+
+因此，ETF 配置主线评价重点不应是“有没有像个股主线一样做出高 CAGR”，而应是“能否稳定承接 beta、切换风险、提高资本利用率”。
+
+3. Phase 1 策略目标
+
+Phase 1 的 ETF 配置主线只做三件事：
+
+3.1 承接权益 beta
+
+在 RISK_ON 与 NEUTRAL 环境中，为系统提供低频、可解释的宽基/风格 ETF 暴露。
+
+3.2 实现有限风格切换
+
+在核心权益 ETF 之间做有限偏配，而不是做高自由度风格搏杀。
+
+3.3 提供有限防守倾向
+
+在 Governor 要求下降低进攻性、提高防守偏置时，允许向 limited defense candidate 迁移部分权重，但不把 gold/bond/保险 overlay 直接混入当前 ETF beta 主线。
+
+这与当前接口定义一致：Phase 1 的 cn_etf_beta 只表达 core beta + limited defense candidate，不扩张成完整多资产防守系统。
+
+4. Phase 1 资产范围
+4.1 Core beta universe
+
+Phase 1 核心 beta universe 固定为：
+
+510300.SH
+510500.SH
+510050.SH
+512100.SH
+
+它们分别承担：
+
+510300.SH：核心宽基主承接器
+510500.SH：中盘成长 / 风格增强承接器
+510050.SH：大盘核心 / 偏稳宽基承接器
+512100.SH：成长进攻风格增强器
+4.2 Limited defense candidate
+
+Phase 1 limited defense candidate 固定为：
+
+512890.SH
+
+它不是完整防守层，只是 ETF beta 主线内部的有限防守倾向表达器。
+
+4.3 Phase 1 明确不并入
+
+以下资产不并入当前 ETF 配置主线核心：
+
+518880.SH
+511010.SH
+588000.SH
+159915.SZ
+
+原因不是这些资产永远无效，而是当前 Phase 1 要先把“统一状态 -> 统一预算 -> ETF beta 承接”这条主链固化，避免过早把资产层做复杂。
+
+5. 策略语义
+
+ETF 配置主线的核心问题不是：
+
+“哪只 ETF 最强，所以只买它。”
+
+而是：
+
+“在当前 regime 和 Governor 预算下，权益 beta 应该配多少，权益内部该由哪些 ETF 承接，风险抬升时该如何向防守倾向过渡。”
+
+因此它的策略语义必须从“筛票”改成“分配”。
+
+它不应该把大多数日子都变成：
+
+无票可买
+长期空仓
+只持有 1 只强者
+弱了就全清
+
+它应该在多数可参与环境里给出连续答案：
+
+当前总 ETF sleeve 应该有多少预算
+预算内部多少给核心宽基
+多少给成长/进攻增强
+多少给防守倾向
+多少保留为 cash buffer
+6. 决策骨架
+
+Phase 1 正式采用四层决策骨架。
+
+6.1 第一层：状态映射层
+
+输入来自 market_regime_engine 的正式状态：
+
+base_state_5
+effective_state_5
+effective_coarse_state
+confidence
+defense_bias
+
+ETF 配置主线不直接解释行情，只做状态消费。
+
+其内部只允许使用：
+
+RISK_ON
+NEUTRAL
+RISK_OFF
+
+作为粗粒度预算执行视图。
+五状态是正式真相源，三状态只是 ETF 执行层的派生视图。
+
+6.2 第二层：总 ETF sleeve 预算承接层
+
+输入来自 global_portfolio_governor：
+
+risk_budget
+exposure_cap
+allow_new_risk
+force_deleveraging
+defense_floor_required
+
+这一层只回答：
+
+ETF sleeve 当前总共能承接多少预算。
+
+它不能超配，只能在下发预算内工作。
+
+6.3 第三层：权益 / 防守 / 现金三桶分配层
+
+ETF 配置主线内部先不直接做单 ETF TopN。
+先把预算分成三桶：
+
+equity_core_bucket
+defense_tilt_bucket
+cash_buffer_bucket
+
+这是 Phase 1 最关键的语义转换。
+
+也就是说，ETF 主线先决定：
+
+大部分预算是否继续留在权益 ETF
+是否需要向 512890.SH 迁移部分预算
+是否需要保留部分现金缓冲而不是强行满仓
+6.4 第四层：桶内权重分配层
+
+在每个桶内部再做简单、低自由度的权重分配：
+
+核心宽基之间分配
+成长风格增强比例
+防守倾向比例
+
+这一层只允许低自由度规则，不允许变回复杂筛票器。
+
+7. 状态到配置的正式映射
+7.1 RISK_ON
+
+策略目标：
+
+承接主要权益 beta
+允许一定成长风格增强
+防守倾向维持低位
+
+建议语义：
+
+ETF sleeve 总预算尽量接近 Governor 下发上限
+以 510300 + 510500 为主骨架
+510050 作为稳定器
+512100 作为有限进攻增强
+512890 原则上仅保留极低占比或不配
+cash_buffer 保持低位
+7.2 NEUTRAL
+
+策略目标：
+
+保留参与
+降低激进风格权重
+提高组合平滑性
+
+建议语义：
+
+ETF sleeve 仍维持正暴露，不以大面积空仓为默认
+提高 510300、510050 占比
+降低 512100 权重
+510500 保留但不做激进偏配
+允许小比例 512890
+cash_buffer 略高于 RISK_ON
+7.3 RISK_OFF
+
+策略目标：
+
+缩减权益暴露
+服从 Governor 的防守要求
+用 limited defense candidate 与现金缓冲过渡
+
+建议语义：
+
+权益 ETF 明显降配
+核心保留优先给 510050 或 510300
+512100 原则上降至极低或归零
+512890 作为 limited defense candidate 承接部分预算
+cash_buffer 提升
+若 allow_new_risk = false 或 force_deleveraging = true，应优先执行减仓而不是内部轮动
+8. Phase 1 权重结构原则
+
+Phase 1 不做复杂优化器，采用“上限约束 + 低自由度偏配”原则。
+
+8.1 核心原则
+ETF sleeve 内默认不超过 max_positions = 3
+单一 ETF 不超过 single_instrument_cap
+不追求长期满配单一强者
+允许保留现金缓冲
+防守倾向只作为偏配，不替代 Governor 总防守职责
+
+这些约束与现有接口合同一致。
+
+8.2 权重建议语义
+
+不是固定死权重，而是固定死语义：
+
+510300：默认主锚
+510050：稳定器
+510500：中盘 beta 增强
+512100：成长进攻增强
+512890：有限防守倾向
+cash：执行缓冲与风险缓冲
+
+Phase 1 更重要的是让这套语义在审计上稳定、在状态切换上顺滑，而不是在回测里通过频繁调权重挤收益。
+
+9. 信号设计原则
+
+ETF 配置主线可以有信号，但信号只允许服务“配置”，不能主导成“筛票淘汰”。
+
+9.1 允许使用的信号
+
+Phase 1 允许：
+
+低频趋势确认
+宽基之间的有限相对强弱
+风格偏好确认
+Governor 下发的 defense bias
+9.2 不允许使用的主壳
+
+Phase 1 禁止：
+
+复用 V10.1 的 breakout 主壳
+复用残差排序主壳
+复用个股式强绝对过滤 + TopN 精选主壳
+高频切换
+黑箱优化器
+
+这不是保守，而是为了避免 ETF 主线再次滑回“个股 alpha 壳 + ETF 池”的旧路径。
+
+10. 调仓原则
+10.1 频率
+
+Phase 1 正式调仓频率：
+
+周频或双周频
+
+不做日频追逐，也不做高频轮动。
+
+10.2 触发条件
+
+允许触发调仓的原因只包括：
+
+regime 粗状态变化
+Governor budget 变化
+桶间权重偏离过大
+最低持有期结束后的再平衡窗口
+10.3 最低持有与换手约束
+min_hold_days 生效
+turnover_cap 生效
+若状态未变且权重偏离有限，应优先减少无谓交易
+
+ETF 配置主线的好坏，很大程度上体现在“切换是否稳”，而不是“切换是否快”。
+
+11. 输出形式
+
+ETF 配置主线的正式输出应保持为配置结果，而不是交易信号列表。
+
+输出语义应包含：
+
+requested_budget
+applied_budget
+state
+targets
+cash_weight
+defense_weight
+reason_codes
+
+这和当前 cn_etf_beta 输出合同一致。
+
+其中 targets 应体现的是：
+
+配置后的目标权重
+每个目标的资产角色
+是 core beta 还是 defense tilt
+权重变动的原因
+
+而不是简单“买入名单”。
+
+12. 审计与归因要求
+
+ETF 配置主线必须完整接入 attribution_audit。
+
+至少要能回答：
+
+今天 ETF sleeve 预算为什么是这个数
+为什么当前是权益偏配还是防守偏配
+为什么没有给 512100
+为什么提高了现金缓冲
+是 regime、Governor、turnover cap、min_hold，还是 defense bias 在起作用
+
+如果做不到这些，就说明它还不是正式主线，只是 research entry。
+这也是为什么 attribution_audit 必须被正式命名，而不能继续散在产物层。
+
+13. Phase 1 验收标准
+
+ETF 配置主线的验收优先级应调整为：
+
+一级指标
+avg_actual_exposure
+cash_ratio 是否合理
+empty_allocation_days
+state switch stability
+defense tilt 是否与 regime / Governor 一致
+MaxDD
+二级指标
+CAGR
+Sharpe
+Calmar
+turnover
+
+这里必须明确：
+
+ETF 配置主线不是拿来和个股 alpha 主线拼收益弹性的。
+它首先要证明的是：
+
+能承接
+能切换
+能解释
+能纳入统一总控
+14. Phase 1 非目标
+
+以下内容明确不属于当前 ETF 配置主线：
+
+高频 ETF 轮动
+个股 breakout 壳的 ETF 复制版
+gold/bond 正式并入 ETF beta 主核心
+保险 overlay 一体化实现
+黑箱资产配置器
+复杂多资产优化器
+依赖大规模参数搜索的风格轮动器
+
+这些都应后置。当前最重要的是先把 ETF 主线从“研究型趋势筛票器”重构成“正式配置承接器”。

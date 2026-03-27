@@ -1,0 +1,240 @@
+study_id: etf/cn_broad_based_mainline_filter_pool_selection
+title: CN Broad Based ETF Mainline Filter Pool Selection
+asset_scope: cn_etf
+baseline_id: baseline_V10_2
+hypothesis: 固定当前宽基 ETF 主线的 Governor/CTA 边界与本地暴露语义，只研究绝对过滤、候选池和选择链路三个主瓶颈；如果 ETF 主线收益上不去，应该先明确是过滤过严、候选池偏弱，还是排序链路把强 ETF 过滤掉了。
+change_scope:
+  modules_modified:
+    - research_entry.cn_etf.broad_based_mainline_filter_pool_selection
+variants:
+  - name: CTRL_MAINLINE_A0
+    description: 当前宽基 ETF 主线控制组；固定 mainline 边界与 light_only 本地承接，使用 A0 proxy 候选池、MA200+12M 绝对过滤和 12/6/3 全局 Top2 链路。
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - 510050.SH
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+          - 588000.SH
+          - 512100.SH
+          - 512890.SH
+          - 511010.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_id
+        value: cn_broad_based_mainline_filter_pool_selection
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: MAINLINE_BOTTLENECK_V1
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510050.SH: sse50
+          510300.SH: hs300
+          510500.SH: csi500
+          159845.SZ: csi1000_standard
+          510880.SH: dividend_standard
+          159915.SZ: growth_style_gem
+          588000.SH: growth_style_star50
+          512100.SH: csi1000_proxy
+          512890.SH: dividend_proxy
+      - path: governed_a_share.etf_beta.template_proxy_map
+        value:
+          512100.SH: 159845.SZ
+          512890.SH: 510880.SH
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510050.SH
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 159915.SZ
+          - 588000.SH
+      - path: governed_a_share.etf_beta.core_slot_symbols
+        value:
+          - 510050.SH
+          - 510300.SH
+          - 510500.SH
+          - 159845.SZ
+          - 510880.SH
+          - 512100.SH
+          - 512890.SH
+      - path: governed_a_share.etf_beta.growth_slot_symbols
+        value:
+          - 159915.SZ
+          - 588000.SH
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 512890.SH
+          - 159915.SZ
+          - 588000.SH
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value: []
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_profile
+        value: ma200_ret12
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_and_positive_12m
+      - path: governed_a_share.etf_beta.candidate_pool_profile
+        value: a0_proxy_pool
+      - path: governed_a_share.etf_beta.selection_chain_profile
+        value: global_top2_12_6_3
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.strategy_role
+        value: governed_broad_based_standalone_mainline
+      - path: governed_a_share.etf_beta.source_entry_type
+        value: cn_etf_broad_based_standalone_mainline_entry
+      - path: governed_a_share.etf_beta.governor_boundary_mode
+        value: consume_governor_state_and_budget
+      - path: governed_a_share.etf_beta.local_policy_mode
+        value: broad_based_rotation_mainline
+      - path: governed_a_share.etf_beta.controlled_accumulation_mode
+        value: light_only
+      - path: governed_a_share.etf_beta.exposure_policy_family
+        value: broad_based_standalone_mainline_v1
+      - path: governed_a_share.etf_beta.policy_scope
+        value: broad_based_only
+      - path: governed_a_share.etf_beta.broad_based_only
+        value: true
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 0.9
+          LIGHT: 0.75
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.45
+          TRANS_UP: 0.35
+          LIGHT: 0.2
+          TRANS_DOWN: 0.0
+          RISK_OFF: 0.0
+      - path: governed_a_share.etf_beta.target_selected_count_by_state_5
+        value:
+          BULL: 2
+          TRANS_UP: 2
+          LIGHT: 2
+          TRANS_DOWN: 0
+          RISK_OFF: 0
+      - path: governed_a_share.etf_beta.fallback_allowed_by_state_5
+        value:
+          BULL: true
+          TRANS_UP: true
+          LIGHT: true
+          TRANS_DOWN: false
+          RISK_OFF: false
+  - name: FILTER_MA200_ONLY
+    description: 只放松绝对过滤，改成 MA200 only；其余候选池、选择链路与主线控制组完全一致。
+    config_patches:
+      - path: governed_a_share.etf_beta.absolute_filter_profile
+        value: ma200_only
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma200_only
+  - name: FILTER_MA150_RET12
+    description: 只把绝对过滤换成 MA150+12M>0；其余候选池、选择链路与主线控制组完全一致。
+    config_patches:
+      - path: governed_a_share.etf_beta.absolute_filter_profile
+        value: ma150_ret12
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma150_and_positive_12m
+  - name: POOL_PROXY_EXPANDED
+    description: 只扩展候选池到 proxy expanded；其余过滤与选择链路保持控制组不变。
+    config_patches:
+      - path: governed_a_share.etf_beta.candidate_pool_profile
+        value: proxy_expanded_pool
+  - name: POOL_STANDARD_OVERLAP
+    description: 只切换到 standard overlap 候选池；其余过滤与选择链路保持控制组不变。
+    config_patches:
+      - path: governed_a_share.etf_beta.candidate_pool_profile
+        value: standard_overlap_pool
+  - name: CHAIN_TOP2_6_3_1
+    description: 只把排序链路切到 6/3/1 全局 Top2；其余过滤与候选池保持控制组不变。
+    config_patches:
+      - path: governed_a_share.etf_beta.selection_chain_profile
+        value: global_top2_6_3_1
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 21
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+  - name: CHAIN_CORE_GROWTH_SLOT
+    description: 只把排序链路切到 core+growth 双槽位；其余过滤与候选池保持控制组不变。
+    config_patches:
+      - path: governed_a_share.etf_beta.selection_chain_profile
+        value: core_growth_slot
+windows:
+  - key: "21426"
+    role: overlap
+    start: "2021-03-31"
+    end: "2026-03-24"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: research/studies/etf/cn_broad_based_mainline_filter_pool_selection.base_config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true
+  template_id: cn_broad_based_mainline_filter_pool_selection
+  policy_scope: broad_based_only
+  excludes_sector_etf: true
+  notes:
+    - this study only targets broad-based and broad-style ETF mainline variants
+    - sector ETF and thematic ETF are explicitly out of scope
+    - governor boundary and ETF local exposure semantics are fixed controls

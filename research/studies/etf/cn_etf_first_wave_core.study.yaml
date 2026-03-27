@@ -49,3 +49,6 @@ request_template:
   fast_mode: true
 metadata:
   materialize_config_json: true
+  formal_alignment_classification: formal_mainline
+  formal_alignment_reference: A股ETF子系统策略思路md
+  formal_alignment_reason_codes: []

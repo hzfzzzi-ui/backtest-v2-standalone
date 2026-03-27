@@ -30,6 +30,7 @@ package-lock.json
 # OS
 .DS_Store
 Thumbs.db
+/backtest.db
 
 # Backtest outputs (runtime data, not source)
 outputs/
