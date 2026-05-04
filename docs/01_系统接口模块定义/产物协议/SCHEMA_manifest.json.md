@@ -1,0 +1,113 @@
+# SCHEMA_manifest.json
+
+## 1. 用途
+
+`manifest.json` 是每个实验目录的产物索引。
+它负责记录产物存在性、核心文件映射、指标摘要与实验元数据。
+
+## 2. 文件位置
+
+- `outputs/experiments/<exp_id>/manifest.json`
+
+## 3. 正式收口结构
+
+```json
+{
+  "exp_id": "exp_20260405_030220276_6afd",
+  "experiment_id": "exp_20260405_030220276_6afd",
+  "status": "OK",
+  "created_at": "2026-04-05T03:02:36.488069",
+  "schema_version": "backtest_v2_experiment_manifest@2",
+  "artifacts": {},
+  "config_snapshots": {},
+  "core_artifacts": {},
+  "baseline_compare_status": "NOT_RUN",
+  "metrics": {},
+  "stage_pipeline": {},
+  "asset_scope": "cn_a_equity",
+  "asset_profile_id": "cn_a_equity_mainline",
+  "market_profile_id": "cn_a_mainland_equity_market",
+  "execution_profile_id": "cn_a_tplus1_next_open",
+  "asset_context": {}
+}
+```
+
+## 4. 必需字段
+
+- `exp_id`
+- `experiment_id`
+- `status`
+- `created_at`
+- `schema_version`
+- `artifacts`
+- `config_snapshots`
+- `core_artifacts`
+- `baseline_compare_status`
+- `metrics`
+
+## 5. 产物映射
+
+常见 `artifacts` 键包括：
+- `perf`
+- `nav`
+- `daily`
+- `trades`
+- `orders`
+- `reason_codes`
+- `symbol_performance`
+- `stage_summary`
+- `regime_audit_summary`
+- `attribution_audit`
+- `run_meta`
+- `execution_contract`
+- `input_config`
+- `resolved_config`
+- `compiled_plan`
+- `audit`
+
+## 6. `core_artifacts`
+
+`core_artifacts` 是正式核心产物索引。它至少要能定位：
+- `perf`
+- `nav`
+- `run_meta`
+- `execution_contract`
+
+其中：
+- `execution_contract` 是唯一正式执行真相
+- `input_config`、`resolved_config`、`compiled_plan` 属于输入快照、编译快照或过渡映射
+- 这些快照不得和 `execution_contract` 并列承担执行真相职责
+
+## 7. `config_snapshots`
+
+`config_snapshots` 记录输入与编译快照，例如：
+- `input_config`
+- `resolved_config`
+- `compiled_plan`
+
+它们主要服务于：
+- 审计
+- 回放
+- 对比
+- provenance 说明
+
+它们不是正式执行合同。
+
+## 8. `metrics`
+
+`metrics` 记录结果摘要，例如：
+- `total_return`
+- `max_drawdown`
+- `cagr`
+- `sharpe`
+- `trades`
+- `turnover`
+- `effective_execution_start_date`
+- `metrics_from_effective_start`
+
+## 9. 兼容原则
+
+- 允许新增产物键
+- 不允许无声删除核心产物索引
+- 不允许把运行时临时文件当成正式产物索引
+- 不允许把来源字段或引用字段冒充执行合同
