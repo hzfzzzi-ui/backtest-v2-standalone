@@ -105,3 +105,50 @@ def test_compute_nav_snapshot_uses_hfq_close_and_entry_adj_to_smooth_ex_right_ju
     assert raw_nav == raw_market_value
     assert round(hfq_market_value, 2) == 603989.74
     assert hfq_nav == hfq_market_value
+
+
+def test_compute_nav_snapshot_uses_etf_adj_factor_to_smooth_share_fold_jump() -> None:
+    history = pd.DataFrame(
+        [
+            {
+                "date": pd.Timestamp("2015-04-08"),
+                "symbol": "SH510500",
+                "open": 2.219,
+                "close": 2.187,
+                "adj_factor": 1.0,
+            },
+            {
+                "date": pd.Timestamp("2015-04-15"),
+                "symbol": "SH510500",
+                "open": 8.100,
+                "close": 7.818,
+                "adj_factor": 0.28032483,
+            },
+        ]
+    )
+    trading_days = [
+        date(2015, 4, 8),
+        date(2015, 4, 15),
+    ]
+    _, close_idx = build_backtest_price_indices(history=history, trading_days=trading_days)
+    hfq_close_idx, _ = build_backtest_hfq_indices(history=history, trading_days=trading_days)
+
+    raw_nav, raw_market_value, _ = compute_nav_snapshot(
+        cash=0.0,
+        positions={"sh510500": 571200},
+        close_idx=close_idx,
+        day=date(2015, 4, 15),
+    )
+    hfq_nav, hfq_market_value, _ = compute_nav_snapshot(
+        cash=0.0,
+        positions={"sh510500": 571200},
+        close_idx=close_idx,
+        day=date(2015, 4, 15),
+        hfq_close_idx=hfq_close_idx,
+        position_entry_adj={"sh510500": 1.0},
+    )
+
+    assert round(raw_market_value, 2) == 4465641.60
+    assert raw_nav == raw_market_value
+    assert round(hfq_market_value, 2) == 1251830.22
+    assert hfq_nav == hfq_market_value

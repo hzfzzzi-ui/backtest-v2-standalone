@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 
@@ -90,7 +90,7 @@ def test_build_attribution_audit_collects_state_budget_sleeve_and_reason_logs() 
                 "cn_etf_beta": {
                     "eligible_etfs": ["510300.SH", "512100.SH"],
                     "selected_etfs": ["510300.SH"],
-                    "out_of_scope_etfs": ["511010.SH"],
+                    "out_of_scope_etfs": [],
                     "selection_reason_codes": {"510300.SH": ["FORMAL_CORE_BETA"]},
                 }
             },
@@ -98,8 +98,8 @@ def test_build_attribution_audit_collects_state_budget_sleeve_and_reason_logs() 
         "etf_beta": {
             "source_entry_type": "cn_etf_research_entry",
             "formal_core_beta_symbols": ["510300.SH", "512100.SH"],
-            "limited_defense_candidates": ["512890.SH"],
-            "out_of_scope_reason_codes": {"511010.SH": ["OUT_OF_PHASE1_FORMAL_SCOPE"]},
+            "limited_defense_candidates": ["511010.SH"],
+            "out_of_scope_reason_codes": {},
         },
     }
 
@@ -116,4 +116,5 @@ def test_build_attribution_audit_collects_state_budget_sleeve_and_reason_logs() 
     assert payload["state_logs"][-1]["defense_bias"] == 0.7
     assert payload["state_logs"][-1]["block_scores"]["risk_block"]["net"] == -0.8
     assert payload["state_logs"][-1]["state_stability_metrics"]["pending_transition"] is True
-    assert payload["manual_override_logs"][-1]["target_state_5"] == "LIGHT"
+    assert payload["manual_override_logs"][-1]["target_state_5"] == "TRANS_UP"
+

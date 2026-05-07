@@ -53,6 +53,17 @@ def test_read_json_artifact_allows_sidecar_fallback(tmp_path: Path) -> None:
     assert run_config["universe"]["start"] == "2024-01-01"
 
 
+def test_resolve_results_dir_can_find_archived_experiment_by_id(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    archived_dir = repo_root / "outputs" / "experiments" / "archive" / "retention_sweep" / "exp_archived_demo"
+    _make_experiment_dir(archived_dir.parent, archived_dir.name)
+    monkeypatch.setattr(helper.experiment_artifact_access, "_repo_root", lambda: repo_root)
+
+    resolved = helper.resolve_results_dir(exp_id="exp_archived_demo")
+
+    assert resolved == archived_dir.resolve()
+
+
 def test_official_sources_use_core_runtime_access_boundary() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     helper_source = (repo_root / "backend" / "core" / "tools" / "experiment_runtime_access.py").read_text(encoding="utf-8")

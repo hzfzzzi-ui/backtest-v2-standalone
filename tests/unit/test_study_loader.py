@@ -22,7 +22,7 @@ def test_load_study_definition_from_explicit_path(tmp_path: Path) -> None:
                     "study_id: v10/demo",
                     "title: Demo",
                     "asset_scope: cn_a_equity",
-                    "baseline_id: baseline_V10",
+                    "baseline_id: baseline_V10_1",
                     "hypothesis: hypothesis",
                     "change_scope: {}",
                 "variants:",
@@ -60,7 +60,7 @@ def test_load_study_definition_rejects_missing_required_fields(tmp_path: Path) -
             [
                 "study_id: broken",
                 "title: Broken",
-                "baseline_id: baseline_V10",
+                "baseline_id: baseline_V10_1",
                 "change_scope: {}",
                 "variants:",
                 "  - name: B0",
@@ -81,6 +81,6 @@ def test_load_study_definition_rejects_missing_required_fields(tmp_path: Path) -
 
 
 def test_load_repo_study_by_id() -> None:
-    study = study_loader.load_study_definition("v10/residual_structure_s1")
-    assert study.study_id == "v10/residual_structure_s1"
+    study = study_loader.load_study_definition("v10/industry_second_stage_s7")
+    assert study.study_id == "v10/industry_second_stage_s7"
     assert len(study.variants) >= 3

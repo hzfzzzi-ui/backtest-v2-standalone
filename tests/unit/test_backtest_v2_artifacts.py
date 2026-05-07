@@ -114,25 +114,25 @@ def test_build_counters_reads_sorting_diagnostics_from_daily_csv(tmp_path: Path)
     pd.DataFrame(
         [
             {
-                "mf_rank_triggered": 1,
-                "mf_rank_applied": 1,
-                "mf_candidates_when_triggered": 3,
-                "mf_topk_reject_count": 2,
-                "mf_concentrated_selected_count": 1,
-                "mf_gate_on": 1,
+                "final_score_rank_triggered": 1,
+                "final_score_rank_applied": 1,
+                "final_score_candidates_when_triggered": 3,
+                "final_score_topk_reject_count": 2,
+                "final_score_concentrated_selected_count": 1,
+                "final_score_rank_gate_on": 1,
                 "strong_risk_on": 0,
-                "mf_rank_suppressed_by_strong_gate": 0,
+                "final_score_rank_suppressed_by_strong_gate": 0,
                 "selected_count": 2,
             },
             {
-                "mf_rank_triggered": 0,
-                "mf_rank_applied": 0,
-                "mf_candidates_when_triggered": 0,
-                "mf_topk_reject_count": 0,
-                "mf_concentrated_selected_count": 0,
-                "mf_gate_on": 0,
+                "final_score_rank_triggered": 0,
+                "final_score_rank_applied": 0,
+                "final_score_candidates_when_triggered": 0,
+                "final_score_topk_reject_count": 0,
+                "final_score_concentrated_selected_count": 0,
+                "final_score_rank_gate_on": 0,
                 "strong_risk_on": 1,
-                "mf_rank_suppressed_by_strong_gate": 1,
+                "final_score_rank_suppressed_by_strong_gate": 1,
                 "selected_count": 0,
             },
         ]
@@ -194,7 +194,29 @@ def test_build_counters_maps_order_reject_aliases_to_cash_and_lot_counts(tmp_pat
     )
 
     assert counters["cash_skip_count"] == 5
+    assert counters["planning_cash_skip_count"] == 5
+    assert counters["fill_cash_reject_count"] == 0
     assert counters["lot_skip_count"] == 5
+
+
+def test_build_counters_exposes_fill_cash_reject_layer_when_present(tmp_path: Path) -> None:
+    results_dir = tmp_path / "exp_test_fill_cash"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    counters = _build_counters(
+        {
+            "avg_positions": 0.0,
+            "max_positions": 10,
+            "planning_reject_reason_counts": {"SKIP_NO_CASH": 3},
+            "fill_reject_reason_counts": {"INSUFFICIENT_CASH": 2},
+        },
+        results_dir,
+        funnel_obj={},
+    )
+
+    assert counters["cash_skip_count"] == 3
+    assert counters["planning_cash_skip_count"] == 3
+    assert counters["fill_cash_reject_count"] == 2
 
 
 def test_build_buy_stage_funnel_preserves_unavailable_stage_counts(tmp_path: Path) -> None:

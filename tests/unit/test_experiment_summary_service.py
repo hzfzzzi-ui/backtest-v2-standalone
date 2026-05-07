@@ -10,7 +10,7 @@ def test_write_dual_output_bundle_creates_machine_and_human_outputs(tmp_path: Pa
         exp_id="exp_demo",
         results_dir=tmp_path,
         title="Demo Study",
-        baseline_id="baseline_V10",
+        baseline_id="baseline_V10_1",
         study_id="v10/demo",
         hypothesis="demo hypothesis",
         change_scope={"modules_modified": ["ranking"]},

@@ -118,6 +118,50 @@ def test_build_accounting_integrity_audit_passes_with_canonical_daily_snapshots(
     assert audit["summary"]["days_with_evidence"] == 2
 
 
+def test_build_accounting_integrity_audit_accepts_recorded_corporate_action_qty_adjustments() -> None:
+    audit = build_accounting_integrity_audit(
+        initial_cash=100000.0,
+        daily_snapshots=[
+            {
+                "day": "2026-03-02",
+                "cash_after": 89999.0,
+                "positions_after": {"sh600000": 100},
+                "trade_rows": [
+                    {
+                        "symbol": "sh600000",
+                        "side": "BUY",
+                        "qty": 100,
+                        "net_amount": 10001.0,
+                    }
+                ],
+                "nav": 100099.0,
+                "market_value": 10100.0,
+                "max_positions": 10,
+            },
+            {
+                "day": "2026-03-03",
+                "cash_after": 89999.0,
+                "positions_after": {"sh600000": 200},
+                "trade_rows": [],
+                "corporate_action_adjustments": [
+                    {
+                        "symbol": "sh600000",
+                        "prev_qty": 100,
+                        "adjusted_qty": 200,
+                    }
+                ],
+                "nav": 101999.0,
+                "market_value": 12000.0,
+                "max_positions": 10,
+            },
+        ],
+    )
+
+    assert audit["status"] == "PASS"
+    assert audit["summary"]["position_check_fail"] == 0
+    assert audit["summary"]["days_with_evidence"] == 2
+
+
 def test_build_accounting_integrity_audit_fails_on_negative_cash_and_position_mismatch() -> None:
     audit = build_accounting_integrity_audit(
         initial_cash=100000.0,
@@ -174,6 +218,70 @@ def test_build_accounting_integrity_audit_tolerates_rounded_trade_row_cash_drift
 
     assert audit["status"] == "PASS"
     assert audit["summary"]["cash_check_fail"] == 0
+
+
+def test_build_accounting_integrity_audit_tracks_dividend_receivable_lifecycle() -> None:
+    audit = build_accounting_integrity_audit(
+        initial_cash=1000.0,
+        daily_snapshots=[
+            {
+                "day": "2020-09-18",
+                "cash_after": 1000.0,
+                "dividend_receivable_after": 330.0,
+                "positions_after": {},
+                "trade_rows": [],
+                "dividend_receivable_create_today": 330.0,
+                "dividend_receivable_settle_today": 0.0,
+                "dividend_cash_credit_today": 0.0,
+                "nav": 1330.0,
+                "market_value": 0.0,
+                "max_positions": 10,
+            },
+            {
+                "day": "2020-09-21",
+                "cash_after": 1330.0,
+                "dividend_receivable_after": 0.0,
+                "positions_after": {},
+                "trade_rows": [],
+                "dividend_receivable_create_today": 0.0,
+                "dividend_receivable_settle_today": 330.0,
+                "dividend_cash_credit_today": 330.0,
+                "nav": 1330.0,
+                "market_value": 0.0,
+                "max_positions": 10,
+            },
+        ],
+    )
+
+    assert audit["status"] == "PASS"
+    assert audit["summary"]["receivable_check_fail"] == 0
+    assert audit["summary"]["cash_check_fail"] == 0
+    assert audit["summary"]["nav_check_fail"] == 0
+
+
+def test_build_accounting_integrity_audit_flags_receivable_mismatch() -> None:
+    audit = build_accounting_integrity_audit(
+        initial_cash=1000.0,
+        daily_snapshots=[
+            {
+                "day": "2020-09-18",
+                "cash_after": 1000.0,
+                "dividend_receivable_after": 320.0,
+                "positions_after": {},
+                "trade_rows": [],
+                "dividend_receivable_create_today": 330.0,
+                "dividend_receivable_settle_today": 0.0,
+                "dividend_cash_credit_today": 0.0,
+                "nav": 1320.0,
+                "market_value": 0.0,
+                "max_positions": 10,
+            },
+        ],
+    )
+
+    assert audit["status"] == "FAIL"
+    assert audit["summary"]["receivable_check_fail"] == 1
+    assert audit["samples"]["receivable_check_fail"][0]["expected_receivable_after"] == 330.0
 
 
 def test_build_accounting_integrity_audit_uses_hard_cap_not_effective_cap_for_position_breach() -> None:

@@ -1,10 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import time
 from datetime import date
 from types import SimpleNamespace
 
+import pytest
 from pytest import MonkeyPatch
 
 from backend.core.core.types import Side
@@ -118,6 +119,639 @@ def test_apply_open_fills_buy_updates_avg_cost_and_buy_side_effects() -> None:
     assert runtime.trade_rows[0]["triggered_rule"] == "RULE_Y"
 
 
+def test_apply_open_fills_rejects_new_buy_when_live_positions_already_hit_pending_cap() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600001"): 10.0},
+        close_idx={(trading_day, "sh600001"): 10.2},
+        _slip_bps=0.001,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=2000.0,
+        _traded_value_today=0.0,
+        positions={"sh600000": 100},
+        position_avg_cost={"sh600000": 9.5},
+        position_entry_adj={"sh600000": 1.0},
+        holding_sources={"sh600000": {"entry_reason_code": "BREAKOUT_HIGH", "entry_date": trading_day}},
+        provider=SimpleNamespace(
+            entry_day={},
+            entry_day_overwrite=False,
+            peak_state_on_buy={},
+        ),
+        _current_day={"controls": {"effective_max_positions": 1}},
+        trade_rows=[],
+        fill_reject_reason_counts={},
+    )
+    order = SimpleNamespace(
+        side=Side.BUY,
+        symbol="SH600001",
+        qty=100,
+        reason_code="ENTRY",
+        meta={"triggered_rule": "RULE_Y"},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.positions == {"sh600000": 100}
+    assert runtime.trade_rows == []
+    assert runtime.fill_reject_reason_counts == {"POSITION_CAP_REACHED": 1}
+    assert runtime._last_fill_reject_reason_counts_today == {"POSITION_CAP_REACHED": 1}
+    assert runtime._last_accounting_snapshot.counters["FILL::POSITION_CAP_REACHED"] == 1
+
+
+def test_apply_open_fills_allows_sell_then_buy_to_reuse_slot_at_pending_cap() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600000"): 10.0, (trading_day, "sh600001"): 10.0},
+        close_idx={(trading_day, "sh600000"): 10.1, (trading_day, "sh600001"): 10.2},
+        _slip_bps=0.0,
+        _comm_rate=0.0,
+        _comm_min=0.0,
+        _stamp_rate=0.0,
+        _min_trade_price=5.0,
+        cash=0.0,
+        _traded_value_today=0.0,
+        positions={"sh600000": 100},
+        position_avg_cost={"sh600000": 9.5},
+        position_entry_adj={"sh600000": 1.0},
+        holding_sources={"sh600000": {"entry_reason_code": "BREAKOUT_HIGH", "entry_date": trading_day}},
+        provider=SimpleNamespace(
+            last_sell_day={},
+            _risk_off_partial_state={},
+            extra_clear_dicts=[{}],
+            entry_day={},
+            entry_day_overwrite=False,
+            peak_state_on_buy={},
+        ),
+        _current_day={"controls": {"effective_max_positions": 1}},
+        trade_rows=[],
+        fill_reject_reason_counts={},
+    )
+    orders = [
+        SimpleNamespace(side=Side.SELL, symbol="SH600000", qty=100, reason_code="EXIT", meta={}),
+        SimpleNamespace(side=Side.BUY, symbol="SH600001", qty=100, reason_code="ENTRY", meta={}),
+    ]
+
+    apply_open_fills(runtime, trading_day, orders)
+
+    assert runtime.positions == {"sh600001": 100}
+    assert [trade["side"] for trade in runtime.trade_rows] == ["SELL", "BUY"]
+    assert runtime.fill_reject_reason_counts == {}
+
+
+def test_apply_open_fills_buy_cost_only_keeps_open_fill_price_and_books_slippage_as_cash() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600001"): 10.0},
+        close_idx={(trading_day, "sh600001"): 10.2},
+        hfq_close_idx={(trading_day, "sh600001"): 102.0},
+        adj_factor_idx={(trading_day, "sh600001"): 10.0},
+        _slip_bps=0.001,
+        _slippage_mode="cost_only",
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=2000.0,
+        _traded_value_today=0.0,
+        positions={},
+        position_avg_cost={},
+        position_entry_adj={},
+        holding_sources={},
+        provider=SimpleNamespace(
+            entry_day={},
+            entry_day_overwrite=False,
+            peak_state_on_buy={},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.BUY,
+        symbol="SH600001",
+        qty=100,
+        reason_code="ENTRY",
+        meta={},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.trade_rows[0]["fill_price"] == 10.0
+    assert runtime.trade_rows[0]["value"] == 1000.0
+    assert runtime.trade_rows[0]["slippage"] == 1.0
+    assert runtime.trade_rows[0]["slippage_mode"] == "cost_only"
+    assert runtime.trade_rows[0]["net_amount"] == 1002.0
+
+
+def test_apply_open_fills_sell_cost_only_keeps_open_fill_price_and_books_slippage_as_cash() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600000"): 10.0},
+        close_idx={(trading_day, "sh600000"): 10.1},
+        _slip_bps=0.001,
+        _slippage_mode="cost_only",
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=1000.0,
+        _traded_value_today=0.0,
+        positions={"sh600000": 100},
+        position_avg_cost={"sh600000": 9.5},
+        holding_sources={"sh600000": {"entry_reason_code": "BREAKOUT_HIGH", "entry_date": trading_day}},
+        provider=SimpleNamespace(
+            last_sell_day={},
+            _risk_off_partial_state={"sh600000": True},
+            extra_clear_dicts=[{}],
+            entry_day={"sh600000": trading_day},
+        ),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.SELL,
+        symbol="SH600000",
+        qty=100,
+        reason_code="EXIT",
+        meta={},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.trade_rows[0]["fill_price"] == 10.0
+    assert runtime.trade_rows[0]["value"] == 1000.0
+    assert runtime.trade_rows[0]["slippage"] == 1.0
+    assert runtime.trade_rows[0]["slippage_mode"] == "cost_only"
+    assert runtime.trade_rows[0]["net_amount"] == 997.0
+
+
+def test_apply_open_fills_adjusts_position_qty_for_etf_share_fold_before_sell() -> None:
+    previous_day = date(2015, 4, 17)
+    trading_day = date(2015, 4, 20)
+    previous_close = 7.7984 * 0.28032483
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh510500"): 7.7984},
+        close_idx={
+            (previous_day, "sh510500"): previous_close,
+            (trading_day, "sh510500"): 7.8210,
+        },
+        adj_factor_idx={(trading_day, "sh510500"): 0.28032483},
+        _slip_bps=0.0,
+        _comm_rate=0.0003,
+        _comm_min=5.0,
+        _stamp_rate=0.001,
+        _min_trade_price=0.0,
+        cash=46.94608,
+        _traded_value_today=0.0,
+        positions={"sh510500": 571200},
+        position_avg_cost={"sh510500": 2.2194},
+        position_entry_adj={"sh510500": 1.0},
+        holding_sources={"sh510500": {"entry_reason_code": "ETF_ENTRY", "entry_date": date(2015, 4, 8)}},
+        provider=SimpleNamespace(
+            last_sell_day={},
+            _risk_off_partial_state={},
+            extra_clear_dicts=[{}],
+            entry_day={"sh510500": date(2015, 4, 8)},
+        ),
+        request=SimpleNamespace(data_bundle=SimpleNamespace(trading_days=[previous_day, trading_day])),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.SELL,
+        symbol="SH510500",
+        qty=571200,
+        reason_code="EXIT",
+        meta={},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.positions == {}
+    assert runtime.trade_rows[0]["qty"] == 160122
+    assert round(runtime.trade_rows[0]["value"], 2) == 1248695.40
+    assert runtime.trade_rows[0]["reason_code"] == "EXIT"
+    adjustment = runtime._last_accounting_snapshot.daily_marks["corporate_action_adjustments"][0]
+    assert adjustment["symbol"] == "sh510500"
+    assert adjustment["date"] == "2015-04-20"
+    assert adjustment["prev_qty"] == 571200
+    assert adjustment["adjusted_qty"] == 160122
+    assert adjustment["prev_entry_adj"] == pytest.approx(1.0)
+    assert adjustment["current_adj"] == pytest.approx(0.28032483)
+    assert adjustment["prev_avg_cost"] == pytest.approx(2.2194)
+    assert adjustment["adjusted_avg_cost"] == pytest.approx(7.91724372043675)
+
+
+def test_apply_open_fills_keeps_qty_when_adj_change_looks_like_small_cash_distribution() -> None:
+    previous_day = date(2020, 9, 17)
+    trading_day = date(2020, 9, 18)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh511010"): 120.66},
+        close_idx={
+            (previous_day, "sh511010"): 120.71,
+            (trading_day, "sh511010"): 120.714,
+        },
+        adj_factor_idx={(trading_day, "sh511010"): 1.0},
+        _slip_bps=0.0,
+        _comm_rate=0.0003,
+        _comm_min=5.0,
+        _stamp_rate=0.0,
+        _min_trade_price=0.0,
+        cash=0.0,
+        _traded_value_today=0.0,
+        positions={"sh511010": 11000},
+        position_avg_cost={"sh511010": 120.0},
+        position_entry_adj={"sh511010": 1.012},
+        holding_sources={"sh511010": {"entry_reason_code": "ETF_ENTRY", "entry_date": date(2020, 9, 1)}},
+        provider=SimpleNamespace(
+            last_sell_day={},
+            _risk_off_partial_state={},
+            extra_clear_dicts=[{}],
+            entry_day={"sh511010": date(2020, 9, 1)},
+        ),
+        request=SimpleNamespace(data_bundle=SimpleNamespace(trading_days=[previous_day, trading_day])),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.SELL,
+        symbol="SH511010",
+        qty=11000,
+        reason_code="EXIT",
+        meta={},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.positions == {}
+    assert runtime.trade_rows[0]["qty"] == 11000
+    assert runtime._last_accounting_snapshot.daily_marks["corporate_action_adjustments"] == []
+
+
+def test_apply_open_fills_pay_date_dividend_creates_receivable_then_settles_cash() -> None:
+    pre_day = date(2020, 9, 17)
+    ex_day = date(2020, 9, 18)
+    pay_day = date(2020, 9, 21)
+    event_id = "sh511010|2020-09-18|2020-09-21|0.03"
+    runtime = SimpleNamespace(
+        open_idx={(ex_day, "sh511010"): 120.66, (pay_day, "sh511010"): 120.70},
+        close_idx={
+            (pre_day, "sh511010"): 120.71,
+            (ex_day, "sh511010"): 120.714,
+            (pay_day, "sh511010"): 120.73,
+        },
+        hfq_close_idx={(ex_day, "sh511010"): 122.16, (pay_day, "sh511010"): 122.18},
+        adj_factor_idx={
+            (pre_day, "sh511010"): 1.0,
+            (ex_day, "sh511010"): 1.012,
+            (pay_day, "sh511010"): 1.012,
+        },
+        dividend_events_ex_idx={
+            ex_day: (
+                {
+                    "event_id": event_id,
+                    "symbol": "sh511010",
+                    "ex_date": ex_day,
+                    "cash_pay_date": pay_day,
+                    "div_cash": 0.03,
+                },
+            )
+        },
+        dividend_events_pay_idx={
+            pay_day: (
+                {
+                    "event_id": event_id,
+                    "symbol": "sh511010",
+                    "ex_date": ex_day,
+                    "cash_pay_date": pay_day,
+                    "div_cash": 0.03,
+                },
+            )
+        },
+        _dividend_cash_timing_mode="pay_date",
+        _slip_bps=0.0,
+        _comm_rate=0.0003,
+        _comm_min=5.0,
+        _stamp_rate=0.0,
+        _min_trade_price=0.0,
+        cash=0.0,
+        dividend_receivable=0.0,
+        _traded_value_today=0.0,
+        positions={"sh511010": 11000},
+        position_avg_cost={"sh511010": 120.0},
+        position_entry_adj={"sh511010": 1.0},
+        pending_dividend_receivables={},
+        processed_dividend_ex_event_ids=set(),
+        processed_dividend_cash_event_ids=set(),
+        dividend_event_rows=[],
+        holding_sources={"sh511010": {"entry_reason_code": "ETF_ENTRY", "entry_date": date(2020, 9, 1)}},
+        provider=SimpleNamespace(
+            last_sell_day={},
+            _risk_off_partial_state={},
+            extra_clear_dicts=[{}],
+            entry_day={"sh511010": date(2020, 9, 1)},
+        ),
+        request=SimpleNamespace(data_bundle=SimpleNamespace(trading_days=[pre_day, ex_day, pay_day])),
+        trade_rows=[],
+    )
+
+    apply_open_fills(runtime, ex_day, [])
+
+    assert runtime.cash == pytest.approx(0.0)
+    assert runtime.dividend_receivable == pytest.approx(330.0)
+    assert runtime.position_entry_adj["sh511010"] == pytest.approx(1.012)
+    assert runtime._last_accounting_snapshot.dividend_receivable == pytest.approx(330.0)
+    assert runtime._last_accounting_snapshot.daily_marks["dividend_receivable_create_today"] == pytest.approx(330.0)
+    assert runtime._last_accounting_snapshot.daily_marks["dividend_cash_credit_today"] == pytest.approx(0.0)
+
+    apply_open_fills(runtime, pay_day, [])
+
+    assert runtime.cash == pytest.approx(330.0)
+    assert runtime.dividend_receivable == pytest.approx(0.0)
+    assert runtime._last_accounting_snapshot.dividend_receivable == pytest.approx(0.0)
+    assert runtime._last_accounting_snapshot.daily_marks["dividend_receivable_settle_today"] == pytest.approx(330.0)
+    assert runtime._last_accounting_snapshot.daily_marks["dividend_cash_credit_today"] == pytest.approx(330.0)
+    runtime.daily_rows = []
+    runtime.candidate_rows = []
+    runtime.accounting_audit_rows = []
+    runtime.composition_audit_rows = []
+    runtime.execution_lineage_records = {}
+    runtime.order_reject_reason_counts = {}
+    runtime.fill_reject_reason_counts = {}
+    runtime.route_id = "strict_inline_runtime"
+    runtime.market_filter_bull_days = 0
+    runtime.market_filter_bear_days = 0
+    runtime.market_state_trans_down_days = 0
+    runtime.market_state_trans_up_days = 0
+    runtime.trade_mode_main_days = 0
+    runtime.trade_mode_light_days = 0
+    runtime.trade_mode_notrade_days = 0
+    runtime._simulation_t0 = time.perf_counter()
+    runtime.request.initial_cash = 0.0
+    runtime.request.max_positions = 10
+    runtime.request.enable_strength_rank = False
+    runtime.request.strength_ma = 55
+    runtime.provider.blocked_by_trend_count = 0
+    runtime.provider.total_buy_signals = 0
+    runtime.provider.precompute_seconds = 0.0
+    runtime.provider.diag_reason_counts = {}
+    result = build_portfolio_backtest_result(runtime)
+    assert result.cash_events is not None
+    assert list(result.cash_events["cash_event_type"]) == [
+        "DIVIDEND_RECEIVABLE",
+        "DIVIDEND_CASH",
+        "DIVIDEND_RECEIVABLE",
+    ]
+    assert list(result.cash_events["action"].fillna("")) == ["create", "", "settle"]
+
+
+def test_apply_open_fills_ex_date_dividend_credits_cash_without_receivable() -> None:
+    pre_day = date(2020, 9, 17)
+    ex_day = date(2020, 9, 18)
+    runtime = SimpleNamespace(
+        open_idx={(ex_day, "sh511010"): 120.66},
+        close_idx={
+            (pre_day, "sh511010"): 120.71,
+            (ex_day, "sh511010"): 120.714,
+        },
+        hfq_close_idx={(ex_day, "sh511010"): 122.16},
+        adj_factor_idx={
+            (pre_day, "sh511010"): 1.0,
+            (ex_day, "sh511010"): 1.012,
+        },
+        dividend_events_ex_idx={
+            ex_day: (
+                {
+                    "event_id": "sh511010|2020-09-18|2020-09-18|0.03",
+                    "symbol": "sh511010",
+                    "ex_date": ex_day,
+                    "cash_pay_date": ex_day,
+                    "div_cash": 0.03,
+                },
+            )
+        },
+        dividend_events_pay_idx={},
+        _dividend_cash_timing_mode="ex_date",
+        _slip_bps=0.0,
+        _comm_rate=0.0003,
+        _comm_min=5.0,
+        _stamp_rate=0.0,
+        _min_trade_price=0.0,
+        cash=0.0,
+        dividend_receivable=0.0,
+        _traded_value_today=0.0,
+        positions={"sh511010": 11000},
+        position_avg_cost={"sh511010": 120.0},
+        position_entry_adj={"sh511010": 1.0},
+        pending_dividend_receivables={},
+        processed_dividend_ex_event_ids=set(),
+        processed_dividend_cash_event_ids=set(),
+        dividend_event_rows=[],
+        holding_sources={"sh511010": {"entry_reason_code": "ETF_ENTRY", "entry_date": date(2020, 9, 1)}},
+        provider=SimpleNamespace(
+            last_sell_day={},
+            _risk_off_partial_state={},
+            extra_clear_dicts=[{}],
+            entry_day={"sh511010": date(2020, 9, 1)},
+        ),
+        request=SimpleNamespace(data_bundle=SimpleNamespace(trading_days=[pre_day, ex_day])),
+        trade_rows=[],
+    )
+
+    apply_open_fills(runtime, ex_day, [])
+
+    assert runtime.cash == pytest.approx(330.0)
+    assert runtime.dividend_receivable == pytest.approx(0.0)
+    assert runtime.position_entry_adj["sh511010"] == pytest.approx(1.012)
+    assert runtime._last_accounting_snapshot.daily_marks["dividend_cash_credit_today"] == pytest.approx(330.0)
+    assert runtime._last_accounting_snapshot.daily_marks["dividend_receivable_create_today"] == pytest.approx(0.0)
+
+
+def test_apply_open_fills_ignores_large_adj_jump_when_price_gap_does_not_match_share_transform() -> None:
+    previous_day = date(2020, 9, 17)
+    trading_day = date(2020, 9, 18)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh510500"): 7.0},
+        close_idx={
+            (previous_day, "sh510500"): 7.009,
+            (trading_day, "sh510500"): 7.136,
+        },
+        adj_factor_idx={(trading_day, "sh510500"): 1.0},
+        _slip_bps=0.0,
+        _comm_rate=0.0003,
+        _comm_min=5.0,
+        _stamp_rate=0.001,
+        _min_trade_price=0.0,
+        cash=0.0,
+        _traded_value_today=0.0,
+        positions={"sh510500": 411264},
+        position_avg_cost={"sh510500": 2.2194},
+        position_entry_adj={"sh510500": 0.28},
+        holding_sources={"sh510500": {"entry_reason_code": "ETF_ENTRY", "entry_date": date(2020, 8, 1)}},
+        provider=SimpleNamespace(
+            last_sell_day={},
+            _risk_off_partial_state={},
+            extra_clear_dicts=[{}],
+            entry_day={"sh510500": date(2020, 8, 1)},
+        ),
+        request=SimpleNamespace(data_bundle=SimpleNamespace(trading_days=[previous_day, trading_day])),
+        trade_rows=[],
+    )
+    order = SimpleNamespace(
+        side=Side.SELL,
+        symbol="SH510500",
+        qty=411264,
+        reason_code="EXIT",
+        meta={},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.positions == {}
+    assert runtime.trade_rows[0]["qty"] == 411264
+    assert runtime._last_accounting_snapshot.daily_marks["corporate_action_adjustments"] == []
+
+
+def test_apply_open_fills_buy_reject_tracks_fill_cash_reason_counts() -> None:
+    trading_day = date(2026, 3, 2)
+    runtime = SimpleNamespace(
+        open_idx={(trading_day, "sh600001"): 10.0},
+        close_idx={(trading_day, "sh600001"): 10.2},
+        _slip_bps=0.001,
+        _comm_rate=0.0005,
+        _comm_min=1.0,
+        _stamp_rate=0.001,
+        _min_trade_price=5.0,
+        cash=500.0,
+        _traded_value_today=0.0,
+        positions={},
+        position_avg_cost={},
+        position_entry_adj={},
+        holding_sources={},
+        provider=SimpleNamespace(
+            entry_day={},
+            entry_day_overwrite=False,
+            peak_state_on_buy={},
+        ),
+        trade_rows=[],
+        order_reject_reason_counts={},
+        fill_reject_reason_counts={},
+    )
+    order = SimpleNamespace(
+        side=Side.BUY,
+        symbol="SH600001",
+        qty=100,
+        reason_code="ENTRY",
+        meta={"triggered_rule": "RULE_Y"},
+    )
+
+    apply_open_fills(runtime, trading_day, [order])
+
+    assert runtime.positions == {}
+    assert runtime.trade_rows == []
+    assert runtime.fill_reject_reason_counts == {"INSUFFICIENT_CASH": 1}
+    assert runtime._last_fill_reject_reason_counts_today == {"INSUFFICIENT_CASH": 1}
+    assert runtime._last_accounting_snapshot.counters["FILL::INSUFFICIENT_CASH"] == 1
+
+
+def test_apply_daily_decision_diagnostics_separates_planning_and_fill_cash_counts() -> None:
+    runtime = SimpleNamespace(
+        daily_rows=[
+            {
+                "date": "2026-03-02",
+                "positions_count": 0,
+                "positions_count_end_of_day": 0,
+                "candidates_count": 0,
+                "selected_count": 0,
+                "buy_slots_before_buy": 0,
+                "buy_slots_after_sell": 0,
+                "buy_candidate_count": 0,
+                "after_held_filter_count": 0,
+                "positions_before_sell": 0,
+                "sells_executed_count": 0,
+                "positions_after_sell": 0,
+                "buy_slots_calculated": 0,
+                "raw_buy_signal_count": 0,
+                "raw_alpha_signal_count": 0,
+                "composed_buy_signal_count": 0,
+                "composed_sell_signal_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "candidates_after_held_filter_count": 0,
+                "sorting_triggered": False,
+                "mf_rank_triggered": 0,
+                "mf_rank_applied": 0,
+                "mf_candidates_when_triggered": 0,
+                "mf_topk_reject_count": 0,
+                "mf_concentrated_selected_count": 0,
+                "mf_gate_on": 0,
+                "moneyflow_overlay_enabled": 0,
+                "moneyflow_overlay_mode": "off",
+                "moneyflow_overlay_gate_on": 0,
+                "moneyflow_overlay_observation_date": "",
+                "moneyflow_overlay_score_source": "",
+                "strong_risk_on": 0,
+                "mf_rank_suppressed_by_strong_gate": 0,
+                "same_symbol_conflict_count": 0,
+                "sleeve_budget_reject_count": 0,
+                "source_only_exit_count": 0,
+                "global_risk_override_count": 0,
+                "effective_max_positions": 2,
+                "breadth_max_positions": 2,
+                "dd_state": "NORMAL",
+                "regime_transition_reason": "",
+                "market_state_5": "BULL",
+                "base_state_5": "BULL",
+                "effective_state_5": "BULL",
+                "coarse_state": "RISK_ON",
+                "effective_coarse_state": "RISK_ON",
+                "risk_budget_multiplier": 1.0,
+                "reason_codes_json": "[]",
+                "manual_override_json": "{}",
+                "defense_bias": 0.0,
+                "governor_budget_json": "{}",
+            }
+        ],
+        route_id="strict_inline_runtime",
+        _current_day={"controls": {"effective_max_positions": 2}},
+        positions={},
+        composition_audit_rows=[],
+        request=SimpleNamespace(max_positions=2),
+        _last_fill_reject_reason_counts_today={"INSUFFICIENT_CASH": 1},
+    )
+    buy_signal = SimpleNamespace(symbol="SH600001", meta={})
+    day_signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        raw_alpha_signals=[],
+        composed_buy_signals=[],
+        composed_sell_signals=[],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={"raw_buy_signal_count": 1, "composition_enabled": False},
+    )
+
+    apply_daily_decision_diagnostics(
+        runtime,
+        day_signals=day_signals,
+        debug_plan={
+            "buy_candidates_count": 1,
+            "buy_slots": 1,
+            "selected_symbols": [],
+            "selected_count": 0,
+            "execution_kernel_reject_reason_counts": {"SKIP_NO_CASH": 2},
+        },
+    )
+
+    daily_row = runtime.daily_rows[-1]
+    assert daily_row["planning_cash_skip_count"] == 2
+    assert daily_row["fill_cash_reject_count"] == 1
+    assert json.loads(daily_row["planning_reject_reason_counts_json"]) == {"SKIP_NO_CASH": 2}
+    assert json.loads(daily_row["fill_reject_reason_counts_json"]) == {"INSUFFICIENT_CASH": 1}
+
+
 def test_prepare_daily_snapshot_uses_hfq_valuation_when_entry_adj_present() -> None:
     trading_day = date(2015, 4, 1)
     runtime = SimpleNamespace(
@@ -153,6 +787,45 @@ def test_prepare_daily_snapshot_uses_hfq_valuation_when_entry_adj_present() -> N
 
     assert round(snapshot.market_value, 2) == 603989.74
     assert round(snapshot.nav, 2) == 603989.74
+
+
+def test_prepare_daily_snapshot_adds_dividend_receivable_into_nav() -> None:
+    trading_day = date(2020, 9, 18)
+    runtime = SimpleNamespace(
+        cash=1000.0,
+        dividend_receivable=330.0,
+        positions={"sh511010": 11000},
+        position_entry_adj={"sh511010": 1.012},
+        close_idx={(trading_day, "sh511010"): 120.714},
+        hfq_close_idx={(trading_day, "sh511010"): 122.162168},
+        peak_nav=0.0,
+        prev_nav=1000.0,
+        _traded_value_today=0.0,
+        daily_rows=[],
+        _compute_day_controls=lambda *_args, **_kwargs: {
+            "effective_max_positions": 10,
+            "dd_state": "NORMAL",
+            "regime_engine": "weekly_five_state",
+            "market_state_5": "BULL",
+            "market_state_score": 5,
+            "market_state_raw": "BULL",
+            "market_state_smoothed": "BULL",
+            "risk_budget_multiplier": 1.0,
+            "weekly_observation_flag": False,
+            "market_state": "BULL",
+            "trade_mode": "TREND_MAIN",
+            "benchmark_regime_on": True,
+            "feature_availability": {},
+            "risk_on_today": True,
+        },
+        _last_accounting_snapshot=None,
+    )
+
+    snapshot = prepare_daily_snapshot(runtime, day_index=0, day=trading_day)
+
+    assert round(snapshot.market_value, 2) == 1327849.65
+    assert round(snapshot.nav, 2) == 1329179.65
+    assert snapshot.accounting_snapshot.dividend_receivable == pytest.approx(330.0)
 
 
 def test_apply_open_fills_buy_persists_entry_source_fields() -> None:
@@ -702,7 +1375,7 @@ def test_prepare_daily_snapshot_updates_nav_trackers_and_daily_row() -> None:
     assert governor_budget["effective_max_positions"] == 5
     assert governor_budget["sleeve_budgets"]["cn_stock_trend_alpha_core"]["slot_cap"] == 5
     assert governor_budget["regime_source_state"] == "TRANS_UP"
-    assert governor_budget["regime_effective_state"] == "LIGHT"
+    assert governor_budget["regime_effective_state"] == "TRANS_UP"
     assert governor_budget["manual_override"]["active"] is True
     assert governor_budget["defense_bias"] == 0.35
 
@@ -1108,14 +1781,803 @@ def test_apply_daily_decision_diagnostics_resolves_cn_etf_governor_truth_from_as
     assert governor_budget["budget_consumer_sleeve_id"] == "cn_etf_beta"
     assert governor_budget["budget_consumer_system_role"] == "market_beta_sleeve"
     assert governor_budget["target_exposure"] == 1.0
-    assert governor_budget["target_exposure_source"] == "slot_cap_default"
-    assert governor_budget["min_deployable_exposure"] == 0.5
-    assert governor_budget["min_deployable_exposure_source"] == "derived_from_target"
-    assert governor_budget["fallback_allowed"] is False
-    assert governor_budget["actual_exposure"] == 0.0
-    assert governor_budget["actual_risk_exposure"] == 0.0
-    assert governor_budget["actual_fallback_exposure"] == 0.0
-    assert governor_budget["deployability_gap"] == 1.0
+    assert "target_exposure_source" not in governor_budget
+    assert "min_deployable_exposure" not in governor_budget
+    assert "fallback_allowed" not in governor_budget
+    diagnostics = json.loads(runtime.daily_rows[-1]["diagnostics_input_json"])
+    formal_view = diagnostics["diagnostics"]["etf_beta_formal_view"]
+    assert formal_view["target_exposure_source"] == "governor_total_exposure_cap"
+    assert formal_view["min_deployable_exposure"] == pytest.approx(0.0)
+    assert formal_view["min_deployable_exposure_source"] == "phase1_allocation_engine"
+    assert formal_view["fallback_allowed"] is False
+
+
+def test_apply_daily_decision_diagnostics_overrides_cn_etf_phase1_budget_fields_from_governor_truth() -> None:
+    runtime = SimpleNamespace(
+        daily_rows=[
+            {
+                "date": "2026-03-02",
+                "drawdown": 0.0,
+                "positions_count": 0,
+                "positions_count_end_of_day": 0,
+                "candidates_count": 0,
+                "selected_count": 0,
+                "buy_slots_before_buy": 0,
+                "buy_slots_after_sell": 0,
+                "buy_candidate_count": 0,
+                "after_held_filter_count": 0,
+                "positions_before_sell": 0,
+                "sells_executed_count": 0,
+                "positions_after_sell": 0,
+                "buy_slots_calculated": 0,
+                "raw_buy_signal_count": 0,
+                "raw_alpha_signal_count": 0,
+                "composed_buy_signal_count": 0,
+                "composed_sell_signal_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "candidates_after_held_filter_count": 0,
+                "sorting_triggered": False,
+                "mf_rank_triggered": 0,
+                "mf_rank_applied": 0,
+                "mf_candidates_when_triggered": 0,
+                "mf_topk_reject_count": 0,
+                "mf_concentrated_selected_count": 0,
+                "mf_gate_on": 0,
+                "strong_risk_on": 0,
+                "mf_rank_suppressed_by_strong_gate": 0,
+                "same_symbol_conflict_count": 0,
+                "sleeve_budget_reject_count": 0,
+                "source_only_exit_count": 0,
+                "global_risk_override_count": 0,
+                "effective_max_positions": 2,
+                "breadth_max_positions": 2,
+                "dd_state": "NORMAL",
+                "regime_transition_reason": "",
+                "market_state_5": "TRANS_DOWN",
+                "base_state_5": "TRANS_DOWN",
+                "effective_state_5": "TRANS_DOWN",
+                "coarse_state": "RISK_OFF",
+                "effective_coarse_state": "RISK_OFF",
+                "risk_budget_multiplier": 0.8,
+                "reason_codes_json": "[]",
+                "manual_override_json": "{}",
+                "defense_bias": 0.0,
+                "governor_budget_json": json.dumps(
+                    {
+                        "contract_version": "cn_a_governor_budget@1",
+                        "asset_scope": "cn_etf",
+                        "budget_consumer_sleeve_id": "cn_etf_beta",
+                        "budget_consumer_system_role": "market_beta_sleeve",
+                        "budget_semantics": "consume_governor_sleeve_budget",
+                        "regime_effective_state": "TRANS_DOWN",
+                        "total_risk_budget": 0.5,
+                        "total_exposure_cap": 0.5,
+                        "budget_reason_codes": [],
+                        "sleeve_budgets": {
+                            "cn_etf_beta": {
+                                "slot_cap": 2,
+                                "target_exposure": 0.4,
+                                "target_exposure_source": "budget_snapshot",
+                                "target_selected_count": 2,
+                            }
+                        },
+                    }
+                ),
+            }
+        ],
+        route_id="strict_inline_runtime",
+        _current_day={"controls": {"effective_max_positions": 2}},
+        positions={},
+        composition_audit_rows=[],
+        request=SimpleNamespace(
+            max_positions=2,
+            asset_context={"asset_scope": "cn_etf"},
+            governed_a_share={
+                "etf_beta": {
+                    "enabled": True,
+                    "strategy_role": "phase1_allocation_engine",
+                    "source_entry_type": "cn_etf_phase1_allocation_entry",
+                    "research_rule_family": "phase1_allocation_engine_v1",
+                    "governor_boundary_mode": "consume_governor_sleeve_budget",
+                    "local_policy_mode": "phase1_bucket_allocation",
+                    "boundary_policy_mode": "formal_phase1_document_aligned_v1",
+                    "exposure_policy_family": "phase1_governed_allocation_v1",
+                    "core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                    "limited_defense_candidates": ["511010.SH"],
+                    "max_selected_symbols": 3,
+                }
+            },
+        ),
+    )
+    buy_signal = SimpleNamespace(symbol="SH510300", meta={"sleeve_id": "cn_etf_beta"})
+    day_signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        raw_alpha_signals=[],
+        composed_buy_signals=[],
+        composed_sell_signals=[],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={
+            "raw_buy_signal_count": 1,
+            "composition_enabled": False,
+            "etf_beta_rebalance_day": True,
+            "etf_beta_eligible_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH", "511010.SH"],
+            "etf_beta_selected_symbols": ["510300.SH", "510500.SH"],
+            "etf_beta_deployable_slot_cap": 2,
+            "etf_beta_target_selected_count": 2,
+            "etf_beta_target_selected_count_source": "state_slot_cap_fallback",
+            "etf_beta_requested_budget": 0.0,
+            "etf_beta_applied_budget": 0.0,
+            "etf_beta_target_exposure": 0.0,
+            "etf_beta_target_exposure_source": "governor_sleeve_budget",
+            "etf_beta_min_deployable_exposure": 0.0,
+            "etf_beta_min_deployable_exposure_source": "phase1_allocation_engine",
+            "etf_beta_targets": {},
+            "etf_beta_cash_weight": 0.0,
+            "etf_beta_defense_weight": 0.0,
+            "etf_beta_equity_core_bucket": 0.0,
+            "etf_beta_defense_tilt_bucket": 0.0,
+            "etf_beta_cash_buffer_bucket": 0.0,
+            "etf_beta_allocation_reason_codes": [],
+            "etf_beta_target_actual_exposure": 0.0,
+            "etf_beta_target_deployability_gap": 0.0,
+        },
+    )
+
+    apply_daily_decision_diagnostics(
+        runtime,
+        day_signals=day_signals,
+        debug_plan={
+            "buy_candidates_count": 2,
+            "buy_slots": 2,
+            "selected_symbols": ["sh510300", "sh510500"],
+            "selected_count": 2,
+        },
+    )
+
+    diagnostics_input = json.loads(runtime.daily_rows[-1]["diagnostics_input_json"])
+    diagnostics = diagnostics_input["diagnostics"]
+    formal_view = diagnostics["etf_beta_formal_view"]
+    research_view = diagnostics["etf_beta_research_view"]
+
+    assert formal_view["target_exposure"] == pytest.approx(0.4)
+    assert formal_view["target_exposure_source"] == "governor_sleeve_budget"
+    assert formal_view["min_deployable_exposure"] == pytest.approx(0.0)
+    assert formal_view["min_deployable_exposure_source"] == "phase1_allocation_engine"
+    assert formal_view["targets"]["511010.SH"] == pytest.approx(0.22)
+    assert "510500.SH" not in formal_view["targets"]
+    assert "512100.SH" not in formal_view["targets"]
+    assert sum(float(value) for value in formal_view["targets"].values()) == pytest.approx(0.4)
+    assert formal_view["target_selected_count"] == 2
+    assert formal_view["target_selected_count_source"] == "input"
+    assert formal_view["boundary_policy_mode"] == "formal_phase1_document_aligned_v1"
+    assert formal_view["governor_hard_blocked"] is False
+    assert formal_view["local_boundary_state"] == "REDUCED_ALLOCATION"
+    assert "PHASE1_DOCUMENT_REDUCED_ALLOCATION" in formal_view["local_boundary_reason_codes"]
+    assert "PHASE1_ALLOCATION_ENGINE::THREE_BUCKET" in formal_view["reason_codes"]
+    assert research_view["requested_budget"] == pytest.approx(0.4)
+    assert research_view["applied_budget"] == pytest.approx(0.4)
+    assert research_view["defense_weight"] == pytest.approx(0.22)
+    assert research_view["equity_core_bucket"] == pytest.approx(0.45)
+    assert research_view["defense_tilt_bucket"] == pytest.approx(0.10)
+    assert research_view["cash_buffer_bucket"] == pytest.approx(0.45)
+    assert research_view["cash_weight"] == pytest.approx(0.0)
+    assert research_view["strategic_floor_cap"] == pytest.approx(0.18)
+    assert research_view["tactical_overlay_cap"] == pytest.approx(0.0)
+    assert research_view["deployability_gap"] == pytest.approx(0.4)
+
+
+def test_apply_daily_decision_diagnostics_prefers_notional_total_exposure_cap_over_risk_multiplier() -> None:
+    runtime = SimpleNamespace(
+        daily_rows=[
+            {
+                "date": "2026-03-02",
+                "drawdown": 0.0,
+                "positions_count": 0,
+                "positions_count_end_of_day": 0,
+                "candidates_count": 0,
+                "selected_count": 0,
+                "buy_slots_before_buy": 0,
+                "buy_slots_after_sell": 0,
+                "buy_candidate_count": 0,
+                "after_held_filter_count": 0,
+                "positions_before_sell": 0,
+                "sells_executed_count": 0,
+                "positions_after_sell": 0,
+                "buy_slots_calculated": 0,
+                "raw_buy_signal_count": 0,
+                "raw_alpha_signal_count": 0,
+                "composed_buy_signal_count": 0,
+                "composed_sell_signal_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "candidates_after_held_filter_count": 0,
+                "sorting_triggered": False,
+                "mf_rank_triggered": 0,
+                "mf_rank_applied": 0,
+                "mf_candidates_when_triggered": 0,
+                "mf_topk_reject_count": 0,
+                "mf_concentrated_selected_count": 0,
+                "mf_gate_on": 0,
+                "strong_risk_on": 0,
+                "mf_rank_suppressed_by_strong_gate": 0,
+                "same_symbol_conflict_count": 0,
+                "sleeve_budget_reject_count": 0,
+                "source_only_exit_count": 0,
+                "global_risk_override_count": 0,
+                "effective_max_positions": 2,
+                "breadth_max_positions": 2,
+                "dd_state": "NORMAL",
+                "regime_transition_reason": "",
+                "market_state_5": "BULL",
+                "base_state_5": "BULL",
+                "effective_state_5": "BULL",
+                "coarse_state": "RISK_ON",
+                "effective_coarse_state": "RISK_ON",
+                "risk_budget_multiplier": 1.8,
+                "reason_codes_json": "[]",
+                "manual_override_json": "{}",
+                "defense_bias": 0.0,
+                "governor_budget_json": json.dumps(
+                    {
+                        "contract_version": "cn_a_governor_budget@1",
+                        "asset_scope": "cn_etf",
+                        "budget_consumer_sleeve_id": "cn_etf_beta",
+                        "budget_consumer_system_role": "market_beta_sleeve",
+                        "budget_semantics": "consume_governor_sleeve_budget",
+                        "regime_effective_state": "BULL",
+                        "total_risk_budget": 1.8,
+                        "total_exposure_cap": 0.2,
+                        "budget_reason_codes": [],
+                        "sleeve_budgets": {
+                            "cn_etf_beta": {
+                                "slot_cap": 2,
+                                "target_selected_count": 2,
+                            }
+                        },
+                    }
+                ),
+            }
+        ],
+        route_id="strict_inline_runtime",
+        _current_day={"controls": {"effective_max_positions": 2}},
+        positions={},
+        composition_audit_rows=[],
+        request=SimpleNamespace(
+            max_positions=10,
+            asset_context={"asset_scope": "cn_etf"},
+            governed_a_share={
+                "etf_beta": {
+                    "enabled": True,
+                    "strategy_role": "phase1_allocation_engine",
+                    "source_entry_type": "cn_etf_phase1_allocation_entry",
+                    "research_rule_family": "phase1_allocation_engine_v1",
+                    "governor_boundary_mode": "consume_governor_sleeve_budget",
+                    "local_policy_mode": "phase1_bucket_allocation",
+                    "boundary_policy_mode": "formal_phase1_document_aligned_v1",
+                    "exposure_policy_family": "phase1_governed_allocation_v1",
+                    "core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                    "limited_defense_candidates": ["511010.SH"],
+                    "max_selected_symbols": 3,
+                }
+            },
+        ),
+    )
+    buy_signal = SimpleNamespace(symbol="SH510300", meta={"sleeve_id": "cn_etf_beta"})
+    day_signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        raw_alpha_signals=[],
+        composed_buy_signals=[],
+        composed_sell_signals=[],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={
+            "raw_buy_signal_count": 1,
+            "composition_enabled": False,
+            "etf_beta_target_selected_count": 2,
+        },
+    )
+
+    apply_daily_decision_diagnostics(
+        runtime,
+        day_signals=day_signals,
+        debug_plan={
+            "buy_candidates_count": 2,
+            "buy_slots": 2,
+            "selected_symbols": ["sh510300", "sh510500"],
+            "selected_count": 2,
+        },
+    )
+
+    diagnostics_input = json.loads(runtime.daily_rows[-1]["diagnostics_input_json"])
+    diagnostics = diagnostics_input["diagnostics"]
+    governor_budget = json.loads(runtime.daily_rows[-1]["governor_budget_json"])
+    formal_view = diagnostics["etf_beta_formal_view"]
+    research_view = diagnostics["etf_beta_research_view"]
+
+    assert formal_view["target_exposure"] == pytest.approx(0.2)
+    assert research_view["requested_budget"] == pytest.approx(0.2)
+    assert research_view["applied_budget"] == pytest.approx(0.2)
+    assert runtime.daily_rows[-1]["etf_target_exposure"] == pytest.approx(0.2)
+    assert governor_budget["target_exposure"] == pytest.approx(0.2)
+
+
+def test_apply_daily_decision_diagnostics_projects_trans_up_redeploy_fields() -> None:
+    runtime = SimpleNamespace(
+        daily_rows=[
+            {
+                "date": "2026-03-20",
+                "drawdown": 0.0,
+                "positions_count": 0,
+                "positions_count_end_of_day": 0,
+                "candidates_count": 0,
+                "selected_count": 0,
+                "buy_slots_before_buy": 0,
+                "buy_slots_after_sell": 0,
+                "buy_candidate_count": 0,
+                "after_held_filter_count": 0,
+                "positions_before_sell": 0,
+                "sells_executed_count": 0,
+                "positions_after_sell": 0,
+                "buy_slots_calculated": 0,
+                "raw_buy_signal_count": 0,
+                "raw_alpha_signal_count": 0,
+                "composed_buy_signal_count": 0,
+                "composed_sell_signal_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "candidates_after_held_filter_count": 0,
+                "sorting_triggered": False,
+                "mf_rank_triggered": 0,
+                "mf_rank_applied": 0,
+                "mf_candidates_when_triggered": 0,
+                "mf_topk_reject_count": 0,
+                "mf_concentrated_selected_count": 0,
+                "mf_gate_on": 0,
+                "strong_risk_on": 0,
+                "mf_rank_suppressed_by_strong_gate": 0,
+                "same_symbol_conflict_count": 0,
+                "sleeve_budget_reject_count": 0,
+                "source_only_exit_count": 0,
+                "global_risk_override_count": 0,
+                "effective_max_positions": 1,
+                "breadth_max_positions": 1,
+                "dd_state": "NORMAL",
+                "regime_transition_reason": "",
+                "market_state_5": "TRANS_UP",
+                "base_state_5": "TRANS_UP",
+                "effective_state_5": "TRANS_UP",
+                "coarse_state": "RISK_ON",
+                "effective_coarse_state": "RISK_ON",
+                "risk_budget_multiplier": 0.75,
+                "reason_codes_json": "[]",
+                "manual_override_json": "{}",
+                "defense_bias": 0.0,
+                "governor_budget_json": json.dumps(
+                    {
+                        "contract_version": "cn_a_governor_budget@1",
+                        "asset_scope": "cn_etf",
+                        "budget_consumer_sleeve_id": "cn_etf_beta",
+                        "budget_consumer_system_role": "market_beta_sleeve",
+                        "budget_semantics": "consume_governor_sleeve_budget",
+                        "regime_effective_state": "TRANS_UP",
+                        "total_risk_budget": 0.75,
+                        "total_exposure_cap": 0.1,
+                        "budget_reason_codes": [],
+                        "sleeve_budgets": {
+                            "cn_etf_beta": {
+                                "slot_cap": 1,
+                                "target_selected_count": 1,
+                                "target_exposure": 0.1,
+                            }
+                        },
+                    }
+                ),
+            }
+        ],
+        route_id="strict_inline_runtime",
+        _current_day={"controls": {"effective_max_positions": 1}},
+        positions={},
+        composition_audit_rows=[],
+        request=SimpleNamespace(
+            max_positions=10,
+            asset_context={"asset_scope": "cn_etf"},
+            governed_a_share={
+                "etf_beta": {
+                    "enabled": True,
+                    "strategy_role": "strategic_beta_stabilizer",
+                    "source_entry_type": "cn_etf_phase1_allocation_entry",
+                    "research_rule_family": "phase1_allocation_engine_v1",
+                    "governor_boundary_mode": "consume_governor_sleeve_budget",
+                    "local_policy_mode": "phase1_bucket_allocation",
+                    "boundary_policy_mode": "formal_phase1_document_aligned_v1",
+                    "exposure_policy_family": "phase1_governed_allocation_v1",
+                    "core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                    "limited_defense_candidates": ["511010.SH"],
+                    "max_selected_symbols": 3,
+                }
+            },
+        ),
+    )
+    buy_signal = SimpleNamespace(symbol="SH510300", meta={"sleeve_id": "cn_etf_beta"})
+    day_signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        raw_alpha_signals=[],
+        composed_buy_signals=[],
+        composed_sell_signals=[],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={
+            "raw_buy_signal_count": 1,
+            "composition_enabled": False,
+            "etf_beta_target_selected_count": 1,
+            "etf_beta_execution_path": "trans_up_state_change_redeploy",
+            "etf_beta_trans_up_contract_mode": "single_seat_core_recovery",
+            "etf_beta_trans_up_single_seat_core_recovery": True,
+            "etf_beta_trans_up_redeploy_active": True,
+            "etf_beta_trans_up_redeploy_reason_code": "ETF_BETA_TRANS_UP_REDEPLOY_ACTIVE",
+            "etf_beta_trans_up_redeploy_reject_reason": None,
+            "etf_beta_trans_up_redeploy_floor_gap": 0.0527,
+            "etf_beta_trans_up_redeploy_edge_from_state": "RISK_OFF",
+            "etf_beta_pace_policy_gap": 0.0473,
+            "etf_beta_pace_policy_reason_code": "ETF_BETA_DEPLOYMENT_PACE_FLOOR_ONLY",
+        },
+    )
+
+    apply_daily_decision_diagnostics(
+        runtime,
+        day_signals=day_signals,
+        debug_plan={
+            "buy_candidates_count": 1,
+            "buy_slots": 1,
+            "selected_symbols": ["sh510300"],
+            "selected_count": 1,
+        },
+    )
+
+    diagnostics_input = json.loads(runtime.daily_rows[-1]["diagnostics_input_json"])
+    diagnostics = diagnostics_input["diagnostics"]
+    research_view = diagnostics["etf_beta_research_view"]
+
+    assert "etf_execution_path" not in runtime.daily_rows[-1]
+    assert research_view["execution_path"] == "trans_up_state_change_redeploy"
+    assert research_view["trans_up_contract_mode"] == "single_seat_core_recovery"
+    assert research_view["trans_up_single_seat_core_recovery"] is True
+    assert research_view["trans_up_redeploy_active"] is True
+    assert research_view["trans_up_redeploy_reason_code"] == "ETF_BETA_TRANS_UP_REDEPLOY_ACTIVE"
+    assert research_view["trans_up_redeploy_reject_reason"] is None
+    assert research_view["trans_up_redeploy_floor_gap"] == pytest.approx(0.0527)
+    assert research_view["trans_up_redeploy_edge_from_state"] == "RISK_OFF"
+    assert research_view["pace_policy_gap"] == pytest.approx(0.0473)
+    assert research_view["pace_policy_reason_code"] == "ETF_BETA_DEPLOYMENT_PACE_FLOOR_ONLY"
+    assert research_view["rebalance_timing_gap"] == pytest.approx(0.0)
+    assert research_view["execution_residual_gap"] == pytest.approx(0.0527)
+    assert research_view["gap_primary_owner"] == "pace_policy"
+
+
+def test_apply_daily_decision_diagnostics_preserves_standalone_provider_target_contract() -> None:
+    runtime = SimpleNamespace(
+        daily_rows=[
+            {
+                "date": "2014-07-14",
+                "drawdown": 0.0,
+                "positions_count": 0,
+                "positions_count_end_of_day": 0,
+                "candidates_count": 0,
+                "selected_count": 0,
+                "buy_slots_before_buy": 0,
+                "buy_slots_after_sell": 0,
+                "buy_candidate_count": 0,
+                "after_held_filter_count": 0,
+                "positions_before_sell": 0,
+                "sells_executed_count": 0,
+                "positions_after_sell": 0,
+                "buy_slots_calculated": 0,
+                "raw_buy_signal_count": 0,
+                "raw_alpha_signal_count": 0,
+                "composed_buy_signal_count": 0,
+                "composed_sell_signal_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "candidates_after_held_filter_count": 0,
+                "sorting_triggered": False,
+                "mf_rank_triggered": 0,
+                "mf_rank_applied": 0,
+                "mf_candidates_when_triggered": 0,
+                "mf_topk_reject_count": 0,
+                "mf_concentrated_selected_count": 0,
+                "mf_gate_on": 0,
+                "strong_risk_on": 0,
+                "mf_rank_suppressed_by_strong_gate": 0,
+                "same_symbol_conflict_count": 0,
+                "sleeve_budget_reject_count": 0,
+                "source_only_exit_count": 0,
+                "global_risk_override_count": 0,
+                "effective_max_positions": 2,
+                "breadth_max_positions": 2,
+                "dd_state": "NORMAL",
+                "regime_transition_reason": "",
+                "market_state_5": "TRANS_UP",
+                "base_state_5": "TRANS_UP",
+                "effective_state_5": "TRANS_UP",
+                "coarse_state": "RISK_ON",
+                "effective_coarse_state": "RISK_ON",
+                "risk_budget_multiplier": 1.0,
+                "reason_codes_json": "[]",
+                "manual_override_json": "{}",
+                "defense_bias": 0.0,
+                "governor_budget_json": json.dumps(
+                    {
+                        "contract_version": "cn_a_governor_budget@1",
+                        "asset_scope": "cn_etf",
+                        "budget_consumer_sleeve_id": "cn_etf_beta",
+                        "budget_consumer_system_role": "market_beta_sleeve",
+                        "budget_semantics": "consume_governor_state_and_budget",
+                        "regime_effective_state": "TRANS_UP",
+                        "total_risk_budget": 1.0,
+                        "total_exposure_cap": 0.9,
+                        "budget_reason_codes": [],
+                        "sleeve_budgets": {
+                            "cn_etf_beta": {
+                                "slot_cap": 2,
+                                "target_selected_count": 2,
+                                "target_exposure": 0.9,
+                                "allow_new_risk": True,
+                            }
+                        },
+                    }
+                ),
+            }
+        ],
+        route_id="strict_inline_runtime",
+        _current_day={"controls": {"effective_max_positions": 2}},
+        positions={},
+        composition_audit_rows=[],
+        request=SimpleNamespace(
+            max_positions=10,
+            asset_context={"asset_scope": "cn_etf"},
+            governed_a_share={
+                "etf_beta": {
+                    "enabled": True,
+                    "strategy_role": "governed_broad_based_standalone_mainline",
+                    "source_entry_type": "cn_etf_broad_based_standalone_mainline_entry",
+                    "research_rule_family": "broad_based_rotation_template_a",
+                    "governor_boundary_mode": "consume_governor_state_and_budget",
+                    "local_policy_mode": "broad_based_rotation_mainline",
+                    "exposure_policy_family": "broad_based_standalone_mainline_v1",
+                    "policy_scope": "broad_based_only",
+                    "broad_based_only": True,
+                    "core_accumulator_symbols": ["510300.SH"],
+                    "tactical_satellite_symbols": ["510500.SH"],
+                    "limited_defense_candidates": ["511010.SH"],
+                    "symbol_role_map": {
+                        "510300.SH": "core_accumulator",
+                        "510500.SH": "tactical_satellite",
+                        "511010.SH": "limited_defense",
+                    },
+                    "target_exposure_by_state_5": {"TRANS_UP": 0.9},
+                    "target_selected_count_by_state_5": {"TRANS_UP": 2},
+                }
+            },
+        ),
+    )
+    buy_signal = SimpleNamespace(symbol="SH510500", meta={"sleeve_id": "cn_etf_beta"})
+    day_signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        raw_alpha_signals=[],
+        composed_buy_signals=[],
+        composed_sell_signals=[],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={
+            "raw_buy_signal_count": 1,
+            "composition_enabled": False,
+            "etf_beta_target_selected_count": 2,
+            "etf_beta_execution_path": "trans_up_inter_rebalance_deploy",
+            "etf_beta_formal_view": {
+                "target_exposure": 0.9,
+                "target_exposure_source": "state_map::TRANS_UP",
+                "min_deployable_exposure": 0.0,
+                "min_deployable_exposure_source": "phase1_allocation_engine",
+                "target_selected_count": 2,
+                "target_selected_count_source": "state_map::TRANS_UP",
+                "fallback_allowed": False,
+                "fallback_allowed_source": "state_map::TRANS_UP",
+                "targets": {"510500.SH": 0.9},
+                "selected_symbols": ["510500.SH"],
+            },
+            "etf_beta_research_view": {
+                "execution_path": "trans_up_inter_rebalance_deploy",
+                "deployability_gap": 0.9,
+            },
+        },
+    )
+
+    apply_daily_decision_diagnostics(
+        runtime,
+        day_signals=day_signals,
+        debug_plan={
+            "buy_candidates_count": 1,
+            "buy_slots": 2,
+            "selected_symbols": ["sh510500"],
+            "selected_count": 1,
+        },
+    )
+
+    diagnostics_input = json.loads(runtime.daily_rows[-1]["diagnostics_input_json"])
+    diagnostics = diagnostics_input["diagnostics"]
+    formal_view = diagnostics["etf_beta_formal_view"]
+    research_view = diagnostics["etf_beta_research_view"]
+
+    assert formal_view["targets"] == {"510500.SH": pytest.approx(0.9)}
+    assert formal_view["target_exposure"] == pytest.approx(0.9)
+    assert research_view["execution_path"] == "trans_up_inter_rebalance_deploy"
+    assert research_view["deployability_gap"] == pytest.approx(0.9)
+
+
+def test_apply_daily_decision_diagnostics_persists_bull_partial_overlay_pace_fields() -> None:
+    runtime = SimpleNamespace(
+        daily_rows=[
+            {
+                "date": "2026-03-20",
+                "positions_count": 0,
+                "positions_count_end_of_day": 0,
+                "candidates_count": 0,
+                "selected_count": 0,
+                "buy_slots_before_buy": 0,
+                "buy_slots_after_sell": 0,
+                "buy_candidate_count": 0,
+                "after_held_filter_count": 0,
+                "positions_before_sell": 0,
+                "sells_executed_count": 0,
+                "positions_after_sell": 0,
+                "buy_slots_calculated": 0,
+                "raw_buy_signal_count": 0,
+                "raw_alpha_signal_count": 0,
+                "composed_buy_signal_count": 0,
+                "composed_sell_signal_count": 0,
+                "after_slot_filter_count": 0,
+                "after_cash_lot_count": 0,
+                "candidates_after_held_filter_count": 0,
+                "sorting_triggered": False,
+                "mf_rank_triggered": 0,
+                "mf_rank_applied": 0,
+                "mf_candidates_when_triggered": 0,
+                "mf_topk_reject_count": 0,
+                "mf_concentrated_selected_count": 0,
+                "mf_gate_on": 0,
+                "strong_risk_on": 0,
+                "mf_rank_suppressed_by_strong_gate": 0,
+                "same_symbol_conflict_count": 0,
+                "sleeve_budget_reject_count": 0,
+                "source_only_exit_count": 0,
+                "global_risk_override_count": 0,
+                "effective_max_positions": 2,
+                "breadth_max_positions": 2,
+                "dd_state": "NORMAL",
+                "regime_transition_reason": "",
+                "market_state_5": "BULL",
+                "base_state_5": "BULL",
+                "effective_state_5": "BULL",
+                "coarse_state": "RISK_ON",
+                "effective_coarse_state": "RISK_ON",
+                "risk_budget_multiplier": 1.0,
+                "reason_codes_json": "[]",
+                "manual_override_json": "{}",
+                "defense_bias": 0.0,
+                "governor_budget_json": json.dumps(
+                    {
+                        "contract_version": "cn_a_governor_budget@1",
+                        "asset_scope": "cn_etf",
+                        "budget_consumer_sleeve_id": "cn_etf_beta",
+                        "budget_consumer_system_role": "market_beta_sleeve",
+                        "budget_semantics": "consume_governor_sleeve_budget",
+                        "regime_effective_state": "BULL",
+                        "total_risk_budget": 1.0,
+                        "total_exposure_cap": 0.2,
+                        "budget_reason_codes": [],
+                        "sleeve_budgets": {
+                            "cn_etf_beta": {
+                                "slot_cap": 2,
+                                "target_selected_count": 2,
+                                "target_exposure": 0.2,
+                            }
+                        },
+                    }
+                ),
+            }
+        ],
+        route_id="strict_inline_runtime",
+        _current_day={"controls": {"effective_max_positions": 2}},
+        positions={},
+        composition_audit_rows=[],
+        request=SimpleNamespace(
+            max_positions=10,
+            asset_context={"asset_scope": "cn_etf"},
+            governed_a_share={
+                "etf_beta": {
+                    "enabled": True,
+                    "strategy_role": "strategic_beta_stabilizer",
+                    "source_entry_type": "cn_etf_phase1_allocation_entry",
+                    "research_rule_family": "phase1_allocation_engine_v1",
+                    "governor_boundary_mode": "consume_governor_sleeve_budget",
+                    "local_policy_mode": "phase1_bucket_allocation",
+                    "boundary_policy_mode": "formal_phase1_document_aligned_v1",
+                    "exposure_policy_family": "phase1_governed_allocation_v1",
+                    "core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                    "limited_defense_candidates": ["511010.SH"],
+                    "max_selected_symbols": 3,
+                    "bull_partial_overlay_pace_ratio": 0.5,
+                }
+            },
+        ),
+    )
+    buy_signal = SimpleNamespace(symbol="SH510300", meta={"sleeve_id": "cn_etf_beta"})
+    day_signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        raw_alpha_signals=[],
+        composed_buy_signals=[],
+        composed_sell_signals=[],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={
+            "raw_buy_signal_count": 1,
+            "composition_enabled": False,
+            "etf_beta_target_selected_count": 2,
+            "etf_beta_execution_path": "monthly_rebalance",
+            "etf_beta_bull_partial_overlay_pace_ratio": 0.5,
+            "etf_beta_bull_pace_mode": "partial_overlay_v1",
+            "etf_beta_pace_policy_gap": 0.056,
+            "etf_beta_pace_policy_reason_code": "ETF_BETA_DEPLOYMENT_PACE_BULL_PARTIAL_OVERLAY",
+        },
+    )
+
+    apply_daily_decision_diagnostics(
+        runtime,
+        day_signals=day_signals,
+        debug_plan={
+            "buy_candidates_count": 2,
+            "buy_slots": 2,
+            "selected_symbols": ["sh510300", "sh510500"],
+            "selected_count": 2,
+        },
+    )
+
+    diagnostics_input = json.loads(runtime.daily_rows[-1]["diagnostics_input_json"])
+    diagnostics = diagnostics_input["diagnostics"]
+    research_view = diagnostics["etf_beta_research_view"]
+
+    assert "etf_bull_partial_overlay_pace_ratio" not in runtime.daily_rows[-1]
+    assert research_view["bull_partial_overlay_pace_ratio"] == pytest.approx(0.5)
+    assert research_view["bull_pace_mode"] == "partial_overlay_v1"
+    assert research_view["pace_policy_gap"] == pytest.approx(0.056)
+    assert research_view["pace_policy_reason_code"] == "ETF_BETA_DEPLOYMENT_PACE_BULL_PARTIAL_OVERLAY"
 
 
 def test_apply_daily_decision_diagnostics_populates_moneyflow_overlay_fields() -> None:
@@ -1383,3 +2845,4 @@ def test_build_portfolio_backtest_result_keeps_cn_etf_governor_latest_truth() ->
     assert latest["risk_budget_multiplier"] == 0.7
     assert latest["local_budget_controls"] == []
     assert list(latest["sleeve_budgets"].keys()) == ["cn_etf_beta"]
+

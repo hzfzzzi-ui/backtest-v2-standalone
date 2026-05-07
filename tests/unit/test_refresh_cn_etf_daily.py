@@ -68,6 +68,35 @@ class _FakePro:
             ]
         )
 
+    def query(self, api_name: str, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        assert api_name == "fund_adj"
+        assert ts_code == "512100.SH"
+        assert start_date == "20210104"
+        assert end_date == "20210105"
+        return pd.DataFrame(
+            [
+                {"trade_date": "20210105", "adj_factor": 0.5},
+                {"trade_date": "20210104", "adj_factor": 1.0},
+            ]
+        )
+
+    def fund_div(self, ts_code: str) -> pd.DataFrame:
+        assert ts_code == "512100.SH"
+        return pd.DataFrame(
+            [
+                {
+                    "ann_date": "20201231",
+                    "record_date": "20210104",
+                    "ex_date": "20210105",
+                    "pay_date": "20210106",
+                    "earpay_date": None,
+                    "net_ex_date": "20210105",
+                    "div_cash": 0.03,
+                    "div_proc": "实施",
+                }
+            ]
+        )
+
 
 def test_run_refresh_writes_daily_rows_and_coverage(monkeypatch, tmp_path: Path) -> None:
     fake_conn = _FakeConnection()
@@ -93,6 +122,7 @@ def test_run_refresh_writes_daily_rows_and_coverage(monkeypatch, tmp_path: Path)
     )
 
     assert summary["rows_inserted"] == 2
+    assert summary["dividend_rows_inserted"] == 1
     assert summary["symbols"] == ["512100.SH"]
     assert summary["per_symbol"] == [
         {
@@ -101,21 +131,34 @@ def test_run_refresh_writes_daily_rows_and_coverage(monkeypatch, tmp_path: Path)
             "rows": 2,
             "coverage_start": "2021-01-04",
             "coverage_end": "2021-01-05",
+            "dividend_events": 1,
         }
     ]
     daily_inserts = [
         params for sql, params in fake_conn.cursor_obj.executed if params and "INSERT INTO public.pams_cn_etf_daily" in sql
     ]
     assert len(daily_inserts) == 2
-    assert daily_inserts[0][10] == "none"
-    assert daily_inserts[0][11] == refresh_cn_etf_daily.PRICE_SERIES_SEMANTICS
+    assert daily_inserts[0][10] == 1.0
+    assert daily_inserts[0][11] == "none"
+    assert daily_inserts[0][12] == refresh_cn_etf_daily.PRICE_SERIES_SEMANTICS
+    assert daily_inserts[1][10] == 0.5
     coverage_insert = [
         params
         for sql, params in fake_conn.cursor_obj.executed
         if params and "INSERT INTO public.cn_etf_data_coverage_daily" in sql
     ][0]
+    dividend_insert = [
+        params
+        for sql, params in fake_conn.cursor_obj.executed
+        if params and "INSERT INTO public.pit_cn_etf_dividend_events" in sql
+    ][0]
     assert coverage_insert[0] == "512100.SH"
     assert coverage_insert[7] == refresh_cn_etf_daily.DAILY_TABLE
     assert coverage_insert[8] == refresh_cn_etf_daily.PRICE_SERIES_SEMANTICS
+    assert dividend_insert[1] == "512100.SH"
+    assert dividend_insert[2] == "sh512100"
+    assert dividend_insert[7].isoformat() == "2021-01-05"
+    assert dividend_insert[8].isoformat() == "2021-01-06"
+    assert dividend_insert[12] == 0.03
     assert fake_conn.committed is True
     assert (tmp_path / "summary.json").exists()

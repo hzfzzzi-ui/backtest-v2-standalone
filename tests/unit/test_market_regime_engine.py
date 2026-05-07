@@ -81,11 +81,11 @@ def test_build_formal_market_regime_result_emits_dual_track_payload_and_override
     assert len(result.subscores) == len(trading_days)
     assert len(result.manual_override) == len(trading_days)
     assert len(result.state_stability_metrics) == len(trading_days)
-    assert set(result.base_state_5.tolist()).issubset({"BULL", "TRANS_UP", "LIGHT", "TRANS_DOWN", "RISK_OFF"})
-    assert set(result.effective_state_5.tolist()) == {"LIGHT"}
+    assert set(result.base_state_5.tolist()).issubset({"BULL", "TRANS_UP", "TRANS_DOWN", "RISK_OFF"})
+    assert set(result.effective_state_5.tolist()) == {"TRANS_UP"}
     assert "MANUAL_OVERRIDE_ACTIVE" in set(result.reason_codes[-1])
     assert result.manual_override[-1]["active"] is True
-    assert result.manual_override[-1]["target_state_5"] == "LIGHT"
+    assert result.manual_override[-1]["target_state_5"] == "TRANS_UP"
     assert result.subscores[-1]["technical"] is not None
     assert result.subscores[-1]["macro_global"] is None
     assert result.block_scores[-1]["trend_block"]["net"] is not None

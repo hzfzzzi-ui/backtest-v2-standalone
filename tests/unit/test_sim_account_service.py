@@ -40,14 +40,38 @@ def test_store_holdings_snapshot_writes_latest_and_history(tmp_path) -> None:
     latest_path = account_root / "holdings" / "latest.json"
     history_path = account_root / "holdings" / "history" / f"{snapshot['snapshot_id']}.json"
     audit_path = account_root / "audit_log.jsonl"
+    compat_manifest_path = account_root / "compat_manifest.json"
 
     assert latest_path.exists()
     assert history_path.exists()
     latest_payload = _read_json(latest_path)
     assert latest_payload["schema_version"] == "sim_account_holdings_snapshot@1"
     assert latest_payload["snapshot_id"] == snapshot["snapshot_id"]
+    assert latest_payload["object_type"] == "holdings_snapshot"
+    assert latest_payload["object_scope"] == "account_ops"
     assert [item["symbol"] for item in latest_payload["positions"]] == ["sh600000", "sz000001"]
     assert latest_payload["summary"]["position_count"] == 2
+    assert (account_root / "account.json").exists()
+    account_profile = _read_json(account_root / "account.json")
+    assert account_profile["object_type"] == "account"
+    assert account_profile["object_scope"] == "account_ops"
+    assert compat_manifest_path.exists()
+    compat_manifest = _read_json(compat_manifest_path)
+    assert compat_manifest["status"] == "active_transition"
+    assert compat_manifest["authority"] == "account_ops_domain"
+    assert compat_manifest["formal_truth_objects"] == [
+        "accounts",
+        "holdings_snapshots",
+        "cash_ledger",
+        "sync_logs",
+        "reconcile_summary",
+    ]
+    assert compat_manifest["formal_object_catalog"]["cash_ledger"]["object_type"] == "cash_ledger"
+    assert compat_manifest["formal_object_catalog"]["sync_logs"]["object_type"] == "sync_log"
+    assert compat_manifest["compat_paths"]["holdings_latest"] == "ops/sim_account/paper_a_share_main/holdings/latest.json"
+    assert "sim_account services stop reading outputs/ops/sim_account/* as formal truth" in compat_manifest["exit_conditions"]
+    assert (account_root / "sync_logs" / "latest.json").exists()
+    assert len(list((account_root / "sync_logs" / "history").glob("*.json"))) == 1
     assert audit_path.exists()
     audit_lines = audit_path.read_text(encoding="utf-8").strip().splitlines()
     assert any('"event_type":"snapshot_synced"' in line for line in audit_lines)

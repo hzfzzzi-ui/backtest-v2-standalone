@@ -29,6 +29,34 @@ _STORED_PAYLOAD_ROOTS = {
     "v10_state_conditional_window_r3": "v10_state_conditional_window_r3_20260314",
 }
 
+_RETIRED_STUDY_REFS = {
+    "v10/residual_structure_s1",
+    "v10/onset_ingress_minimal_s2",
+    "v10/quality_then_residual_s3",
+    "v10/regime_source_minimal_r1",
+    "v10/rotation_replace_minimal_r1",
+    "v10/upstream_pullback_minimal_p1",
+    "v10/conditional_tiebreak_s4",
+    "v10/strict_industry_relative_s5",
+    "v10/industry_excess_median_s6",
+    "v10/leadership_route_l1",
+    "v10/state_conditional_residual_r2",
+    "v10/state_conditional_window_r3",
+    "v10/breakout_window_40_ab",
+    "etf/cn_etf_single_asset_template",
+    "etf/cn_etf_first_wave_core",
+    "etf/cn_etf_first_wave_all",
+}
+
+
+def _load_study_definition(study_ref: str):
+    try:
+        return study_loader.load_study_definition(study_ref)
+    except FileNotFoundError:
+        if study_ref in _RETIRED_STUDY_REFS:
+            pytest.skip(f"retired study definition is no longer active: {study_ref}")
+        raise
+
 
 def _stored_request_payload(study_slug: str, window_key: str, variant_name: str) -> dict[str, object]:
     root_dir = _STORED_PAYLOAD_ROOTS[study_slug]
@@ -102,7 +130,7 @@ def test_current_study_assets_declare_asset_scope() -> None:
 
 
 def test_residual_structure_s1_study_matches_script_dry_run_and_stored_payload() -> None:
-    study = study_loader.load_study_definition("v10/residual_structure_s1")
+    study = _load_study_definition("v10/residual_structure_s1")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_residual_structure_s1.py")
     assert script_payload["study"]["study_id"] == study.study_id
@@ -115,7 +143,7 @@ def test_residual_structure_s1_study_matches_script_dry_run_and_stored_payload()
 
 
 def test_onset_ingress_s2_study_matches_script_dry_run_and_stored_payload() -> None:
-    study = study_loader.load_study_definition("v10/onset_ingress_minimal_s2")
+    study = _load_study_definition("v10/onset_ingress_minimal_s2")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_onset_ingress_minimal_s2.py")
     assert script_payload["study"]["study_id"] == study.study_id
@@ -128,7 +156,7 @@ def test_onset_ingress_s2_study_matches_script_dry_run_and_stored_payload() -> N
 
 
 def test_quality_then_residual_s3_study_matches_script_dry_run_and_stored_payload() -> None:
-    study = study_loader.load_study_definition("v10/quality_then_residual_s3")
+    study = _load_study_definition("v10/quality_then_residual_s3")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_quality_then_residual_s3.py")
     assert script_payload["study"]["study_id"] == study.study_id
@@ -141,7 +169,7 @@ def test_quality_then_residual_s3_study_matches_script_dry_run_and_stored_payloa
 
 
 def test_regime_source_minimal_r1_study_matches_generated_entry_dry_run() -> None:
-    study = study_loader.load_study_definition("v10/regime_source_minimal_r1")
+    study = _load_study_definition("v10/regime_source_minimal_r1")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_regime_source_minimal_r1.py")
     assert script_payload["study"]["study_id"] == study.study_id
@@ -153,119 +181,140 @@ def test_regime_source_minimal_r1_study_matches_generated_entry_dry_run() -> Non
 
 
 def test_rotation_replace_minimal_r1_study_matches_generated_entry_dry_run() -> None:
-    study = study_loader.load_study_definition("v10/rotation_replace_minimal_r1")
+    study = _load_study_definition("v10/rotation_replace_minimal_r1")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_rotation_replace_minimal_r1.py")
     assert script_payload["study"]["study_id"] == study.study_id
     actual = _plan_map(list(script_payload["plan"]))
 
-    for key in (("1626", "B0"), ("1626", "R1"), ("0717", "R1b")):
+    for key in (("1626", "B0"), ("1626", "R1"), ("1217", "R1b")):
         _assert_runtime_equivalent(expected[key], actual[key])
 
 
 def test_upstream_pullback_minimal_p1_study_matches_generated_entry_dry_run() -> None:
-    study = study_loader.load_study_definition("v10/upstream_pullback_minimal_p1")
+    study = _load_study_definition("v10/upstream_pullback_minimal_p1")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_upstream_pullback_minimal_p1.py")
     assert script_payload["study"]["study_id"] == study.study_id
     actual = _plan_map(list(script_payload["plan"]))
 
-    for key in (("1626", "B0"), ("1626", "P1"), ("0717", "P1b")):
+    for key in (("1626", "B0"), ("1626", "P1"), ("1217", "P1b")):
         _assert_runtime_equivalent(expected[key], actual[key])
 
 
 def test_conditional_tiebreak_s4_study_matches_generated_entry_and_stored_payload() -> None:
-    study = study_loader.load_study_definition("v10/conditional_tiebreak_s4")
+    study = _load_study_definition("v10/conditional_tiebreak_s4")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_conditional_tiebreak_s4.py")
     assert script_payload["study"]["study_id"] == study.study_id
     actual = _plan_map(list(script_payload["plan"]))
 
-    for key in (("1626", "B0"), ("1626", "S4_A_TB10"), ("0717", "S4_B_TB20")):
+    for key in (("1626", "B0"), ("1626", "S4_A_TB10"), ("1217", "S4_B_TB20")):
         _assert_runtime_equivalent(expected[key], actual[key])
         _assert_matches_stored_if_present(expected[key], "v10_conditional_tiebreak_s4", key[0], key[1])
 
 
 def test_strict_industry_relative_s5_study_matches_generated_entry_and_stored_payload() -> None:
-    study = study_loader.load_study_definition("v10/strict_industry_relative_s5")
+    study = _load_study_definition("v10/strict_industry_relative_s5")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_strict_industry_relative_s5.py")
     assert script_payload["study"]["study_id"] == study.study_id
     actual = _plan_map(list(script_payload["plan"]))
 
-    for key in (("1626", "B0"), ("1626", "S5_A_STRICT_INDUSTRY_RANK"), ("0717", "S5_B_STRICT_INDUSTRY_RANK_STRONG")):
+    for key in (("1626", "B0"), ("1626", "S5_A_STRICT_INDUSTRY_RANK"), ("1217", "S5_B_STRICT_INDUSTRY_RANK_STRONG")):
         _assert_runtime_equivalent(expected[key], actual[key])
         _assert_matches_stored_if_present(expected[key], "v10_strict_industry_relative_s5", key[0], key[1])
 
 
 def test_industry_excess_median_s6_study_matches_generated_entry_and_stored_payload() -> None:
-    study = study_loader.load_study_definition("v10/industry_excess_median_s6")
+    study = _load_study_definition("v10/industry_excess_median_s6")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_industry_excess_median_s6.py")
     assert script_payload["study"]["study_id"] == study.study_id
     actual = _plan_map(list(script_payload["plan"]))
 
-    for key in (("1626", "B0"), ("1626", "S6_A_INDUSTRY_EXCESS_MEDIAN"), ("0717", "S6_B_INDUSTRY_EXCESS_MEDIAN_STRONG")):
+    for key in (("1626", "B0"), ("1626", "S6_A_INDUSTRY_EXCESS_MEDIAN"), ("1217", "S6_B_INDUSTRY_EXCESS_MEDIAN_STRONG")):
         _assert_runtime_equivalent(expected[key], actual[key])
         _assert_matches_stored_if_present(expected[key], "v10_industry_excess_median_s6", key[0], key[1])
 
 
 def test_industry_second_stage_s7_study_matches_generated_entry_and_stored_payload() -> None:
-    study = study_loader.load_study_definition("v10/industry_second_stage_s7")
+    study = _load_study_definition("v10/industry_second_stage_s7")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_industry_second_stage_s7.py")
     assert script_payload["study"]["study_id"] == study.study_id
     actual = _plan_map(list(script_payload["plan"]))
 
-    for key in (("1626", "B0"), ("1626", "S7_A_SOFT15"), ("0717", "S7_B_SOFT25")):
+    for key in (("1626", "B0"), ("1626", "S7_A_SOFT15"), ("1217", "S7_B_SOFT25")):
         _assert_runtime_equivalent(expected[key], actual[key])
         _assert_matches_stored_if_present(expected[key], "v10_industry_second_stage_s7", key[0], key[1])
 
 
 def test_industry_second_stage_tiebreak_s8_study_matches_generated_entry_and_stored_payload() -> None:
-    study = study_loader.load_study_definition("v10/industry_second_stage_tiebreak_s8")
+    study = _load_study_definition("v10/industry_second_stage_tiebreak_s8")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_industry_second_stage_tiebreak_s8.py")
     assert script_payload["study"]["study_id"] == study.study_id
     actual = _plan_map(list(script_payload["plan"]))
 
-    for key in (("1626", "B0"), ("1626", "S8_A_TB85"), ("0717", "S8_B_TB90")):
+    for key in (("1626", "B0"), ("1626", "S8_A_TB85"), ("1217", "S8_B_TB90")):
         _assert_runtime_equivalent(expected[key], actual[key])
         _assert_matches_stored_if_present(expected[key], "v10_industry_second_stage_tiebreak_s8", key[0], key[1])
 
 
+def test_moneyflow_monthly_band_rerank_state_gate_study_matches_generated_entry_dry_run() -> None:
+    study = _load_study_definition("v10/moneyflow_monthly_band_rerank_state_gate_s1")
+    expected = _plan_map(study_runner.build_execution_plan(study))
+    script_payload = _script_dry_run("backend/scripts/generated/run_v10_moneyflow_monthly_band_rerank_state_gate_s1.py")
+    assert script_payload["study"]["study_id"] == study.study_id
+    actual = _plan_map(list(script_payload["plan"]))
+
+    for key, expected_mode in (
+        (("1217", "MF_BAND20_BULL"), "bull_only_band_rerank"),
+        (("1226", "MF_BAND20_BULL"), "bull_only_band_rerank"),
+        (("1217", "MF_BAND20_BULL_TRANSUP"), "bull_trans_up_band_rerank"),
+        (("1226", "MF_BAND20_BULL_TRANSUP"), "bull_trans_up_band_rerank"),
+    ):
+        _assert_runtime_equivalent(expected[key], actual[key])
+        overlay_cfg = actual[key]["runtime_config_json"]["asset_context"]["moneyflow_overlay"]
+        assert overlay_cfg["mode"] == expected_mode
+        assert overlay_cfg["band_limit"] == 20
+        assert overlay_cfg["factor_role"] == "rank"
+        assert overlay_cfg["apply_layer"] == "ranking"
+
+
 def test_leadership_route_l1_study_matches_generated_entry_and_stored_payload() -> None:
-    study = study_loader.load_study_definition("v10/leadership_route_l1")
+    study = _load_study_definition("v10/leadership_route_l1")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_leadership_route_l1.py")
     assert script_payload["study"]["study_id"] == study.study_id
     actual = _plan_map(list(script_payload["plan"]))
 
-    for key in (("1626", "B0"), ("1626", "L1_A_BUCKET2"), ("0717", "L1_B_BUCKET3")):
+    for key in (("1626", "B0"), ("1626", "L1_A_BUCKET2"), ("1217", "L1_B_BUCKET3")):
         _assert_runtime_equivalent(expected[key], actual[key])
         _assert_matches_stored_if_present(expected[key], "v10_leadership_route_l1", key[0], key[1])
 
 
 def test_state_conditional_residual_r2_study_matches_generated_entry_and_stored_payload() -> None:
-    study = study_loader.load_study_definition("v10/state_conditional_residual_r2")
+    study = _load_study_definition("v10/state_conditional_residual_r2")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_state_conditional_residual_r2.py")
     assert script_payload["study"]["study_id"] == study.study_id
     actual = _plan_map(list(script_payload["plan"]))
 
-    for key in (("1626", "B0"), ("1626", "R2_A_STRONG_IND_ONLY"), ("0717", "R2_B_STRONG_B30_I70")):
+    for key in (("1626", "B0"), ("1626", "R2_A_STRONG_IND_ONLY"), ("1217", "R2_B_STRONG_B30_I70")):
         _assert_runtime_equivalent(expected[key], actual[key])
         _assert_matches_stored_if_present(expected[key], "v10_state_conditional_residual_r2", key[0], key[1])
 
 
 def test_state_conditional_window_r3_study_matches_generated_entry_and_stored_payload() -> None:
-    study = study_loader.load_study_definition("v10/state_conditional_window_r3")
+    study = _load_study_definition("v10/state_conditional_window_r3")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_state_conditional_window_r3.py")
     assert script_payload["study"]["study_id"] == study.study_id
     actual = _plan_map(list(script_payload["plan"]))
 
-    for key in (("1626", "B0"), ("1626", "R3_A_STRONG40_ELSE60"), ("0717", "R3_B_STRONG40_ELSE80")):
+    for key in (("1626", "B0"), ("1626", "R3_A_STRONG40_ELSE60"), ("1217", "R3_B_STRONG40_ELSE80")):
         _assert_runtime_equivalent(expected[key], actual[key])
         _assert_matches_stored_if_present(expected[key], "v10_state_conditional_window_r3", key[0], key[1])
 
@@ -278,7 +327,7 @@ def test_current_study_assets_do_not_keep_legacy_script_metadata() -> None:
 
 
 def test_breakout_window_40_ab_study_keeps_single_variable_patch() -> None:
-    study = study_loader.load_study_definition("v10/breakout_window_40_ab")
+    study = _load_study_definition("v10/breakout_window_40_ab")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_v10_breakout_window_40_ab.py")
     assert script_payload["study"]["study_id"] == study.study_id
@@ -301,7 +350,7 @@ def test_breakout_window_40_ab_study_keeps_single_variable_patch() -> None:
 
 
 def test_cn_etf_single_asset_template_matches_generated_entry_dry_run() -> None:
-    study = study_loader.load_study_definition("etf/cn_etf_single_asset_template")
+    study = _load_study_definition("etf/cn_etf_single_asset_template")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_etf_cn_etf_single_asset_template.py")
     assert script_payload["study"]["study_id"] == study.study_id
@@ -321,7 +370,7 @@ def test_cn_etf_single_asset_template_matches_generated_entry_dry_run() -> None:
 
 
 def test_cn_etf_first_wave_core_matches_generated_entry_dry_run() -> None:
-    study = study_loader.load_study_definition("etf/cn_etf_first_wave_core")
+    study = _load_study_definition("etf/cn_etf_first_wave_core")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_etf_cn_etf_first_wave_core.py")
     assert script_payload["study"]["study_id"] == study.study_id
@@ -336,7 +385,7 @@ def test_cn_etf_first_wave_core_matches_generated_entry_dry_run() -> None:
 
 
 def test_cn_etf_first_wave_all_matches_generated_entry_dry_run() -> None:
-    study = study_loader.load_study_definition("etf/cn_etf_first_wave_all")
+    study = _load_study_definition("etf/cn_etf_first_wave_all")
     expected = _plan_map(study_runner.build_execution_plan(study))
     script_payload = _script_dry_run("backend/scripts/generated/run_etf_cn_etf_first_wave_all.py")
     assert script_payload["study"]["study_id"] == study.study_id

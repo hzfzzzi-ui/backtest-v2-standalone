@@ -1,0 +1,21 @@
+{
+  "contract_version": "subsystem_budget_v1",
+  "as_of_date": "2026-04-04",
+  "owner_system": "cn_stock_trend_alpha_core",
+  "budget_value": 0.6,
+  "budget_unit": "weight",
+  "budget_basis": "portfolio_relative",
+  "strategic_floor_cap": 0.2,
+  "tactical_overlay_cap": 0.4,
+  "deployment_pace": "normal",
+  "allow_new_risk": true,
+  "force_reduce_only": false,
+  "hard_block_flags": [],
+  "reason_codes": [
+    "STATE_BULL",
+    "RECOVERY_INACTIVE"
+  ],
+  "notes": {
+    "source": "governor_budget_snapshot"
+  }
+}

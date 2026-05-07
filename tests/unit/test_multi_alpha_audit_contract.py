@@ -101,6 +101,7 @@ def test_multi_alpha_audit_summary_and_flagged_days_are_aggregated() -> None:
             "buy_candidates_count": 1,
             "buy_slots": 1,
             "selected_symbols": ["sh600101"],
+            "execution_kernel_selected_symbols": ["sh600101"],
             "same_symbol_policy": "prefer_higher_score",
             "sleeve_budget_mode": "hard_sleeve_budget",
             "sleeve_budget_reject_count": 2,
@@ -109,6 +110,17 @@ def test_multi_alpha_audit_summary_and_flagged_days_are_aggregated() -> None:
             "sleeve_positions_after_sell": {"mr": 0, "trend": 1},
             "sleeve_candidate_counts": {"mr": 1, "trend": 1},
             "sleeve_selected_counts": {"mr": 1},
+            "candidate_boundary_mode": "hard_sleeve_budget",
+            "candidate_boundary_reject_count": 2,
+            "candidate_plan_mode": "cash_aware",
+            "cash_aware_selected_symbols": ["sh600101"],
+            "cash_aware_pool_count": 2,
+            "rotation_replace_count": 0,
+            "candidate_plan_reject_count": 1,
+            "after_slot_filter_count": 1,
+            "after_cash_lot_count": 1,
+            "execution_kernel_reject_count": 1,
+            "execution_kernel_reject_reason_counts": {"SKIP_NO_CASH": 1},
         },
     )
 
@@ -130,7 +142,9 @@ def test_multi_alpha_audit_summary_and_flagged_days_are_aggregated() -> None:
     assert summary["raw_signal_counts_by_alpha"] == {"breakout_55": 1, "rsi_reversal": 1}
     assert summary["composed_signal_counts_by_alpha"] == {"breakout_55": 1, "risk_control": 1, "rsi_reversal": 1}
     assert summary["blocked_signal_counts_by_reason"] == {
+        "CANDIDATE_PLAN_REJECTED": 1,
         "DISABLED_BY_REGIME": 1,
+        "EXECUTION_KERNEL_REJECTED": 1,
         "SAME_SYMBOL_CONFLICT": 1,
         "SLEEVE_BUDGET_EXCEEDED": 2,
     }
@@ -140,8 +154,18 @@ def test_multi_alpha_audit_summary_and_flagged_days_are_aggregated() -> None:
     assert len(audit["flagged_days"]) == 1
     assert audit["flagged_days"][0]["date"] == "2026-03-02"
     assert audit["flagged_days"][0]["regime_tag"] == "RANGE"
+    assert audit["flagged_days"][0]["candidate_boundary"]["decision_layer"] == "candidate_boundary"
+    assert audit["flagged_days"][0]["candidate_boundary"]["reject_count"] == 2
+    assert audit["flagged_days"][0]["candidate_plan"]["decision_layer"] == "candidate_plan"
+    assert audit["flagged_days"][0]["candidate_plan"]["mode"] == "cash_aware"
+    assert audit["flagged_days"][0]["candidate_plan"]["cash_aware_selected_symbols"] == ["sh600101"]
+    assert audit["flagged_days"][0]["candidate_plan"]["reject_count"] == 1
+    assert audit["flagged_days"][0]["execution_kernel"]["decision_layer"] == "execution_kernel"
+    assert audit["flagged_days"][0]["execution_kernel"]["selected_symbols"] == ["sh600101"]
+    assert audit["flagged_days"][0]["execution_kernel"]["reject_count"] == 1
+    assert audit["flagged_days"][0]["execution_kernel"]["reject_reason_counts"] == {"SKIP_NO_CASH": 1}
+    assert "sleeve_budget" not in audit["flagged_days"][0]
     assert len(audit["flagged_days"][0]["raw_alpha_signals"]) == 2
     assert len(audit["flagged_days"][0]["composed_sell_signals"]) == 2
     assert result.metrics["source_only_exit_count"] == 1
     assert result.metrics["global_risk_override_count"] == 1
-

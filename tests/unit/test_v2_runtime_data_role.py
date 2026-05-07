@@ -103,3 +103,66 @@ def test_postgres_provider_load_ohlcv_daily_uses_resolved_runtime_table() -> Non
     assert dict(captured["audit_meta"] or {}).get("table") == "pams_ohlcv_daily_v2_runtime"
     assert captured["params"] == (date(2026, 3, 16), date(2026, 3, 16), ["sh600000"])
     assert result["symbol"].tolist() == ["sh600000"]
+
+
+def test_postgres_provider_load_cn_etf_dividend_events_casts_dates_to_text_and_coerces_invalid_values() -> None:
+    provider = PostgresDataProvider.__new__(PostgresDataProvider)
+    provider._audit = []
+    provider._table_columns_cache = {}
+    provider._db = DBConfig(host="localhost", port=5432, dbname="pams", user="pams", password="")
+    provider._runtime = type("Runtime", (), {"statement_timeout_ms": 60000})()
+    provider._source = DataSourceConfig(cn_etf_dividend_table="pit_cn_etf_dividend_events")
+    provider._schema = {}
+    provider._get_table_columns = lambda table: {  # type: ignore[attr-defined]
+        "event_id",
+        "ts_code",
+        "symbol",
+        "ann_date",
+        "record_date",
+        "ex_date",
+        "pay_date",
+        "earpay_date",
+        "net_ex_date",
+        "div_cash",
+        "div_proc",
+    }
+    captured: dict[str, object] = {}
+
+    def _fake_exec_df(query, params, audit_meta):
+        captured["query"] = query
+        captured["params"] = params
+        captured["audit_meta"] = audit_meta
+        return pd.DataFrame(
+            [
+                {
+                    "event_id": "511010.SH|2013-06-03|2013-06-07|2013-05-31|0.28000000",
+                    "ts_code": "511010.SH",
+                    "symbol": "sh511010",
+                    "ann_date": "2013-05-28",
+                    "record_date": "2013-05-31",
+                    "ex_date": "2013-06-03",
+                    "pay_date": "2013-06-07",
+                    "earpay_date": "48113-11-21",
+                    "net_ex_date": "2013-06-03",
+                    "div_cash": "0.28",
+                    "div_proc": "实施",
+                }
+            ]
+        )
+
+    provider._exec_df = _fake_exec_df  # type: ignore[attr-defined]
+
+    result = provider.load_cn_etf_dividend_events(
+        ["511010.SH"],
+        date(2013, 1, 1),
+        date(2013, 12, 31),
+    )
+
+    assert "CAST(ex_date AS TEXT) AS ex_date" in str(captured["query"])
+    assert "CAST(earpay_date AS TEXT) AS earpay_date" in str(captured["query"])
+    assert captured["params"] == (date(2013, 12, 31), date(2013, 1, 1), ["sh511010"], ["511010.SH"])
+    assert result["symbol"].tolist() == ["sh511010"]
+    assert result["ts_code"].tolist() == ["511010.SH"]
+    assert result["ex_date"].iloc[0].strftime("%Y-%m-%d") == "2013-06-03"
+    assert pd.isna(result["earpay_date"].iloc[0])
+    assert result["div_cash"].iloc[0] == 0.28

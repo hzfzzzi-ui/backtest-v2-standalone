@@ -1,0 +1,51 @@
+{
+  "contract_version": "backtest_execution_contract@1",
+  "contract_type": "unified_combo",
+  "asset_scope": "cn_a_multi_sleeve",
+  "combo_policy": {
+    "mode": "account_budget_controlled_dynamic_mix",
+    "benchmark": "CN_STOCK_ETF_50_50",
+    "weights": {
+      "cn_stock_trend_alpha_core": 0.6,
+      "cn_etf_beta": 0.4
+    },
+    "account_budget_control": {
+      "contract_version": "account_budget_control@1",
+      "enabled": true
+    }
+  },
+  "components": {
+    "stock_component": {
+      "sleeve_id": "cn_stock_trend_alpha_core",
+      "asset_scope": "cn_a_equity",
+      "weight": 0.6,
+      "runtime_config": {
+        "asset_scope": "cn_a_equity",
+        "governed_a_share": {
+          "enabled": true,
+          "stock_alpha_core": {
+            "enabled": true,
+            "budget_semantics": "consume_governor_sleeve_budget"
+          }
+        }
+      },
+      "execution_overrides": {}
+    },
+    "etf_component": {
+      "sleeve_id": "cn_etf_beta",
+      "asset_scope": "cn_etf",
+      "weight": 0.4,
+      "runtime_config": {
+        "asset_scope": "cn_etf",
+        "governed_a_share": {
+          "enabled": true,
+          "etf_beta": {
+            "enabled": true,
+            "strategy_role": "strategic_beta_stabilizer"
+          }
+        }
+      },
+      "execution_overrides": {}
+    }
+  }
+}

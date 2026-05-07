@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -151,23 +151,177 @@ test('applyConfigToUI normalizes legacy unsupported combo values into phase1 mul
   assert.equal((context.validateConfigDraft(context.state.config_draft || {}) || []).length, 0);
 });
 
-test('legacy weighted-score baseline config stays on single-strategy path', (t) => {
-  const legacyBaseline = readJsonIfExists('outputs', 'baselines', 'baseline_V1', 'config.json');
-  if (!legacyBaseline) {
-    t.skip('baseline_V1 fixture missing in outputs/baselines');
-    return;
-  }
+test('applyConfigToUI derives visible date window from unified runtime provenance stock component contract when top-level universe is absent', () => {
   const { context } = createWorkbenchHarness();
+  const config = {
+    asset_scope: 'cn_a_equity',
+    unified_runtime: {
+      enabled: true,
+      provenance: {
+        component_source_contract: {
+        components: {
+          stock_component: {
+            compile_input: {
+              semantic_config: {
+                universe_mode: 'HS300_ZZ500',
+                universe: {
+                  start: '2012-01-04',
+                  end: '2026-03-20',
+                  benchmark: '000300.SH',
+                  symbols: [],
+                  limit: 0,
+                  price_adj: 'hfq',
+                  membership_mode: 'PIT_DYNAMIC',
+                  filters: {
+                    exclude_st: true,
+                    exclude_suspended: true,
+                    min_list_days: 120,
+                    min_avg_turnover_20d: 100000000,
+                    price_min: 5,
+                    price_max: 99999,
+                    atr_pct_range: '0,100',
+                    limit_rule: 'ignore',
+                  },
+                },
+              },
+            },
+          },
+        },
+        },
+      },
+    },
+  };
 
-  context.applyConfigToUI(clone(legacyBaseline));
+  context.applyConfigToUI(clone(config));
 
-  assert.equal(context.byId('wbEnableComposition').checked, false);
-  assert.equal(context.state.config_draft?.signal_composition?.enabled, false);
-  assert.equal((context.validateConfigDraft(context.state.config_draft || {}) || []).length, 0);
+  assert.equal(context.byId('wbStartDate').value, '2012-01-04');
+  assert.equal(context.byId('wbEndDate').value, '2026-03-20');
+  assert.equal(context.byId('wbUniverseMode').value, 'HS300_ZZ500');
 });
 
-test('baseline_V10 semantic config round-trips without dropping ranking or pre-profit exit fields', () => {
-  const baselinePath = path.join(PROJECT_ROOT, 'outputs', 'baselines', 'baseline_V10', 'config.json');
+test('formal frontend payload serializer strips auxiliary runtime fields before run/save submission', () => {
+  const { context } = createWorkbenchHarness();
+  const raw = {
+    asset_scope: 'cn_a_equity',
+    mode: 'experiment',
+    strategy_pack: 'EMA_CROSS',
+    universe_mode: 'HS300_ZZ500',
+    universe: {
+      start: '2012-01-04',
+      end: '2026-03-20',
+      benchmark: '000300.SH',
+      symbols: [],
+      limit: 0,
+      price_adj: 'hfq',
+      membership_mode: 'PIT_DYNAMIC',
+      filters: {
+        exclude_st: true,
+        exclude_suspended: true,
+      },
+    },
+    signal_generation: {
+      enabled: true,
+      strategy: 'EMA_CROSS',
+    },
+    position_risk: {
+      enabled: true,
+      max_positions: 10,
+    },
+    data_source: {
+      data_role: 'v1',
+      stocks_table: 'pams_ohlcv_daily',
+      benchmark_table: 'pams_index_daily_v2',
+    },
+    asset_context: {
+      asset_scope: 'cn_a_equity',
+    },
+    unified_runtime: {
+      enabled: true,
+    },
+    combo_context: {
+      source: 'research_combo',
+    },
+  };
+
+  const formal = context.buildFrontendSemanticPayload(raw);
+  const runtimePayload = context.sanitizeRuntimeConfigDraft(raw);
+  const persistedPayload = context.sanitizePersistedConfigDraft(raw);
+
+  assert.equal('asset_context' in formal, false);
+  assert.equal('unified_runtime' in formal, false);
+  assert.equal('combo_context' in formal, false);
+  assert.equal(formal.data_source?.data_role, undefined);
+  assert.equal(formal.data_source?.stocks_table, undefined);
+  assert.equal(formal.data_source?.benchmark_table, 'pams_index_daily_v2');
+  assert.deepEqual(runtimePayload, formal);
+  assert.deepEqual(persistedPayload, formal);
+});
+
+test('applyConfigToUI refreshes ETF drawer from unified runtime provenance contract when combo source stays on stock asset scope', () => {
+  const { context } = createWorkbenchHarness();
+  const config = {
+    asset_scope: 'cn_a_equity',
+    unified_runtime: {
+      enabled: true,
+      provenance: {
+        component_source_contract: {
+          components: {
+            etf_component: {
+              compile_input: {
+                semantic_config: {
+                  template_id: 'cn_broad_based_research_mainline_r1',
+                  research_rule_family: 'broad_based_rotation_template_a',
+                  source_entry_type: 'cn_etf_broad_based_standalone_mainline_entry',
+                  universe_mode: 'HS300_ZZ500',
+                  universe: {
+                    start: '2012-01-01',
+                    end: '2026-03-24',
+                    benchmark: '510300.SH',
+                    symbols: ['510050.SH', '510300.SH', '510500.SH', '512100.SH', '512890.SH', '588000.SH'],
+                    limit: 6,
+                    price_adj: 'none',
+                    membership_mode: 'PIT_DYNAMIC',
+                    filters: {
+                      exclude_st: true,
+                      exclude_suspended: true,
+                      min_list_days: 120,
+                      min_avg_turnover_20d: 100000000,
+                      price_min: 5,
+                      price_max: 99999,
+                      atr_pct_range: '0,100',
+                      limit_rule: 'ignore',
+                    },
+                  },
+                  template_target_formal_symbols: ['510050.SH', '510300.SH', '510500.SH', '512100.SH', '512890.SH', '588000.SH'],
+                  limited_defense_candidates: ['511010.SH', '518880.SH'],
+                  fallback_symbol: '511010.SH',
+                  rebalance_frequency: 'biweekly',
+                  absolute_filter_mode: 'ma150_and_positive_12m',
+                  selection_chain_profile: 'core_growth_slot',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  context.state.active_asset_context = { asset_scope: 'cn_etf' };
+  context.state.loaded_source_asset_context = { asset_scope: 'cn_etf' };
+  context.state.loaded_source_config = clone(config);
+
+  context.applyConfigToUI(clone(config));
+
+  assert.equal(context.byId('wbAssetScope').value, 'cn_etf');
+  assert.match(context.byId('wbSymbols').value, /510050\.SH/);
+  assert.match(context.byId('wbSymbols').value, /511010\.SH/);
+  assert.equal(context.resolveEtfSemanticConfig(clone(config))?.template_id, 'cn_broad_based_research_mainline_r1');
+  assert.equal(context.state.config_draft?.asset_scope, 'cn_etf');
+});
+
+test('baseline_V10_1 semantic config round-trips without dropping ranking or pre-profit exit fields', () => {
+  const baselinePath = path.join(PROJECT_ROOT, 'outputs', 'baselines', 'baseline_V10_1', 'config.json');
   const baselineV10 = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
   const { context } = createWorkbenchHarness();
 
@@ -316,33 +470,52 @@ test('syncAssetAwareShell moves public summary to global strip and scopes left r
   assert.equal(context.byId('wbGlobalGovernorEmpty').hidden, true);
 });
 
-test('syncAssetAwareShell shows compact empty state for legacy experiments without formal regime/governor data', () => {
+test('comboRuntimeState prefers execution_contract_ref over legacy provenance source contract', () => {
   const { context } = createWorkbenchHarness();
-  context.state.config_draft = {
-    asset_scope: 'cn_a_equity',
-    universe_mode: 'HS300_ZZ500',
-    universe: {
-      start: '2012-01-04',
-      end: '2026-03-20',
+  const comboState = context.comboRuntimeState({
+    data: {
+      asset_role: 'research_combo',
+      system_asset_scope: 'cn_a_multi_sleeve',
     },
-  };
-  context.state.active_result = { exp_id: 'exp_legacy' };
-  context.state.active_artifacts = {
-    run_meta: {
-      data: {
-        asset_scope: 'cn_a_equity',
+    execution_contract_ref: {
+      contract_type: 'unified_combo',
+      contract_version: 'backtest_execution_contract@1',
+    },
+    provenance: {
+      component_source_contract: {
+        contract_version: 'unified_combo_component_source_contract@1',
+        runtime_entry_mode: 'contract_only',
+        source_mode: 'contract_only',
       },
     },
-  };
+    combo_result: {
+      type: 'unified_runtime_combo',
+    },
+  });
 
-  context.syncAssetAwareShell('cn_a_equity');
+  assert.equal(comboState.comboSourceMode, 'execution_contract');
+  assert.equal(comboState.isComboRuntime, true);
+  assert.equal(comboState.researchComboOnly, false);
+});
 
-  assert.equal(context.byId('wbGlobalRegimeDetail').hidden, true);
-  assert.equal(context.byId('wbGlobalGovernorDetail').hidden, true);
-  assert.equal(context.byId('wbGlobalRegimeEmpty').hidden, false);
-  assert.equal(context.byId('wbGlobalGovernorEmpty').hidden, false);
-  assert.match(context.byId('wbGlobalRegimeEmpty').textContent, /formal regime/);
-  assert.match(context.byId('wbGlobalGovernorEmpty').textContent, /governed snapshot/);
+test('comboRuntimeState ignores legacy top-level source contract when provenance is absent', () => {
+  const { context } = createWorkbenchHarness();
+  const comboState = context.comboRuntimeState({
+    data: {
+      asset_role: 'research_combo',
+      system_asset_scope: 'cn_a_multi_sleeve',
+    },
+    component_source_contract: {
+      contract_version: 'unified_combo_component_source_contract@1',
+      runtime_entry_mode: 'contract_only',
+    },
+    combo_result: {
+      type: 'unified_runtime_combo',
+    },
+  });
+
+  assert.equal(comboState.comboSourceMode, '');
+  assert.equal(comboState.isComboRuntime, true);
 });
 
 /*
@@ -368,19 +541,19 @@ test('syncAssetAwareShell renders research combo summaries from backend combo tr
       display: {
         regime: {
         available: true,
-        base_state: '个股 TRANS_DOWN',
+        base_state: '涓偂 TRANS_DOWN',
         effective_state: 'ETF RISK_OFF',
-        coarse_state: '个股 RISK_OFF | ETF RISK_OFF',
-        risk_budget_multiplier_text: '个股 60.00% | ETF 0.00%',
-        reason_text: '个股 TRANS_DOWN | ETF RISK_OFF | 模式 daily_rebalanced_equal_weight_50_50',
-        manual_override_text: '无',
+        coarse_state: '涓偂 RISK_OFF | ETF RISK_OFF',
+        risk_budget_multiplier_text: '涓偂 60.00% | ETF 0.00%',
+        reason_text: '涓偂 TRANS_DOWN | ETF RISK_OFF | 妯″紡 daily_rebalanced_equal_weight_50_50',
+        manual_override_text: '鏃?,
       },
         governor: {
         available: true,
-        total_risk_budget_text: '个股 60.00% | ETF 0.00%',
-        total_exposure_cap_text: '研究组合 daily_rebalanced_equal_weight_50_50',
+        total_risk_budget_text: '涓偂 60.00% | ETF 0.00%',
+        total_exposure_cap_text: '鐮旂┒缁勫悎 daily_rebalanced_equal_weight_50_50',
         budget_consumer_text: 'cn_stock_trend_alpha_core + cn_etf_beta',
-        budget_reason_text: '个股 TOTAL_RISK_BUDGET_REDUCED | ETF NO_DEPLOYABLE_SLOTS',
+        budget_reason_text: '涓偂 TOTAL_RISK_BUDGET_REDUCED | ETF NO_DEPLOYABLE_SLOTS',
         },
       },
     },
@@ -388,10 +561,10 @@ test('syncAssetAwareShell renders research combo summaries from backend combo tr
 
   context.syncAssetAwareShell('cn_a_equity');
 
-  assert.equal(context.byId('wbGlobalRegimeBase').textContent, '个股 TRANS_DOWN');
+  assert.equal(context.byId('wbGlobalRegimeBase').textContent, '涓偂 TRANS_DOWN');
   assert.equal(context.byId('wbGlobalRegimeEffective').textContent, 'ETF RISK_OFF');
   assert.match(context.byId('wbGlobalRegimeReason').textContent, /daily_rebalanced_equal_weight_50_50/);
-  assert.equal(context.byId('wbGlobalGovernorBudget').textContent, '个股 60.00% | ETF 0.00%');
+  assert.equal(context.byId('wbGlobalGovernorBudget').textContent, '涓偂 60.00% | ETF 0.00%');
   assert.equal(context.byId('wbGlobalGovernorSleeve').textContent, 'cn_stock_trend_alpha_core + cn_etf_beta');
   assert.equal(context.byId('wbGlobalRegimeDetail').hidden, false);
   assert.equal(context.byId('wbGlobalGovernorDetail').hidden, false);
@@ -450,7 +623,7 @@ test('syncAssetAwareShell renders research combo summaries from backend combo tr
   assert.equal(context.byId('wbGlobalGovernorDetail').hidden, false);
 });
 
-test('config is a first-class load source in badge and URL sync helpers', () => {
+test('frontend load surface only exposes baseline and experiment sources', () => {
   const { context } = createWorkbenchHarness();
   context.URL = URL;
   let replacedUrl = '';
@@ -463,20 +636,20 @@ test('config is a first-class load source in badge and URL sync helpers', () => 
     context.window.location.search = parsed.search;
   };
 
-  assert.equal(context.loadItemBadgeLabel({ kind: 'config' }), 'Config');
-  assert.equal(context.loadItemBadgeClass({ kind: 'config' }), 'wb-load-kind-config');
+  assert.equal(context.loadItemBadgeLabel({ kind: 'baseline' }), 'Baseline');
+  assert.equal(context.loadItemBadgeClass({ kind: 'baseline' }), 'wb-load-kind-baseline');
 
-  context.syncWorkbenchLoadedSourceToUrl('config', 'cfg_cn_stock_etf_v1');
-  assert.match(replacedUrl, /load_kind=config/);
-  assert.match(replacedUrl, /load_id=cfg_cn_stock_etf_v1/);
+  context.syncWorkbenchLoadedSourceToUrl('baseline', 'CN_STOCK_ETF_FORMAL_V1');
+  assert.match(replacedUrl, /load_kind=baseline/);
+  assert.match(replacedUrl, /load_id=CN_STOCK_ETF_FORMAL_V1/);
 
   const parsedSource = context.currentWorkbenchInputSourceFromUrl();
-  assert.equal(parsedSource?.kind, 'config');
-  assert.equal(parsedSource?.id, 'cfg_cn_stock_etf_v1');
+  assert.equal(parsedSource?.kind, 'baseline');
+  assert.equal(parsedSource?.id, 'CN_STOCK_ETF_FORMAL_V1');
 });
 
-test('applyConfigToUI populates explicit S5 and S9 controls for baseline_V10', () => {
-  const baselinePath = path.join(PROJECT_ROOT, 'outputs', 'baselines', 'baseline_V10', 'config.json');
+test('applyConfigToUI populates explicit S5 and S9 controls for baseline_V10_1', () => {
+  const baselinePath = path.join(PROJECT_ROOT, 'outputs', 'baselines', 'baseline_V10_1', 'config.json');
   const baselineV10 = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
   const { context } = createWorkbenchHarness();
 
@@ -492,7 +665,7 @@ test('applyConfigToUI populates explicit S5 and S9 controls for baseline_V10', (
 });
 
 test('explicit S5 and S9 controls write back into semantic config', () => {
-  const baselinePath = path.join(PROJECT_ROOT, 'outputs', 'baselines', 'baseline_V10', 'config.json');
+  const baselinePath = path.join(PROJECT_ROOT, 'outputs', 'baselines', 'baseline_V10_1', 'config.json');
   const baselineV10 = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
   const { context } = createWorkbenchHarness();
 
@@ -512,26 +685,6 @@ test('explicit S5 and S9 controls write back into semantic config', () => {
   assert.equal(draft.exit_rules?.trailing?.pre_profit_breakout_failure_enabled, true);
   assert.equal(draft.exit_rules?.trailing?.pre_profit_breakout_failure_max_bars, 7);
   assert.equal(draft.exit_rules?.trailing?.pre_profit_breakout_failure_atr_buffer_k, 0.9);
-});
-
-test('baseline_V9_1 round-trips without injecting V10-only overrides', (t) => {
-  const baselineV91 = readJsonIfExists('outputs', 'baselines', 'baseline_V9_1', 'config.json');
-  if (!baselineV91) {
-    t.skip('baseline_V9_1 fixture missing in outputs/baselines');
-    return;
-  }
-  const { context } = createWorkbenchHarness();
-
-  context.state.loaded_source_config = clone(baselineV91);
-  context.applyConfigToUI(clone(baselineV91));
-
-  const expected = clone(baselineV91);
-  expected.asset_scope = expected.asset_scope || 'cn_a_equity';
-  assert.deepEqual(clone(context.state.config_draft), expected);
-  assert.equal('residual_window' in (context.state.config_draft?.signal_generation?.ranking || {}), false);
-  assert.equal('pre_profit_breakout_failure_enabled' in (context.state.config_draft?.exit_rules?.trailing || {}), false);
-  assert.equal('pre_profit_breakout_failure_max_bars' in (context.state.config_draft?.exit_rules?.trailing || {}), false);
-  assert.equal('pre_profit_breakout_failure_atr_buffer_k' in (context.state.config_draft?.exit_rules?.trailing || {}), false);
 });
 
 test('buildConfigDraft emits PIT dynamic membership for supported index universes by default', () => {
@@ -581,8 +734,8 @@ test('default PIT membership is hidden in config meta display', () => {
   const { context } = createWorkbenchHarness();
 
   const meta = context.cloneLoadedSourceMeta({
-    config_id: 'baseline_V1',
-    display_name: 'baseline_V1',
+    config_id: 'baseline_V10_1',
+    display_name: 'baseline_V10.1',
     universe_mode: 'HS300_ZZ500',
     membership_mode: 'PIT_DYNAMIC',
   });
@@ -609,3 +762,5 @@ test('non-default membership mode is shown in config meta and load summary', () 
   assert.equal(meta.display_name.includes('Membership=START_SNAPSHOT'), true);
   assert.equal(summary.includes('Membership=START_SNAPSHOT'), true);
 });
+
+

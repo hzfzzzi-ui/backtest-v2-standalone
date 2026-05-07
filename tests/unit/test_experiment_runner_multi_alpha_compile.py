@@ -1,9 +1,12 @@
 ﻿from __future__ import annotations
 
+import json
 import pandas as pd
+import pytest
 
 from backend.api.backtest_v2 import runner_impl
 from backend.api.shared.paths import bt_root
+from backend.core.tools import baseline_access
 from backend.core.tools.experiment_runner import _project_trade_csv_schema
 
 
@@ -142,6 +145,12 @@ def _stock_etf_unified_config() -> dict:
     return payload
 
 
+def _assert_pure_unified_combo_component_runtime(runtime_cfg: dict, *, active_key: str, inactive_key: str) -> None:
+    governed = dict(runtime_cfg.get("governed_a_share") or {})
+    assert active_key in governed
+    assert inactive_key not in governed
+
+
 def test_compile_semantic_bundle_preserves_multi_alpha_runtime_payload() -> None:
     compiled = runner_impl._compile_semantic_config_bundle(
         base_cfg=runner_impl._load_base_config(bt_root()),
@@ -215,9 +224,34 @@ def test_compile_semantic_bundle_preserves_data_role_in_runtime_config() -> None
     )
 
     runtime_cfg = compiled["runtime_config"]
+    assert runtime_cfg["market_data_contract"] == "canonical_market"
     assert runtime_cfg["data_source"]["data_role"] == "v2_canonical"
     assert "pams_ohlcv_daily_v2" in runtime_cfg["schema_mapping"]
     assert runtime_cfg["schema_mapping"]["pams_ohlcv_daily_v2"]["date"] == "trade_date"
+
+
+def test_compile_semantic_bundle_defaults_baseline_v10_1_to_canonical_market_contract() -> None:
+    record = baseline_access.load_baseline_record("baseline_V10_1")
+    if not isinstance(record, dict):
+        pytest.skip("baseline_V10_1 fixture missing")
+    semantic_cfg = dict(record.get("config_json") or {})
+
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=semantic_cfg,
+        config_source="baseline_fixture",
+        use_body_universe_fields=False,
+    )
+
+    runtime_cfg = compiled["runtime_config"]
+    assert runtime_cfg["market_data_contract"] == "canonical_market"
+    assert runtime_cfg["data_source"]["stocks_table"] == "pams_ohlcv_daily_v2"
+    assert runtime_cfg["universe"]["start"] == semantic_cfg["universe"]["start"]
+    assert runtime_cfg["universe"]["end"] == semantic_cfg["universe"]["end"]
+    assert "data_role" not in runtime_cfg["data_source"]
+
+
 
 
 def test_compile_semantic_bundle_preserves_regime_engine_in_runtime_config() -> None:
@@ -280,7 +314,36 @@ def test_compile_semantic_bundle_preserves_blank_etf_benchmark_truth() -> None:
     assert runtime_cfg["regime_engine"]["benchmark"] == ""
 
 
-def test_compile_semantic_bundle_emits_unified_stock_etf_runtime_payload() -> None:
+def test_compile_semantic_bundle_applies_top_level_combo_window_to_sleeve_runtime_configs() -> None:
+    semantic_cfg = _stock_etf_unified_config()
+    semantic_cfg["universe"] = dict(semantic_cfg.get("universe") or {})
+    semantic_cfg["universe"]["start"] = "2012-01-04"
+    semantic_cfg["universe"]["end"] = "2016-12-30"
+
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=semantic_cfg,
+        config_source="config_json",
+        use_body_universe_fields=False,
+    )
+
+    execution_contract = compiled["compiled_plan"]["unified_runtime"]["execution_contract"]
+    stock_runtime = execution_contract["components"]["stock_component"]["runtime_config"]
+    etf_runtime = execution_contract["components"]["etf_component"]["runtime_config"]
+
+    assert stock_runtime["universe"]["start"] == "2012-01-04"
+    assert stock_runtime["universe"]["end"] == "2016-12-30"
+    assert stock_runtime["universe_mode"] == "HS300_ZZ500"
+    assert stock_runtime["universe"]["membership_mode"] == "PIT_DYNAMIC"
+    assert etf_runtime["universe"]["start"] == "2012-01-04"
+    assert etf_runtime["universe"]["end"] == "2016-12-30"
+    assert etf_runtime["universe_mode"] == "CUSTOM"
+    _assert_pure_unified_combo_component_runtime(stock_runtime, active_key="stock_alpha_core", inactive_key="etf_beta")
+    _assert_pure_unified_combo_component_runtime(etf_runtime, active_key="etf_beta", inactive_key="stock_alpha_core")
+
+
+def test_compile_semantic_bundle_emits_execution_contract_for_unified_combo() -> None:
     compiled = runner_impl._compile_semantic_config_bundle(
         base_cfg=runner_impl._load_base_config(bt_root()),
         body=runner_impl.BacktestV2ExperimentRequest(),
@@ -289,21 +352,303 @@ def test_compile_semantic_bundle_emits_unified_stock_etf_runtime_payload() -> No
         use_body_universe_fields=False,
     )
 
-    unified_runtime = compiled["compiled_plan"]["unified_runtime"]
-    assert unified_runtime["enabled"] is True
-    assert unified_runtime["combo_context"]["system_asset_scope"] == "cn_a_multi_sleeve"
-    assert unified_runtime["combo_context"]["weights"] == {
-        "cn_stock_trend_alpha_core": 0.5,
-        "cn_etf_beta": 0.5,
+    unified_runtime = dict(compiled.get("unified_runtime") or {})
+    execution_contract = dict(unified_runtime.get("execution_contract") or {})
+    assert execution_contract["contract_version"] == "backtest_execution_contract@1"
+    assert execution_contract["contract_type"] == "unified_combo"
+    assert execution_contract["asset_scope"] == "cn_a_multi_sleeve"
+    assert execution_contract["combo_policy"]["benchmark"] == "CN_STOCK_ETF_50_50"
+    assert execution_contract["components"]["stock_component"]["asset_scope"] == "cn_a_equity"
+    assert execution_contract["components"]["etf_component"]["asset_scope"] == "cn_etf"
+    _assert_pure_unified_combo_component_runtime(
+        execution_contract["components"]["stock_component"]["runtime_config"],
+        active_key="stock_alpha_core",
+        inactive_key="etf_beta",
+    )
+    _assert_pure_unified_combo_component_runtime(
+        execution_contract["components"]["etf_component"]["runtime_config"],
+        active_key="etf_beta",
+        inactive_key="stock_alpha_core",
+    )
+    source_contract = dict(unified_runtime.get("component_source_contract") or {})
+    source_stock_compile_input = dict(
+        (((source_contract.get("components") or {}).get("stock_component") or {}).get("compile_input") or {})
+    )
+    source_etf_compile_input = dict(
+        (((source_contract.get("components") or {}).get("etf_component") or {}).get("compile_input") or {})
+    )
+    assert "runtime_config" not in source_stock_compile_input
+    assert "runtime_config" not in source_etf_compile_input
+    assert isinstance(source_stock_compile_input.get("semantic_config"), dict)
+    assert isinstance(source_etf_compile_input.get("semantic_config"), dict)
+    serialized = json.dumps(execution_contract, ensure_ascii=False)
+    assert "source_kind" not in serialized
+    assert "baseline_id" not in serialized
+    assert "linked_exp_id" not in serialized
+    assert "study_id" not in serialized
+
+
+def test_compile_semantic_bundle_emits_etf_source_truth_from_component_semantic_identity() -> None:
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=_stock_etf_unified_config(),
+        config_source="config_json",
+        use_body_universe_fields=False,
+    )
+
+    source_contract = dict((compiled.get("unified_runtime") or {}).get("component_source_contract") or {})
+    etf_component = dict(((source_contract.get("components") or {}).get("etf_component") or {}))
+    etf_semantic_cfg = dict((((etf_component.get("compile_input") or {}).get("semantic_config")) or {}))
+    etf_governed = dict((etf_semantic_cfg.get("governed_a_share") or {}).get("etf_beta") or {})
+
+    assert etf_component["formal_alignment_status"] in {"formal_mainline", "research_only", "do_not_promote"}
+    assert etf_component["source_entry_type"] == etf_governed["source_entry_type"]
+    assert etf_component["strategy_role"] == etf_governed["strategy_role"]
+    assert etf_component["local_policy_mode"] == etf_governed["local_policy_mode"]
+    assert etf_component["governor_boundary_mode"] == etf_governed["governor_boundary_mode"]
+
+
+def test_compile_semantic_bundle_can_force_formal_etf_promotion_for_unified_combo() -> None:
+    semantic_cfg = _stock_etf_unified_config()
+    semantic_cfg["unified_runtime"] = {
+        "enabled": True,
+        "etf_component_promotion_mode": "formal_phase1",
+        "execution_contract": {
+            "contract_version": "backtest_execution_contract@1",
+            "contract_type": "unified_combo",
+            "asset_scope": "cn_a_multi_sleeve",
+            "components": {
+                "etf_component": {
+                    "asset_scope": "cn_etf",
+                    "runtime_config": {
+                        "asset_scope": "cn_etf",
+                        "universe": {
+                            "symbols": ["510050.SH", "512890.SH", "588000.SH", "518880.SH", "511010.SH"],
+                            "price_adj": "hfq",
+                        },
+                        "governed_a_share": {
+                            "enabled": True,
+                            "etf_beta": {
+                                "enabled": True,
+                                "source_entry_type": "cn_etf_broad_based_standalone_mainline_entry",
+                                "strategy_role": "governed_broad_based_standalone_mainline",
+                                "local_policy_mode": "broad_based_rotation_mainline",
+                                "governor_boundary_mode": "consume_governor_state_and_budget",
+                                "core_beta_symbols": ["510050.SH", "510300.SH", "510500.SH", "512100.SH", "588000.SH"],
+                                "limited_defense_candidates": ["511010.SH", "518880.SH"],
+                            },
+                        },
+                    },
+                },
+            },
+        },
     }
-    stock_sleeve = unified_runtime["sleeves"]["stock_alpha_core"]
-    etf_sleeve = unified_runtime["sleeves"]["etf_beta"]
-    assert stock_sleeve["semantic_config"]["asset_scope"] == "cn_a_equity"
-    assert stock_sleeve["runtime_config"]["asset_context"]["asset_scope"] == "cn_a_equity"
-    assert etf_sleeve["semantic_config"]["asset_scope"] == "cn_etf"
-    assert etf_sleeve["semantic_config"]["universe"]["symbols"] == ["cn_etf_first_wave_core"]
-    assert etf_sleeve["runtime_config"]["asset_context"]["asset_scope"] == "cn_etf"
-    assert etf_sleeve["runtime_config"]["data_source"]["stocks_table"] == "pams_cn_etf_daily"
+
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=semantic_cfg,
+        config_source="config_json",
+        use_body_universe_fields=False,
+    )
+
+    source_contract = dict((compiled.get("unified_runtime") or {}).get("component_source_contract") or {})
+    execution_contract = dict((compiled.get("compiled_plan") or {}).get("unified_runtime", {}).get("execution_contract") or {})
+    etf_component = dict(((source_contract.get("components") or {}).get("etf_component") or {}))
+    etf_semantic_cfg = dict((((etf_component.get("compile_input") or {}).get("semantic_config")) or {}))
+    etf_governed = dict((etf_semantic_cfg.get("governed_a_share") or {}).get("etf_beta") or {})
+    etf_symbols = set(etf_semantic_cfg.get("universe", {}).get("symbols") or [])
+    etf_runtime_component = dict((execution_contract.get("components") or {}).get("etf_component") or {})
+    etf_runtime_cfg = dict(etf_runtime_component.get("runtime_config") or {})
+    etf_runtime_governed = dict((etf_runtime_cfg.get("governed_a_share") or {}).get("etf_beta") or {})
+    etf_runtime_symbols = set((etf_runtime_cfg.get("universe") or {}).get("symbols") or [])
+
+    assert etf_component["formal_alignment_status"] == "formal_mainline"
+    assert etf_component["formal_etf_pool_version"] == "formal_etf_pool_v1"
+    assert etf_component["source_entry_type"] == "cn_etf_phase1_allocation_entry"
+    assert etf_component["strategy_role"] == "strategic_beta_stabilizer"
+    assert etf_component["local_policy_mode"] == "phase1_bucket_allocation"
+    assert etf_component["governor_boundary_mode"] == "consume_governor_sleeve_budget"
+    assert etf_semantic_cfg["universe"]["price_adj"] == "none"
+    assert etf_symbols == {"510300.SH", "510500.SH", "510050.SH", "512100.SH", "511010.SH"}
+    assert "518880.SH" not in etf_symbols
+    assert "588000.SH" not in etf_symbols
+    assert "512890.SH" not in etf_symbols
+    assert etf_governed["source_entry_type"] == "cn_etf_phase1_allocation_entry"
+    assert etf_governed["local_policy_mode"] == "phase1_bucket_allocation"
+    assert etf_runtime_cfg["universe"]["price_adj"] == "none"
+    assert etf_runtime_symbols == {"510300.SH", "510500.SH", "510050.SH", "512100.SH", "511010.SH"}
+    assert etf_runtime_governed["source_entry_type"] == "cn_etf_phase1_allocation_entry"
+    assert etf_runtime_governed["strategy_role"] == "strategic_beta_stabilizer"
+    assert etf_runtime_governed["local_policy_mode"] == "phase1_bucket_allocation"
+    assert etf_runtime_governed["governor_boundary_mode"] == "consume_governor_sleeve_budget"
+
+
+def test_compile_semantic_bundle_prefers_execution_contract_seed_for_unified_combo() -> None:
+    semantic_cfg = _stock_etf_unified_config()
+    semantic_cfg["unified_runtime"] = {
+        "etf_component_promotion_mode": "replay_only",
+        "component_source_contract": {
+            "contract_version": "unified_combo_component_source_contract@1",
+            "components": {
+                "etf_component": {
+                    "asset_scope": "cn_etf",
+                    "compile_input": {
+                        "semantic_config": {
+                            "asset_scope": "cn_etf",
+                            "universe": {
+                                "symbols": ["510050.SH", "510300.SH", "510500.SH", "512100.SH", "512890.SH", "588000.SH", "518880.SH", "511010.SH"],
+                                "price_adj": "hfq",
+                            },
+                            "governed_a_share": {
+                                "enabled": True,
+                                "etf_beta": {
+                                    "enabled": True,
+                                    "sleeve_id": "cn_etf_beta",
+                                    "source_entry_type": "cn_etf_broad_based_standalone_mainline_entry",
+                                    "strategy_role": "governed_broad_based_standalone_mainline",
+                                    "local_policy_mode": "broad_based_rotation_mainline",
+                                    "governor_boundary_mode": "consume_governor_state_and_budget",
+                                    "exposure_policy_family": "broad_based_standalone_mainline_v1",
+                                    "core_beta_symbols": ["510050.SH", "510300.SH", "510500.SH", "512100.SH", "512890.SH", "588000.SH"],
+                                    "limited_defense_candidates": ["511010.SH", "518880.SH"],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "execution_contract": {
+            "contract_version": "backtest_execution_contract@1",
+            "contract_type": "unified_combo",
+            "asset_scope": "cn_a_multi_sleeve",
+            "combo_policy": {
+                "mode": "account_budget_controlled_dynamic_mix",
+                "benchmark": "CN_STOCK_ETF_EXECUTION",
+            },
+            "components": {
+                "stock_component": {
+                    "asset_scope": "cn_a_equity",
+                    "weight": 0.7,
+                    "runtime_config": {
+                        "asset_scope": "cn_a_equity",
+                        "universe": {"start": "2013-01-04", "end": "2015-12-31"},
+                        "governed_a_share": {
+                            "enabled": True,
+                            "stock_alpha_core": {"enabled": True, "legacy_anchor": "baseline_V10.1"},
+                            "etf_beta": {"enabled": True, "sleeve_id": "cn_etf_beta"},
+                        },
+                    },
+                },
+                    "etf_component": {
+                        "asset_scope": "cn_etf",
+                        "weight": 0.3,
+                        "runtime_config": {
+                            "asset_scope": "cn_etf",
+                            "universe": {
+                                "start": "2013-01-04",
+                                "end": "2015-12-31",
+                                "symbols": ["510050.SH", "510300.SH", "510500.SH", "512100.SH", "512890.SH", "588000.SH", "518880.SH", "511010.SH"],
+                                "price_adj": "hfq",
+                            },
+                            "governed_a_share": {
+                                "enabled": True,
+                                "stock_alpha_core": {"enabled": True, "legacy_anchor": "baseline_V10.1"},
+                                "etf_beta": {
+                                    "enabled": True,
+                                    "sleeve_id": "cn_etf_beta",
+                                    "source_entry_type": "cn_etf_broad_based_standalone_mainline_entry",
+                                    "strategy_role": "governed_broad_based_standalone_mainline",
+                                    "local_policy_mode": "broad_based_rotation_mainline",
+                                    "governor_boundary_mode": "consume_governor_state_and_budget",
+                                    "exposure_policy_family": "broad_based_standalone_mainline_v1",
+                                    "core_beta_symbols": ["510050.SH", "510300.SH", "510500.SH", "512100.SH", "512890.SH", "588000.SH"],
+                                    "limited_defense_candidates": ["511010.SH", "518880.SH"],
+                                },
+                            },
+                        },
+                    },
+                },
+        }
+    }
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=semantic_cfg,
+        config_source="config_json",
+        use_body_universe_fields=False,
+    )
+
+    execution_contract = dict(compiled["compiled_plan"]["unified_runtime"]["execution_contract"] or {})
+    stock_component = dict(execution_contract["components"]["stock_component"] or {})
+    etf_component = dict(execution_contract["components"]["etf_component"] or {})
+
+    assert execution_contract["combo_policy"]["mode"] == "account_budget_controlled_dynamic_mix"
+    assert execution_contract["combo_policy"]["benchmark"] == "CN_STOCK_ETF_EXECUTION"
+    assert stock_component["weight"] == 0.7
+    assert etf_component["weight"] == 0.3
+    assert stock_component["runtime_config"]["universe"]["start"] == "2013-01-04"
+    assert etf_component["runtime_config"]["universe"]["end"] == "2015-12-31"
+    _assert_pure_unified_combo_component_runtime(
+        stock_component["runtime_config"],
+        active_key="stock_alpha_core",
+        inactive_key="etf_beta",
+    )
+    _assert_pure_unified_combo_component_runtime(
+        etf_component["runtime_config"],
+        active_key="etf_beta",
+        inactive_key="stock_alpha_core",
+    )
+
+
+def test_compile_semantic_bundle_accepts_stabilizer_symbol_contract_fields() -> None:
+    payload = {
+        "asset_scope": "cn_etf",
+        "universe_mode": "CUSTOM",
+        "universe": {
+            "start": "2016-11-04",
+            "end": "2026-03-20",
+            "benchmark": "",
+            "symbols": ["cn_etf_first_wave_core"],
+            "price_adj": "none",
+        },
+        "data_source": {"stocks_table": "pams_cn_etf_daily", "data_role": "v1"},
+        "governed_a_share": {
+            "enabled": True,
+            "etf_beta": {
+                "enabled": True,
+                "strategy_role": "strategic_beta_stabilizer",
+                "local_policy_mode": "phase1_bucket_allocation",
+                "core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                "core_accumulator_symbols": ["510300.SH", "510050.SH"],
+                "tactical_satellite_symbols": ["510500.SH", "512100.SH"],
+                "limited_defense_candidates": ["511010.SH"],
+                "symbol_role_map": {
+                    "510300.SH": "core_accumulator",
+                    "510050.SH": "core_accumulator",
+                    "510500.SH": "tactical_satellite",
+                    "512100.SH": "tactical_satellite",
+                    "511010.SH": "limited_defense",
+                },
+            },
+        },
+    }
+
+    compiled = runner_impl._compile_semantic_config_bundle(
+        base_cfg=runner_impl._load_base_config(bt_root()),
+        body=runner_impl.BacktestV2ExperimentRequest(),
+        semantic_cfg=payload,
+        config_source="config_json",
+        use_body_universe_fields=False,
+    )
+
+    etf_beta = compiled["runtime_config"]["governed_a_share"]["etf_beta"]
+    assert etf_beta["strategy_role"] == "strategic_beta_stabilizer"
+    assert etf_beta["core_accumulator_symbols"] == ["510300.SH", "510050.SH"]
+    assert etf_beta["tactical_satellite_symbols"] == ["510500.SH", "512100.SH"]
+    assert etf_beta["symbol_role_map"]["511010.SH"] == "limited_defense"
 
 
 def test_compile_semantic_bundle_preserves_turnover_rate_filter_fields() -> None:
@@ -1128,7 +1473,7 @@ def test_build_runtime_cfg_from_workbench_infers_governed_a_share_contract_for_b
     assert governed["stock_alpha_core"]["budget_semantics"] == "consume_governor_sleeve_budget"
     assert governed["stock_alpha_core"]["total_budget_owner"] == "global_portfolio_governor"
     assert governed["etf_beta"]["core_beta_symbols"] == ["510300.SH", "510500.SH", "510050.SH", "512100.SH"]
-    assert governed["etf_beta"]["limited_defense_candidates"] == ["512890.SH"]
+    assert governed["etf_beta"]["limited_defense_candidates"] == ["511010.SH"]
 
 
 def test_project_trade_csv_schema_keeps_source_and_exit_fields() -> None:
@@ -1157,4 +1502,7 @@ def test_project_trade_csv_schema_keeps_source_and_exit_fields() -> None:
     assert "entry_sleeve_id" in projected.columns
     assert projected.loc[0, "exit_owner"] == "global_risk_override"
     assert projected.loc[0, "entry_alpha_id"] == "breakout_55"
+
+
+
 

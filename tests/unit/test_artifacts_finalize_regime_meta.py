@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 
@@ -71,7 +71,7 @@ def test_ensure_standard_artifacts_writes_regime_engine_snapshot(tmp_path) -> No
     assert out["status"] == "OK"
     assert run_meta["regime"]["engine"] == "market_regime_framework"
     assert run_meta["regime"]["regime_semantics"] == "formal_multi_factor_regime"
-    assert run_meta["regime"]["state_contract"]["primary_states"] == ["BULL", "TRANS_UP", "LIGHT", "TRANS_DOWN", "RISK_OFF"]
+    assert run_meta["regime"]["state_contract"]["primary_states"] == ["BULL", "TRANS_UP", "TRANS_DOWN", "RISK_OFF"]
     assert run_meta["regime"]["feature_availability_contract"]["required_blocks"] == ["trend_block", "risk_block"]
     assert run_meta["governed_a_share"]["stock_alpha_core"]["sleeve_id"] == "cn_stock_trend_alpha_core"
     assert run_meta["governed_a_share"]["stock_alpha_core"]["legacy_anchor"] == "baseline_V10.1"
@@ -94,7 +94,7 @@ def test_ensure_standard_artifacts_writes_regime_audit_bundle(tmp_path) -> None:
             [
                 "date,nav,market_state,trade_mode,regime_engine,regime_confidence,regime_duration_bars,regime_transition_reason,feature_availability_json,risk_budget_multiplier,reason_codes_json,subscores_json,block_scores_json,manual_override_json,state_stability_metrics_json,base_state_5,effective_state_5,coarse_state,effective_coarse_state,defense_bias",
                 '2026-03-02,1.0,BULL,TREND_MAIN,market_regime_framework,0.82,6,,"{""trend_block"": true, ""risk_block"": true}",1.0,"[""BULL_CONFIRMED""]","{""technical"": 0.82, ""sentiment"": null, ""macro_global"": null}","{""trend_block"": {""support"": 0.8, ""stress"": 0.1, ""net"": 0.7}}","{""active"": false, ""reason"": null, ""scope"": null, ""actor"": null}","{""pending_transition"": false, ""cooldown_active"": false}","BULL","BULL","RISK_ON","RISK_ON",0.0',
-                '2026-03-03,1.1,TRANS_DOWN,TREND_LIGHT,market_regime_framework,0.44,1,RISK_BLOCK_WEAKNESS,"{""trend_block"": true, ""risk_block"": false}",0.35,"[""RISK_BLOCK_WEAKNESS""]","{""technical"": 0.44, ""sentiment"": 0.1, ""macro_global"": -0.2}","{""risk_block"": {""support"": 0.2, ""stress"": 0.9, ""net"": -0.7}}","{""active"": true, ""reason"": ""MANUAL_REVIEW"", ""scope"": ""cn_a_mainline"", ""actor"": ""pm"", ""target_state_5"": ""LIGHT""}","{""pending_transition"": true, ""cooldown_active"": false}","TRANS_DOWN","LIGHT","RISK_OFF","NEUTRAL",0.7',
+                '2026-03-03,1.1,TRANS_DOWN,TREND_LIGHT,market_regime_framework,0.44,1,RISK_BLOCK_WEAKNESS,"{""trend_block"": true, ""risk_block"": false}",0.35,"[""RISK_BLOCK_WEAKNESS""]","{""technical"": 0.44, ""sentiment"": 0.1, ""macro_global"": -0.2}","{""risk_block"": {""support"": 0.2, ""stress"": 0.9, ""net"": -0.7}}","{""active"": true, ""reason"": ""MANUAL_REVIEW"", ""scope"": ""cn_a_mainline"", ""actor"": ""pm"", ""target_state_5"": ""LIGHT""}","{""pending_transition"": true, ""cooldown_active"": false}","TRANS_DOWN","TRANS_UP","RISK_OFF","RISK_ON",0.7',
             ]
         ),
         encoding="utf-8",
@@ -155,17 +155,17 @@ def test_ensure_standard_artifacts_writes_regime_audit_bundle(tmp_path) -> None:
     assert summary["summary"]["switch_count"] == 1
     assert summary["latest_state"]["why_today"] == "RISK_BLOCK_WEAKNESS"
     assert summary["latest_state"]["base_state_5"] == "TRANS_DOWN"
-    assert summary["latest_state"]["effective_state_5"] == "LIGHT"
+    assert summary["latest_state"]["effective_state_5"] == "TRANS_UP"
     assert summary["latest_state"]["coarse_state"] == "RISK_OFF"
     assert summary["latest_state"]["reason_codes"] == ["RISK_BLOCK_WEAKNESS"]
     assert summary["latest_state"]["manual_override"]["active"] is True
-    assert summary["latest_state"]["manual_override"]["target_state_5"] == "LIGHT"
+    assert summary["latest_state"]["manual_override"]["target_state_5"] == "TRANS_UP"
 
     run_meta = json.loads((results_dir / "run_meta.json").read_text(encoding="utf-8"))
     assert run_meta["regime"]["latest_state"]["base_state"] == "TRANS_DOWN"
-    assert run_meta["regime"]["latest_state"]["effective_state"] == "LIGHT"
+    assert run_meta["regime"]["latest_state"]["effective_state"] == "TRANS_UP"
     assert run_meta["regime"]["latest_state"]["coarse_state"] == "RISK_OFF"
-    assert run_meta["regime"]["latest_state"]["effective_coarse_state"] == "NEUTRAL"
+    assert run_meta["regime"]["latest_state"]["effective_coarse_state"] == "RISK_ON"
     assert run_meta["regime"]["latest_state"]["risk_budget_multiplier"] == 0.35
     assert run_meta["regime"]["latest_state"]["defense_bias"] == 0.7
     assert run_meta["regime"]["latest_state"]["block_scores"]["risk_block"]["net"] == -0.7
@@ -504,7 +504,7 @@ def test_ensure_standard_artifacts_writes_cn_etf_beta_phase1_summary(tmp_path) -
     assert etf_beta["source_entry_type"] == "cn_etf_research_entry"
     assert etf_beta["eligible_etfs"] == ["510050.SH", "510300.SH", "510500.SH", "512100.SH"]
     assert etf_beta["selected_etfs"] == ["510300.SH", "512100.SH"]
-    assert etf_beta["out_of_scope_etfs"] == ["511010.SH", "518880.SH"]
+    assert etf_beta["out_of_scope_etfs"] == ["518880.SH"]
     assert etf_beta["runtime_reason_codes"] == ["ETF_BETA_WEEKLY_SELECTION_ACTIVE", "ETF_BETA_VOL_TARGET_ACTIVE"]
     assert etf_beta["target_selected_count"] == 2
     assert etf_beta["target_exposure"] == 0.2
@@ -544,7 +544,6 @@ def test_ensure_standard_artifacts_writes_cn_etf_beta_phase1_summary(tmp_path) -
     assert run_meta["attribution"]["summary"]["sleeve_log_count"] == 1
     assert run_meta["governed_snapshot"]["attribution_summary"]["sleeve_log_count"] == 1
     assert run_meta["governed_snapshot"]["sleeve_selection_summary"]["cn_etf_beta"]["out_of_scope_etfs"] == [
-        "511010.SH",
         "518880.SH",
     ]
     assert run_meta["governed_snapshot"]["sleeve_selection_summary"]["cn_etf_beta"]["target_selected_count"] == 2
@@ -555,3 +554,4 @@ def test_ensure_standard_artifacts_writes_cn_etf_beta_phase1_summary(tmp_path) -
     audit = json.loads((results_dir / "audit.json").read_text(encoding="utf-8"))
     assert audit["attribution_audit"]["summary"]["sleeve_log_count"] == 1
     assert (results_dir / "attribution_audit.json").exists()
+

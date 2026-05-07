@@ -30,6 +30,7 @@ from backend.core.core.types import Side
 from backend.core.engine_vector.signal_provider import DaySignals
 from backend.core.services.sim_account_reconcile_service import (
     load_latest_reconcile_run,
+    load_latest_reconcile_summary,
     run_position_aware_reconcile,
 )
 from backend.core.services.sim_account_service import store_holdings_snapshot
@@ -285,6 +286,14 @@ def test_run_position_aware_reconcile_builds_buy_sell_hold_and_caps_sellable_qty
     latest = load_latest_reconcile_run(results_root, "paper_a_share_main")
     assert latest is not None
     assert latest["reconcile_id"] == payload["reconcile_id"]
+    summary = load_latest_reconcile_summary(results_root, "paper_a_share_main")
+    assert summary is not None
+    assert summary["reconcile_id"] == payload["reconcile_id"]
+    assert summary["object_type"] == "reconcile_summary"
+    assert summary["object_scope"] == "account_ops"
+    assert summary["source_kind"] == "derived_summary"
+    assert summary["summary"]["buy_count"] == 1
+    assert (results_root / "ops" / "sim_account" / "paper_a_share_main" / "reconcile" / "summary" / "latest.json").exists()
 
 
 @pytest.mark.parametrize(

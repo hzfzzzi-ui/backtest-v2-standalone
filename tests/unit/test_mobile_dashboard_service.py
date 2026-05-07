@@ -185,7 +185,6 @@ def _seed_reconcile(
             "trade_mode": "TREND_MAIN",
             "effective_max_positions": 10,
         },
-        "execution_intent": {},
     }
     account_root = results_root / "ops" / "sim_account" / "paper_a_share_main" / "reconcile"
     _write_json(account_root / "latest.json", payload)

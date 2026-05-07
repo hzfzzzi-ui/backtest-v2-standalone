@@ -10,7 +10,7 @@ def test_append_experiment_to_baseline_appends_fail_and_only_promotes_pass(monke
     monkeypatch.setenv("RESULTS_ROOT", str(tmp_path / "outputs"))
 
     fail_result = baseline_report_service.append_experiment_to_baseline(
-        baseline_id="baseline_V10",
+        baseline_id="baseline_V10_1",
         exp_id="exp_fail",
         study_id="v10/demo",
         title="Demo Study",
@@ -21,12 +21,12 @@ def test_append_experiment_to_baseline_appends_fail_and_only_promotes_pass(monke
         window_key="main",
         variant_name="B0",
     )
-    baseline_dir = tmp_path / "outputs" / "baselines" / "baseline_V10"
+    baseline_dir = tmp_path / "outputs" / "baselines" / "baseline_V10_1"
     assert fail_result["champion_updated"] is False
     assert not (baseline_dir / "machine" / "latest_champion.json").exists()
 
     pass_result = baseline_report_service.append_experiment_to_baseline(
-        baseline_id="baseline_V10",
+        baseline_id="baseline_V10_1",
         exp_id="exp_pass",
         study_id="v10/demo",
         title="Demo Study",

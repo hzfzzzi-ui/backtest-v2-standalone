@@ -187,7 +187,11 @@ def _make_exp_dir(
 
 def test_load_contract_has_foundation_baseline() -> None:
     contract = _load_contract(Path("backend/scripts/ops/v2_backend_refactor_baseline_contract.json"))
-    assert contract["baseline_exp_id"] == "exp_20260314_144548534_7db9"
+    assert contract["baseline_exp_id"] == "exp_20260426_005716047_8650"
+    assert contract["current_anchor"]["baseline_id"] == "CN_STOCK_ETF_FORMAL_V1"
+    missing = {row["exp_id"] for row in contract["historical_missing_anchors"]}
+    assert "exp_20260314_144548534_7db9" in missing
+    assert "exp_20260328_220801073_478b" in missing
     assert "portfolio_daily.csv" in dict((contract.get("protected_artifacts") or {}).get("semantic_csv") or {})
 
 

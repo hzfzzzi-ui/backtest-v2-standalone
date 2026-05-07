@@ -164,12 +164,14 @@ def test_create_provider_from_payload_prefers_materialized_config_json(monkeypat
         captured["payload"] = json.loads(Path(path).read_text(encoding="utf-8"))
         return _Cfg(), "hash"
 
-    def _fake_provider(**kwargs):
-        captured["provider_kwargs"] = kwargs
+    def _fake_build_runtime_provider(cfg_obj, rules_path, *, use_cache=False):
+        captured["provider_cfg_obj"] = cfg_obj
+        captured["provider_rules_path"] = rules_path
+        captured["provider_use_cache"] = use_cache
         return "provider"
 
     monkeypatch.setattr(moneyflow_divergence, "load_config", _fake_load_config)
-    monkeypatch.setattr(moneyflow_divergence, "PostgresDataProvider", _fake_provider)
+    monkeypatch.setattr(moneyflow_divergence, "build_runtime_provider_from_config", _fake_build_runtime_provider)
 
     provider, snapshot, config_hash = _create_provider_from_payload(
         {
@@ -187,6 +189,8 @@ def test_create_provider_from_payload_prefers_materialized_config_json(monkeypat
     assert snapshot["data_source"]["stocks_table"] == "pams_ohlcv_daily_v2"
     assert config_hash == "hash"
     assert captured["payload"]["data_source"]["stocks_table"] == "pams_ohlcv_daily_v2"
+    assert str(captured["provider_rules_path"]).endswith("config\\rules.csv")
+    assert captured["provider_use_cache"] is False
 
 
 def test_build_daily_divergence_frame_requires_full_20d_window_and_non_null_moneyflow() -> None:

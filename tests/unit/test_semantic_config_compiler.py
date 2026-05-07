@@ -230,11 +230,11 @@ def test_validate_semantic_config_json_accepts_governed_etf_rule_family_fields()
             "layering_policy": "light_trans_down_accumulate",
             "target_exposure": 0.2,
             "min_deployable_exposure": 0.1,
-            "target_exposure_by_state_5": {"BULL": 0.3, "LIGHT": 0.15},
-            "min_deployable_exposure_by_state_5": {"BULL": 0.15, "LIGHT": 0.1},
-            "target_selected_count_by_state_5": {"BULL": 2, "LIGHT": 2, "TRANS_DOWN": 1},
+            "target_exposure_by_state_5": {"BULL": 0.3, "TRANS_UP": 0.15},
+            "min_deployable_exposure_by_state_5": {"BULL": 0.15, "TRANS_UP": 0.1},
+            "target_selected_count_by_state_5": {"BULL": 2, "TRANS_UP": 2, "TRANS_DOWN": 1},
             "fallback_allowed": True,
-            "fallback_allowed_by_state_5": {"BULL": True, "LIGHT": True, "TRANS_DOWN": True, "RISK_OFF": False},
+            "fallback_allowed_by_state_5": {"BULL": True, "TRANS_UP": True, "TRANS_DOWN": True, "RISK_OFF": False},
             "vol_target_window": 20,
             "vol_target_annualized_target": 0.18,
             "vol_target_min_scale": 0.35,
@@ -258,22 +258,94 @@ def test_validate_semantic_config_json_accepts_governed_etf_rule_family_fields()
     assert etf_beta["template_target_formal_symbols"][-1] == "DIVIDEND_STANDARD"
     assert etf_beta["growth_seat_symbol"] == "159915.SZ"
     assert etf_beta["absolute_filter_mode"] == "ma200_and_positive_12m"
+
+
+def test_validate_semantic_config_json_accepts_phase1_allocation_engine_fields() -> None:
+    payload = _valid_config()
+    payload["asset_scope"] = "cn_etf"
+    payload["governed_a_share"] = {
+        "enabled": True,
+        "etf_beta": {
+            "research_rule_family": "phase1_allocation_engine_v1",
+            "strategy_role": "phase1_allocation_engine",
+            "source_entry_type": "cn_etf_phase1_allocation_entry",
+            "governor_boundary_mode": "consume_governor_sleeve_budget",
+            "local_policy_mode": "phase1_bucket_allocation",
+            "boundary_policy_mode": "formal_phase1_document_aligned_v1",
+            "exposure_policy_family": "phase1_governed_allocation_v1",
+            "policy_scope": "broad_based_only",
+            "broad_based_only": True,
+            "allocation_engine_mode": "phase1_three_bucket_v1",
+            "bucket_policy_profile": "phase1_state_template_v1",
+            "core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+            "limited_defense_candidates": ["511010.SH"],
+            "absolute_filter_mode": "none",
+            "fallback_mode": "none",
+            "max_selected_symbols": 3,
+            "bull_partial_overlay_pace_ratio": 0.5,
+            "equity_core_bucket_by_state_5": {
+                "BULL": 0.9,
+                "TRANS_UP": 0.85,
+                "TRANS_UP": 0.75,
+                "TRANS_DOWN": 0.45,
+                "RISK_OFF": 0.15,
+            },
+            "defense_tilt_bucket_by_state_5": {
+                "BULL": 0.0,
+                "TRANS_UP": 0.05,
+                "TRANS_UP": 0.05,
+                "TRANS_DOWN": 0.10,
+                "RISK_OFF": 0.15,
+            },
+            "cash_buffer_bucket_by_state_5": {
+                "BULL": 0.10,
+                "TRANS_UP": 0.10,
+                "TRANS_UP": 0.20,
+                "TRANS_DOWN": 0.45,
+                "RISK_OFF": 0.70,
+            },
+            "equity_core_tilt_limits": {
+                "510300.SH": 0.55,
+                "510500.SH": 0.35,
+                "510050.SH": 0.55,
+                "512100.SH": 0.15,
+            },
+            "defense_asset_weights": {"511010.SH": 1.0},
+        },
+    }
+
+    out = validate_semantic_config_json(payload)
+
+    etf_beta = out["governed_a_share"]["etf_beta"]
+    assert etf_beta["research_rule_family"] == "phase1_allocation_engine_v1"
+    assert etf_beta["strategy_role"] == "phase1_allocation_engine"
+    assert etf_beta["source_entry_type"] == "cn_etf_phase1_allocation_entry"
+    assert etf_beta["governor_boundary_mode"] == "consume_governor_sleeve_budget"
+    assert etf_beta["local_policy_mode"] == "phase1_bucket_allocation"
+    assert etf_beta["boundary_policy_mode"] == "formal_phase1_document_aligned_v1"
+    assert etf_beta["allocation_engine_mode"] == "phase1_three_bucket_v1"
+    assert etf_beta["bucket_policy_profile"] == "phase1_state_template_v1"
+    assert etf_beta["absolute_filter_mode"] == "none"
+    assert etf_beta["fallback_mode"] == "none"
+    assert etf_beta["equity_core_bucket_by_state_5"]["TRANS_UP"] == 0.75
+    assert etf_beta["defense_asset_weights"]["511010.SH"] == 1.0
     assert etf_beta["rebalance_frequency"] == "monthly"
-    assert etf_beta["fallback_symbol"] == "511010.SH"
-    assert etf_beta["relative_strength_mid_window"] == 126
-    assert etf_beta["relative_strength_mid_weight"] == 0.3
-    assert etf_beta["max_selected_symbols"] == 2
-    assert etf_beta["exposure_policy_family"] == "broad_based_standalone_mainline_v1"
+    assert etf_beta["fallback_symbol"] is None
+    assert etf_beta["relative_strength_mid_window"] is None
+    assert etf_beta["relative_strength_mid_weight"] == 0.0
+    assert etf_beta["max_selected_symbols"] == 3
+    assert etf_beta["exposure_policy_family"] == "phase1_governed_allocation_v1"
     assert etf_beta["policy_scope"] == "broad_based_only"
     assert etf_beta["broad_based_only"] is True
-    assert etf_beta["layering_policy"] == "light_trans_down_accumulate"
-    assert etf_beta["target_exposure"] == 0.2
-    assert etf_beta["min_deployable_exposure"] == 0.1
-    assert etf_beta["target_exposure_by_state_5"] == {"BULL": 0.3, "LIGHT": 0.15}
-    assert etf_beta["min_deployable_exposure_by_state_5"] == {"BULL": 0.15, "LIGHT": 0.1}
-    assert etf_beta["target_selected_count_by_state_5"] == {"BULL": 2, "LIGHT": 2, "TRANS_DOWN": 1}
-    assert etf_beta["fallback_allowed"] is True
-    assert etf_beta["fallback_allowed_by_state_5"] == {"BULL": True, "LIGHT": True, "TRANS_DOWN": True, "RISK_OFF": False}
+    assert etf_beta["layering_policy"] == "none"
+    assert etf_beta["target_exposure"] is None
+    assert etf_beta["min_deployable_exposure"] is None
+    assert etf_beta["target_exposure_by_state_5"] == {}
+    assert etf_beta["min_deployable_exposure_by_state_5"] == {}
+    assert etf_beta["target_selected_count_by_state_5"] == {}
+    assert etf_beta["fallback_allowed"] is None
+    assert etf_beta["fallback_allowed_by_state_5"] == {}
+    assert etf_beta["bull_partial_overlay_pace_ratio"] == pytest.approx(0.5)
     assert etf_beta["vol_target_window"] == 20
     assert etf_beta["vol_target_annualized_target"] == 0.18
 
@@ -321,7 +393,7 @@ def test_compile_semantic_config_json_preserves_governed_a_share_contract() -> N
     payload["governed_a_share"] = {
         "enabled": True,
         "stock_alpha_core": {"sleeve_id": "cn_stock_trend_alpha_core", "legacy_anchor": "baseline_V10.1"},
-        "etf_beta": {"limited_defense_candidates": ["512890.SH"]},
+        "etf_beta": {"limited_defense_candidates": ["511010.SH"]},
     }
 
     compiled = compile_semantic_config_json(payload)
@@ -330,7 +402,7 @@ def test_compile_semantic_config_json_preserves_governed_a_share_contract() -> N
     assert resolved_json["governed_a_share"]["stock_alpha_core"]["sleeve_id"] == "cn_stock_trend_alpha_core"
     assert resolved_json["governed_a_share"]["stock_alpha_core"]["legacy_anchor"] == "baseline_V10.1"
     assert resolved_json["governed_a_share"]["stock_alpha_core"]["budget_semantics"] == "consume_governor_sleeve_budget"
-    assert resolved_json["governed_a_share"]["etf_beta"]["limited_defense_candidates"] == ["512890.SH"]
+    assert resolved_json["governed_a_share"]["etf_beta"]["limited_defense_candidates"] == ["511010.SH"]
 
 
 def test_compile_semantic_config_json_preserves_governed_etf_rule_family_fields() -> None:
@@ -372,11 +444,11 @@ def test_compile_semantic_config_json_preserves_governed_etf_rule_family_fields(
             "layering_policy": "light_accumulate",
             "target_exposure": 0.2,
             "min_deployable_exposure": 0.1,
-            "target_exposure_by_state_5": {"BULL": 0.3, "LIGHT": 0.15},
-            "min_deployable_exposure_by_state_5": {"BULL": 0.15, "LIGHT": 0.1},
-            "target_selected_count_by_state_5": {"BULL": 2, "LIGHT": 2},
+            "target_exposure_by_state_5": {"BULL": 0.3, "TRANS_UP": 0.15},
+            "min_deployable_exposure_by_state_5": {"BULL": 0.15, "TRANS_UP": 0.1},
+            "target_selected_count_by_state_5": {"BULL": 2, "TRANS_UP": 2},
             "fallback_allowed": True,
-            "fallback_allowed_by_state_5": {"BULL": True, "LIGHT": True, "RISK_OFF": False},
+            "fallback_allowed_by_state_5": {"BULL": True, "TRANS_UP": True, "RISK_OFF": False},
             "vol_target_window": 30,
             "vol_target_annualized_target": 0.16,
             "vol_target_min_scale": 0.4,
@@ -416,11 +488,11 @@ def test_compile_semantic_config_json_preserves_governed_etf_rule_family_fields(
     assert etf_beta["layering_policy"] == "light_trans_down_accumulate"
     assert etf_beta["target_exposure"] == 0.2
     assert etf_beta["min_deployable_exposure"] == 0.1
-    assert etf_beta["target_exposure_by_state_5"] == {"BULL": 0.3, "LIGHT": 0.15}
-    assert etf_beta["min_deployable_exposure_by_state_5"] == {"BULL": 0.15, "LIGHT": 0.1}
-    assert etf_beta["target_selected_count_by_state_5"] == {"BULL": 2, "LIGHT": 2}
+    assert etf_beta["target_exposure_by_state_5"] == {"BULL": 0.3, "TRANS_UP": 0.15}
+    assert etf_beta["min_deployable_exposure_by_state_5"] == {"BULL": 0.15, "TRANS_UP": 0.1}
+    assert etf_beta["target_selected_count_by_state_5"] == {"BULL": 2, "TRANS_UP": 2}
     assert etf_beta["fallback_allowed"] is True
-    assert etf_beta["fallback_allowed_by_state_5"] == {"BULL": True, "LIGHT": True, "RISK_OFF": False}
+    assert etf_beta["fallback_allowed_by_state_5"] == {"BULL": True, "TRANS_UP": True, "RISK_OFF": False}
     assert etf_beta["vol_target_window"] == 30
     assert etf_beta["vol_target_annualized_target"] == 0.16
 
@@ -463,6 +535,9 @@ def test_validate_semantic_config_json_accepts_market_filter_ab_sequence_fields(
         "trans_down_multiplier": 0.5,
         "trans_up_multiplier": 0.25,
         "freeze_trans_up_entries": True,
+        "allow_trans_up_recovery_entries_when_benchmark_off": True,
+        "trans_up_recovery_entry_scale_when_benchmark_off": 0.3,
+        "trans_up_recovery_confirmed_top_up_scale_when_benchmark_on": 0.5,
     }
 
     out = validate_semantic_config_json(payload)
@@ -472,6 +547,9 @@ def test_validate_semantic_config_json_accepts_market_filter_ab_sequence_fields(
     assert market_filter["trans_down_multiplier"] == 0.5
     assert market_filter["trans_up_multiplier"] == 0.25
     assert market_filter["freeze_trans_up_entries"] is True
+    assert market_filter["allow_trans_up_recovery_entries_when_benchmark_off"] is True
+    assert market_filter["trans_up_recovery_entry_scale_when_benchmark_off"] == 0.3
+    assert market_filter["trans_up_recovery_confirmed_top_up_scale_when_benchmark_on"] == 0.5
 
 
 def test_compile_semantic_config_json_preserves_market_filter_ab_sequence_fields() -> None:
@@ -486,6 +564,9 @@ def test_compile_semantic_config_json_preserves_market_filter_ab_sequence_fields
         "trans_down_multiplier": 0.5,
         "trans_up_multiplier": 0.25,
         "freeze_trans_up_entries": True,
+        "allow_trans_up_recovery_entries_when_benchmark_off": True,
+        "trans_up_recovery_entry_scale_when_benchmark_off": 0.3,
+        "trans_up_recovery_confirmed_top_up_scale_when_benchmark_on": 0.5,
     }
 
     compiled = compile_semantic_config_json(
@@ -500,6 +581,36 @@ def test_compile_semantic_config_json_preserves_market_filter_ab_sequence_fields
     assert market_filter["trans_down_multiplier"] == 0.5
     assert market_filter["trans_up_multiplier"] == 0.25
     assert market_filter["freeze_trans_up_entries"] is True
+    assert market_filter["allow_trans_up_recovery_entries_when_benchmark_off"] is True
+    assert market_filter["trans_up_recovery_entry_scale_when_benchmark_off"] == 0.3
+    assert market_filter["trans_up_recovery_confirmed_top_up_scale_when_benchmark_on"] == 0.5
+
+
+def test_runner_market_filter_defaults_trans_up_recovery_gate_to_enabled() -> None:
+    from backend.api.backtest_v2.runner_config_risk_exit import _apply_market_filter_cfg
+
+    cfg: dict[str, object] = {}
+    pos_risk = {
+        "market_filter": {
+            "enabled": True,
+            "long_ma_window": 160,
+            "slope_ma_period": 50,
+            "slope_window": 10,
+            "bull_multiplier": 1.8,
+            "light_multiplier": 0.6,
+            "trans_down_multiplier": 0.5,
+            "trans_up_multiplier": 0.25,
+            "freeze_trans_up_entries": True,
+        }
+    }
+
+    _apply_market_filter_cfg(cfg, pos_risk)
+
+    market_filter = cfg["market_filter"]
+    assert isinstance(market_filter, dict)
+    assert market_filter["allow_trans_up_recovery_entries_when_benchmark_off"] is True
+    assert market_filter["trans_up_recovery_entry_scale_when_benchmark_off"] == 1.0
+    assert market_filter["trans_up_recovery_confirmed_top_up_scale_when_benchmark_on"] == 0.0
 
 
 def test_validate_semantic_config_json_accepts_bull_breakout_quality_veto_fields() -> None:
@@ -1360,6 +1471,50 @@ def test_validate_semantic_config_json_rejects_unsupported_multi_alpha_module() 
         raise AssertionError("expected HTTPException for unsupported multi-alpha module")
 
 
+def test_validate_semantic_config_json_rejects_invalid_moneyflow_overlay_contract() -> None:
+    payload = _valid_config()
+    payload["asset_context"] = {
+        "asset_scope": "cn_a_equity",
+        "moneyflow_overlay": {
+            "enabled": True,
+            "mode": "veto_bottom20",
+            "factor_role": "context",
+            "factor_snapshot_path": "outputs/demo/factor_snapshot.csv",
+            "source_kind": "daily_factor_snapshot",
+        },
+    }
+    try:
+        validate_semantic_config_json(payload)
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "asset_context.moneyflow_overlay.mode" in str(exc.detail)
+    else:
+        raise AssertionError("expected HTTPException for invalid moneyflow overlay contract")
+
+
+def test_validate_semantic_config_json_rejects_invalid_holding_exit_fragility_contract() -> None:
+    payload = _valid_config()
+    payload["asset_context"] = {
+        "asset_scope": "cn_a_equity",
+        "holding_exit_fragility": {
+            "enabled": True,
+            "factor_role": "lifecycle",
+            "apply_layer": "candidate",
+            "source_kind": "daily_factor_snapshot",
+            "factor_snapshot_path": "outputs/demo/factor_snapshot.csv",
+            "factor_id": "pre_profit_failure_context_risk",
+            "action": "watch",
+        },
+    }
+    try:
+        validate_semantic_config_json(payload)
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "asset_context.holding_exit_fragility.apply_layer" in str(exc.detail)
+    else:
+        raise AssertionError("expected HTTPException for invalid holding_exit_fragility contract")
+
+
 def test_compile_semantic_config_json_emits_provenance_and_compiled_plan() -> None:
     compiled = compile_semantic_config_json(
         _valid_config(),
@@ -1370,4 +1525,5 @@ def test_compile_semantic_config_json_emits_provenance_and_compiled_plan() -> No
     assert compiled["resolved_config"]["schema_version"] == SEMANTIC_CONFIG_SCHEMA_VERSION
     assert compiled["resolved_config"]["config_source"] == "config_json"
     assert compiled["compiled_plan"]["runtime_config"]["strategy"]["name"] == "breakout_trend"
+
 

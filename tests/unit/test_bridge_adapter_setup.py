@@ -126,6 +126,9 @@ def test_build_runtime_bootstrap_normalizes_runtime_defaults() -> None:
     assert bootstrap.dd_reduce_scale == 0.4
     assert bootstrap.portfolio_mode == "equal_8"
     assert bootstrap.min_trade_price == 7.5
+    assert bootstrap.dividend_cash_timing_mode == "pay_date"
+    assert bootstrap.dividend_events_ex_idx == {}
+    assert bootstrap.dividend_events_pay_idx == {}
     assert bootstrap.open_idx[(request.data_bundle.trading_days[0], "sh600000")] > 0
     assert bootstrap.close_idx[(request.data_bundle.trading_days[0], "sh600000")] > 0
     assert bootstrap.volume_idx[(request.data_bundle.trading_days[0], "sh600000")] > 0
@@ -140,6 +143,7 @@ def test_initialize_runtime_state_helpers_start_clean() -> None:
     counters = initialize_runtime_counters()
 
     assert ledger.cash == 123456.0
+    assert ledger.dividend_receivable == 0.0
     assert ledger.peak_nav == 123456.0
     assert ledger.prev_nav == 123456.0
     assert ledger.positions == {}

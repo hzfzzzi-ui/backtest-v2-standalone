@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from backend.core.core.models import Signal
 from backend.core.core.types import Side
 from backend.core.engine_vector.signal_provider import DaySignals, ExitCounts
+from backend.core.stage_pipeline.adapters.candidate_boundary import build_candidate_boundary_result
+from backend.core.stage_pipeline.adapters.candidate_plan import build_candidate_plan_result
 from backend.core.stage_pipeline.adapters.fill_accounting import apply_open_fills
 from backend.core.stage_pipeline.adapters.lineage import build_execution_lineage_audit, finalize_execution_lineage
 from backend.core.stage_pipeline.adapters.order_planning import build_s7_order_stage_output
@@ -49,11 +51,36 @@ def _sell_signal() -> Signal:
     )
 
 
+def _prepare_candidate_contracts(runtime: SimpleNamespace) -> None:
+    current_day = runtime._current_day
+    candidate_boundary = build_candidate_boundary_result(
+        runtime,
+        day=current_day["day"],
+        controls=current_day["controls"],
+        day_signals=current_day["day_signals"],
+    )
+    candidate_plan = build_candidate_plan_result(
+        runtime,
+        day=current_day["day"],
+        controls=current_day["controls"],
+        day_signals=current_day["day_signals"],
+        candidate_boundary=candidate_boundary,
+        next_open=current_day["next_open"],
+        nav=float(current_day["nav"]),
+    )
+    current_day["candidate_boundary"] = candidate_boundary
+    current_day["candidate_plan"] = candidate_plan
+
+
 def test_signal_order_fill_lineage_ids_propagate_end_to_end(monkeypatch) -> None:
     buy_signal = _buy_signal()
 
-    def _fake_build_rebalance_orders(**kwargs):
-        signal = kwargs["buy_signals"][0]
+    def _fake_build_execution_orders_from_candidate_plan(**kwargs):
+        signal = kwargs["planned_items"][0]["signal"]
+        kwargs["debug_plan"]["reject_reason_counts"] = {}
+        kwargs["debug_plan"]["execution_kernel_reject_reason_counts"] = {}
+        kwargs["debug_plan"]["execution_kernel_reject_count"] = 0
+        kwargs["debug_plan"]["execution_kernel_selected_symbols"] = ["sh600000"]
         return [
             SimpleNamespace(
                 side=Side.BUY,
@@ -65,8 +92,8 @@ def test_signal_order_fill_lineage_ids_propagate_end_to_end(monkeypatch) -> None
         ]
 
     monkeypatch.setattr(
-        "backend.core.stage_pipeline.adapters.order_planning.build_rebalance_orders",
-        _fake_build_rebalance_orders,
+        "backend.core.stage_pipeline.adapters.order_planning.build_execution_orders_from_candidate_plan",
+        _fake_build_execution_orders_from_candidate_plan,
     )
 
     runtime = SimpleNamespace(
@@ -134,6 +161,7 @@ def test_signal_order_fill_lineage_ids_propagate_end_to_end(monkeypatch) -> None
         _prepared_day_index=0,
         _apply_daily_decision_diagnostics=lambda **_kwargs: None,
     )
+    _prepare_candidate_contracts(runtime)
 
     output = build_s7_order_stage_output(runtime)
     order_payload = output.payload["next_day_orders"][0]
@@ -160,9 +188,13 @@ def test_record_scheduled_orders_preserves_sell_buy_execution_order(monkeypatch)
     sell_signal = _sell_signal()
     buy_signal = _buy_signal()
 
-    def _fake_build_rebalance_orders(**kwargs):
+    def _fake_build_execution_orders_from_candidate_plan(**kwargs):
         sell = kwargs["sell_signals"][0]
-        buy = kwargs["buy_signals"][0]
+        buy = kwargs["planned_items"][0]["signal"]
+        kwargs["debug_plan"]["reject_reason_counts"] = {}
+        kwargs["debug_plan"]["execution_kernel_reject_reason_counts"] = {}
+        kwargs["debug_plan"]["execution_kernel_reject_count"] = 0
+        kwargs["debug_plan"]["execution_kernel_selected_symbols"] = ["sh600000"]
         return [
             SimpleNamespace(
                 side=Side.SELL,
@@ -181,8 +213,8 @@ def test_record_scheduled_orders_preserves_sell_buy_execution_order(monkeypatch)
         ]
 
     monkeypatch.setattr(
-        "backend.core.stage_pipeline.adapters.order_planning.build_rebalance_orders",
-        _fake_build_rebalance_orders,
+        "backend.core.stage_pipeline.adapters.order_planning.build_execution_orders_from_candidate_plan",
+        _fake_build_execution_orders_from_candidate_plan,
     )
 
     runtime = SimpleNamespace(
@@ -287,6 +319,7 @@ def test_record_scheduled_orders_preserves_sell_buy_execution_order(monkeypatch)
         _prepared_day_index=0,
         _apply_daily_decision_diagnostics=lambda **_kwargs: None,
     )
+    _prepare_candidate_contracts(runtime)
 
     output = build_s7_order_stage_output(runtime)
 
@@ -301,3 +334,41 @@ def test_record_scheduled_orders_preserves_sell_buy_execution_order(monkeypatch)
 
     ledger_rows = finalize_execution_lineage(runtime)
     assert build_execution_lineage_audit(ledger_rows)["status"] == "PASS"
+
+
+def test_execution_lineage_audit_tracks_planning_and_fill_cash_layers() -> None:
+    rows = [
+        {
+            "signal_id": "sig_1",
+            "signal_date": "2026-03-02",
+            "order_id": "ord_1",
+            "scheduled_date": "2026-03-03",
+            "last_scheduled_date": "2026-03-03",
+            "schedule_attempts": 1,
+            "fill_id": "",
+            "fill_date": "",
+            "symbol": "sh600001",
+            "side": "BUY",
+            "qty": 100,
+            "reason_code": "ENTRY",
+            "signal_alpha_id": "breakout_55",
+            "signal_sleeve_id": "trend",
+            "entry_alpha_id": "breakout_55",
+            "entry_sleeve_id": "trend",
+            "terminal_status": "rejected",
+            "terminal_reason": "INSUFFICIENT_CASH",
+            "deferred_count": 0,
+        }
+    ]
+
+    audit = build_execution_lineage_audit(
+        rows,
+        planning_reject_reason_counts={"SKIP_NO_CASH": 2},
+        fill_reject_reason_counts={"INSUFFICIENT_CASH": 1},
+    )
+
+    assert audit["summary"]["planning_reject_reason_counts"] == {"SKIP_NO_CASH": 2}
+    assert audit["summary"]["fill_reject_reason_counts"] == {"INSUFFICIENT_CASH": 1}
+    assert audit["summary"]["planning_cash_skip_count"] == 2
+    assert audit["summary"]["fill_insufficient_cash_count"] == 1
+    assert audit["summary"]["terminal_reason_counts"]["INSUFFICIENT_CASH"] == 1

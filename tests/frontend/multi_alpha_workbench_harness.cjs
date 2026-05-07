@@ -1,12 +1,17 @@
-const fs = require('fs');
+﻿const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
-const BACKTEST_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'backtest_v2.js');
+const DESKTOP_HOST_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'desktop-shell', 'host.js');
+const DESKTOP_RUNTIME_SURFACE_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'desktop-shell', 'runtime-surface.js');
+const MULTI_ALPHA_CONSTANTS_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'state', 'multi-alpha-constants.js');
+const DESKTOP_APP_SHELL_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'desktop-shell', 'app-shell.js');
 const MULTI_ALPHA_UI_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'state', 'multi-alpha-ui.js');
 const CONFIG_DRAFT_CORE_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'state', 'config-draft-core.js');
-const UI_CONTROLS_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'ui-controls.js');
+const CONFIG_WORKSPACE_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'desktop-shell', 'config-workspace.js');
+const RUN_ORCHESTRATION_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'desktop-shell', 'run-orchestration.js');
+const SAVE_ORCHESTRATION_SCRIPT = path.join(PROJECT_ROOT, 'frontend', 'assets', 'js', 'desktop-shell', 'save-orchestration.js');
 const ACCEPTANCE_REQUEST = path.join(PROJECT_ROOT, 'backend', 'scripts', 'ops', 'multi_alpha_phase1_acceptance.request.json');
 
 function clone(value) {
@@ -124,6 +129,10 @@ class FakeElement {
     this.attributes[String(name)] = String(value);
   }
 
+  removeAttribute(name) {
+    delete this.attributes[String(name)];
+  }
+
   getAttribute(name) {
     return this.attributes[String(name)] ?? null;
   }
@@ -170,9 +179,11 @@ function registerElement(elements, id, tagName = 'input', props = {}) {
 
 function defaultElementMap(elements) {
   registerElement(elements, 'wbAssetScopeLabel', 'label');
+  registerElement(elements, 'wbAssetScope', 'select', { value: 'cn_a_equity' });
   registerElement(elements, 'wbUniverseModeLabel', 'label');
   registerElement(elements, 'wbSymbolsLabel', 'label');
   registerElement(elements, 'wbPitStatusLabel', 'label');
+  registerElement(elements, 'wbPitStatus', 'div', { textContent: 'PIT 鍚敤' });
   registerElement(elements, 'wbBenchmarkLabel', 'label');
   registerElement(elements, 'wbDrawerTitle', 'div');
   registerElement(elements, 'wbGlobalAssetSummary', 'div');
@@ -211,6 +222,16 @@ function defaultElementMap(elements) {
   registerElement(elements, 'wbStageS7Label', 'span');
   registerElement(elements, 'wbStageS8Label', 'span');
   registerElement(elements, 'wbStageS9Label', 'span');
+  registerElement(elements, 'wbUniverseModeWrap', 'div', { hidden: false });
+  registerElement(elements, 'wbSymbolsWrap', 'div', { hidden: false, style: {} });
+  registerElement(elements, 'wbEtfPresetWrap', 'div', { hidden: true });
+  registerElement(elements, 'wbStockBasicFiltersWrap', 'div', { hidden: false });
+  registerElement(elements, 'wbMinListDaysWrap', 'div', { hidden: false });
+  registerElement(elements, 'wbMinTurnoverWrap', 'div', { hidden: false });
+  registerElement(elements, 'wbIndustryFilterWrap', 'div', { hidden: false });
+  registerElement(elements, 'wbPitStatusWrap', 'div', { hidden: false });
+  registerElement(elements, 'wbMktCapWrap', 'div', { hidden: false });
+  registerElement(elements, 'wbIndustrySystemWrap', 'div', { hidden: false });
   registerElement(elements, 'wbEnableSignal', 'input', { checked: true });
   registerElement(elements, 'wbEnableComposition', 'input', { checked: false });
   registerElement(elements, 'wbUniverseMode', 'select', { value: 'HS300_ZZ500' });
@@ -468,13 +489,29 @@ function createWorkbenchHarness() {
   context.window.requestAnimationFrame = context.requestAnimationFrame;
   context.window.cancelAnimationFrame = context.cancelAnimationFrame;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync(BACKTEST_SCRIPT, 'utf8'), context, { filename: 'backtest_v2.js' });
+  vm.runInContext(fs.readFileSync(DESKTOP_HOST_SCRIPT, 'utf8'), context, { filename: 'desktop-shell/host.js' });
+  vm.runInContext(fs.readFileSync(DESKTOP_RUNTIME_SURFACE_SCRIPT, 'utf8'), context, { filename: 'desktop-shell/runtime-surface.js' });
+  vm.runInContext(fs.readFileSync(MULTI_ALPHA_CONSTANTS_SCRIPT, 'utf8'), context, { filename: 'state/multi-alpha-constants.js' });
+  vm.runInContext(fs.readFileSync(DESKTOP_APP_SHELL_SCRIPT, 'utf8'), context, { filename: 'desktop-shell/app-shell.js' });
   vm.runInContext(fs.readFileSync(MULTI_ALPHA_UI_SCRIPT, 'utf8'), context, { filename: 'multi-alpha-ui.js' });
-  Object.assign(context, context.window.multiAlphaUi || {});
   vm.runInContext(fs.readFileSync(CONFIG_DRAFT_CORE_SCRIPT, 'utf8'), context, { filename: 'config-draft-core.js' });
-  vm.runInContext(fs.readFileSync(UI_CONTROLS_SCRIPT, 'utf8'), context, { filename: 'ui-controls.js' });
-  vm.runInContext("this.__codexExports = { state, byId, buildConfigDraft, validateConfigDraft, applyConfigToUI, defaultComposeRows, defaultRegimeMatrix, syncAssetAwareShell, setDrawerPanel };", context);
+  vm.runInContext(fs.readFileSync(CONFIG_WORKSPACE_SCRIPT, 'utf8'), context, { filename: 'config-workspace.js' });
+  vm.runInContext(fs.readFileSync(RUN_ORCHESTRATION_SCRIPT, 'utf8'), context, { filename: 'run-orchestration.js' });
+  vm.runInContext(fs.readFileSync(SAVE_ORCHESTRATION_SCRIPT, 'utf8'), context, { filename: 'save-orchestration.js' });
+  vm.runInContext("this.__codexExports = { state, byId, buildConfigDraft, validateConfigDraft, applyConfigToUI, defaultComposeRows: () => JSON.parse(JSON.stringify((window.multiAlphaUi && window.multiAlphaUi.defaultComposeRows && window.multiAlphaUi.defaultComposeRows()) || [])), defaultRegimeMatrix: () => JSON.parse(JSON.stringify((window.multiAlphaUi && window.multiAlphaUi.defaultRegimeMatrix && window.multiAlphaUi.defaultRegimeMatrix()) || {})), syncAssetAwareShell, setDrawerPanel, serializeFrontendSemanticConfig: window.configDraftCore && window.configDraftCore.serializeFrontendSemanticConfig, buildFrontendSemanticPayload: window.buildFrontendSemanticPayload, sanitizeRuntimeConfigDraft: window.sanitizeRuntimeConfigDraft, sanitizePersistedConfigDraft: window.sanitizePersistedConfigDraft };", context);
   Object.assign(context, context.__codexExports || {});
+  const rawBuildConfigDraft = context.buildConfigDraft;
+  if (typeof rawBuildConfigDraft === 'function') {
+    context.buildConfigDraft = (...args) => JSON.parse(JSON.stringify(rawBuildConfigDraft(...args)));
+  }
+  const rawValidateConfigDraft = context.validateConfigDraft;
+  if (typeof rawValidateConfigDraft === 'function') {
+    context.validateConfigDraft = (...args) => JSON.parse(JSON.stringify(rawValidateConfigDraft(...args)));
+  }
+  const rawApplyConfigToUI = context.applyConfigToUI;
+  if (typeof rawApplyConfigToUI === 'function') {
+    context.applyConfigToUI = (...args) => JSON.parse(JSON.stringify(rawApplyConfigToUI(...args)));
+  }
   defaultElementMap(elements);
   patchWorkbench(context);
   context.state.mode = 'experiment';

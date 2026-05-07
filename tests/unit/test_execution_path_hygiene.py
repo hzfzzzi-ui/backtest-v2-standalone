@@ -9,7 +9,7 @@ BRIDGE_ADAPTER_PATH = Path("backend/core/stage_pipeline/adapters/bridge_adapter.
 PORTFOLIO_RUNTIME_PATH = Path("backend/core/portfolio/portfolio_runtime.py")
 PORTFOLIO_LOOP_PATH = Path("backend/core/portfolio/portfolio_loop.py")
 
-RETIRED_PATHS = (
+REMOVED_PATHS = (
     Path("backend/core/engine_vector/portfolio_simulator_strict.py"),
     Path("backend/core/engine_vector/strict_runtime_impl.py"),
     Path("backend/core/portfolio/portfolio_builder.py"),
@@ -29,8 +29,8 @@ def _import_targets(path: Path) -> set[str]:
     return targets
 
 
-def test_retired_execution_paths_are_removed() -> None:
-    for rel_path in RETIRED_PATHS:
+def test_removed_execution_paths_are_absent() -> None:
+    for rel_path in REMOVED_PATHS:
         assert not rel_path.exists(), rel_path.as_posix()
 
 
@@ -43,10 +43,10 @@ def test_runtime_modules_point_at_final_execution_paths() -> None:
     assert "backend.core.portfolio.portfolio_runtime" in loop_imports
 
 
-def test_active_backend_core_sources_no_longer_reference_retired_execution_paths() -> None:
+def test_active_backend_core_sources_no_longer_reference_removed_execution_paths() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     core_root = repo_root / "backend" / "core"
-    retired_tokens = (
+    removed_tokens = (
         "portfolio_simulator_strict.py",
         "strict_runtime_impl.py",
         "backend.core.portfolio.portfolio_builder",
@@ -57,12 +57,12 @@ def test_active_backend_core_sources_no_longer_reference_retired_execution_paths
         if "__pycache__" in path.parts:
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
-        if any(token in text for token in retired_tokens):
+        if any(token in text for token in removed_tokens):
             matches.append(str(path.relative_to(repo_root)).replace("\\", "/"))
     assert matches == []
 
 
-def test_final_execution_modules_drop_transitional_docstrings() -> None:
+def test_final_execution_modules_keep_current_docstrings() -> None:
     expected = {
         STRICT_RUNTIME_PATH: ("Vector runtime entrypoint",),
         BRIDGE_ADAPTER_PATH: ("Stage-pipeline bridge",),

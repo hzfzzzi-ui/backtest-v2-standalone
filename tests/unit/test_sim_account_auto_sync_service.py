@@ -24,6 +24,27 @@ def test_run_auto_sync_returns_disabled_when_source_path_is_not_configured(tmp_p
     assert status_path.exists()
 
 
+def test_run_auto_sync_requires_explicit_enable_even_with_source_path(tmp_path, monkeypatch) -> None:
+    results_root = tmp_path / "outputs"
+    source_path = tmp_path / "holdings.json"
+    _write_json(
+        source_path,
+        {
+            "trade_date": "2026-03-16",
+            "cash": 1000,
+            "positions": [],
+        },
+    )
+    monkeypatch.delenv("SIM_ACCOUNT_AUTO_SYNC_ENABLED", raising=False)
+    monkeypatch.setenv("SIM_ACCOUNT_AUTO_SYNC_SOURCE_PATH", str(source_path))
+
+    payload = mod.run_auto_sync(results_root, target_trade_date="2026-03-16")
+
+    assert payload["status"] == "disabled"
+    assert payload["message"] == "auto sync disabled by SIM_ACCOUNT_AUTO_SYNC_ENABLED"
+    assert load_latest_holdings_snapshot(results_root, "paper_a_share_main") is None
+
+
 def test_run_auto_sync_invalid_payload_does_not_override_latest_snapshot(tmp_path, monkeypatch) -> None:
     results_root = tmp_path / "outputs"
     initial = store_holdings_snapshot(
@@ -115,3 +136,21 @@ def test_run_auto_sync_success_writes_snapshot_and_reconcile(tmp_path, monkeypat
     latest = load_latest_holdings_snapshot(results_root, "paper_a_share_main")
     assert latest is not None
     assert latest["trade_date"] == "2026-03-16"
+    assert latest["object_type"] == "holdings_snapshot"
+    assert latest["object_scope"] == "account_ops"
+    account_root = results_root / "ops" / "sim_account" / "paper_a_share_main"
+    latest_cash_ledger = json.loads((account_root / "cash_ledger" / "latest.json").read_text(encoding="utf-8"))
+    latest_sync_log = json.loads((account_root / "sync_logs" / "latest.json").read_text(encoding="utf-8"))
+    assert latest_cash_ledger["object_type"] == "cash_ledger"
+    assert latest_cash_ledger["object_scope"] == "account_ops"
+    assert latest_sync_log["object_type"] == "sync_log"
+    assert latest_sync_log["object_scope"] == "account_ops"
+    compat_manifest = json.loads((account_root / "compat_manifest.json").read_text(encoding="utf-8"))
+    assert compat_manifest["status"] == "active_transition"
+    assert compat_manifest["rollback_order"] == [
+        "keep database/domain writes enabled",
+        "fall back to database mirror + file main-read only if domain reads regress",
+        "disable auto sync before replaying historical compat snapshots",
+    ]
+    assert (account_root / "cash_ledger" / "latest.json").exists()
+    assert (account_root / "sync_logs" / "latest.json").exists()

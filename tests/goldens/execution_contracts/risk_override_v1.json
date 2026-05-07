@@ -1,0 +1,12 @@
+{
+  "contract_version": "risk_override_v1",
+  "as_of_date": "2026-04-04",
+  "override_owner": "global_portfolio_governor",
+  "scope": "symbol",
+  "action": "FORCE_EXIT",
+  "target_symbol": "sh510300",
+  "reason_codes": ["RISK_LOCKED", "FORCE_EXIT_SYMBOL"],
+  "notes": {
+    "origin": "governor_snapshot"
+  }
+}

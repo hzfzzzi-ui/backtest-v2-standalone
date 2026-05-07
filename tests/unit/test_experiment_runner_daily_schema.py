@@ -45,6 +45,39 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
                             "raw_after_held_filter_count": 3,
                             "raw_after_slot_filter_count": 2,
                             "raw_after_cash_lot_count": 2,
+                            "diagnostics": {
+                                "etf_beta_formal_view": {
+                                    "target_exposure": 0.2,
+                                    "min_deployable_exposure": 0.1,
+                                    "target_exposure_source": "fixed",
+                                    "min_deployable_exposure_source": "fixed",
+                                    "target_selected_count": 1,
+                                },
+                                "etf_beta_research_view": {
+                                    "strategic_floor_cap": 0.12,
+                                    "tactical_overlay_cap": 0.06,
+                                    "limited_defense_cap": 0.02,
+                                    "deployment_pace": 0.03,
+                                    "bull_partial_overlay_pace_ratio": 0.5,
+                                    "bull_pace_mode": "partial_overlay_v1",
+                                    "pace_policy_gap": 0.17,
+                                    "pace_policy_reason_code": "ETF_BETA_DEPLOYMENT_PACE_FLOOR_ONLY",
+                                    "rebalance_timing_gap": 0.03,
+                                    "rebalance_timing_reason_code": "ETF_BETA_AWAIT_MONTHLY_REBALANCE",
+                                    "execution_residual_gap": 0.0,
+                                    "gap_primary_owner": "pace_policy",
+                                    "hard_block_flags": [],
+                                    "deployability_gap": 0.04,
+                                    "execution_path": "trans_up_state_change_redeploy",
+                                    "trans_up_contract_mode": "single_seat_core_recovery",
+                                    "trans_up_single_seat_core_recovery": True,
+                                    "trans_up_redeploy_active": True,
+                                    "trans_up_redeploy_reason_code": "ETF_BETA_TRANS_UP_REDEPLOY_ACTIVE",
+                                    "trans_up_redeploy_reject_reason": "",
+                                    "trans_up_redeploy_floor_gap": 0.0527,
+                                    "trans_up_redeploy_edge_from_state": "RISK_OFF",
+                                },
+                            },
                         },
                         ensure_ascii=False,
                     ),
@@ -107,13 +140,18 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
                     "etf_actual_risk_exposure": 0.15,
                     "etf_actual_fallback_exposure": 0.01,
                     "etf_actual_other_exposure": 0.0,
-                    "etf_deployability_gap": 0.04,
+                    "etf_actual_core_exposure": 0.1,
+                    "etf_actual_satellite_exposure": 0.04,
+                    "etf_actual_defense_exposure": 0.02,
                 }
             ]
         )
     )
 
     row = projected.iloc[0].to_dict()
+    diagnostics_input = json.loads(row["diagnostics_input_json"])
+    formal_view = diagnostics_input["diagnostics"]["etf_beta_formal_view"]
+    research_view = diagnostics_input["diagnostics"]["etf_beta_research_view"]
     assert row["sorting_triggered"] is True
     assert row["mf_rank_triggered"] == 1
     assert row["mf_rank_applied"] == 1
@@ -126,7 +164,7 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
     assert row["after_slot_filter_count"] == 2
     assert row["after_cash_lot_count"] == 2
     assert row["candidates_after_held_filter_count"] == 3
-    assert json.loads(row["diagnostics_input_json"])["raw_after_slot_filter_count"] == 2
+    assert diagnostics_input["raw_after_slot_filter_count"] == 2
     assert row["regime_engine"] == "market_regime_framework"
     assert row["regime_confidence"] == 0.82
     assert row["regime_duration_bars"] == 12
@@ -136,4 +174,33 @@ def test_project_daily_csv_schema_preserves_sorting_diagnostics() -> None:
     assert row["etf_target_exposure"] == 0.2
     assert row["etf_target_exposure_source"] == "fixed"
     assert row["etf_actual_risk_exposure"] == 0.15
-    assert row["etf_deployability_gap"] == 0.04
+    assert row["etf_actual_core_exposure"] == 0.1
+    assert row["etf_actual_satellite_exposure"] == 0.04
+    assert row["etf_actual_defense_exposure"] == 0.02
+    assert "etf_strategic_floor_target" not in row
+    assert "etf_deployment_pace" not in row
+    assert "etf_execution_path" not in row
+    assert formal_view["target_exposure"] == 0.2
+    assert formal_view["min_deployable_exposure"] == 0.1
+    assert research_view["strategic_floor_cap"] == 0.12
+    assert research_view["tactical_overlay_cap"] == 0.06
+    assert research_view["limited_defense_cap"] == 0.02
+    assert research_view["deployment_pace"] == 0.03
+    assert research_view["bull_partial_overlay_pace_ratio"] == 0.5
+    assert research_view["bull_pace_mode"] == "partial_overlay_v1"
+    assert research_view["pace_policy_gap"] == 0.17
+    assert research_view["pace_policy_reason_code"] == "ETF_BETA_DEPLOYMENT_PACE_FLOOR_ONLY"
+    assert research_view["rebalance_timing_gap"] == 0.03
+    assert research_view["rebalance_timing_reason_code"] == "ETF_BETA_AWAIT_MONTHLY_REBALANCE"
+    assert research_view["execution_residual_gap"] == 0.0
+    assert research_view["gap_primary_owner"] == "pace_policy"
+    assert research_view["hard_block_flags"] == []
+    assert research_view["deployability_gap"] == 0.04
+    assert research_view["execution_path"] == "trans_up_state_change_redeploy"
+    assert research_view["trans_up_contract_mode"] == "single_seat_core_recovery"
+    assert research_view["trans_up_single_seat_core_recovery"] is True
+    assert research_view["trans_up_redeploy_active"] is True
+    assert research_view["trans_up_redeploy_reason_code"] == "ETF_BETA_TRANS_UP_REDEPLOY_ACTIVE"
+    assert research_view["trans_up_redeploy_reject_reason"] == ""
+    assert research_view["trans_up_redeploy_floor_gap"] == 0.0527
+    assert research_view["trans_up_redeploy_edge_from_state"] == "RISK_OFF"

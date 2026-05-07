@@ -11,8 +11,8 @@ from backend.core.stage_pipeline.adapters import bridge_adapter
 from backend.core.stage_pipeline.adapters.route_runtime import initialize_route_controls
 from backend.core.stage_pipeline.adapters.day_controls import compute_day_controls
 from backend.core.stage_pipeline.adapters.signal_postprocess import postprocess_day_signals
-from backend.core.stage_pipeline.adapters.stage_applicability import is_stage_disabled, stage_is_applicable
 from backend.core.stage_pipeline.context import DayContext
+from backend.core.stage_pipeline.contracts import AccountingSnapshot
 
 
 def test_stage_applicability_respects_disabled_and_route_specific_rules() -> None:
@@ -27,11 +27,11 @@ def test_stage_applicability_respects_disabled_and_route_specific_rules() -> Non
         _dd_enabled=True,
     )
 
-    assert is_stage_disabled(runtime.request.disabled_stages, "S6") is True
-    assert stage_is_applicable(runtime, "S6") is False
-    assert stage_is_applicable(runtime, "S2") is True
-    assert stage_is_applicable(runtime, "S3") is True
-    assert stage_is_applicable(runtime, "S8") is True
+    assert bridge_adapter.is_stage_disabled(runtime.request.disabled_stages, "S6") is True
+    assert bridge_adapter.stage_is_applicable(runtime, "S6") is False
+    assert bridge_adapter.stage_is_applicable(runtime, "S2") is True
+    assert bridge_adapter.stage_is_applicable(runtime, "S3") is True
+    assert bridge_adapter.stage_is_applicable(runtime, "S8") is True
 
 
 def test_stage_applicability_uses_filter_configs_for_s2() -> None:
@@ -46,9 +46,9 @@ def test_stage_applicability_uses_filter_configs_for_s2() -> None:
         _dd_enabled=False,
     )
 
-    assert stage_is_applicable(runtime, "S2") is True
-    assert stage_is_applicable(runtime, "S3") is False
-    assert stage_is_applicable(runtime, "S8") is False
+    assert bridge_adapter.stage_is_applicable(runtime, "S2") is True
+    assert bridge_adapter.stage_is_applicable(runtime, "S3") is False
+    assert bridge_adapter.stage_is_applicable(runtime, "S8") is False
 
 
 def test_compute_day_controls_breakout_route_preserves_market_state_and_counters() -> None:
@@ -252,6 +252,34 @@ def test_initialize_route_controls_legacy_overlay_uses_provider_veto_arrays() ->
     assert float(controls.mf_mult_arr[0]) == 0.0
 
 
+def test_initialize_route_controls_formal_etf_boundary_uses_provider_runtime_arrays() -> None:
+    trading_day = date(2026, 3, 2)
+    controls = initialize_route_controls(
+        route_id="provider_breakout_runtime",
+        data_bundle=SimpleNamespace(
+            benchmark=pd.DataFrame(),
+            trading_days=[trading_day],
+        ),
+        market_filter_cfg=SimpleNamespace(enabled=True, bull_multiplier=1.8, light_multiplier=0.6),
+        benchmark_regime_cfg=None,
+        breadth_cfg=None,
+        provider=SimpleNamespace(
+            _regime_engine_name="ma200_legacy",
+            _legacy_turn_weak_overlay_active=False,
+            _etf_beta_strategy_role="phase1_allocation_engine",
+            _etf_beta_boundary_policy_mode="formal_phase1_document_aligned_v1",
+            _formal_phase1_runtime_boundary_active=True,
+            _market_state=np.array([3], dtype=np.int8),
+            _trade_mode=np.array([1], dtype=np.int8),
+            _risk_budget_multiplier_arr=np.array([0.1], dtype=float),
+        ),
+    )
+
+    assert controls.mf_enabled is True
+    assert int(controls.mf_trade_mode_arr[0]) == 1
+    assert float(controls.mf_mult_arr[0]) == 0.1
+
+
 def test_postprocess_day_signals_respects_breakout_gates() -> None:
     runtime = SimpleNamespace(
         route_id="provider_breakout_runtime",
@@ -279,6 +307,170 @@ def test_postprocess_day_signals_respects_breakout_gates() -> None:
     )
 
     assert gated.buy_signals == []
+
+
+def test_postprocess_day_signals_preserves_etf_trans_up_redeploy_under_breakout_gate() -> None:
+    runtime = SimpleNamespace(
+        route_id="provider_breakout_runtime",
+        _br_enabled=True,
+        _mf_enabled=False,
+        _mf_state_arr=np.array([0], dtype=np.int8),
+    )
+    redeploy_signal = SimpleNamespace(
+        symbol="SH510300",
+        reason_code="ETF_BETA_TRANS_UP_REDEPLOY",
+        meta={
+            "execution_path": "trans_up_state_change_redeploy",
+            "sleeve_id": "cn_etf_beta",
+            "alpha_id": "cn_etf_beta",
+        },
+    )
+    ordinary_signal = SimpleNamespace(symbol="SH600000", reason_code="BREAKOUT_HIGH", meta={})
+    signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[ordinary_signal, redeploy_signal],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={},
+    )
+
+    gated = postprocess_day_signals(
+        runtime,
+        day_index=0,
+        day_signals=signals,
+        controls={"benchmark_regime_on": False},
+    )
+
+    assert gated.buy_signals == [redeploy_signal]
+    assert gated.diagnostics["global_risk_override_count"] == 1
+
+
+def test_postprocess_day_signals_allows_trans_up_recovery_entries_when_flag_enabled() -> None:
+    runtime = SimpleNamespace(
+        route_id="provider_breakout_runtime",
+        _br_enabled=True,
+        _mf_enabled=True,
+        _mf_state_arr=np.array([2], dtype=np.int8),
+        _market_filter_cfg=SimpleNamespace(
+            freeze_trans_up_entries=False,
+            allow_trans_up_recovery_entries_when_benchmark_off=True,
+        ),
+        provider=SimpleNamespace(_risk_off_exit_mode=""),
+    )
+    ordinary_signal = SimpleNamespace(symbol="SH600000", reason_code="BREAKOUT_HIGH", meta={})
+    signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[ordinary_signal],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={},
+    )
+
+    gated = postprocess_day_signals(
+        runtime,
+        day_index=0,
+        day_signals=signals,
+        controls={"benchmark_regime_on": False, "market_state": "TRANS_UP", "trade_mode": "TREND_LIGHT"},
+    )
+
+    assert gated.buy_signals == [ordinary_signal]
+    assert gated.diagnostics["global_risk_override_count"] == 0
+    assert gated.diagnostics["trans_up_recovery_gate_relaxed"] is True
+
+
+def test_postprocess_day_signals_scales_trans_up_recovery_entries_when_configured() -> None:
+    runtime = SimpleNamespace(
+        route_id="provider_breakout_runtime",
+        _br_enabled=True,
+        _mf_enabled=True,
+        _mf_state_arr=np.array([2], dtype=np.int8),
+        _market_filter_cfg=SimpleNamespace(
+            freeze_trans_up_entries=False,
+            allow_trans_up_recovery_entries_when_benchmark_off=True,
+            trans_up_recovery_entry_scale_when_benchmark_off=0.3,
+        ),
+        provider=SimpleNamespace(_risk_off_exit_mode=""),
+    )
+    ordinary_signal = SimpleNamespace(symbol="SH600000", reason_code="BREAKOUT_HIGH", meta={"order_value_scale": 1.0})
+    signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[ordinary_signal],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={},
+    )
+
+    gated = postprocess_day_signals(
+        runtime,
+        day_index=0,
+        day_signals=signals,
+        controls={"benchmark_regime_on": False, "market_state": "TRANS_UP", "trade_mode": "TREND_LIGHT"},
+    )
+
+    assert len(gated.buy_signals) == 1
+    assert gated.buy_signals[0].meta["order_value_scale"] == 0.3
+    assert gated.buy_signals[0].meta["trans_up_recovery_staged_deploy_active"] is True
+    assert gated.buy_signals[0].meta["entry_reason_code"] == "TRANS_UP_RECOVERY_STAGED_ENTRY"
+    assert gated.diagnostics["trans_up_recovery_gate_relaxed"] is True
+    assert gated.diagnostics["trans_up_recovery_entry_scale_applied"] == 0.3
+    assert gated.diagnostics["trans_up_recovery_scaled_entry_count"] == 1
+
+
+def test_postprocess_day_signals_marks_confirmed_top_up_for_staged_recovery_holdings() -> None:
+    runtime = SimpleNamespace(
+        route_id="provider_breakout_runtime",
+        _br_enabled=True,
+        _mf_enabled=True,
+        _mf_state_arr=np.array([2], dtype=np.int8),
+        _market_filter_cfg=SimpleNamespace(
+            freeze_trans_up_entries=False,
+            allow_trans_up_recovery_entries_when_benchmark_off=True,
+            trans_up_recovery_entry_scale_when_benchmark_off=0.5,
+            trans_up_recovery_confirmed_top_up_scale_when_benchmark_on=0.5,
+        ),
+        provider=SimpleNamespace(_risk_off_exit_mode=""),
+        positions={"sh600000": 100},
+        holding_sources={"sh600000": {"entry_reason_code": "TRANS_UP_RECOVERY_STAGED_ENTRY"}},
+    )
+    ordinary_signal = SimpleNamespace(symbol="sh600000", reason_code="BREAKOUT_HIGH", meta={"order_value_scale": 1.0})
+    signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[ordinary_signal],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={},
+    )
+
+    gated = postprocess_day_signals(
+        runtime,
+        day_index=0,
+        day_signals=signals,
+        controls={"benchmark_regime_on": True, "market_state": "TRANS_UP", "trade_mode": "TREND_LIGHT"},
+    )
+
+    assert len(gated.buy_signals) == 1
+    assert gated.buy_signals[0].meta["order_value_scale"] == 0.5
+    assert gated.buy_signals[0].meta["allow_existing_holding_top_up"] is True
+    assert gated.buy_signals[0].meta["trans_up_recovery_confirmed_scale_up_active"] is True
+    assert gated.buy_signals[0].meta["entry_reason_code"] == "TRANS_UP_RECOVERY_CONFIRMED_TOP_UP"
+    assert gated.diagnostics["trans_up_recovery_confirmed_top_up_scale_when_benchmark_on"] == 0.5
+    assert gated.diagnostics["trans_up_recovery_confirmed_top_up_count"] == 1
 
 
 def test_postprocess_day_signals_respects_market_filter_state_gate() -> None:
@@ -369,6 +561,48 @@ def test_postprocess_day_signals_freezes_entries_in_trans_up_when_flag_enabled()
     )
 
     assert gated.buy_signals == []
+
+
+def test_postprocess_day_signals_preserves_etf_trans_up_redeploy_when_freeze_flag_enabled() -> None:
+    runtime = SimpleNamespace(
+        route_id="provider_breakout_runtime",
+        _br_enabled=False,
+        _mf_enabled=True,
+        _mf_state_arr=np.array([2], dtype=np.int8),
+        _market_filter_cfg=SimpleNamespace(freeze_trans_up_entries=True),
+        provider=SimpleNamespace(_risk_off_exit_mode=""),
+    )
+    redeploy_signal = SimpleNamespace(
+        symbol="SH510300",
+        reason_code="ETF_BETA_TRANS_UP_REDEPLOY",
+        meta={
+            "execution_path": "trans_up_state_change_redeploy",
+            "sleeve_id": "cn_etf_beta",
+            "alpha_id": "cn_etf_beta",
+        },
+    )
+    ordinary_signal = SimpleNamespace(symbol="SH600000", reason_code="BREAKOUT_HIGH", meta={})
+    signals = DaySignals(
+        sell_signals=[],
+        buy_signals=[ordinary_signal, redeploy_signal],
+        exit_syms=set(),
+        strength_map={},
+        mf_score_map={},
+        mf_gate_on_today=False,
+        strong_risk_on=False,
+        exit_counts=ExitCounts(),
+        diagnostics={},
+    )
+
+    gated = postprocess_day_signals(
+        runtime,
+        day_index=0,
+        day_signals=signals,
+        controls={"benchmark_regime_on": True, "market_state": "TRANS_UP", "trade_mode": "TREND_LIGHT"},
+    )
+
+    assert gated.buy_signals == [redeploy_signal]
+    assert gated.diagnostics["global_risk_override_count"] == 1
 
 
 def test_postprocess_day_signals_trims_to_topk_holdings_in_trans_down_for_m2_mode() -> None:
@@ -715,3 +949,63 @@ def test_ensure_day_passes_market_state_into_provider_context(monkeypatch) -> No
     assert captured["day_index"] == 0
     assert captured["risk_on"] is False
     assert captured["market_state"] == "BEAR"
+
+
+def test_ensure_day_forwards_corporate_action_adjustments_into_accounting_audit_rows(monkeypatch) -> None:
+    trading_day = date(2026, 3, 2)
+    monkeypatch.setattr(
+        bridge_adapter,
+        "prepare_daily_snapshot",
+        lambda runtime, *, day_index, day: SimpleNamespace(
+            nav=100_000.0,
+            market_value=12_000.0,
+            controls={
+                "effective_max_positions": 8,
+                "risk_on_today": False,
+                "market_state": "BULL",
+                "benchmark_regime_on": True,
+            },
+            accounting_snapshot=AccountingSnapshot(
+                cash=88_000.0,
+                positions={"sh600000": 200},
+                trade_rows=[],
+                daily_marks={
+                    "corporate_action_adjustments": [
+                        {
+                            "symbol": "sh600000",
+                            "prev_qty": 100,
+                            "adjusted_qty": 200,
+                        }
+                    ],
+                    "dividend_cash_credit_today": 0.0,
+                    "dividend_receivable_create_today": 0.0,
+                    "dividend_receivable_settle_today": 0.0,
+                },
+            ),
+        ),
+    )
+
+    runtime = SimpleNamespace(
+        _prepared_day_index=-1,
+        _traded_value_today=0.0,
+        positions={"sh600000": 200},
+        position_avg_cost={"sh600000": 10.0},
+        cash=88_000.0,
+        holding_sources={},
+        close_idx={},
+        open_idx={},
+        request=SimpleNamespace(max_positions=10),
+        _current_day=None,
+        _apply_open_fills=lambda trading_day, fills_today: None,
+    )
+    day_context = DayContext.from_trading_days([trading_day], 0)
+
+    bridge_adapter.StagePipelineBridgeRuntime.ensure_day(runtime, day_context, fills_today=[])
+
+    assert runtime.accounting_audit_rows[0]["corporate_action_adjustments"] == [
+        {
+            "symbol": "sh600000",
+            "prev_qty": 100,
+            "adjusted_qty": 200,
+        }
+    ]

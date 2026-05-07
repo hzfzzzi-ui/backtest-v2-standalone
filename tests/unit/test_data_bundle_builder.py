@@ -144,6 +144,66 @@ class _FakeProvider(DataProvider):
         return pd.DataFrame(columns=["ts_code", "coverage_start", "coverage_end", "daily_table", "price_series_semantics"])
 
 
+class _AdjFactorStaleProvider(_FakeProvider):
+    def load_ohlcv_daily(self, symbols: list[str], start: date, end: date, source: str) -> pd.DataFrame:
+        dates = [
+            pd.Timestamp("2024-01-02"),
+            pd.Timestamp("2024-01-03"),
+            pd.Timestamp("2024-01-04"),
+            pd.Timestamp("2024-01-05"),
+            pd.Timestamp("2024-01-08"),
+            pd.Timestamp("2024-01-09"),
+            pd.Timestamp("2024-01-10"),
+        ]
+        adj_values = [1.0, 1.1, None, None, None, None, None]
+        rows = []
+        for idx, trade_date in enumerate(dates):
+            rows.append(
+                {
+                    "date": trade_date,
+                    "symbol": "sh600000",
+                    "open": 10.0 + idx,
+                    "high": 10.2 + idx,
+                    "low": 9.9 + idx,
+                    "close": 10.1 + idx,
+                    "volume": 1000 + idx,
+                    "amount": 10000 + idx,
+                    "adj_factor": adj_values[idx],
+                }
+            )
+        return pd.DataFrame(rows)
+
+    def load_trading_calendar_cn(self, start: date, end: date) -> pd.DatetimeIndex:
+        return pd.DatetimeIndex(
+            [
+                pd.Timestamp("2024-01-02"),
+                pd.Timestamp("2024-01-03"),
+                pd.Timestamp("2024-01-04"),
+                pd.Timestamp("2024-01-05"),
+                pd.Timestamp("2024-01-08"),
+                pd.Timestamp("2024-01-09"),
+                pd.Timestamp("2024-01-10"),
+            ]
+        )
+
+    def load_benchmark_daily(self, benchmark_symbol: str, start: date, end: date) -> pd.DataFrame:
+        rows = []
+        for idx, trade_date in enumerate(self.load_trading_calendar_cn(start, end)):
+            rows.append(
+                {
+                    "date": trade_date,
+                    "symbol": benchmark_symbol,
+                    "open": 1.0 + idx * 0.01,
+                    "high": 1.0 + idx * 0.01,
+                    "low": 1.0 + idx * 0.01,
+                    "close": 1.0 + idx * 0.01,
+                    "volume": 1,
+                    "amount": 1,
+                }
+            )
+        return pd.DataFrame(rows)
+
+
 def _cfg() -> BacktestConfig:
     return BacktestConfig(
         db=DBConfig(host="localhost", port=5432, dbname="pams", user="pams", password="secret"),
@@ -463,6 +523,25 @@ class _EtfProvider(_FakeProvider):
             ]
         )
 
+    def load_cn_etf_dividend_events(self, symbols: list[str] | None, start: date, end: date) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "event_id": "512100.SH|2024-01-03|2024-01-04|2024-01-02|0.03000000",
+                    "ts_code": "512100.SH",
+                    "symbol": "sh512100",
+                    "ann_date": pd.Timestamp("2023-12-31"),
+                    "record_date": pd.Timestamp("2024-01-02"),
+                    "ex_date": pd.Timestamp("2024-01-03"),
+                    "pay_date": pd.Timestamp("2024-01-04"),
+                    "earpay_date": pd.NaT,
+                    "net_ex_date": pd.Timestamp("2024-01-03"),
+                    "div_cash": 0.03,
+                    "div_proc": "实施",
+                }
+            ]
+        )
+
 
 def test_build_data_bundle_supports_cn_etf_research_entry() -> None:
     cfg = _cfg()
@@ -485,16 +564,41 @@ def test_build_data_bundle_supports_cn_etf_research_entry() -> None:
     assert bundle.universe_meta["etf_symbols"] == ["512100.SH"]
     assert bundle.universe_meta["etf_batch"] == "cn_etf_single_asset_template"
     assert bundle.universe_meta["catalog_batch_id"] == "cn_etf_single_asset_template"
-    assert bundle.universe_meta["etf_beta_phase1_summary"]["source_entry_type"] == "cn_etf_research_entry"
-    assert bundle.universe_meta["etf_beta_phase1_summary"]["eligible_etfs"] == ["512100.SH"]
-    assert bundle.universe_meta["etf_beta_phase1_summary"]["selected_etfs"] == ["512100.SH"]
+    assert bundle.universe_meta["etf_beta_phase1_summary"]["source_entry_type"] == "cn_etf_phase1_allocation_entry"
+    assert bundle.universe_meta["etf_beta_phase1_summary"]["eligible_etfs"] == []
+    assert bundle.universe_meta["etf_beta_phase1_summary"]["selected_etfs"] == []
     assert bundle.universe_meta["etf_beta_phase1_summary"]["out_of_scope_etfs"] == []
     assert bundle.summary["daily_table"] == "pams_cn_etf_daily"
     assert bundle.summary["price_series_semantics"] == "executable_price_only_not_total_return"
-    assert bundle.summary["etf_beta_source_entry_type"] == "cn_etf_research_entry"
-    assert bundle.summary["etf_beta_eligible_count"] == 1
+    assert bundle.summary["dividend_event_rows"] == 1
+    assert bundle.summary["dividend_event_ex_start"] == "2024-01-03"
+    assert bundle.summary["dividend_event_ex_end"] == "2024-01-03"
+    assert len(bundle.dividend_events.index) == 1
+    assert bundle.summary["etf_beta_source_entry_type"] == "cn_etf_phase1_allocation_entry"
+    assert bundle.summary["etf_beta_eligible_count"] == 0
     assert bundle.summary["etf_beta_out_of_scope_count"] == 0
     assert bundle.summary["industry_map_count"] == 0
     assert bundle.summary["benchmark_rows"] == 2
     assert cfg.data_source.data_role == "v1"
     assert cfg.data_source.stocks_table == "pams_cn_etf_daily"
+
+
+def test_build_data_bundle_exposes_adj_factor_stale_stats() -> None:
+    cfg = _cfg()
+    cfg.universe.symbols = ["600000.SH"]
+    cfg.universe.end = date(2024, 1, 10)
+    bundle = build_data_bundle(
+        cfg_obj=cfg,
+        cfg_merged={"universe": {}},
+        overrides={"universe_mode": "CUSTOM", "price_adj": "hfq"},
+        rules_path=Path("instrument_rules_cn.csv"),
+        provider=_AdjFactorStaleProvider(),
+        default_experiment_symbols=["600000.SH"],
+    )
+
+    assert bundle.adj_factor_stats["null_count"] == 5
+    assert bundle.adj_factor_stats["symbols_with_missing_count"] == 1
+    assert bundle.adj_factor_stats["max_consecutive_missing_after_valid_rows"] == 5
+    assert bundle.adj_factor_stats["symbols_exceeding_warn_count"] == 1
+    assert bundle.adj_factor_stats["symbols_exceeding_fail_count"] == 0
+    assert bundle.summary["adj_factor_symbols_exceeding_warn_count"] == 1

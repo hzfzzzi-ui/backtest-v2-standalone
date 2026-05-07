@@ -170,7 +170,6 @@ def _prepare_outputs(tmp_path) -> str:
             "trade_mode": "TREND_MAIN",
             "effective_max_positions": 10,
         },
-        "execution_intent": {},
     }
     reconcile_payload["action_sheet"] = reconcile_payload["actions"]["buy"] + reconcile_payload["actions"]["sell"]
     _write_json(

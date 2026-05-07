@@ -18,6 +18,8 @@ def test_cli_lists_data_refresh_targets(capsys) -> None:
     payload = json.loads(captured)
     assert exit_code == 0
     assert payload["targets"] == [
+        "cn_etf_catalog",
+        "cn_etf_daily",
         "csi1000_pit",
         "csi800_pit",
         "pams_ohlcv_daily",
@@ -44,7 +46,7 @@ def test_cli_study_run_dry_run_loads_yaml(tmp_path: Path, capsys) -> None:
                 "study_id: demo/test",
                 "title: Demo Test",
                 "asset_scope: cn_a_equity",
-                "baseline_id: baseline_V10",
+                "baseline_id: baseline_V10_1",
                 "hypothesis: test hypothesis",
                 "change_scope:",
                 "  modules_modified:",
@@ -85,10 +87,10 @@ def test_cli_experiment_compare_supports_baseline_mode(monkeypatch, capsys) -> N
 
     monkeypatch.setattr("backend.core.services.experiment_compare_service.compare_experiment_to_baseline", _fake_compare)
 
-    exit_code = cli_main.main(["experiment_compare", "exp_demo", "--baseline-id", "baseline_V10"])
+    exit_code = cli_main.main(["experiment_compare", "exp_demo", "--baseline-id", "baseline_V10_1"])
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert captured == {"exp_id": "exp_demo", "baseline_id": "baseline_V10"}
+    assert captured == {"exp_id": "exp_demo", "baseline_id": "baseline_V10_1"}
     assert payload["status"] == "ok"
 
 
@@ -101,7 +103,7 @@ def test_cli_study_run_can_emit_thin_script(tmp_path: Path, capsys, monkeypatch)
                 "study_id: v10/demo_emit",
                 "title: Emit Demo",
                 "asset_scope: cn_a_equity",
-                "baseline_id: baseline_V10",
+                "baseline_id: baseline_V10_1",
                 "hypothesis: test hypothesis",
                 "change_scope: {}",
                 "variants:",

@@ -361,9 +361,24 @@ test('results formatting detects research combo snapshots and surfaces combo com
           start: '2016-11-04',
           end: '2026-03-20',
         },
-        combo_components: {
-          stock_component: { exp_id: 'exp_stock' },
-          etf_component: { exp_id: 'exp_etf' },
+        execution_contract_ref: {
+          contract_type: 'unified_combo',
+          contract_version: 'backtest_execution_contract@1',
+        },
+        execution_contract: {
+          contract_type: 'unified_combo',
+          runtime_config: {
+            initial_capital: 1000000,
+          },
+        },
+        provenance: {
+          component_source_contract: {
+            contract_version: 'unified_combo_component_source_contract@1',
+            components: {
+              stock_component: { exp_id: 'exp_stock' },
+              etf_component: { exp_id: 'exp_etf' },
+            },
+          },
         },
         research_combo: {
           mode: 'daily_rebalanced_equal_weight_50_50',
@@ -392,7 +407,12 @@ test('results formatting detects research combo snapshots and surfaces combo com
   assert.equal(summary.assetRole, 'research_combo');
   assert.equal(summary.universeSectionTitle, '组合研究口径');
   assert.equal(summary.universeMode, 'daily_rebalanced_equal_weight_50_50');
-  assert.equal(summary.benchmark, '-');
+  assert.equal(summary.benchmark, 'CN_STOCK_ETF_50_50');
+  assert.equal(summary.universeRange, '2016-11-04 ~ 2026-03-20');
+  assert.equal(summary.universeCount, '2');
+  assert.equal(summary.strategy, 'RESEARCH_COMBO');
+  assert.equal(summary.initialCapital, '1,000,000.00');
+  assert.match(summary.strategySummary, /execution_contract/);
   assert.equal(summary.comboStockExpId, 'exp_stock');
   assert.equal(summary.comboEtfExpId, 'exp_etf');
   assert.equal(summary.comboWindow, '2016-11-04 ~ 2026-03-20');
@@ -519,9 +539,24 @@ test('results formatting treats unified runtime combo as combo result instead of
           start: '2021-01-04',
           end: '2026-03-24',
         },
-        combo_components: {
-          stock_component: { exp_id: 'exp_stock' },
-          etf_component: { exp_id: 'exp_etf' },
+        execution_contract_ref: {
+          contract_type: 'unified_combo',
+          contract_version: 'backtest_execution_contract@1',
+        },
+        execution_contract: {
+          contract_type: 'unified_combo',
+          runtime_config: {
+            initial_capital: 1000000,
+          },
+        },
+        provenance: {
+          component_source_contract: {
+            contract_version: 'unified_combo_component_source_contract@1',
+            components: {
+              stock_component: { exp_id: 'exp_stock' },
+              etf_component: { exp_id: 'exp_etf' },
+            },
+          },
         },
         combo_result: {
           type: 'unified_runtime_combo',
@@ -552,7 +587,75 @@ test('results formatting treats unified runtime combo as combo result instead of
   assert.equal(summary.isComboResult, true);
   assert.equal(summary.universeSectionTitle, '组合结果口径');
   assert.equal(summary.comboMode, 'daily_rebalanced_equal_weight_50_50');
+  assert.equal(summary.initialCapital, '1,000,000.00');
+  assert.match(summary.strategySummary, /execution_contract/);
   assert.match(summary.comboReadOnlyNote, /unified runtime/i);
   assert.equal(summary.comboStockExpId, 'exp_stock');
   assert.equal(summary.comboEtfExpId, 'exp_etf');
 });
+
+test('results formatting ignores legacy top-level source contract outside provenance', () => {
+  const summary = resultsFormatting.summarizeSnapshot({
+    result: {
+      exp_id: 'exp_unified_combo_legacy_source',
+      status: 'OK',
+      total_return: 0.12,
+      cagr: 0.08,
+      max_drawdown: -0.11,
+      sharpe: 0.76,
+    },
+    artifacts: {
+      perf: {
+        total_return: 0.12,
+        cagr: 0.08,
+        max_drawdown: -0.11,
+        sharpe: 0.76,
+      },
+      run_meta: {
+        data: {
+          asset_scope: 'cn_a_equity',
+          asset_role: 'unified_multi_sleeve_combo',
+          coverage_start: '2021-01-04',
+          coverage_end: '2026-03-24',
+          benchmark: 'CN_STOCK_ETF_50_50',
+        },
+        execution_contract_ref: {
+          contract_type: 'unified_combo',
+          contract_version: 'backtest_execution_contract@1',
+        },
+        component_source_contract: {
+          contract_version: 'unified_combo_component_source_contract@1',
+          components: {
+            stock_component: { exp_id: 'exp_stock_legacy' },
+            etf_component: { exp_id: 'exp_etf_legacy' },
+          },
+        },
+        combo_result: {
+          type: 'unified_runtime_combo',
+          mode: 'daily_rebalanced_equal_weight_50_50',
+          assumption: 'cn_stock_etf_unified_runtime_phase1_daily_rebalanced_equal_weight_50_50',
+          stock_nav_column: 'stock_nav',
+          etf_nav_column: 'etf_nav',
+        },
+      },
+      nav: [
+        { date: '2021-01-04', nav: 1.0, stock_nav: 1.0, etf_nav: 1.0 },
+        { date: '2026-03-24', nav: 1.12, stock_nav: 1.35, etf_nav: 1.01 },
+      ],
+      navSeries: [
+        { date: '2021-01-04', value: 1.0 },
+        { date: '2026-03-24', value: 1.12 },
+      ],
+      benchmarkSeries: [],
+      tradesRows: [],
+      symbolPerformanceRows: [],
+      audit: { summary: {} },
+      missing: [],
+    },
+  });
+
+  assert.match(summary.strategySummary, /execution_contract/);
+  assert.equal(summary.comboStockExpId, '-');
+  assert.equal(summary.comboEtfExpId, '-');
+});
+

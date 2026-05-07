@@ -7,18 +7,18 @@ from pathlib import Path
 from backend.cli.managed import run_pams_ohlcv_daily_v2_formal_audits as formal_audits
 
 
-def test_formal_audit_windows_use_2012_2017_not_2007_2017() -> None:
+def test_formal_audit_windows_use_2012_formal_policy() -> None:
     assert [window.key for window in formal_audits.v2_common.FORMAL_AUDIT_WINDOWS] == [
         "2016_2026",
         "2012_2017",
-        "2007_2026",
+        "2012_2026",
     ]
     assert list(formal_audits.v2_common.FORMAL_AUDIT_REQUIRED_WINDOW_KEYS) == [
         "2016_2026",
         "2012_2017",
     ]
     assert list(formal_audits.v2_common.FORMAL_AUDIT_ADVISORY_WINDOW_KEYS) == [
-        "2007_2026",
+        "2012_2026",
     ]
     assert formal_audits.v2_common.FORMAL_AUDIT_WINDOWS[1].start_date.isoformat() == "2012-01-04"
     assert formal_audits.v2_common.FORMAL_AUDIT_WINDOWS[1].end_date.isoformat() == "2017-12-29"
@@ -74,8 +74,8 @@ def test_formal_audits_runner_executes_all_required_windows(monkeypatch, tmp_pat
     assert summary["formal_windows_complete"] is True
     assert summary["all_windows_complete"] is True
     assert summary["required_windows"] == ["2016_2026", "2012_2017"]
-    assert summary["advisory_windows"] == ["2007_2026"]
-    assert [item["key"] for item in summary["windows"]] == ["2016_2026", "2012_2017", "2007_2026"]
+    assert summary["advisory_windows"] == ["2012_2026"]
+    assert [item["key"] for item in summary["windows"]] == ["2016_2026", "2012_2017", "2012_2026"]
     assert calls == [
         (
             "audit_formal_windows:2016_2026",
@@ -90,10 +90,10 @@ def test_formal_audits_runner_executes_all_required_windows(monkeypatch, tmp_pat
             str(tmp_path / "audit_2012_2017"),
         ),
         (
-            "audit_formal_windows:2007_2026",
-            "2007-01-04",
+            "audit_formal_windows:2012_2026",
+            "2012-01-04",
             "2026-03-20",
-            str(tmp_path / "audit_2007_2026"),
+            str(tmp_path / "audit_2012_2026"),
         ),
     ]
     top_summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))

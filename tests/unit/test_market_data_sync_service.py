@@ -275,6 +275,29 @@ def test_build_market_data_sync_status_returns_etf_coverage_status(monkeypatch) 
     assert payload["coverage_end"] == "2026-03-20"
 
 
+def test_build_market_data_sync_status_reports_etf_scheduler_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("CN_ETF_DAILY_SYNC_ENABLED", "true")
+    monkeypatch.setattr(mod, "resolve_target_trade_date", lambda now=None: date(2026, 3, 20))
+    monkeypatch.setattr(mod, "_connect", lambda: _DummyConn())
+    monkeypatch.setattr(
+        mod,
+        "_cn_etf_coverage_summary",
+        lambda conn=None: {
+            "etf_count": 9,
+            "coverage_start": date(2013, 3, 25),
+            "coverage_end": date(2026, 3, 20),
+            "latest_refresh_at": datetime(2026, 3, 23, 10, 0, tzinfo=UTC),
+        },
+    )
+    monkeypatch.setattr(mod, "_latest_cn_etf_trade_date", lambda conn=None: date(2026, 3, 20))
+
+    payload = mod.build_market_data_sync_status(asset_scope="cn_etf")
+
+    assert payload["status"] == "fresh"
+    assert payload["scheduler_enabled"] is True
+    assert payload["sync_key"] == "cn_etf_daily"
+
+
 def test_build_market_data_sync_status_uses_live_target_date_even_when_db_latest_is_older(monkeypatch) -> None:
     monkeypatch.setenv("CN_DAILY_SYNC_ENABLED", "true")
     monkeypatch.setattr(mod, "ensure_sync_runs_table", lambda: None)
@@ -395,11 +418,42 @@ def test_run_cn_daily_sync_once_can_sync_when_live_target_exceeds_db_max(monkeyp
     assert pit_calls
     assert payload["csi800_pit_refresh"]["status"] == "ok"
     assert auto_sync_calls
+    assert auto_sync_calls[0][0][0] == mod.daily_updater.ROOT / "outputs"
     assert payload["sim_account_auto_sync"]["status"] == "disabled"
     assert updates
     assert updates[0]["status"] == "success"
     assert updates[0]["latest_trade_date_after"] == date(2026, 3, 12)
     assert updates[0]["rows_upserted"] == 640
+
+
+def test_run_cn_etf_daily_sync_once_refreshes_gap(monkeypatch, tmp_path) -> None:
+    calls = []
+    latest_values = [date(2026, 3, 10), date(2026, 3, 12)]
+
+    monkeypatch.setenv("CN_ETF_DAILY_SYNC_ENABLED", "true")
+    monkeypatch.setenv("TUSHARE_TOKEN", "dummy-token")
+    monkeypatch.setattr(mod, "resolve_target_trade_date", lambda now=None: date(2026, 3, 12))
+    monkeypatch.setattr(mod, "_results_root", lambda: tmp_path / "outputs")
+    monkeypatch.setattr(mod, "_connect", lambda: _DummyConn())
+    monkeypatch.setattr(mod, "_advisory_lock", lambda conn, sync_key: True)
+    monkeypatch.setattr(mod, "_advisory_unlock", lambda conn, sync_key: None)
+    monkeypatch.setattr(mod, "_latest_cn_etf_trade_date", lambda conn=None: latest_values.pop(0))
+    monkeypatch.setattr(
+        mod.etf_daily_refresher,
+        "run_refresh",
+        lambda **kwargs: calls.append(kwargs) or {"status": "success", "rows_inserted": 128},
+    )
+
+    payload = mod.run_cn_etf_daily_sync_once(force=False)
+
+    assert payload["status"] == "success"
+    assert payload["sync_key"] == "cn_etf_daily"
+    assert payload["latest_trade_date_before"] == "2026-03-10"
+    assert payload["latest_trade_date_after"] == "2026-03-12"
+    assert calls
+    assert calls[0]["start"] == "2026-03-11"
+    assert calls[0]["end"] == "2026-03-12"
+    assert str(calls[0]["summary_out"]).endswith("summary.json")
 
 
 def test_run_cn_daily_sync_once_fails_when_pit_index_refresh_raises(monkeypatch) -> None:

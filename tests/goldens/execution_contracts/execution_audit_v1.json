@@ -1,0 +1,68 @@
+{
+  "contract_version": "execution_audit_v1",
+  "as_of_date": "2026-04-04",
+  "records": [
+    {
+      "action_index": 1,
+      "owner_system": "stock_alpha",
+      "symbol": "sh600000",
+      "side": "BUY",
+      "requested_size_value": 0.25,
+      "requested_size_unit": "weight",
+      "requested_size_basis": "subsystem_budget_relative",
+      "outcome": "blocked",
+      "reason_codes": ["REDUCE_ONLY_BLOCKED"],
+      "blocked_by_override": true,
+      "clipped_to_sellable": false,
+      "rounded_to_lot": false,
+      "skipped_for_priority": false,
+      "final_qty": 0,
+      "notes": {}
+    },
+    {
+      "action_index": 2,
+      "owner_system": "stock_alpha",
+      "symbol": "sh600036",
+      "side": "SELL",
+      "requested_size_value": 0.8,
+      "requested_size_unit": "ratio",
+      "requested_size_basis": "sellable_qty_relative",
+      "outcome": "clipped",
+      "reason_codes": ["CLIPPED_TO_SELLABLE"],
+      "blocked_by_override": false,
+      "clipped_to_sellable": true,
+      "rounded_to_lot": true,
+      "skipped_for_priority": false,
+      "final_qty": 300,
+      "notes": {
+        "sellable_qty": 320,
+        "lot_size": 100
+      }
+    },
+    {
+      "action_index": 3,
+      "owner_system": "stock_alpha",
+      "symbol": "sh600519",
+      "side": "BUY",
+      "requested_size_value": 0.1,
+      "requested_size_unit": "weight",
+      "requested_size_basis": "subsystem_budget_relative",
+      "outcome": "skipped",
+      "reason_codes": ["HIGHER_PRIORITY_FILLED_CASH"],
+      "blocked_by_override": false,
+      "clipped_to_sellable": false,
+      "rounded_to_lot": false,
+      "skipped_for_priority": true,
+      "final_qty": 0,
+      "notes": {}
+    }
+  ],
+  "summary": {
+    "accepted_count": 0,
+    "blocked_count": 1,
+    "overridden_count": 0,
+    "clipped_count": 1,
+    "rounded_count": 1,
+    "skipped_count": 1
+  }
+}

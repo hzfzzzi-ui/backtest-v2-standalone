@@ -13,21 +13,18 @@ def _read(*parts: str) -> str:
 
 
 def test_architecture_doc_covers_main_paths_and_entrypoints() -> None:
-    source = _read("ARCHITECTURE.md")
+    source = _read("docs", "02_系统架构设计", "全系统架构设计.md")
     for marker in (
-        "backend/api",
-        "backend/core",
-        "backend/research",
-        "frontend",
-        "research",
-        "tests",
-        "openspec",
-        "backend/scripts",
-        "outputs",
-        "backend/main.py",
-        "python -m backend.cli",
+        "backend/api/",
+        "backend/core/",
+        "backend/research/",
+        "frontend/",
+        "tests/",
+        "openspec/",
+        "outputs/",
         "frontend/index.html",
-        "backend/core/services/experiment_history_service.py",
+        "frontend/assets/js/desktop-shell/host.js",
+        "execution_contract",
     ):
         assert marker in source
 
@@ -35,23 +32,21 @@ def test_architecture_doc_covers_main_paths_and_entrypoints() -> None:
 def test_schema_docs_and_runbook_exist() -> None:
     repo_root = _repo_root()
     for rel in (
-        "docs/SCHEMA_rows.json.md",
-        "docs/SCHEMA_run_meta.json.md",
-        "docs/SCHEMA_manifest.json.md",
-        "docs/RUNBOOK_baseline_regression.md",
+        "docs/01_系统接口模块定义/产物协议/SCHEMA_rows.json.md",
+        "docs/01_系统接口模块定义/产物协议/SCHEMA_run_meta.json.md",
+        "docs/01_系统接口模块定义/产物协议/SCHEMA_manifest.json.md",
+        "docs/02_系统架构设计/运行与基线/RUNBOOK_baseline_regression.md",
     ):
         assert repo_root.joinpath(rel).exists(), rel
 
 
 def test_guardrails_reference_real_docs_and_examples() -> None:
-    source = _read("ARCHITECTURE_GUARDRAILS.md")
+    source = _read("docs", "01_系统接口模块定义", "架构守门", "ARCHITECTURE_GUARDRAILS.md")
     for marker in (
-        "docs/SCHEMA_rows.json.md",
-        "docs/SCHEMA_run_meta.json.md",
-        "docs/SCHEMA_manifest.json.md",
-        "docs/RUNBOOK_baseline_regression.md",
-        "examples/experiment_contract_minimal/",
-        "tests/integration/test_schema_and_artifacts.py",
+        "host.js -> runtime-surface.js -> app-shell.js",
+        "execution_contract",
+        "manifest.json",
+        "run_meta.json",
     ):
         assert marker in source
 

@@ -5,10 +5,20 @@ from types import SimpleNamespace
 
 import pandas as pd
 
+from backend.core.data import market_data_access
 from backend.core.tools import runtime_data_access
 
 
+def _install_market_data_access_stub(monkeypatch) -> None:
+    monkeypatch.setattr(
+        market_data_access,
+        "build_market_data_access",
+        lambda access: SimpleNamespace(),
+    )
+
+
 def test_resolve_validation_universe_uses_shared_filter_path(monkeypatch) -> None:
+    _install_market_data_access_stub(monkeypatch)
     provider = SimpleNamespace(
         load_ohlcv_daily=lambda symbols, start, end, source="stocks": pd.DataFrame(
             {"symbol": ["sh600000"], "date": [pd.Timestamp(start)], "close": [10.0]}
@@ -70,6 +80,7 @@ def test_resolve_validation_universe_uses_shared_filter_path(monkeypatch) -> Non
 
 
 def test_resolve_validation_universe_supports_cn_etf_catalog_snapshot(monkeypatch) -> None:
+    _install_market_data_access_stub(monkeypatch)
     provider = SimpleNamespace(
         load_cn_etf_catalog=lambda symbols: pd.DataFrame(
             [
@@ -146,6 +157,7 @@ def test_resolve_validation_universe_supports_cn_etf_catalog_snapshot(monkeypatc
 
 
 def test_resolve_validation_universe_requires_turnover_rate_field_when_filter_enabled(monkeypatch) -> None:
+    _install_market_data_access_stub(monkeypatch)
     provider = SimpleNamespace(
         load_ohlcv_daily=lambda symbols, start, end, source="stocks": pd.DataFrame(
             {"symbol": ["sh600000"], "date": [pd.Timestamp(start)], "close": [10.0]}
@@ -194,6 +206,7 @@ def test_resolve_validation_universe_requires_turnover_rate_field_when_filter_en
 
 
 def test_resolve_validation_universe_filters_star_market_for_dynamic_all_a(monkeypatch) -> None:
+    _install_market_data_access_stub(monkeypatch)
     provider = SimpleNamespace(
         load_ohlcv_daily=lambda symbols, start, end, source="stocks": pd.DataFrame(),
         load_st_history=lambda symbols, start, end: pd.DataFrame(columns=["ts_code", "start_date", "end_date", "st_type"]),

@@ -1,4 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+from fastapi import HTTPException
 
 from backend.api.backtest_v2 import runner_impl
 from backend.core.services import experiment_runtime_service as service
@@ -443,4 +449,177 @@ def test_workbench_config_can_carry_explicit_data_role(monkeypatch) -> None:
     overrides = dict(captured["overrides"] or {})
     assert overrides["data_role"] == "v2_canonical"
     assert result["data_role"] == "v2_canonical"
+
+
+def test_runtime_config_rejects_invalid_moneyflow_overlay_contract(monkeypatch) -> None:
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
+
+    body = runner_impl.BacktestV2ExperimentRequest(
+        runtime_config_json={
+            "db": {"host": "pams-postgres"},
+            "schema_mapping": {},
+            "asset_context": {
+                "asset_scope": "cn_a_equity",
+                "moneyflow_overlay": {
+                    "enabled": True,
+                    "mode": "veto_bottom20",
+                    "factor_role": "context",
+                },
+            },
+        }
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.run_experiment_request_body(body)
+    assert exc_info.value.status_code == 400
+    assert "asset_context.moneyflow_overlay.mode" in str(exc_info.value.detail)
+
+
+def test_runtime_config_rejects_moneyflow_band_rerank_without_band_limit(monkeypatch) -> None:
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
+
+    body = runner_impl.BacktestV2ExperimentRequest(
+        runtime_config_json={
+            "db": {"host": "pams-postgres"},
+            "schema_mapping": {},
+            "asset_context": {
+                "asset_scope": "cn_a_equity",
+                "moneyflow_overlay": {
+                    "enabled": True,
+                    "mode": "band_rerank",
+                    "factor_role": "rank",
+                    "apply_layer": "ranking",
+                },
+            },
+        }
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.run_experiment_request_body(body)
+    assert exc_info.value.status_code == 400
+    assert "asset_context.moneyflow_overlay.band_limit" in str(exc_info.value.detail)
+
+
+def test_workbench_config_rejects_invalid_holding_exit_fragility_contract(monkeypatch) -> None:
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
+
+    body = runner_impl.BacktestV2ExperimentRequest(
+        workbench_config={
+            **_breakout_config(),
+            "asset_context": {
+                "asset_scope": "cn_a_equity",
+                "holding_exit_fragility": {
+                    "enabled": True,
+                    "factor_role": "lifecycle",
+                    "apply_layer": "candidate",
+                    "action": "watch",
+                    "source_kind": "daily_factor_snapshot",
+                    "factor_snapshot_path": "outputs/demo/factor_snapshot.csv",
+                    "factor_id": "pre_profit_failure_context_risk",
+                },
+            },
+        }
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.run_experiment_request_body(body)
+    assert exc_info.value.status_code == 400
+    assert "asset_context.holding_exit_fragility.apply_layer" in str(exc_info.value.detail)
+
+
+def test_request_body_does_not_override_pams_pg_env_without_explicit_pg_env(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_experiment(base_cfg_path, preset="single", overrides=None, progress_hook=None):
+        captured["env"] = {
+            "PAMS_PG_HOST": os.environ.get("PAMS_PG_HOST"),
+            "PAMS_PG_PORT": os.environ.get("PAMS_PG_PORT"),
+            "PAMS_PG_DBNAME": os.environ.get("PAMS_PG_DBNAME"),
+            "PAMS_PG_USER": os.environ.get("PAMS_PG_USER"),
+            "PAMS_PG_PASSWORD": os.environ.get("PAMS_PG_PASSWORD"),
+        }
+        return {
+            "exp_id": "exp_env_passthrough",
+            "results_dir": "",
+            "status": "OK",
+        }
+
+    for key in ("PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"):
+        monkeypatch.delenv(key, raising=False)
+    for key in ("PAMS_PG_HOST", "PAMS_PG_PORT", "PAMS_PG_DBNAME", "PAMS_PG_USER", "PAMS_PG_PASSWORD"):
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
+    cfg_path = Path("research/studies/v10/configs/live_baseline_ablation_s1/B0.json").resolve()
+
+    body = runner_impl.BacktestV2ExperimentRequest(
+        config_path=str(cfg_path),
+        config_json=_breakout_config(),
+    )
+    result = service.run_experiment_request_body(body)
+
+    assert result["exp_id"] == "exp_env_passthrough"
+    assert captured["env"] == {
+        "PAMS_PG_HOST": None,
+        "PAMS_PG_PORT": None,
+        "PAMS_PG_DBNAME": None,
+        "PAMS_PG_USER": None,
+        "PAMS_PG_PASSWORD": None,
+    }
+
+
+def test_request_body_mirrors_explicit_pg_env_into_pams_pg_env(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_experiment(base_cfg_path, preset="single", overrides=None, progress_hook=None):
+        captured["env"] = {
+            "PAMS_PG_HOST": os.environ.get("PAMS_PG_HOST"),
+            "PAMS_PG_PORT": os.environ.get("PAMS_PG_PORT"),
+            "PAMS_PG_DBNAME": os.environ.get("PAMS_PG_DBNAME"),
+            "PAMS_PG_USER": os.environ.get("PAMS_PG_USER"),
+            "PAMS_PG_PASSWORD": os.environ.get("PAMS_PG_PASSWORD"),
+        }
+        return {
+            "exp_id": "exp_env_mirrored",
+            "results_dir": "",
+            "status": "OK",
+        }
+
+    monkeypatch.setenv("PGHOST", "db.example")
+    monkeypatch.setenv("PGPORT", "15432")
+    monkeypatch.setenv("PGDATABASE", "pams_shadow")
+    monkeypatch.setenv("PGUSER", "shadow_user")
+    monkeypatch.setenv("PGPASSWORD", "shadow_pass")
+    for key in ("PAMS_PG_HOST", "PAMS_PG_PORT", "PAMS_PG_DBNAME", "PAMS_PG_USER", "PAMS_PG_PASSWORD"):
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
+    cfg_path = Path("research/studies/v10/configs/live_baseline_ablation_s1/B0.json").resolve()
+
+    body = runner_impl.BacktestV2ExperimentRequest(
+        config_path=str(cfg_path),
+        config_json=_breakout_config(),
+    )
+    result = service.run_experiment_request_body(body)
+
+    assert result["exp_id"] == "exp_env_mirrored"
+    assert captured["env"] == {
+        "PAMS_PG_HOST": "db.example",
+        "PAMS_PG_PORT": "15432",
+        "PAMS_PG_DBNAME": "pams_shadow",
+        "PAMS_PG_USER": "shadow_user",
+        "PAMS_PG_PASSWORD": "shadow_pass",
+    }
 

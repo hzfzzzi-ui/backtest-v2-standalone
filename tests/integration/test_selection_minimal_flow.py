@@ -78,7 +78,12 @@ def test_minimal_selection_flow_topk_and_reject_reasons() -> None:
     assert by_symbol["aaa"]["selected"] is True
     assert by_symbol["bbb"]["selected"] is False
     assert by_symbol["bbb"]["reject_reason"] == "NOT_IN_TOPK"
+    assert by_symbol["aaa"]["final_score_value"] == by_symbol["aaa"]["mf_score"]
+    assert by_symbol["aaa"]["final_score_rank"] == 1
+    assert by_symbol["bbb"]["final_score_value"] == by_symbol["bbb"]["mf_score"]
+    assert by_symbol["bbb"]["final_score_rank"] == 2
 
+    assert debug_plan.get("final_score_rank_triggered") is True
     assert debug_plan.get("mf_rank_triggered") is True
     assert int(debug_plan.get("buy_slots") or 0) == 1
     assert int(debug_plan.get("buy_candidates_count") or 0) == 2

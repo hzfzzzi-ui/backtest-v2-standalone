@@ -55,11 +55,14 @@ def test_canonical_artifact_contract_and_missing_fields(tmp_path: Path) -> None:
     effective_results_dir = Path(out["results_dir"])
     assert artifacts.get("reason_codes") == "reason_codes.csv"
     assert artifacts.get("symbol_performance") == "symbol_performance.csv"
+    assert artifacts.get("execution_contract") == "execution_contract.json"
 
     assert (effective_results_dir / "reason_codes.csv").exists()
     assert (effective_results_dir / "symbol_performance.csv").exists()
+    assert (effective_results_dir / "execution_contract.json").exists()
 
     run_meta = json.loads((effective_results_dir / "run_meta.json").read_text(encoding="utf-8"))
+    assert (run_meta.get("execution_contract_ref") or {}).get("artifact") == "execution_contract.json"
     counters = dict(run_meta.get("counters") or {})
     for key in ["raw_signal", "blocked", "orders", "skipped", "closed_trades"]:
         assert key in counters
@@ -194,13 +197,65 @@ def test_run_meta_report_consistency_includes_resolved_config_details(tmp_path: 
     assert consistency.get("resolved_config_mode") == "saved_config_run"
     assert consistency.get("resolved_config_id") == "cfg_br35_atr10_csi800_10y"
     assert consistency.get("resolved_config_hash") == "abc123"
+    assert consistency.get("market_data_contract") == "compat_runtime_migration"
     assert consistency.get("data_role") == "v2_runtime"
     assert consistency.get("stocks_table") == "pams_ohlcv_daily_v2_runtime"
     assert consistency.get("stocks_mapping_table") == "pams_ohlcv_daily_v2"
     assert (consistency.get("resolved_config_meta") or {}).get("display_name") == "BR35+ATR1.0+HS300+ZZ500+10Y"
     assert (consistency.get("resolved_config_meta") or {}).get("universe_mode") == "HS300_ZZ500"
     assert (consistency.get("resolved_config_meta") or {}).get("data_role") == "v2_runtime"
+    assert (consistency.get("resolved_config_meta") or {}).get("market_data_contract") == "compat_runtime_migration"
     assert "fallbacks" not in consistency
+
+
+def test_run_meta_report_consistency_defaults_to_canonical_market_contract(tmp_path: Path) -> None:
+    bt_root = tmp_path / "backtest_V2"
+    bt_root.mkdir(parents=True, exist_ok=True)
+    results_dir = tmp_path / "exp_case_canonical"
+
+    base_cfg = {
+        "market_data_contract": "canonical_market",
+        "universe": {"start": "2024-01-01", "end": "2024-12-31", "benchmark": "000300.SH"},
+        "data_source": {
+            "stocks_table": "pams_ohlcv_daily_v2",
+            "v2_canonical_stocks_table": "pams_ohlcv_daily_v2",
+            "v2_runtime_stocks_table": "pams_ohlcv_daily_v2_runtime",
+            "v2_schema_mapping_table": "pams_ohlcv_daily_v2",
+        },
+        "signal": {"strategy": "EMA_CROSS"},
+    }
+    result = {
+        "exp_id": "exp_case_canonical",
+        "results_dir": str(results_dir),
+        "status": "OK",
+        "total_return": 0.01,
+        "max_drawdown": -0.02,
+        "cagr": 0.01,
+        "sharpe": 0.2,
+        "trades": 0,
+        "raw_signal": 0,
+        "blocked": 0,
+        "orders": 0,
+        "skipped": 0,
+        "closed_trades": 0,
+        "universe_meta": {"universe_mode": "HS300_ZZ500"},
+    }
+
+    out = backtest_impl.stabilize_experiment_result(
+        bt_root=bt_root,
+        result=result,
+        base_cfg=base_cfg,
+        overrides={},
+        run_profile_summary=None,
+    )
+
+    effective_results_dir = Path(out["results_dir"])
+    run_meta = json.loads((effective_results_dir / "run_meta.json").read_text(encoding="utf-8"))
+    consistency = dict(run_meta.get("report_consistency") or {})
+    assert consistency.get("market_data_contract") == "canonical_market"
+    assert consistency.get("data_role") == "v2_canonical"
+    assert consistency.get("stocks_table") == "pams_ohlcv_daily_v2"
+    assert run_meta.get("data", {}).get("market_data_contract") == "canonical_market"
 
 
 def test_stage_summary_artifact_is_written_and_indexed(tmp_path: Path) -> None:
@@ -356,6 +411,8 @@ def test_stage_summary_artifact_is_written_and_indexed(tmp_path: Path) -> None:
     manifest = json.loads((effective_results_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["artifacts"]["execution_lineage_ledger"] == "execution_lineage_ledger.csv"
     assert manifest["core_artifacts"]["execution_lineage_ledger"] == "execution_lineage_ledger.csv"
+    assert manifest["artifacts"]["execution_contract"] == "execution_contract.json"
+    assert manifest["core_artifacts"]["execution_contract"] == "execution_contract.json"
     assert manifest["artifacts"]["stage_summary"] == "stage_summary.json"
     assert (manifest.get("stage_pipeline") or {}).get("route_id") == "provider_breakout_runtime"
 

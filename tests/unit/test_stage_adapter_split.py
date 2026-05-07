@@ -8,8 +8,13 @@ import pandas as pd
 
 from backend.core.core.types import Side
 from backend.core.engine_vector.signal_provider import DaySignals, ExitCounts
-from backend.core.stage_pipeline.adapters.candidate_flow import build_candidate_stage_output
-from backend.core.stage_pipeline.adapters.holding_flow import build_holding_stage_output
+from backend.core.stage_pipeline.adapters.bridge_adapter import (
+    apply_s7_order_stage_side_effects,
+    build_candidate_stage_output,
+    build_holding_stage_output,
+)
+from backend.core.stage_pipeline.adapters.candidate_boundary import build_candidate_boundary_result
+from backend.core.stage_pipeline.adapters.candidate_plan import build_candidate_plan_result
 from backend.core.stage_pipeline.adapters.order_planning import build_s7_order_stage_output
 from backend.core.stage_pipeline.adapters.route_runtime import build_signal_provider, initialize_route_controls
 from backend.core.stage_pipeline.adapters.runtime_state import build_runtime_bootstrap, initialize_runtime_ledger
@@ -73,10 +78,14 @@ def test_build_runtime_bootstrap_and_ledger_preserve_existing_defaults() -> None
     assert bootstrap.portfolio_mode == "equal_8"
     assert bootstrap.weight_mode == "equal"
     assert bootstrap.dd_enabled is False
+    assert bootstrap.dividend_cash_timing_mode == "pay_date"
+    assert bootstrap.dividend_events_ex_idx == {}
+    assert bootstrap.dividend_events_pay_idx == {}
     assert bootstrap.open_idx[(date(2026, 3, 2), "sh600000")] == 10.0
     assert bootstrap.close_idx[(date(2026, 3, 3), "sh600000")] == 10.4
 
     assert ledger.cash == 100000.0
+    assert ledger.dividend_receivable == 0.0
     assert ledger.peak_nav == 100000.0
     assert ledger.prev_nav == 100000.0
     assert ledger.positions == {}
@@ -119,6 +128,27 @@ def _sample_current_day() -> dict[str, object]:
             diagnostics={},
         ),
     }
+
+
+def _prepare_candidate_contracts(runtime: SimpleNamespace) -> None:
+    current_day = runtime._current_day
+    candidate_boundary = build_candidate_boundary_result(
+        runtime,
+        day=current_day["day"],
+        controls=current_day["controls"],
+        day_signals=current_day["day_signals"],
+    )
+    candidate_plan = build_candidate_plan_result(
+        runtime,
+        day=current_day["day"],
+        controls=current_day["controls"],
+        day_signals=current_day["day_signals"],
+        candidate_boundary=candidate_boundary,
+        next_open=current_day["next_open"],
+        nav=float(current_day["nav"]),
+    )
+    current_day["candidate_boundary"] = candidate_boundary
+    current_day["candidate_plan"] = candidate_plan
 
 
 def test_candidate_flow_module_preserves_candidate_stage_shape() -> None:
@@ -199,24 +229,20 @@ def test_order_planning_module_preserves_s7_shape(monkeypatch) -> None:
         "holding_symbols": ("sh600001",),
     }
 
-    def _fake_gate(**_kwargs):
-        return True
-
-    def _fake_build_rebalance_orders(**kwargs):
-        kwargs["candidate_audit"].append({"symbol": "sh600000", "selected": True})
+    def _fake_build_execution_orders_from_candidate_plan(**kwargs):
+        kwargs["candidate_audit"].append({"symbol": "sh600000", "selected": True, "decision_layer": "execution_kernel"})
         kwargs["debug_plan"]["reject_reason_counts"] = {"NO_CASH": 1}
+        kwargs["debug_plan"]["execution_kernel_reject_reason_counts"] = {"NO_CASH": 1}
+        kwargs["debug_plan"]["execution_kernel_reject_count"] = 1
+        kwargs["debug_plan"]["execution_kernel_selected_symbols"] = ["sh600000"]
         return [
             SimpleNamespace(side=Side.SELL, symbol="SH600001", qty=100, reason_code="EXIT", meta={"rank": 1}),
             SimpleNamespace(side=Side.BUY, symbol="SH600000", qty=100, reason_code="ENTRY", meta={"rank": 2}),
         ]
 
     monkeypatch.setattr(
-        "backend.core.stage_pipeline.adapters.order_planning.resolve_mf_gate_on_today",
-        _fake_gate,
-    )
-    monkeypatch.setattr(
-        "backend.core.stage_pipeline.adapters.order_planning.build_rebalance_orders",
-        _fake_build_rebalance_orders,
+        "backend.core.stage_pipeline.adapters.order_planning.build_execution_orders_from_candidate_plan",
+        _fake_build_execution_orders_from_candidate_plan,
     )
 
     diag_calls: list[dict[str, object]] = []
@@ -245,6 +271,7 @@ def test_order_planning_module_preserves_s7_shape(monkeypatch) -> None:
         _prepared_day_index=0,
         _apply_daily_decision_diagnostics=lambda **kwargs: diag_calls.append(kwargs),
     )
+    _prepare_candidate_contracts(runtime)
 
     output = build_s7_order_stage_output(runtime)
 
@@ -254,10 +281,19 @@ def test_order_planning_module_preserves_s7_shape(monkeypatch) -> None:
     assert output.reason_counts["NO_CASH"] == 1
     assert output.summary_fragment["buy_orders_count"] == 1
     assert output.summary_fragment["sell_orders_count"] == 1
-    assert output.payload["execution_intent"]["as_of_date"] == "2026-03-02"
-    assert output.payload["execution_intent"]["buy_candidates"] == ["sh600000"]
-    assert output.payload["execution_intent"]["sell_candidates"] == ["sh600001"]
-    assert runtime.candidate_rows == [{"symbol": "sh600000", "selected": True}]
+    assert "execution_intent" not in output.payload
+    assert output.payload["action_intents"][0]["as_of_date"] == "2026-03-02"
+    assert output.payload["action_intents"][0]["actions"][0]["symbol"] == "sh600001"
+    assert output.payload["action_intents"][0]["actions"][1]["symbol"] == "sh600000"
+    assert output.payload["execution_kernel"]["candidate_rows"] == (
+        {"symbol": "sh600000", "selected": True, "decision_layer": "execution_kernel"},
+    )
+    assert runtime.candidate_rows == []
+    assert len(diag_calls) == 0
+
+    apply_s7_order_stage_side_effects(runtime, output)
+
+    assert runtime.candidate_rows == [{"symbol": "sh600000", "selected": True, "decision_layer": "execution_kernel"}]
     assert len(diag_calls) == 1
 
 
@@ -281,10 +317,7 @@ def test_order_planning_module_keeps_cash_blocked_rows_in_fast_mode(monkeypatch)
         "holding_symbols": tuple(),
     }
 
-    def _fake_gate(**_kwargs):
-        return True
-
-    def _fake_build_rebalance_orders(**kwargs):
+    def _fake_build_execution_orders_from_candidate_plan(**kwargs):
         kwargs["candidate_audit"].extend(
             [
                 {
@@ -308,15 +341,14 @@ def test_order_planning_module_keeps_cash_blocked_rows_in_fast_mode(monkeypatch)
             ]
         )
         kwargs["debug_plan"]["reject_reason_counts"] = {"SKIP_NO_CASH": 1, "NOT_IN_TOPK": 1}
+        kwargs["debug_plan"]["execution_kernel_reject_reason_counts"] = {"SKIP_NO_CASH": 1, "NOT_IN_TOPK": 1}
+        kwargs["debug_plan"]["execution_kernel_reject_count"] = 2
+        kwargs["debug_plan"]["execution_kernel_selected_symbols"] = []
         return []
 
     monkeypatch.setattr(
-        "backend.core.stage_pipeline.adapters.order_planning.resolve_mf_gate_on_today",
-        _fake_gate,
-    )
-    monkeypatch.setattr(
-        "backend.core.stage_pipeline.adapters.order_planning.build_rebalance_orders",
-        _fake_build_rebalance_orders,
+        "backend.core.stage_pipeline.adapters.order_planning.build_execution_orders_from_candidate_plan",
+        _fake_build_execution_orders_from_candidate_plan,
     )
 
     diag_calls: list[dict[str, object]] = []
@@ -354,10 +386,16 @@ def test_order_planning_module_keeps_cash_blocked_rows_in_fast_mode(monkeypatch)
         _tilt_bottom_n=0,
         _sizing_cfg=None,
     )
+    _prepare_candidate_contracts(runtime)
 
     output = build_s7_order_stage_output(runtime)
 
     assert output.reason_counts["SKIP_NO_CASH"] == 1
+    assert runtime.candidate_rows == []
+    assert len(diag_calls) == 0
+
+    apply_s7_order_stage_side_effects(runtime, output)
+
     assert runtime.candidate_rows == [
         {
             "date": "2026-03-02",
@@ -395,11 +433,7 @@ def test_order_planning_module_merges_deferred_sell_orders(monkeypatch) -> None:
     }
 
     monkeypatch.setattr(
-        "backend.core.stage_pipeline.adapters.order_planning.resolve_mf_gate_on_today",
-        lambda **_kwargs: True,
-    )
-    monkeypatch.setattr(
-        "backend.core.stage_pipeline.adapters.order_planning.build_rebalance_orders",
+        "backend.core.stage_pipeline.adapters.order_planning.build_execution_orders_from_candidate_plan",
         lambda **kwargs: [
             SimpleNamespace(side=Side.BUY, symbol="SH600000", qty=100, reason_code="ENTRY", meta={"rank": 2}),
         ],
@@ -439,6 +473,7 @@ def test_order_planning_module_merges_deferred_sell_orders(monkeypatch) -> None:
         _prepared_day_index=0,
         _apply_daily_decision_diagnostics=lambda **_kwargs: None,
     )
+    _prepare_candidate_contracts(runtime)
 
     output = build_s7_order_stage_output(runtime)
 
