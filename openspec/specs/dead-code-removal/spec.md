@@ -1,11 +1,9 @@
-# dead-code-removal
+# dead-code-removal Specification
 
 ## Purpose
 
 TBD -- Remove dead code (zero-reference directories, files, and functions) from the codebase to reduce complexity and maintenance burden.
-
 ## Requirements
-
 ### Requirement: 删除零引用整目录
 
 系统 SHALL 删除以下零引用目录，这些目录中没有任何文件被活跃代码 import：
@@ -80,3 +78,11 @@ TBD -- Remove dead code (zero-reference directories, files, and functions) from 
 #### Scenario: 孤立函数删除后所有路由正常
 - **WHEN** 上述孤立函数被删除
 - **THEN** 所有 19 个 `@router` 路由正常工作，无 NameError
+
+### Requirement: 执行边界清理不得先于替代路径稳定
+系统 SHALL 在 `dead-code-removal` 中明确：执行边界残留清理必须以后继正式路径已经稳定落地为前提，不得提前删除仍承担 compat 作用的代码。
+
+#### Scenario: 仍有 compat 作用的残留不得被提前删除
+- **WHEN** 某段旧合同或 helper 仍承担 compat 或回退作用
+- **THEN** 系统 MUST 不得将其提前删除
+

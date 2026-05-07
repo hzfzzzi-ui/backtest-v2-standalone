@@ -1,84 +1,65 @@
 ﻿# research-db-structure-governance Specification
 
 ## Purpose
-TBD - created by archiving change optimize-core-db-structure. Update Purpose after archive.
+
+Define the formal capability boundary for `research-db-structure-governance` in the current mainline.
 ## Requirements
-### Requirement: 核心研究表结构治理分层
-系统 MUST 对共享 PostgreSQL `public` schema 中的数据库对象进行分层治理，并将研究主线数据库优化限制在明确定义的核心研究表范围内。
+### Requirement: 鏍稿績鐮旂┒琛ㄧ粨鏋勬不鐞嗗垎灞?绯荤粺 MUST 瀵瑰叡浜?PostgreSQL `public` schema 涓殑鏁版嵁搴撳璞¤繘琛屽垎灞傛不鐞嗭紝骞跺皢鐮旂┒涓荤嚎鏁版嵁搴撲紭鍖栭檺鍒跺湪鏄庣‘瀹氫箟鐨勬牳蹇冪爺绌惰〃鑼冨洿鍐呫€?
+绯荤粺 MUST 瀵瑰叡浜?PostgreSQL `public` schema 涓殑鏁版嵁搴撳璞¤繘琛屽垎灞傛不鐞嗭紝骞跺皢鐮旂┒涓荤嚎鏁版嵁搴撲紭鍖栭檺鍒跺湪鏄庣‘瀹氫箟鐨勬牳蹇冪爺绌惰〃鑼冨洿鍐呫€?
+#### Scenario: 璇嗗埆鏍稿績鐮旂┒琛?- **WHEN** 鍥㈤槦鍒跺畾鎴栬瘎瀹″洖娴嬬郴缁熸暟鎹簱缁撴瀯浼樺寲鏂规
+- **THEN** 鏂规 MUST 灏?`pams_ohlcv_daily`銆乣pit_index_daily`銆乣pit_index_constituents`銆乣pit_industry_history`銆乣pit_security_master`銆乣pit_st_history` 璇嗗埆涓烘牳蹇冪爺绌惰〃
+- **THEN** 涓嶅睘浜庝笂杩伴泦鍚堢殑鍏变韩涓氬姟琛?MUST NOT 鍥犫€滈『鎵嬩紭鍖栤€濊绾冲叆鍚屼竴杞牳蹇冪爺绌舵敼鍔?
+#### Scenario: 璇嗗埆澶囦唤涓庝复鏃跺璞?- **WHEN** 鍥㈤槦鐩樼偣 `public` schema 涓殑澶囦唤琛ㄦ垨涓存椂鑴氭湰瀵硅薄
+- **THEN** `*_backup_*` 鎸佷箙琛?MUST 琚涓烘不鐞嗗€哄姟鑰岄潪鏍稿績鐮旂┒琛?- **THEN** 浼氳瘽绾?`tmp_*` 琛?MUST 琚涓鸿剼鏈复鏃跺璞★紝涓嶅緱琚鍒や负闀挎湡缁撴瀯璧勪骇### Requirement: L2 鏁版嵁搴撲紭鍖栧彧鍏佽闈炶涔夊瀷 DDL
+绯荤粺 SHALL 灏?L2 鏁版嵁搴撶粨鏋勪紭鍖栭檺瀹氫负涓嶄細鏀瑰彉鐮旂┒鍙ｅ緞銆佹煡璇㈢粨鏋滈泦鍜岃繍琛屾椂鍚堝悓鐨勯潪璇箟鍨?DDL銆?
+#### Scenario: 瀵?PIT 鎴愬垎琛ㄦ墽琛?L2 浼樺寲
+- **WHEN** 鍥㈤槦瀵?`pit_index_constituents` 鍒跺畾棣栨壒 L2 浼樺寲
+- **THEN** 鍏佽鐨?DDL MUST 闄愬畾涓烘柊澧為潪鍞竴绱㈠紩銆佹敞閲婃垨 runbook 閰嶅瀵硅薄
+- **THEN** 璇ヤ紭鍖?MUST NOT 鏀瑰彉琛ㄥ瓧娈靛惈涔夈€佹煡璇㈡潯浠惰涔夋垨 Universe 缁撴灉闆嗗悎
 
-系统 MUST 对共享 PostgreSQL `public` schema 中的数据库对象进行分层治理，并将研究主线数据库优化限制在明确定义的核心研究表范围内。
+#### Scenario: 瀵?PIT 琛屼笟鍘嗗彶琛ㄦ墽琛?L2 浼樺寲
+- **WHEN** 鍥㈤槦瀵?`pit_industry_history` 鍒跺畾棣栨壒 L2 浼樺寲
+- **THEN** 浼樺寲 MUST 浼樺厛瑕嗙洊 `industry_l1 + 鐢熸晥鍖洪棿 + ts_code` 鏌ヨ妯″紡
+- **THEN** 璇ヤ紭鍖?MUST NOT 淇敼 `start_date` / `end_date` 鐨?PIT 瑙ｉ噴鏂瑰紡
 
-#### Scenario: 识别核心研究表
-- **WHEN** 团队制定或评审回测系统数据库结构优化方案
-- **THEN** 方案 MUST 将 `pams_ohlcv_daily`、`pit_index_daily`、`pit_index_constituents`、`pit_industry_history`、`pit_security_master`、`pit_st_history` 识别为核心研究表
-- **THEN** 不属于上述集合的共享业务表 MUST NOT 因“顺手优化”被纳入同一轮核心研究改动
+### Requirement: L2 DDL 蹇呴』鍐呭缓楠岃瘉涓庡洖閫€
+姣忎竴涓?L2 鏁版嵁搴撶粨鏋勫彉鏇?MUST 鍚屾椂鎻愪緵鎵ц鍓嶅熀绾裤€佹墽琛屽悗楠岃瘉鍜岄潪鐮村潖鎬у洖閫€鏂规銆?
+#### Scenario: 鎵ц绱㈠紩鍙樻洿鍓?- **WHEN** 鍥㈤槦鍑嗗鎵ц浠讳綍 L2 绱㈠紩 DDL
+- **THEN** 鏂规 MUST 璁板綍瀵瑰簲涓绘煡璇㈢殑 `EXPLAIN` 鍩虹嚎
+- **THEN** 鏂规 MUST 璁板綍鐩爣琛ㄧ殑鍏抽敭琛屾暟鎴栧幓閲嶇粺璁★紝浣滀负璇箟鏍￠獙渚濇嵁
 
-#### Scenario: 识别备份与临时对象
-- **WHEN** 团队盘点 `public` schema 中的备份表或临时脚本对象
-- **THEN** `*_backup_*` 持久表 MUST 被视为治理债务而非核心研究表
-- **THEN** 会话级 `tmp_*` 表 MUST 被视为脚本临时对象，不得被误判为长期结构资产### Requirement: L2 数据库优化只允许非语义型 DDL
-系统 SHALL 将 L2 数据库结构优化限定为不会改变研究口径、查询结果集和运行时合同的非语义型 DDL。
+#### Scenario: 鎵ц绱㈠紩鍙樻洿鍚?- **WHEN** 鍥㈤槦瀹屾垚浠讳綍 L2 绱㈠紩 DDL
+- **THEN** 鏂规 MUST 閲嶆柊鎵ц鐩稿悓鏌ヨ鐨?`EXPLAIN` 鎴?`EXPLAIN ANALYZE`
+- **THEN** 鏂规 MUST 楠岃瘉鍏抽敭缁撴灉闆嗕笌鍙樻洿鍓嶄竴鑷?- **THEN** 鏂规 MUST 鎻愪緵 `DROP INDEX CONCURRENTLY` 绾у埆鐨勫洖閫€ DDL
 
-#### Scenario: 对 PIT 成分表执行 L2 优化
-- **WHEN** 团队对 `pit_index_constituents` 制定首批 L2 优化
-- **THEN** 允许的 DDL MUST 限定为新增非唯一索引、注释或 runbook 配套对象
-- **THEN** 该优化 MUST NOT 改变表字段含义、查询条件语义或 Universe 结果集合
+### Requirement: 绾︽潫澧炲己涓庤繍琛屾椂鏁版嵁婧愬垏鎹㈠睘浜?L3
+浠讳綍鍙兘鏀瑰彉鍐欏叆鍚堝悓銆佽繍琛屾椂鏁版嵁鏉ユ簮銆佸叡浜簱鍏煎鎬ф垨 PIT 璇箟杈圭晫鐨勭粨鏋勮皟鏁?MUST 浣滀负 L3 鍙樻洿鍗曠嫭绔嬮」銆?
+#### Scenario: 鎻愯澧炲姞绾︽潫
+- **WHEN** 鍥㈤槦鎻愯涓?`pit_index_constituents`銆乣pit_industry_history` 鎴?`pit_st_history` 澧炲姞涓婚敭銆佸敮涓€绾︽潫銆侀潪绌虹害鏉熸垨鍖洪棿閲嶅彔绾︽潫
+- **THEN** 璇ユ彁璁?MUST 琚綊绫讳负 L3
+- **THEN** 鍦ㄧ嫭绔?spec銆佹暟鎹璁″拰鍥炲綊楠岃瘉瀹屾垚鍓?SHALL NOT 鐩存帴瀹炴柦
 
-#### Scenario: 对 PIT 行业历史表执行 L2 优化
-- **WHEN** 团队对 `pit_industry_history` 制定首批 L2 优化
-- **THEN** 优化 MUST 优先覆盖 `industry_l1 + 生效区间 + ts_code` 查询模式
-- **THEN** 该优化 MUST NOT 修改 `start_date` / `end_date` 的 PIT 解释方式
+#### Scenario: 鎻愯鍒囨崲浜ゆ槗鏃ユ棩鍘嗙湡婧?- **WHEN** 鍥㈤槦鎻愯灏嗚繍琛屾椂浜ゆ槗鏃ユ棩鍘嗕富鏉ユ簮浠庣幇鏈変环鏍艰〃鍒囨崲鍒?`pit_trade_cal`
+- **THEN** 璇ユ彁璁?MUST 琚綊绫讳负 L3
+- **THEN** 鍦ㄦ槑纭獙璇佸彛寰勪竴鑷存€т箣鍓?SHALL NOT 涓庣储寮曚紭鍖栦竴骞跺疄鏂?
+### Requirement: 鎸佷箙鍖栧浠借〃蹇呴』鍙楁不鐞嗙害鏉?绯荤粺 MUST 瀵?`public` schema 涓殑鎸佷箙鍖栧浠借〃寤虹珛娌荤悊杈圭晫锛岄伩鍏嶄竴娆℃€ц剼鏈骇鐗╅暱鏈熸贩鍏ヤ富缁撴瀯璁ょ煡銆?
+绯荤粺 MUST 瀵?`public` schema 涓殑鎸佷箙鍖栧浠借〃寤虹珛娌荤悊杈圭晫锛岄伩鍏嶄竴娆℃€ц剼鏈骇鐗╅暱鏈熸贩鍏ヤ富缁撴瀯璁ょ煡銆?
+#### Scenario: 鏂板鎸佷箙鍖栧浠借〃
+- **WHEN** 鍥㈤槦闇€瑕佷负杩愯惀鎴栦慨澶嶇洰鐨勬柊澧炴寔涔呭寲澶囦唤琛?- **THEN** 璇ヨ〃 MUST 璁板綍鏉ユ簮銆佸垱寤烘棩鏈熴€侀鏈熶繚鐣欐湡鍜屽垹闄?杩佺Щ璐ｄ换浜?- **THEN** 璇ヨ〃 MUST NOT 琚爣璁颁负鏍稿績鐮旂┒琛?
+#### Scenario: 鐩樼偣鏃㈡湁澶囦唤琛?- **WHEN** 鍥㈤槦鐩樼偣 `public` schema 涓棦鏈?`*_backup_*` 琛?- **THEN** 鐩樼偣缁撴灉 MUST 鏄庣‘杩欎簺琛ㄤ笉灞炰簬 baseline 涓荤嚎杩愯鏃朵緷璧?- **THEN** 鍚庣画濡傞渶杩佺Щ鎴栧垹闄わ紝蹇呴』閫氳繃鐙珛鍙樻洿鎵ц### Requirement: L2 鏁版嵁搴撲紭鍖栧彧鍏佽闈炶涔夊瀷 DDL
+绯荤粺 SHALL 灏?L2 鏁版嵁搴撶粨鏋勪紭鍖栭檺瀹氫负涓嶄細鏀瑰彉鐮旂┒鍙ｅ緞銆佹煡璇㈢粨鏋滈泦鍜岃繍琛屾椂鍚堝悓鐨勯潪璇箟鍨?DDL銆?
+#### Scenario: 瀵?PIT 鎴愬垎琛ㄦ墽琛?L2 浼樺寲
+- **WHEN** 鍥㈤槦瀵?`pit_index_constituents` 鍒跺畾棣栨壒 L2 浼樺寲
+- **THEN** 鍏佽鐨?DDL MUST 闄愬畾涓烘柊澧為潪鍞竴绱㈠紩銆佹敞閲婃垨 runbook 閰嶅瀵硅薄
+- **THEN** 璇ヤ紭鍖?MUST NOT 鏀瑰彉琛ㄥ瓧娈靛惈涔夈€佹煡璇㈡潯浠惰涔夋垨 Universe 缁撴灉闆嗗悎
 
-### Requirement: L2 DDL 必须内建验证与回退
-每一个 L2 数据库结构变更 MUST 同时提供执行前基线、执行后验证和非破坏性回退方案。
+#### Scenario: 瀵?PIT 琛屼笟鍘嗗彶琛ㄦ墽琛?L2 浼樺寲
+- **WHEN** 鍥㈤槦瀵?`pit_industry_history` 鍒跺畾棣栨壒 L2 浼樺寲
+- **THEN** 浼樺寲 MUST 浼樺厛瑕嗙洊 `industry_l1 + 鐢熸晥鍖洪棿 + ts_code` 鏌ヨ妯″紡
+- **THEN** 璇ヤ紭鍖?MUST NOT 淇敼 `start_date` / `end_date` 鐨?PIT 瑙ｉ噴鏂瑰紡
 
-#### Scenario: 执行索引变更前
-- **WHEN** 团队准备执行任何 L2 索引 DDL
-- **THEN** 方案 MUST 记录对应主查询的 `EXPLAIN` 基线
-- **THEN** 方案 MUST 记录目标表的关键行数或去重统计，作为语义校验依据
-
-#### Scenario: 执行索引变更后
-- **WHEN** 团队完成任何 L2 索引 DDL
-- **THEN** 方案 MUST 重新执行相同查询的 `EXPLAIN` 或 `EXPLAIN ANALYZE`
-- **THEN** 方案 MUST 验证关键结果集与变更前一致
-- **THEN** 方案 MUST 提供 `DROP INDEX CONCURRENTLY` 级别的回退 DDL
-
-### Requirement: 约束增强与运行时数据源切换属于 L3
-任何可能改变写入合同、运行时数据来源、共享库兼容性或 PIT 语义边界的结构调整 MUST 作为 L3 变更单独立项。
-
-#### Scenario: 提议增加约束
-- **WHEN** 团队提议为 `pit_index_constituents`、`pit_industry_history` 或 `pit_st_history` 增加主键、唯一约束、非空约束或区间重叠约束
-- **THEN** 该提议 MUST 被归类为 L3
-- **THEN** 在独立 spec、数据审计和回归验证完成前 SHALL NOT 直接实施
-
-#### Scenario: 提议切换交易日日历真源
-- **WHEN** 团队提议将运行时交易日日历主来源从现有价格表切换到 `pit_trade_cal`
-- **THEN** 该提议 MUST 被归类为 L3
-- **THEN** 在明确验证口径一致性之前 SHALL NOT 与索引优化一并实施
-
-### Requirement: 持久化备份表必须受治理约束
-系统 MUST 对 `public` schema 中的持久化备份表建立治理边界，避免一次性脚本产物长期混入主结构认知。
-
-系统 MUST 对 `public` schema 中的持久化备份表建立治理边界，避免一次性脚本产物长期混入主结构认知。
-
-#### Scenario: 新增持久化备份表
-- **WHEN** 团队需要为运营或修复目的新增持久化备份表
-- **THEN** 该表 MUST 记录来源、创建日期、预期保留期和删除/迁移责任人
-- **THEN** 该表 MUST NOT 被标记为核心研究表
-
-#### Scenario: 盘点既有备份表
-- **WHEN** 团队盘点 `public` schema 中既有 `*_backup_*` 表
-- **THEN** 盘点结果 MUST 明确这些表不属于 baseline 主线运行时依赖
-- **THEN** 后续如需迁移或删除，必须通过独立变更执行### Requirement: L2 数据库优化只允许非语义型 DDL
-系统 SHALL 将 L2 数据库结构优化限定为不会改变研究口径、查询结果集和运行时合同的非语义型 DDL。
-
-#### Scenario: 对 PIT 成分表执行 L2 优化
-- **WHEN** 团队对 `pit_index_constituents` 制定首批 L2 优化
-- **THEN** 允许的 DDL MUST 限定为新增非唯一索引、注释或 runbook 配套对象
-- **THEN** 该优化 MUST NOT 改变表字段含义、查询条件语义或 Universe 结果集合
-
-#### Scenario: 对 PIT 行业历史表执行 L2 优化
-- **WHEN** 团队对 `pit_industry_history` 制定首批 L2 优化
-- **THEN** 优化 MUST 优先覆盖 `industry_l1 + 生效区间 + ts_code` 查询模式
-- **THEN** 该优化 MUST NOT 修改 `start_date` / `end_date` 的 PIT 解释方式
+### Requirement: transactions 鐢熷懡鍛ㄦ湡涓昏〃灞炰簬涓氬姟浜嬪姟鍩熸寮忓璞?绯荤粺 SHALL 鍦ㄦ暟鎹簱缁撴瀯娌荤悊涓槑纭?`transactions` 鐢熷懡鍛ㄦ湡涓昏〃灞炰簬涓氬姟浜嬪姟鍩熸寮忓璞★紝骞朵笌鐮旂┒鏁版嵁鍩熴€佸疄楠屽煙鍒嗙銆?
+#### Scenario: 浜嬪姟涓昏〃鍩熷綊灞炴竻鏅?- **WHEN** 鏂囨。鎴栧疄鐜板０鏄庢暟鎹簱瀵硅薄鐨勬寮忓綊灞?- **THEN** `transactions` 鐢熷懡鍛ㄦ湡涓昏〃 MUST 琚綊绫诲埌涓氬姟浜嬪姟鍩?
+### Requirement: sim_account 姝ｅ紡瀵硅薄灞炰簬涓氬姟浜嬪姟鍩?绯荤粺 SHALL 鍦ㄦ暟鎹簱缁撴瀯娌荤悊涓槑纭?`accounts`銆乣holdings_snapshots`銆乣cash_ledger`銆乣sync_logs` 灞炰簬涓氬姟浜嬪姟鍩熸寮忓璞°€?
+#### Scenario: sim_account 瀵硅薄鍩熷綊灞炴槑纭?- **WHEN** 鏂囨。鎴栧疄鐜板０鏄?`sim_account` 鐩稿叧瀵硅薄鐨勬寮忓綊灞?- **THEN** 杩欎簺瀵硅薄 MUST 琚綊绫诲埌涓氬姟浜嬪姟鍩?
 

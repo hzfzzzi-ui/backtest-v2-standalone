@@ -1,4 +1,4 @@
-# Database Connection Resilience
+# db-connection-resilience Specification
 
 ## Purpose
 

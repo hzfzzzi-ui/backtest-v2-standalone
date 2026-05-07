@@ -2,9 +2,7 @@
 
 ## Purpose
 Define the minimum A-share ETF research entry, including the controlled first-wave ETF catalog, ETF-specific daily truth tables, and minimal research presets.
-
 ## Requirements
-
 ### Requirement: 系统必须维护受控的 A 股 ETF 首波研究目录
 系统 MUST 为 `cn_etf` 研究入口维护一份正式受控 ETF 目录，且第一阶段目录 MUST 只包含首波 9 只 ETF：`510300.SH`、`510500.SH`、`510050.SH`、`518880.SH`、`511010.SH`、`512100.SH`、`512890.SH`、`588000.SH`、`159915.SZ`。目录 MUST 至少记录 `ts_code`、`symbol`、`name`、`exchange`、`batch_id`、`exposure_bucket`、`list_date` 和 `delist_date`。
 
@@ -78,3 +76,33 @@ Define the minimum A-share ETF research entry, including the controlled first-wa
 - **WHEN** 系统为 `cn_etf_beta` 构建 Phase 1 候选池
 - **THEN** 入口摘要 MUST 明确哪些 ETF 属于正式 core beta 范围
 - **THEN** 入口摘要 MUST 明确 `512890.SH` 是否作为 limited defense candidate 参与
+
+### Requirement: 正式 ETF Phase 1 研究入口必须支持零交易诊断模式
+`cn_etf_phase1_allocation_entry` MUST 提供一条不改变正式策略口径的诊断模式，用于输出正式资产池、正式参数和逐层对照实验的根因诊断产物。
+
+#### Scenario: 诊断模式复用正式口径
+- **WHEN** 用户运行正式 ETF Phase 1 的零交易诊断模式
+- **THEN** 系统 MUST 复用正式资产池、正式 Governor 输入和正式配置 contract
+- **THEN** 系统 SHALL NOT 因诊断模式自动切换到研究分支资产或研究排序壳
+
+### Requirement: 正式 ETF Phase 1 研究入口必须输出可复现的诊断产物清单
+诊断模式 MUST 输出可复现的调仓日明细、链路样本、逐层对照实验结果和关键参数生效值清单，以支持离线复核。
+
+#### Scenario: 诊断产物齐全
+- **WHEN** 正式 ETF Phase 1 诊断模式运行完成
+- **THEN** 产物目录 MUST 包含调仓日明细、链路样本和逐层对照实验汇总
+- **THEN** `run_meta` 或等价元信息 MUST 记录本次诊断使用的正式 study、正式资产池和参数快照
+
+### Requirement: cn_etf research entry MUST 支持 ETF research mainline R1 preset
+`cn_etf` research entry MUST 支持装载 `etf/cn_broad_based_research_mainline_r1`，并将其视为受控目录内的 research-only study preset。该 preset MUST 可由 `study_runner` 与 generated thin script 直接执行。
+
+#### Scenario: study_runner 装载 R1 preset
+- **WHEN** 用户通过 study id `etf/cn_broad_based_research_mainline_r1` 运行研究
+- **THEN** 系统 MUST 能从 `research/studies/etf/` 装载对应 study yaml
+- **THEN** 系统 MUST 生成可直接执行的 request payload
+
+#### Scenario: generated thin script 指向 R1 preset
+- **WHEN** 用户运行 `backend/scripts/generated/run_etf_cn_broad_based_research_mainline_r1.py`
+- **THEN** 脚本 MUST 将执行入口转发到 `study_run etf/cn_broad_based_research_mainline_r1`
+- **THEN** 脚本 SHALL NOT 内嵌策略实现逻辑
+

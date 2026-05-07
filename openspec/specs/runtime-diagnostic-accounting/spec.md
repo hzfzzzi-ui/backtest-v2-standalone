@@ -1,32 +1,34 @@
 ﻿# runtime-diagnostic-accounting Specification
 
 ## Purpose
-TBD - created by archiving change decouple-runtime-diagnostics-from-execution. Update Purpose after archive.
+
+Define the formal capability boundary for `runtime-diagnostic-accounting` in the current mainline.
 ## Requirements
-### Requirement: Runtime diagnostics 必须通过独立 snapshot contract 传递
-系统 MUST 定义独立的 runtime diagnostics snapshot / input contract，用于承接执行层产生的原始诊断输入，并作为 artifact diagnostics 与 surface counters 的唯一输入边界。
+### Requirement: Runtime diagnostics 蹇呴』閫氳繃鐙珛 snapshot contract 浼犻€?
+绯荤粺 MUST 瀹氫箟鐙珛鐨?runtime diagnostics snapshot / input contract锛岀敤浜庢壙鎺ユ墽琛屽眰浜х敓鐨勫師濮嬭瘖鏂緭鍏ワ紝骞朵綔涓?artifact diagnostics 涓?surface counters 鐨勫敮涓€杈撳叆杈圭晫銆?
 
-#### Scenario: 执行层产生日级诊断输入
-- **WHEN** 执行层完成某个交易日的持仓、订单和信号处理
-- **THEN** 系统 MUST 产出独立的 runtime diagnostics input，而不是直接在执行函数中定义最终 funnel 口径
-- **THEN** 该 input MUST 包含 stage 计数归一化所需的原始事件字段
+#### Scenario: 鎵ц灞備骇鐢熸棩绾ц瘖鏂緭鍏?
+- **WHEN** 鎵ц灞傚畬鎴愭煇涓氦鏄撴棩鐨勬寔浠撱€佽鍗曞拰淇″彿澶勭悊
+- **THEN** 绯荤粺 MUST 浜у嚭鐙珛鐨?runtime diagnostics input锛岃€屼笉鏄洿鎺ュ湪鎵ц鍑芥暟涓畾涔夋渶缁?funnel 鍙ｅ緞
+- **THEN** 璇?input MUST 鍖呭惈 stage 璁℃暟褰掍竴鍖栨墍闇€鐨勫師濮嬩簨浠跺瓧娈?
 
-#### Scenario: artifact diagnostics 消费执行诊断
-- **WHEN** diagnostics builder 生成 buy funnel、reason counters 或 surface diagnostics
-- **THEN** 系统 MUST 只消费 runtime diagnostics snapshot / input
-- **THEN** diagnostics builder SHALL NOT 直接依赖执行循环内部的隐式局部变量
+#### Scenario: artifact diagnostics 娑堣垂鎵ц璇婃柇
+- **WHEN** diagnostics builder 鐢熸垚 buy funnel銆乺eason counters 鎴?surface diagnostics
+- **THEN** 绯荤粺 MUST 鍙秷璐?runtime diagnostics snapshot / input
+- **THEN** diagnostics builder SHALL NOT 鐩存帴渚濊禆鎵ц寰幆鍐呴儴鐨勯殣寮忓眬閮ㄥ彉閲?
 
-### Requirement: Stage count 归一化必须属于 diagnostics 层
-系统 MUST 将 `buy_candidate_count`、`after_held_filter_count`、`after_slot_filter_count`、`after_cash_lot_count` 等最终 stage 计数语义定义在 diagnostics 层，而不是执行层。
+### Requirement: Stage count 褰掍竴鍖栧繀椤诲睘浜?diagnostics 灞?
+绯荤粺 MUST 灏?`buy_candidate_count`銆乣after_held_filter_count`銆乣after_slot_filter_count`銆乣after_cash_lot_count` 绛夋渶缁?stage 璁℃暟璇箟瀹氫箟鍦?diagnostics 灞傦紝鑰屼笉鏄墽琛屽眰銆?
 
-系统 MUST 将 `buy_candidate_count`、`after_held_filter_count`、`after_slot_filter_count`、`after_cash_lot_count` 等最终 stage 计数语义定义在 diagnostics 层，而不是执行层。
+绯荤粺 MUST 灏?`buy_candidate_count`銆乣after_held_filter_count`銆乣after_slot_filter_count`銆乣after_cash_lot_count` 绛夋渶缁?stage 璁℃暟璇箟瀹氫箟鍦?diagnostics 灞傦紝鑰屼笉鏄墽琛屽眰銆?
 
-#### Scenario: route 专属 stage 计数归一化
-- **WHEN** breakout route 或其他 route 需要对原始计数做口径归一化
-- **THEN** 系统 MUST 在 diagnostics builder 中完成归一化
-- **THEN** 执行层 SHALL NOT 直接写入最终 UI 或 artifact stage 语义
+#### Scenario: route 涓撳睘 stage 璁℃暟褰掍竴鍖?
+- **WHEN** breakout route 鎴栧叾浠?route 闇€瑕佸鍘熷璁℃暟鍋氬彛寰勫綊涓€鍖?
+- **THEN** 绯荤粺 MUST 鍦?diagnostics builder 涓畬鎴愬綊涓€鍖?
+- **THEN** 鎵ц灞?SHALL NOT 鐩存帴鍐欏叆鏈€缁?UI 鎴?artifact stage 璇箟
 
-#### Scenario: baseline funnel 对照
-- **WHEN** 系统对 `baseline_V10.1` 对应实验执行 diagnostics compare
-- **THEN** 归一化后的 stage count MUST 与既有 baseline 结果一致
-- **THEN** 任一差异都 MUST 被视为 diagnostics 口径漂移
+#### Scenario: baseline funnel 瀵圭収
+- **WHEN** 绯荤粺瀵?`baseline_V10.1` 瀵瑰簲瀹為獙鎵ц diagnostics compare
+- **THEN** 褰掍竴鍖栧悗鐨?stage count MUST 涓庢棦鏈?baseline 缁撴灉涓€鑷?
+- **THEN** 浠讳竴宸紓閮?MUST 琚涓?diagnostics 鍙ｅ緞婕傜Щ
+

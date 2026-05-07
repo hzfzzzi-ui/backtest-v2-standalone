@@ -1,4 +1,4 @@
-﻿# api-runtime-config-compilation Specification
+# api-runtime-config-compilation Specification
 
 ## Purpose
 定义 runtime config compile 的模块边界，确保 `runner_config_helpers.py` 只保留 facade 与总装配职责，具体配置域编译拆分到独立模块，同时不改变 `baseline_V10.1` 的 runtime config 语义。
@@ -78,29 +78,46 @@
 - **THEN** runtime compile SHALL 不引入改变既有默认口径的隐式真值
 - **THEN** 旧配置在编译后 SHALL 继续保持与改动前等价的 runtime 语义
 
-### Requirement: Runtime config compile MUST 显式编译 v2 数据角色
-系统 MUST 允许 runtime config compile 显式区分 `v2` 的 canonical 角色与 runtime compatibility 角色。编译后的 runtime config MUST 能表达 baseline 当前消费的是 `v1`、canonical `v2`，还是 runtime `v2`，并保留该选择的可审计元信息。
+### Requirement: Runtime config compile MUST 编译 canonical market source contract
+系统 MUST 以 `canonical_market` 为正式市场数据消费目标编译 runtime config，而不是继续把 `v1`、`v2 runtime` 或 `data_role` 暴露为正式上层数据角色。编译结果 MAY 保留 canonical source reference 作为审计元信息，但 SHALL NOT 再要求上层通过 `data_role` 或具体 `stocks_table` 决定正式市场数据入口。
 
-#### Scenario: 编译 baseline 使用 v2 runtime
-- **WHEN** 用户或研究配置指定 baseline 使用 `v2` runtime compatibility 数据角色
-- **THEN** compile 结果 MUST 明确记录该数据角色
-- **THEN** compile 结果 MUST 指向 compat 层，而不是 canonical 全量表
+#### Scenario: 编译 baseline 使用正式默认市场数据入口
+- **WHEN** 用户继续使用当前正式默认运行配置
+- **THEN** runtime config compile MUST 产出指向 `canonical_market` 的正式市场数据入口
+- **THEN** compile 结果 SHALL NOT 继续把 `pams_ohlcv_daily` 作为默认正式股票数据表
 
-#### Scenario: 编译 baseline 使用 canonical v2 做对照
-- **WHEN** 用户或研究配置指定 baseline 使用 canonical `v2` 做对照实验
-- **THEN** compile 结果 MUST 明确记录该数据角色
-- **THEN** 运行产物 MUST 能区分该实验是 canonical 对照，而非正式 runtime 消费
+#### Scenario: 编译 canonical shadow 对照实验
+- **WHEN** 用户或研究配置指定 canonical shadow source 做对照实验
+- **THEN** compile 结果 MUST 明确记录 canonical source reference
+- **THEN** 运行产物 MUST 能区分该实验是 canonical 对照，而非正式默认入口被隐式切换
 
-### Requirement: Runtime config compile 必须支持显式的 shadow 股票表切换
-系统 MUST 允许 runtime config compile 在不改变默认行为的前提下，显式编译出指向 `pams_ohlcv_daily_v2` 的股票数据源配置。该切换 MUST 来自明确的 shadow 配置或 override，而不是由 compile 流程隐式替换默认 `stocks_table`。
+### Requirement: Runtime config compile 必须支持显式的 canonical shadow source 切换
+系统 MUST 允许 runtime config compile 在不改变正式默认行为的前提下，显式编译出替代性的 canonical market source 引用。该切换 MUST 来自明确的 shadow 配置或 override，而不是由 compile 流程隐式替换默认市场数据入口。
 
-#### Scenario: Shadow 配置编译为 v2 数据源
+#### Scenario: Shadow 配置编译为 canonical shadow source
 - **WHEN** 用户提供 `pams_cn_pg_v2.json` 或等价 shadow override
-- **THEN** runtime config compile MUST 产出指向 `pams_ohlcv_daily_v2` 的 `stocks_table` 和相应 schema mapping
+- **THEN** runtime config compile MUST 产出指向 canonical shadow source 的 source reference 和相应 schema mapping
 - **THEN** 其他运行时字段语义 SHALL 与默认配置保持一致
 
 #### Scenario: 默认配置不被隐式切换
 - **WHEN** 用户继续使用当前默认运行配置
-- **THEN** runtime config compile SHALL 继续产出指向 `pams_ohlcv_daily` 的结果
-- **THEN** compile 流程 SHALL NOT 因存在 `v2` 表而自动替换默认股票表
+- **THEN** runtime config compile SHALL 继续产出指向正式默认 `canonical_market` 入口的结果
+- **THEN** compile 流程 SHALL NOT 因存在 `v2` 或 compat 表而自动发出 `pams_ohlcv_daily` 或 `pams_ohlcv_daily_v2_runtime` 作为正式默认入口
 
+### Requirement: Runtime compile 必须为 unified combo 物化正式 sleeve anchors
+当 runtime config compile 识别到 `cn_stock_etf_v1` unified combo 模板时，编译器 MUST 通过正式 anchor 接口物化两个 sleeve，而不是继续从同一份 workbench template 深拷贝：
+
+- stock sleeve MUST 通过 baseline 记录接口读取正式 `baseline_V10_1`
+- ETF sleeve MUST 通过 study 定义接口读取 `etf/cn_etf_first_wave_core` 的主窗口 `1626` 与 `CORE` variant
+
+编译器 SHALL NOT 因为 unified template 中存在 stock/ETF 字段，就绕过上述 anchor 物化流程。
+
+#### Scenario: 编译 cn_stock_etf_v1
+- **WHEN** 系统编译 `cn_stock_etf_v1` 的 unified runtime payload
+- **THEN** 编译结果中的 stock sleeve MUST 保留正式 `baseline_V10_1` 的主线研究口径
+- **THEN** 编译结果中的 ETF sleeve MUST 保留正式 `cn_etf_first_wave_core` 的 stabilizer 研究口径
+
+#### Scenario: 正式 anchor 缺失
+- **WHEN** `baseline_V10_1` 或 `etf/cn_etf_first_wave_core` 主窗口 `1626` / `CORE` variant 无法解析
+- **THEN** compile MUST 明确失败
+- **THEN** 系统 SHALL NOT 静默回退到 unified template 深拷贝语义

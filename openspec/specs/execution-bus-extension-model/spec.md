@@ -1,4 +1,4 @@
-﻿# execution-bus-extension-model Specification
+# execution-bus-extension-model Specification
 
 ## Purpose
 Synced from delta spec during archive. The capability contract is now part of the main spec set.
@@ -56,5 +56,3 @@ Synced from delta spec during archive. The capability contract is now part of th
 - **WHEN** reporter 试图修改候选集、排序结果或订单计划
 - **THEN** 系统 MUST 将其判定为越界
 - **THEN** 该逻辑 MUST 迁移到 filter/ranker/gate/sizer 等正式模块类型
-
-

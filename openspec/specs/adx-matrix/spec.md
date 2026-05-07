@@ -1,4 +1,4 @@
-# adx-matrix
+# adx-matrix Specification
 
 ## Purpose
 

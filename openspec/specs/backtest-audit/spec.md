@@ -1,4 +1,4 @@
-﻿# backtest-audit Specification
+# backtest-audit Specification
 
 ## Purpose
 定义回测审计产物、恒等式校验、T+1 执行验证，以及多 alpha 组合场景下的组合与归因审计要求。
@@ -52,16 +52,21 @@
 - **THEN** 该标的的 position_after SHALL 等于 position_before + qty_buy - qty_sell
 
 ### Requirement: NAV 一致性检查
-系统 SHALL 在每个交易日的 NAV 快照后验证 NAV 等于现金加市值。
+系统 SHALL 在每个交易日的 NAV 快照后验证正式 NAV 等式；当 `pay_date` 口径下存在分红应收时，NAV 必须显式纳入 `dividend_receivable`。
 
-#### Scenario: NAV 恒等式
-- **WHEN** 某交易日计算 NAV 快照
-- **THEN** nav SHALL 等于 cash + Σ(positions[i] × close[i])（容差 0.01 元）
-- **THEN** nav_check SHALL 为 true
+#### Scenario: 无分红应收时 NAV 等式
+- **WHEN** 某交易日不存在 `dividend_receivable`
+- **THEN** `nav` SHALL 等于 `cash + market_value`（容差 0.01 元）
+- **THEN** `nav_check` SHALL 为 `true`
+
+#### Scenario: 存在分红应收时 NAV 等式
+- **WHEN** 某交易日存在 `dividend_receivable`
+- **THEN** `nav` SHALL 等于 `cash + dividend_receivable + market_value`（容差 0.01 元）
+- **THEN** `nav_check` SHALL 为 `true`
 
 #### Scenario: NAV 非 NaN
 - **WHEN** 某交易日计算 NAV 快照
-- **THEN** nav SHALL 不为 NaN 且不为负数
+- **THEN** `nav` SHALL 不为 NaN 且不为负数
 
 ### Requirement: T+1 执行验证
 系统 SHALL 验证所有原始 alpha 信号、组合后信号和最终订单都遵循 T+1 执行规则（`t` 日信号形成，`t+1` 日成交）。
@@ -271,5 +276,4 @@
 - **WHEN** 某次实验存在多日会计失败样本
 - **THEN** `audit.json` SHALL 仅保留受控数量的代表性样本
 - **THEN** 审计摘要 SHALL 继续暴露总失败计数，避免样本截断改变总体判断
-
 

@@ -1,4 +1,4 @@
-﻿# experiment-runtime-service Specification
+# experiment-runtime-service Specification
 
 ## Purpose
 定义核心 experiment runtime service 的职责边界与输入输出真相。
@@ -29,5 +29,3 @@ runtime service 下沉 MUST 保持 `config_json -> runtime plan -> run_experimen
 - **WHEN** 使用基线配置复跑既有 baseline 实验
 - **THEN** 核心 compare 结果 SHALL 继续通过
 - **THEN** 不得新增核心产物漂移
-
-

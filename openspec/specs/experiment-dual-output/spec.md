@@ -1,4 +1,4 @@
-﻿# experiment-dual-output Specification
+# experiment-dual-output Specification
 
 ## Purpose
 Synced from delta spec during archive. The capability contract is now part of the main spec set.
@@ -43,5 +43,3 @@ Synced from delta spec during archive. The capability contract is now part of th
 - **WHEN** 实验只产出 machine bundle 而未产出 human bundle
 - **THEN** 系统 SHALL 将该实验判定为输出不完整
 - **THEN** 该实验 SHALL NOT 被视为正式研究结论
-
-

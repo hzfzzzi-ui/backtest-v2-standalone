@@ -1,4 +1,4 @@
-# Benchmark Series API
+# benchmark-series-api Specification
 
 ## Purpose
 

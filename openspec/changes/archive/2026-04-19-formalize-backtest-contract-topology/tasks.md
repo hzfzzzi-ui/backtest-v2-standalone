@@ -1,0 +1,14 @@
+﻿## 1. 绾寲缁勪欢鎵ц鍚堝悓
+
+- [x] 1.1 鍦?`runner_config_bundle.py` 涓?unified combo 澧炲姞缁勪欢绾?pure projection锛岀敓鎴愪笉鎼哄甫鍏勫紵鑵垮瓙鏍戠殑 `runtime_config`锛汥oD: stock component 涓嶅啀鍖呭惈 ETF governed 瀛愭爲锛孍TF component 涓嶅啀鍖呭惈 stock governed 瀛愭爲锛涢獙璇? 琛?`test_experiment_runner_multi_alpha_compile.py` 鏂█瀛楁闆嗗悎锛涢闄? compile 杈撳嚭澶栬鍙樺寲鍙兘褰卞搷鏃у墠绔洖濉€?- [x] 1.2 鏀剁揣 `execution_contract` 鏋勯€犻摼锛屽彧鍏佽绾粍浠?`runtime_config` 杩涘叆姝ｅ紡鎵ц鍚堝悓锛汥oD: 鏂扮敓鎴?`execution_contract` 涓笉鍐嶅嚭鐜拌法鑵?governed 鍐呭涓?provenance 瀛楁锛涢獙璇? 琛?execution contract golden / unit tests锛涢闄? unified combo 杩愯鏃跺彲鑳芥毚闇叉棫 fallback 渚濊禆銆?
+## 2. 鏀跺彛 compiled plan 涓庤繍琛屾椂杈撳叆
+
+- [x] 2.1 璋冩暣 `compiled_plan` 鍐欏嚭缁撴瀯锛屽彧淇濈暀缂栬瘧蹇収涓?assembly trace锛岀姝㈢户缁妸 `component_source_contract.components[*].compile_input.runtime_config` 褰撴柊浜х墿鎵ц鐪熺浉锛汥oD: 鏂板疄楠?`compiled_plan.json` 涓嶅啀鎵挎媴姝ｅ紡鎵ц鐪熺浉锛涢獙璇? integration test 鏍￠獙 `manifest` / `compiled_plan` / `execution_contract` 鍒嗗伐锛涢闄? 鏃у伐鍏烽摼璇诲彇 `compiled_plan` 鐨勮矾寰勯渶瑕佸吋瀹广€?- [x] 2.2 鏀?`cn_stock_etf_unified_runtime_service.py` 鐨勬墽琛岃緭鍏ヤ紭鍏堢骇涓?fallback锛屾妸 `component_source_contract` 闄愬畾涓?provenance/legacy 鍙璺緞锛汥oD: runtime 涓昏矾寰勫彧璁?`execution_contract`锛宭egacy fallback 浠呮湇鍔℃棫瀹為獙锛涢獙璇? `test_cn_stock_etf_unified_runtime_service.py` 瑕嗙洊 execution-only 涓?legacy-only 涓ゆ潯璺緞锛涢闄? 杩囨棭绉婚櫎 fallback 浼氭墦鏂棫瀹為獙鍥炴斁銆?
+## 3. 鐦﹁韩 run_meta 涓?baseline 鐩綍
+
+- [x] 3.1 绮剧畝 `run_meta.json`锛屽彧淇濈暀杩愯浜嬪疄銆乣execution_contract_ref`銆佷緷璧栫储寮曞拰 `provenance`锛岃縼鍑烘垨闄嶇骇 `combo_context`銆乣combo_result`銆乣research_combo`銆乣combo_runtime` 鐨勮秺鏉冨瓧娈碉紱DoD: `run_meta` 涓嶅啀鍑虹幇骞跺垪涓荤湡鐩稿璞★紱楠岃瘉: `test_schema_and_artifacts.py` 涓庣浉鍏?front-end fixture 瀵规瘮瀛楁宸紓锛涢闄? 鍘嗗彶椤甸潰鍜岃剼鏈彲鑳戒緷璧栨棫瀛楁銆?- [x] 3.2 閲嶆瀯 baseline 鐩綍缁撴瀯锛氱粰 `baseline.json` 琛?`execution_contract_ref`锛屾柊澧?`baseline_config_snapshot.json`锛屼繚鐣?`config.json` 浣滀负鍏煎鍒悕锛汥oD: baseline 韬唤瀵硅薄涓庡揩鐓у璞″垎绂伙紝`index.json` 缁х画鍙仛缂撳瓨锛涢獙璇? baseline 璇诲啓鑴氭湰涓?API 鍗曟祴銆佹墜宸ユ牳瀵?`outputs/baselines/*`锛涢闄? baseline 璇诲彇鍏ュ彛鑻ユ湭鍚屾锛屽墠绔細鍑虹幇鍔犺浇閿欎綅銆?
+## 4. 鏀剁粨鏋滄秷璐瑰眰鍜岀紪杈戝眰杈圭晫
+
+- [x] 4.1 璋冩暣 results workbench / runtime surface锛屽彧鐢?`execution_contract` 鎴?`execution_contract_ref` 瑙ｉ噴杩愯琛屼负锛屾妸 legacy source contract 闄愪负璇存槑鐢ㄩ€旓紱DoD: 缁撴灉椤典笉鍐嶆妸鏃?source contract 鎴?`comboTruth` 褰撲富鐪熺浉锛涢獙璇? 鍓嶇娴嬭瘯 `test_results_workbench_multi_alpha.mjs`銆乣test_multi_alpha_workbench.cjs` 涓庢瀯寤洪€氳繃锛涢闄? 鏃у疄楠屽睍绀哄彲鑳界己瀛楁锛岄渶瑕佸吋瀹瑰厹搴曡鏄庛€?- [x] 4.2 淇濈暀 `config-workspace` 鐨勬棫 contract 璇诲彇锛屼絾鎶婂畠鏄惧紡闄愬畾涓虹紪杈戞仮澶嶈矾寰勶紱DoD: 閰嶇疆宸ヤ綔鍖轰粛鑳芥仮澶?anchor 娲剧敓閰嶇疆锛屼絾杩愯瑙ｉ噴閾句笉鍐嶈鍙栬繖鏉¤矾寰勶紱楠岃瘉: 閰嶇疆宸ヤ綔鍖哄墠绔祴璇曚笌鎵嬪伐鍔犺浇鍩虹嚎锛涢闄? 缂栬緫鍣ㄥ洖濉瓧娈甸仐婕忎細褰卞搷鐢ㄦ埛鎭㈠鏃ч厤缃€?
+## 5. 瀹堥棬涓庡洖褰?
+- [x] 5.1 鏂板/鏇存柊 contract goldens銆乤rtifact tests 鍜?runtime boundary tests锛岄攣浣忊€滅粍浠跺悎鍚岀函鍖栥€乧ompiled_plan 閫€浣嶃€乺un_meta 鐦﹁韩銆乥aseline 涓夊眰瀵硅薄鈥濆洓鏉¤竟鐣岋紱DoD: 鏂伴噾鏍囧拰娴嬭瘯瑕嗙洊鏂板崗璁綅缃紱楠岃瘉: unit/integration 鍏ㄩ噺閫氳繃锛涢闄? 閲戞爣瑕嗙洊涓嶈冻浼氳鏃х粨鏋勫啀娆″洖娴併€?- [x] 5.2 杩愯鏈€灏忔寮忓洖褰掑苟杈撳嚭宸紓璇存槑锛岀‘璁ゆ湰杞彧鏀瑰悎鍚岃竟鐣屻€佷笉鏀圭爺绌跺彛寰勶紱DoD: 浜х墿鑳藉畾浣嶅敮涓€鎵ц鍚堝悓锛屽墠绔粨鏋滈〉涓?baseline 鍔犺浇閾惧彲姝ｅ父宸ヤ綔锛涢獙璇? `pytest`銆佸墠绔瀯寤?娴嬭瘯銆佸繀瑕佺殑鏈€灏忓洖鏀炬鏌ワ紱椋庨櫓: 鍏煎绐楀彛鍐呭弻鍐欏璞¤嫢涓嶅悓姝ワ紝浼氶€犳垚璇昏€呯湅鍒颁笉涓€鑷寸粨鏋溿€?

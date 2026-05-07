@@ -1,4 +1,4 @@
-﻿# risk-budget-sizing Specification
+# risk-budget-sizing Specification
 
 ## Purpose
 系统化风险预算仓位管理，从组合总风险到单笔仓位再到 sleeve 预算做自上而下分配，并保留 drawdown ladder、渐进式回撤保护与 Governor 统一预算收口能力。
@@ -273,5 +273,3 @@
 - **WHEN** A 股实验完成并输出标准产物
 - **THEN** 产物 MUST 能回答“今天的总预算为什么是这个值”
 - **THEN** 产物 MUST 能回答“某个 sleeve 为什么没有吃满本地 sizing”
-
-

@@ -1,4 +1,4 @@
-# regime-router-vectorize
+# regime-router-vectorize Specification
 
 ## Purpose
 

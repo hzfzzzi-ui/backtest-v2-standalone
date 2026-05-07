@@ -3,9 +3,7 @@
 ## Purpose
 
 定义模拟盘持仓的自动导入、reconcile 触发和状态可观测性要求，确保移动端与桌面端可消费一致的自动同步结果。
-
 ## Requirements
-
 ### Requirement: 模拟盘持仓必须支持定时文件导入
 系统 MUST 支持从可配置 JSON 文件路径自动导入模拟盘真实持仓，并将其标准化为 sim account holdings snapshot。导入器 SHALL 至少支持 `account_id`、`trade_date`、`cash`、`positions[]` 字段，并复用现有 snapshot 标准化校验。
 
@@ -44,3 +42,11 @@
 - **WHEN** 自动同步路径未配置或目标文件不存在
 - **THEN** 状态对象 MUST 返回 `disabled` 或 `failed`
 - **AND** `message` MUST 包含可读原因
+
+### Requirement: auto sync 正式写入现金账本与同步日志
+系统 SHALL 将 `sim-account-auto-sync` 的正式写入结果收口到 `cash_ledger` 与 `sync_logs`，而不是长期写入文件型 latest/history 真相。
+
+#### Scenario: auto sync 完成后生成正式账户运营记录
+- **WHEN** 自动同步完成一次账户刷新
+- **THEN** 系统 MUST 更新正式现金账本与同步日志对象
+

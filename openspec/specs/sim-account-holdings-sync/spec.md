@@ -1,9 +1,8 @@
-﻿# sim-account-holdings-sync Specification
+# sim-account-holdings-sync Specification
 
 ## Purpose
 浠?2026-03-22 褰掓。鍙樻洿鎭㈠鐨勪富瑙勬牸銆?
 ## Requirements
-
 ### Requirement: 系统必须维护标准化模拟盘持仓快照
 系统 MUST 接收模拟盘持仓输入并落地为标准化快照。标准化快照 SHALL 至少包含 `account_id`、`snapshot_id`、`trade_date`、`synced_at`、`source_type`、`cash` 和 `positions[]`。`positions[]` 中的每一行 MUST 至少包含 `symbol`、`qty`、`sellable_qty`、`avg_cost`，并使用系统统一的 symbol 规范。
 
@@ -42,3 +41,11 @@
 - **WHEN** 系统中仍有 `approved_pending` ticket，且账户又同步了新的持仓快照
 - **THEN** 系统 SHALL 记录“pending ticket期间持仓变化”的审计事件
 - **THEN** 旧 reconcile 结果 SHALL 被标记为可能失效或需要重算
+
+### Requirement: holdings sync 正式写入持仓快照
+系统 SHALL 将 `sim-account-holdings-sync` 的正式结果写入 `holdings_snapshots` 对象，而不再把文件型 holdings latest/history 视为长期主真相。
+
+#### Scenario: holdings sync 生成正式快照
+- **WHEN** 系统完成一次持仓同步
+- **THEN** 正式持仓状态 MUST 通过持仓快照对象可读
+

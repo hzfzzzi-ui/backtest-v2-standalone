@@ -1,4 +1,4 @@
-# rsi-feature-matrix
+# rsi-feature-matrix Specification
 
 ## Purpose
 

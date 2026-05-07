@@ -1,4 +1,4 @@
-﻿# artifact-finalization-pipeline Specification
+# artifact-finalization-pipeline Specification
 
 ## Purpose
 定义实验产物稳定化与 finalize pipeline 的模块边界，确保 `artifacts_impl.py` 只保留 facade 入口，具体 artifact finalize 逻辑按职责拆分，同时保持标准 artifact 协议稳定。

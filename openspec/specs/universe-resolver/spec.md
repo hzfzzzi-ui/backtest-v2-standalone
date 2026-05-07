@@ -1,4 +1,4 @@
-﻿# universe-resolver Specification
+# universe-resolver Specification
 
 ## Purpose
 Backend universe resolver that supports 4 modes (ALL_A, HS300_ZZ500, INDUSTRY, CUSTOM) for determining the stock universe used in backtests, replacing the previous single-mode symbol list approach.
@@ -179,5 +179,3 @@ resolver SHALL 返回 `(symbols, meta)` 元组，其中 `meta` 除了原有 `sym
 - **WHEN** 运行配置声明 `asset_scope='cn_etf'` 且 preset 为 `cn_etf_first_wave_all`
 - **THEN** resolver 或其上游编译链路 MUST 展开出首波全部 9 只 ETF
 - **THEN** 展开结果 MUST 不包含目录外 symbol
-
-

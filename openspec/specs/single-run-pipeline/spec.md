@@ -2,7 +2,6 @@
 
 ## Purpose
 定义单次回测公开主路径的请求模型、编译链路与 baseline 兼容要求，并扩展对多 alpha 组合配置的支持。
-
 ## Requirements
 ### Requirement: API 请求模型包含选股排序字段
 `BacktestV2ExperimentRequest` Pydantic 模型 SHALL 包含以下可选字段：
@@ -62,3 +61,37 @@
 - **WHEN** 用户调用异步实验运行接口
 - **THEN** job 执行线程最终 SHALL 调用同一核心运行服务
 - **THEN** 同步与异步路径不得分叉成两套执行编排
+
+### Requirement: 单次回测必须收口为唯一 execution_contract
+单次回测在进入 DataBundle 和 stage pipeline 之前 MUST 收口为唯一 `execution_contract`。该合同 SHALL 是纯参数合同，不得混入 baseline、study 或 replay 引用字段。
+
+#### Scenario: 运行请求带有 baseline 或 study 来源
+- **WHEN** 运行请求来自 baseline、study、wrapper 或其它来源对象
+- **THEN** 系统 MUST 先把这些来源解析成纯参数 `execution_contract`
+- **THEN** 运行时 SHALL NOT 继续根据 `baseline_id`、`study_id`、`linked_exp_id` 或等效引用字段决定执行分支
+
+#### Scenario: 运行产物写出配置快照
+- **WHEN** 单次回测执行完成并写出产物
+- **THEN** 系统 MUST 明确区分 `execution_contract` 与 `input_config`、`resolved_config`、`compiled_plan`
+- **THEN** 后三者 MAY 作为输入快照或 provenance 证据保留
+- **THEN** 它们 SHALL NOT 与 `execution_contract` 并列承担执行真相职责
+
+### Requirement: component execution projections MUST materialize before pipeline entry
+
+单腿回测与 unified combo 在进入 DataBundle 与 stage pipeline 前 MUST 先物化纯组件执行合同和唯一 `execution_contract`。
+
+#### Scenario: compiling a unified combo before runtime
+- **WHEN** compiler 解析 stock / ETF 组件并准备构造运行载荷
+- **THEN** 系统 MUST 先生成纯组件 `runtime_config`
+- **THEN** 系统 MUST 再基于这些纯组件合同构造唯一 `execution_contract`
+- **THEN** stage pipeline SHALL NOT 接收仍然夹带 provenance 或兄弟腿子树的组件合同
+
+### Requirement: pipeline inputs MUST distinguish execution contracts from compile snapshots
+
+进入 pipeline 的正式输入 MUST 明确区分执行合同与编译快照，禁止直接把 `compiled_plan` 当运行输入。
+
+#### Scenario: bootstrapping a new experiment run
+- **WHEN** runtime service 从编译结果启动一次新实验
+- **THEN** runtime MUST 从 `execution_contract` 读取正式执行输入
+- **THEN** `compiled_plan` SHALL 只作为辅助调试和编译追踪快照
+

@@ -1,4 +1,4 @@
-﻿# ma200-market-state Specification
+# ma200-market-state Specification
 
 ## Purpose
 基于基准指数 MA200 位置与斜率的四态市场分类，及对应的交易模式映射。
@@ -221,4 +221,3 @@ EMA5/20 信号矩阵 SHALL 在 precompute 阶段与 SMA 信号矩阵并行计算
 #### Scenario: 前端展示区分 legacy 与正式框架
 - **WHEN** 前端加载一条使用 MA200 fallback 的实验
 - **THEN** 结果页 MUST 能识别该状态线属于 legacy 价格过滤器，而不是正式多因子 regime 框架
-

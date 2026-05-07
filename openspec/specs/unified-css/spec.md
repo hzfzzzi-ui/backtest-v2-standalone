@@ -1,76 +1,44 @@
-# Capability: unified-css
+﻿# unified-css 规范
 
-## Purpose
+## 目标
 
-Unify the frontend CSS into a single stylesheet (`workbench.css`) with a consistent token namespace, eliminating the dual-file system and ensuring all existing class names and JS variable references are preserved. <!-- TBD: expand -->
+前端样式统一收敛到单一 `workbench.css`，并保持当前正式桌面主链所需的 class 与 CSS 变量稳定可用。
 
-## Requirements
+## 要求
 
-### Requirement: Single CSS file replaces dual system
-The system SHALL use a single `frontend/assets/css/workbench.css` file as the only stylesheet. The files `style.css` and `backtest_v2.css` SHALL be deleted.
+### 要求 1：单一 CSS 文件替代历史双文件体系
 
-#### Scenario: HTML loads single stylesheet
-- **WHEN** `frontend/index.html` is loaded in the browser
-- **THEN** it SHALL reference exactly one CSS file: `assets/css/workbench.css`
-- **THEN** there SHALL be no reference to `style.css` or `backtest_v2.css`
+系统只允许使用 `frontend/assets/css/workbench.css` 作为桌面工作台主样式文件。
 
-### Requirement: Unified token namespace
-All CSS custom properties SHALL use the `--wb-*` prefix exclusively. No `--bg`, `--accent`, `--good`, `--bad`, `--warn`, `--info`, `--line`, `--text`, `--card` unprefixed tokens SHALL exist.
+#### 场景：桌面页面加载样式
+- **WHEN** `frontend/index.html` 在浏览器中打开
+- **THEN** 页面只引用 `assets/css/workbench.css`
+- **THEN** 不再引用历史样式文件
 
-#### Scenario: No unprefixed tokens in workbench.css
-- **WHEN** workbench.css is inspected
-- **THEN** all custom property definitions in `:root` SHALL use `--wb-*` prefix
-- **THEN** zero occurrences of `--bg:`, `--accent:`, `--good:`, `--bad:` (unprefixed) SHALL exist as property definitions
+### 要求 2：统一 token 命名空间
 
-### Requirement: Zero override blocks
-The merged CSS SHALL contain no rules whose sole purpose is undoing another rule in the same file (e.g., `transform: none` to undo a hover animation, `text-transform: none` to undo uppercase).
+所有 CSS 自定义属性必须统一使用 `--wb-*` 前缀。
 
-#### Scenario: No undo patterns
-- **WHEN** workbench.css is inspected
-- **THEN** there SHALL be no `.wb-app table`, `.wb-app .pill`, `.wb-app .card` override selectors
-- **THEN** base component rules SHALL be written correctly the first time without needing correction
+#### 场景：检查 `workbench.css`
+- **WHEN** 检查 `:root` 中的自定义属性
+- **THEN** 当前主样式只定义 `--wb-*` 命名空间
 
-### Requirement: All existing CSS class names preserved
-All CSS class names currently used in `index.html` and `backtest_v2.js` SHALL continue to be styled. No class name SHALL be renamed or removed.
+### 要求 3：当前正式主链使用到的 class 必须持续有样式
 
-#### Scenario: HTML classes all have matching CSS rules
-- **WHEN** all class names in `index.html` are extracted
-- **THEN** each class SHALL have at least one matching CSS rule in `workbench.css`
+当前正式主链中由 `index.html`、`desktop-shell/*` 与 `results-workbench` 使用到的 class 名必须继续被 `workbench.css` 覆盖。
 
-#### Scenario: JS dynamic classes all have matching CSS rules
-- **WHEN** JS adds classes dynamically (e.g., `.active`, `.wb-ok`, `.wb-danger`, `.up`, `.down`)
-- **THEN** each dynamically-applied class SHALL have a matching CSS rule in `workbench.css`
+#### 场景：检查主链 class
+- **WHEN** 检查 `index.html` 与当前正式桌面模块使用到的 class
+- **THEN** 每个 class 都应有对应样式规则
 
-### Requirement: Unified design tokens
-The design token values SHALL be unified as defined in the design document.
+### 要求 4：动态 class 与 CSS 变量必须稳定
 
-#### Scenario: Single color palette
-- **WHEN** workbench.css token section is inspected
-- **THEN** background SHALL be `#0f131a`
-- **THEN** accent SHALL be `#52a8ff`
-- **THEN** green SHALL be `#56c585`
-- **THEN** red SHALL be `#ff6d75`
-- **THEN** yellow SHALL be `#efba56`
+所有由当前正式桌面模块动态使用的 class 和 CSS 变量都必须继续可解析。
 
-### Requirement: No unused component styles
-The merged file SHALL NOT contain styles for components not present in `index.html`.
+#### 场景：动态渲染状态 class
+- **WHEN** 页面动态应用 `active`、`wb-ok`、`wb-danger`、`up`、`down` 等 class
+- **THEN** 对应样式必须存在
 
-#### Scenario: PAMS-only components removed
-- **WHEN** workbench.css is inspected
-- **THEN** there SHALL be no rules for `.statusbar`, `.nav`, `.fxCard`, `.cashflowList`, `.analysisList`, `.alertStrip`, `.month-selector`, `.funnel`, `.candidate-row`, `.trail`, `.detail-grid`, `.flow-guide`, `.event-row`, `.align-row`, `.gauge-bar`
-
-### Requirement: Consistent border-radius system
-The file SHALL use a 3-tier border-radius system: small (6px), medium (10px), large (14px).
-
-#### Scenario: Radius tokens defined
-- **WHEN** workbench.css `:root` is inspected
-- **THEN** `--wb-radius-xs` or equivalent SHALL be 6px
-- **THEN** `--wb-radius-sm` SHALL be 10px
-- **THEN** `--wb-radius` SHALL be 14px
-
-### Requirement: JS references to CSS variables preserved
-All CSS variable names referenced in `backtest_v2.js` via `var(--wb-*)` or `getComputedStyle` SHALL remain defined in workbench.css.
-
-#### Scenario: JS variable references resolve
-- **WHEN** JS reads a CSS variable via `getComputedStyle` or uses `var(--wb-*)` in inline styles
-- **THEN** the variable SHALL be defined in workbench.css `:root`
+#### 场景：运行时读取 CSS 变量
+- **WHEN** 当前正式桌面模块通过 `var(--wb-*)` 或 `getComputedStyle` 读取变量
+- **THEN** `workbench.css` 中必须定义这些变量

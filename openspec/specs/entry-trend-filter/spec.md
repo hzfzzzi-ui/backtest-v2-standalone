@@ -1,4 +1,4 @@
-# Capability: entry-trend-filter
+# entry-trend-filter Specification
 
 ## Purpose
 

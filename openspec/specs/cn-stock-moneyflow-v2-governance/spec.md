@@ -1,4 +1,4 @@
-﻿# cn-stock-moneyflow-v2-governance Specification
+# cn-stock-moneyflow-v2-governance Specification
 
 ## Purpose
 浠?2026-03-22 褰掓。鍙樻洿鎭㈠鐨勪富瑙勬牸銆?

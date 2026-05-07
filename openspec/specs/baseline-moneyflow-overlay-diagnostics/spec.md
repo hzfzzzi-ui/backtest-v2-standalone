@@ -1,25 +1,18 @@
 ﻿# baseline-moneyflow-overlay-diagnostics Specification
 
 ## Purpose
-TBD - created by archiving change integrate-moneyflow-divergence-into-baseline-v10-1-2326. Update Purpose after archive.
+
+Define the formal capability boundary for `baseline-moneyflow-overlay-diagnostics` in the current mainline.
 ## Requirements
-### Requirement: Overlay 运行元信息必须进入实验产物
-当 overlay 开启时，系统 MUST 在实验产物中记录 overlay 的配置与输入来源，至少包括模式、factor panel 路径、coverage ledger 路径、score 字段和是否启用。
+### Requirement: Overlay 杩愯鍏冧俊鎭繀椤昏繘鍏ュ疄楠屼骇鐗?
+褰?overlay 寮€鍚椂锛岀郴缁?MUST 鍦ㄥ疄楠屼骇鐗╀腑璁板綍 overlay 鐨勯厤缃笌杈撳叆鏉ユ簮锛岃嚦灏戝寘鎷ā寮忋€乫actor panel 璺緞銆乧overage ledger 璺緞銆乻core 瀛楁鍜屾槸鍚﹀惎鐢ㄣ€?
 
-#### Scenario: Run Meta 记录 overlay 配置
-- **WHEN** overlay 实验运行完成
-- **THEN** `run_meta` 或等价运行元信息中必须包含 overlay 的核心配置与输入路径
+#### Scenario: Run Meta 璁板綍 overlay 閰嶇疆
+- **WHEN** overlay 瀹為獙杩愯瀹屾垚
+- **THEN** `run_meta` 鎴栫瓑浠疯繍琛屽厓淇℃伅涓繀椤诲寘鍚?overlay 鐨勬牳蹇冮厤缃笌杈撳叆璺緞
 
-### Requirement: 每个决策日必须记录 overlay 启停与冻结来源
-当 overlay 开启时，系统 MUST 在日频诊断中记录每个决策日的 overlay 状态，至少包括：
-
-- `overlay_enabled`
-- `overlay_mode`
-- `overlay_gate_on`
-- `overlay_observation_date`
-- `overlay_score_source`
-
-当 overlay 开启时，系统 MUST 在日频诊断中记录每个决策日的 overlay 状态，至少包括：
+### Requirement: 姣忎釜鍐崇瓥鏃ュ繀椤昏褰?overlay 鍚仠涓庡喕缁撴潵婧?
+褰?overlay 寮€鍚椂锛岀郴缁?MUST 鍦ㄦ棩棰戣瘖鏂腑璁板綍姣忎釜鍐崇瓥鏃ョ殑 overlay 鐘舵€侊紝鑷冲皯鍖呮嫭锛?
 
 - `overlay_enabled`
 - `overlay_mode`
@@ -27,31 +20,39 @@ TBD - created by archiving change integrate-moneyflow-divergence-into-baseline-v
 - `overlay_observation_date`
 - `overlay_score_source`
 
-#### Scenario: 覆盖率关闭的月份写入禁用状态
-- **WHEN** 某决策日所在冻结区间的 coverage gate 为关闭
-- **THEN** 该日诊断中必须记录 `overlay_gate_on=false` 和对应的观察日或禁用原因
+褰?overlay 寮€鍚椂锛岀郴缁?MUST 鍦ㄦ棩棰戣瘖鏂腑璁板綍姣忎釜鍐崇瓥鏃ョ殑 overlay 鐘舵€侊紝鑷冲皯鍖呮嫭锛?
 
-#### Scenario: 覆盖率达标的月份写入冻结来源
-- **WHEN** 某决策日使用了最近一次观察日的 overlay 分数
-- **THEN** 该日诊断中必须记录当前冻结所来自的 `overlay_observation_date`### Requirement: 候选级诊断必须能看见 overlay 分数
-当 overlay 开启时，系统 MUST 在候选级诊断中写出每个候选标的的 overlay 分数，并在需要时写出 baseline 主排序分数，确保后续可以复盘“排序没变但仓位变了”或“排序为什么被次级键改变”。
+- `overlay_enabled`
+- `overlay_mode`
+- `overlay_gate_on`
+- `overlay_observation_date`
+- `overlay_score_source`
 
-#### Scenario: Tiebreak 记录双排序信息
-- **WHEN** overlay 模式为 `tiebreak`
-- **THEN** 候选级诊断必须能同时看到 baseline 主排序分数与 overlay 分数
+#### Scenario: 瑕嗙洊鐜囧叧闂殑鏈堜唤鍐欏叆绂佺敤鐘舵€?
+- **WHEN** 鏌愬喅绛栨棩鎵€鍦ㄥ喕缁撳尯闂寸殑 coverage gate 涓哄叧闂?
+- **THEN** 璇ユ棩璇婃柇涓繀椤昏褰?`overlay_gate_on=false` 鍜屽搴旂殑瑙傚療鏃ユ垨绂佺敤鍘熷洜
 
-#### Scenario: Soft Weight 记录权重缩放依据
-- **WHEN** overlay 模式为 `soft_weight`
-- **THEN** 候选级诊断必须记录 overlay 分数以及最终使用的仓位缩放信息
+#### Scenario: 瑕嗙洊鐜囪揪鏍囩殑鏈堜唤鍐欏叆鍐荤粨鏉ユ簮
+- **WHEN** 鏌愬喅绛栨棩浣跨敤浜嗘渶杩戜竴娆¤瀵熸棩鐨?overlay 鍒嗘暟
+- **THEN** 璇ユ棩璇婃柇涓繀椤昏褰曞綋鍓嶅喕缁撴墍鏉ヨ嚜鐨?`overlay_observation_date`### Requirement: 鍊欓€夌骇璇婃柇蹇呴』鑳界湅瑙?overlay 鍒嗘暟
+褰?overlay 寮€鍚椂锛岀郴缁?MUST 鍦ㄥ€欓€夌骇璇婃柇涓啓鍑烘瘡涓€欓€夋爣鐨勭殑 overlay 鍒嗘暟锛屽苟鍦ㄩ渶瑕佹椂鍐欏嚭 baseline 涓绘帓搴忓垎鏁帮紝纭繚鍚庣画鍙互澶嶇洏鈥滄帓搴忔病鍙樹絾浠撲綅鍙樹簡鈥濇垨鈥滄帓搴忎负浠€涔堣娆＄骇閿敼鍙樷€濄€?
 
-### Requirement: 候选级诊断必须能看见 overlay 分数
-当 overlay 开启时，系统 MUST 在候选级诊断中写出每个候选标的的 overlay 分数，并在需要时写出 baseline 主排序分数，确保后续可以复盘“排序没变但仓位变了”或“排序为什么被次级键改变”。
+#### Scenario: Tiebreak 璁板綍鍙屾帓搴忎俊鎭?
+- **WHEN** overlay 妯″紡涓?`tiebreak`
+- **THEN** 鍊欓€夌骇璇婃柇蹇呴』鑳藉悓鏃剁湅鍒?baseline 涓绘帓搴忓垎鏁颁笌 overlay 鍒嗘暟
 
-#### Scenario: Tiebreak 记录双排序信息
-- **WHEN** overlay 模式为 `tiebreak`
-- **THEN** 候选级诊断必须能同时看到 baseline 主排序分数与 overlay 分数
+#### Scenario: Soft Weight 璁板綍鏉冮噸缂╂斁渚濇嵁
+- **WHEN** overlay 妯″紡涓?`soft_weight`
+- **THEN** 鍊欓€夌骇璇婃柇蹇呴』璁板綍 overlay 鍒嗘暟浠ュ強鏈€缁堜娇鐢ㄧ殑浠撲綅缂╂斁淇℃伅
 
-#### Scenario: Soft Weight 记录权重缩放依据
-- **WHEN** overlay 模式为 `soft_weight`
-- **THEN** 候选级诊断必须记录 overlay 分数以及最终使用的仓位缩放信息
+### Requirement: 鍊欓€夌骇璇婃柇蹇呴』鑳界湅瑙?overlay 鍒嗘暟
+褰?overlay 寮€鍚椂锛岀郴缁?MUST 鍦ㄥ€欓€夌骇璇婃柇涓啓鍑烘瘡涓€欓€夋爣鐨勭殑 overlay 鍒嗘暟锛屽苟鍦ㄩ渶瑕佹椂鍐欏嚭 baseline 涓绘帓搴忓垎鏁帮紝纭繚鍚庣画鍙互澶嶇洏鈥滄帓搴忔病鍙樹絾浠撲綅鍙樹簡鈥濇垨鈥滄帓搴忎负浠€涔堣娆＄骇閿敼鍙樷€濄€?
+
+#### Scenario: Tiebreak 璁板綍鍙屾帓搴忎俊鎭?
+- **WHEN** overlay 妯″紡涓?`tiebreak`
+- **THEN** 鍊欓€夌骇璇婃柇蹇呴』鑳藉悓鏃剁湅鍒?baseline 涓绘帓搴忓垎鏁颁笌 overlay 鍒嗘暟
+
+#### Scenario: Soft Weight 璁板綍鏉冮噸缂╂斁渚濇嵁
+- **WHEN** overlay 妯″紡涓?`soft_weight`
+- **THEN** 鍊欓€夌骇璇婃柇蹇呴』璁板綍 overlay 鍒嗘暟浠ュ強鏈€缁堜娇鐢ㄧ殑浠撲綅缂╂斁淇℃伅
 

@@ -1,4 +1,4 @@
-﻿# architecture-closure-gates
+# architecture-closure-gates Specification
 
 ## Purpose
 
@@ -32,4 +32,3 @@ Synced from delta spec during archive. The capability contract is now part of th
 - **WHEN** 某个任务仅处理测试、入口、文档、边界或模块职责收口
 - **THEN** 系统 MAY 接受代码位置或宿主模块变化
 - **THEN** 相关运行口径 MUST 保持不变
-

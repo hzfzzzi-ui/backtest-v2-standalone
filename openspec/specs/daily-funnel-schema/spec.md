@@ -1,4 +1,4 @@
-﻿# Capability: daily-funnel-schema
+# daily-funnel-schema Specification
 
 ## Purpose
 

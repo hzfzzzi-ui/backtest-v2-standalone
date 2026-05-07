@@ -1,27 +1,28 @@
-# symbol-performance-ranking Specification
+﻿# symbol-performance-ranking Specification
 
 ## Purpose
-TBD - created by archiving change symbol-performance-trade-markers. Update Purpose after archive.
+
+Define the formal capability boundary for `symbol-performance-ranking` in the current mainline.
 ## Requirements
-### Requirement: 回测结果必须输出个股绩效汇总产物
-系统 MUST 在每次实验完成后输出可读取的个股绩效汇总产物，至少包含每个 symbol 的收益率、回撤、净收益、交易次数与未平仓近似收益字段。
+### Requirement: 鍥炴祴缁撴灉蹇呴』杈撳嚭涓偂缁╂晥姹囨€讳骇鐗?
+绯荤粺 MUST 鍦ㄦ瘡娆″疄楠屽畬鎴愬悗杈撳嚭鍙鍙栫殑涓偂缁╂晥姹囨€讳骇鐗╋紝鑷冲皯鍖呭惈姣忎釜 symbol 鐨勬敹鐩婄巼銆佸洖鎾ゃ€佸噣鏀剁泭銆佷氦鏄撴鏁颁笌鏈钩浠撹繎浼兼敹鐩婂瓧娈点€?
 
-#### Scenario: 实验完成并生成标准产物
-- **WHEN** 回测任务状态变为成功并写入 artifacts
-- **THEN** 系统 SHALL 生成 `symbol_performance.csv` 产物
-- **THEN** `result.artifacts.symbol_performance` SHALL 指向该文件的相对路径
-- **THEN** 每条记录 SHALL 至少包含 `symbol`, `return_pct`, `max_drawdown`, `net_pnl`, `trades`, `unrealized_approx_pnl`
+#### Scenario: 瀹為獙瀹屾垚骞剁敓鎴愭爣鍑嗕骇鐗?
+- **WHEN** 鍥炴祴浠诲姟鐘舵€佸彉涓烘垚鍔熷苟鍐欏叆 artifacts
+- **THEN** 绯荤粺 SHALL 鐢熸垚 `symbol_performance.csv` 浜х墿
+- **THEN** `result.artifacts.symbol_performance` SHALL 鎸囧悜璇ユ枃浠剁殑鐩稿璺緞
+- **THEN** 姣忔潯璁板綍 SHALL 鑷冲皯鍖呭惈 `symbol`, `return_pct`, `max_drawdown`, `net_pnl`, `trades`, `unrealized_approx_pnl`
 
-### Requirement: 个股绩效产物必须支持空文件降级
-系统 MUST 在无法计算个股绩效时写出合法空产物，避免协议缺失。
+### Requirement: 涓偂缁╂晥浜х墿蹇呴』鏀寔绌烘枃浠堕檷绾?
+绯荤粺 MUST 鍦ㄦ棤娉曡绠椾釜鑲＄哗鏁堟椂鍐欏嚭鍚堟硶绌轰骇鐗╋紝閬垮厤鍗忚缂哄け銆?
 
-#### Scenario: 无交易或无可用估值数据
-- **WHEN** 回测期间无交易记录，或个股估值数据不可用
-- **THEN** 系统 SHALL 写出 `symbol_performance.csv` 且仅包含表头或空记录
-- **THEN** 系统 SHALL 在 `run_meta.missing_fields` 记录对应缺失来源
+#### Scenario: 鏃犱氦鏄撴垨鏃犲彲鐢ㄤ及鍊兼暟鎹?
+- **WHEN** 鍥炴祴鏈熼棿鏃犱氦鏄撹褰曪紝鎴栦釜鑲′及鍊兼暟鎹笉鍙敤
+- **THEN** 绯荤粺 SHALL 鍐欏嚭 `symbol_performance.csv` 涓斾粎鍖呭惈琛ㄥご鎴栫┖璁板綍
+- **THEN** 绯荤粺 SHALL 鍦?`run_meta.missing_fields` 璁板綍瀵瑰簲缂哄け鏉ユ簮
 
-#### Scenario: 前端读取空个股绩效产物
-- **WHEN** 前端加载 `symbol_performance.csv` 且无数据行
-- **THEN** 前端 SHALL 显示空状态而非报错
-- **THEN** 其他绩效面板与图表 SHALL 正常工作
+#### Scenario: 鍓嶇璇诲彇绌轰釜鑲＄哗鏁堜骇鐗?
+- **WHEN** 鍓嶇鍔犺浇 `symbol_performance.csv` 涓旀棤鏁版嵁琛?
+- **THEN** 鍓嶇 SHALL 鏄剧ず绌虹姸鎬佽€岄潪鎶ラ敊
+- **THEN** 鍏朵粬缁╂晥闈㈡澘涓庡浘琛?SHALL 姝ｅ父宸ヤ綔
 

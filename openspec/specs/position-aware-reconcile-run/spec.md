@@ -1,9 +1,8 @@
-﻿# position-aware-reconcile-run Specification
+# position-aware-reconcile-run Specification
 
 ## Purpose
 浠?2026-03-22 褰掓。鍙樻洿鎭㈠鐨勪富瑙勬牸銆?
 ## Requirements
-
 ### Requirement: 系统必须以最新持仓快照为输入重算正式策略
 系统 MUST 提供持仓感知的 reconcile run。该 run SHALL 使用正式策略配置、最新可用市场数据和最新成功的模拟盘持仓快照作为输入，而 SHALL NOT 继续以实验 `portfolio_trades.csv` 重建的持仓作为运行输入。reconcile run 结果 MUST 记录 `account_id`、`snapshot_id`、`reconcile_id`、`strategy_source`、`config_hash` 和 `as_of_date`。
 
@@ -47,3 +46,11 @@
 - **WHEN** 手机端读取 action sheet 中的 `reference_price`
 - **THEN** 结果 MUST 同时返回 `reference_price_basis`
 - **THEN** 客户端 SHALL 能区分“规划参考价”和“实际成交价/回写价”
+
+### Requirement: reconcile 正式输出为摘要索引
+系统 SHALL 将 `position-aware-reconcile-run` 的正式数据库输出限制为 `reconcile_summary` 及必要引用，不得将完整派生 payload 升格为事务域底层真相。
+
+#### Scenario: reconcile 正式输出不包含完整 payload 主真相
+- **WHEN** 系统记录一次 reconcile 结果
+- **THEN** 正式事务域对象 MUST 只保留摘要与引用
+

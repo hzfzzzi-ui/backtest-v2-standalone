@@ -1,4 +1,4 @@
-# api-module-split
+# api-module-split Specification
 
 ## Purpose
 
@@ -102,4 +102,3 @@ TBD -- Split the monolithic `backtest_v2.py` API endpoint file into focused sub-
 - **WHEN** 内部实现被下沉或拆分
 - **THEN** 对外公共路由路径、请求契约和基础响应语义 MUST 保持稳定
 - **THEN** 客户端 SHALL NOT 因内部模块迁移而被迫改动
-

@@ -1,4 +1,4 @@
-# Test Infrastructure
+# test-infrastructure Specification
 
 ## Purpose
 
@@ -59,4 +59,3 @@ A `pytest.ini` file SHALL exist at the project root with test discovery and asyn
 - **WHEN** 本轮收口新增一个正式治理门
 - **THEN** 系统 MUST 为其提供可自动执行的测试或断言
 - **THEN** 该门 SHALL NOT 只停留在文档说明
-

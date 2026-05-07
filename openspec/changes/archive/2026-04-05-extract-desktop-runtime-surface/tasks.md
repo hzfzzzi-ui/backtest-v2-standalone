@@ -1,0 +1,5 @@
+﻿- [x] 新增 `frontend/assets/js/desktop-shell/runtime-surface.js`，承接当前跨模块共享的 runtime surface。
+- [x] 调整 `frontend/index.html`，让 `runtime-surface.js` 在依赖它的脚本之前加载。
+- [x] 修改 `tests/frontend/multi_alpha_workbench_harness.cjs`，同步新的主装载顺序。
+- [x] 修改 `frontend/assets/js/backtest_v2.js`，删除已经迁出的 shared runtime function 定义，只保留 compat shell 逻辑。
+- [x] 更新变更说明，明确本次完成的是 shared runtime surface 迁出，不等于旧壳已经退出所有页面级逻辑。

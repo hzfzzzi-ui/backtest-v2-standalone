@@ -1,235 +1,73 @@
-﻿# backtest-research-audit Specification
+# backtest-research-audit Specification
 
 ## Purpose
-为每次回测实验提供统一的 research audit 结论，用于判断实验结果是否可信，并在 governed multi-sleeve 主线下把状态、预算、sleeve 和人工 override 的证据统一串成可追溯结论。
+
+定义正式 research-audit 层，包括统一审计状态、gate 汇总、target-contract drift 证据，以及 baseline 法源声明。
+
 ## Requirements
-### Requirement: 实验必须生成统一的 research audit 结论
-系统 MUST 在每次实验的 `audit.json` 中生成 `research_audit` 子树，用于表达该实验结果是否可信。
 
-#### Scenario: research audit 正常生成
-- **WHEN** 一次实验完成并进入标准 artifact stabilize 阶段
-- **THEN** `audit.json` SHALL 包含 `research_audit.contract_version`
-- **THEN** `audit.json` SHALL 包含 `research_audit.overall_status`
-- **THEN** `audit.json` SHALL 包含 `research_audit.gates`
-- **THEN** `audit.json` SHALL 包含 `research_audit.evidence_refs`
+### Requirement: every experiment MUST emit a unified research audit
 
-#### Scenario: 不新增第二份元数据文件
-- **WHEN** 系统生成 research audit
-- **THEN** 系统 SHALL 将 research verdict 写入现有 `audit.json`
-- **THEN** 系统 SHALL NOT 生成额外的 `research_audit.json`
+每次实验 SHALL 将 `research_audit` 写入 `audit.json`。系统 SHALL NOT 为同一次运行再额外产出独立的 `research_audit.json`。
 
----
+#### Scenario: emit research audit
 
-### Requirement: overall_status 必须按统一聚合规则生成
-系统 MUST 按 gate 状态统一聚合 `overall_status`，且聚合规则在所有实验中保持一致。
+- **WHEN** 实验完成 artifact stabilization
+- **THEN** `audit.json` MUST 包含 `research_audit.contract_version`
+- **THEN** `audit.json` MUST 包含 `research_audit.overall_status`
+- **THEN** `audit.json` MUST 包含 `research_audit.gates`
 
-#### Scenario: 任一 gate 失败
-- **WHEN** 任一 gate 的状态为 `FAIL`
-- **THEN** `research_audit.overall_status` SHALL 为 `FAIL`
+### Requirement: overall research audit status MUST be derived from gates
 
-#### Scenario: 无失败但存在告警
-- **WHEN** 所有 gate 都不是 `FAIL`，且至少一个 gate 为 `WARN`
-- **THEN** `research_audit.overall_status` SHALL 为 `WARN`
+审计层 SHALL 使用稳定优先级从 gate 状态推导唯一的 `overall_status`。
 
-#### Scenario: 无失败无告警但存在未知
-- **WHEN** 所有 gate 都不是 `FAIL` 或 `WARN`，且至少一个 gate 为 `UNKNOWN`
-- **THEN** `research_audit.overall_status` SHALL 为 `UNKNOWN`
+#### Scenario: failure dominates
 
-#### Scenario: 全部通过
-- **WHEN** 所有 gate 的状态均为 `PASS`
-- **THEN** `research_audit.overall_status` SHALL 为 `PASS`
+- **WHEN** 任一 gate 为 `FAIL`
+- **THEN** `research_audit.overall_status` MUST 为 `FAIL`
 
----
+#### Scenario: warning dominates non-fail states
 
-### Requirement: timing_alignment gate 必须保守判断时间对齐风险
-系统 MUST 对时间错位和未来信息风险给出保守判定；无法证明安全时不得轻易给出 `PASS`。
+- **WHEN** 没有 `FAIL` 且至少一个 gate 为 `WARN`
+- **THEN** `research_audit.overall_status` MUST 为 `WARN`
 
-#### Scenario: 明确发现同日信号同日成交
-- **WHEN** 审计证据显示同日收盘信号被同日收盘成交
-- **THEN** `timing_alignment.status` SHALL 为 `FAIL`
+#### Scenario: unknown dominates pass-only states
 
-#### Scenario: 明确发现未来输入
-- **WHEN** 审计证据显示信号使用了未来财务数据、未来成分股或其他未来可见信息
-- **THEN** `timing_alignment.status` SHALL 为 `FAIL`
+- **WHEN** 没有 `FAIL` 或 `WARN` 且至少一个 gate 为 `UNKNOWN`
+- **THEN** `research_audit.overall_status` MUST 为 `UNKNOWN`
 
-#### Scenario: 只能证明 next-day execution
-- **WHEN** 系统只能证明 execution shell 遵守 next-trading-day contract，但无法证明信号输入 PIT-safe
-- **THEN** `timing_alignment.status` SHALL 为 `UNKNOWN`
+#### Scenario: full pass
 
-#### Scenario: 执行壳元信息冲突
-- **WHEN** execution shell、stage metadata 或执行摘要之间存在不一致
-- **THEN** `timing_alignment.status` SHALL 为 `WARN`
+- **WHEN** 所有 gate 都为 `PASS`
+- **THEN** `research_audit.overall_status` MUST 为 `PASS`
 
----
+### Requirement: audit MUST classify target-contract drift with explicit evidence
 
-### Requirement: universe_lineage gate 必须统一到四种标准模式
-系统 MUST 将实验股票池来源统一映射为 `PIT_DYNAMIC`、`START_SNAPSHOT`、`CURRENT_SNAPSHOT`、`UNKNOWN` 之一，并据此给出状态。
+当 ETF standalone 或其他正式路径在订单、日频产物或 summary 之间暴露出不一致的 final target semantics 时，审计层 MUST 将其标记为 target-contract drift，并保留冲突证据。审计 MUST 区分 final target semantics 和 deploy-gap semantics。
 
-#### Scenario: point-in-time 动态股票池
-- **WHEN** 股票池按历史时点动态变化，且系统能证明成员会按生效日或逐日 as-of 切换
-- **THEN** `universe_lineage.lineage_mode` SHALL 为 `PIT_DYNAMIC`
-- **THEN** `universe_lineage.status` SHALL 为 `PASS`
+#### Scenario: conflicting final target semantics
 
-#### Scenario: 起始日快照股票池
-- **WHEN** 股票池只在 `start_date` 解析一次并在整个回测区间固定使用
-- **THEN** `universe_lineage.lineage_mode` SHALL 为 `START_SNAPSHOT`
-- **THEN** `universe_lineage.status` SHALL 为 `WARN`
+- **WHEN** 同一决策日的 formal artifacts 出现冲突的 `final_target_weight` 或等价字段
+- **THEN** `research_audit` MUST 标记 target-contract drift failure
+- **THEN** 审计 MUST 包含冲突 artifact、字段和值
 
-#### Scenario: 当前或结束时点快照回看历史
-- **WHEN** 股票池在当前时点或实验结束时点解析一次，再回跑整个历史区间
-- **THEN** `universe_lineage.lineage_mode` SHALL 为 `CURRENT_SNAPSHOT`
-- **THEN** `universe_lineage.status` SHALL 为 `FAIL`
+#### Scenario: deploy-gap is not misclassified as drift
 
-#### Scenario: 股票池来源无法判断
-- **WHEN** 现有元信息不足以区分动态股票池、起始快照或当前快照
-- **THEN** `universe_lineage.lineage_mode` SHALL 为 `UNKNOWN`
-- **THEN** `universe_lineage.status` SHALL 为 `UNKNOWN`
+- **WHEN** standalone deploy 的 `target_weight` 只是 incremental deploy gap，而 `final_target_weight` 仍然一致
+- **THEN** 审计 SHALL NOT 将其误判为 drift
 
----
+### Requirement: research audit MUST declare baseline source of truth explicitly
 
-### Requirement: execution_realism gate 必须检查成交是否违反基本市场约束
-系统 MUST 在实验级别检查成交是否存在停牌成交、缺 bar 成交、零成交量成交、零成交额成交、涨停买入或跌停卖出等现实性风险。
+任何 baseline compare 或 research audit MUST 显式声明 baseline 的 source-of-truth。若 baseline 存在 `baseline.json.linked_exp_id`，则 research compare 与 audit MUST 以该 linked experiment 作为唯一正式 baseline 法源。
 
-#### Scenario: 明确出现不可成交填单
-- **WHEN** 任一成交被判定为停牌成交、缺 bar 成交、零成交量成交或零成交额成交
-- **THEN** `execution_realism.status` SHALL 为 `FAIL`
+#### Scenario: display-layer metrics conflict with linked experiment
 
-#### Scenario: 少量涨停买入或跌停卖出
-- **WHEN** 涨停买入或跌停卖出占总成交笔数大于 0 且不高于 1%
-- **THEN** `execution_realism.status` SHALL 为 `WARN`
+- **WHEN** `index.json`、`latest_champion.json` 或其他展示层指标与 `baseline.json.linked_exp_id` 对应实验不一致
+- **THEN** compare 或 audit MUST 标记 baseline source-of-truth conflict
+- **THEN** 输出 MUST 明确指出 canonical source 是 linked experiment，而不是展示层数值
 
-#### Scenario: 大量涨停买入或跌停卖出
-- **WHEN** 涨停买入或跌停卖出占总成交笔数高于 1%
-- **THEN** `execution_realism.status` SHALL 为 `FAIL`
+#### Scenario: linked experiment is missing
 
-#### Scenario: 无交易或无法核对
-- **WHEN** 实验没有交易记录，或系统无法回查成交对应的 bar 证据
-- **THEN** `execution_realism.status` SHALL 为 `UNKNOWN`
-
----
-
-### Requirement: reproducibility gate 必须判断实验是否可复现
-系统 MUST 基于核心产物、配置快照与配置 hash 判断实验是否具备最小可复现性。
-
-#### Scenario: 核心产物齐全且可追溯
-- **WHEN** `run_meta.json`、`manifest.json`、`audit.json` 存在，且配置快照或配置 hash 能追溯本次运行
-- **THEN** `reproducibility.status` SHALL 为 `PASS`
-
-#### Scenario: 核心产物存在但配置追溯不完整
-- **WHEN** 核心产物存在，但配置快照不完整且只能通过部分 hash 或元信息回溯
-- **THEN** `reproducibility.status` SHALL 为 `WARN`
-
-#### Scenario: 关键产物缺失
-- **WHEN** `run_meta.json`、`manifest.json` 或 `audit.json` 缺失
-- **THEN** `reproducibility.status` SHALL 为 `FAIL`
-
-#### Scenario: 证据无法读取
-- **WHEN** manifest 或关键 artifact 无法读取，导致系统无法完成可复现性判断
-- **THEN** `reproducibility.status` SHALL 为 `UNKNOWN`
-
----
-
-### Requirement: result_sanity gate 必须检测明显异常结果
-系统 MUST 对异常收益、异常风险和明显自相矛盾的结果给出风险标记，但不得把该 gate 用作策略优劣评分。
-
-#### Scenario: 极端异常且样本充分
-- **WHEN** 样本满足最小门槛，且 Sharpe 超过 5 或 CAGR 超过 100%
-- **THEN** `result_sanity.status` SHALL 为 `FAIL`
-
-#### Scenario: 指标偏极端
-- **WHEN** 样本满足最小门槛，且 Sharpe 超过 3 或 CAGR 超过 50%，或利润明显过度集中
-- **THEN** `result_sanity.status` SHALL 为 `WARN`
-
-#### Scenario: 指标口径自相矛盾
-- **WHEN** 审计证据显示交易数、净值、收益或计数器之间存在明显矛盾
-- **THEN** `result_sanity.status` SHALL 为 `FAIL`
-
-#### Scenario: 指标不足
-- **WHEN** 关键收益或交易指标缺失，或样本不足以进行异常检测
-- **THEN** `result_sanity.status` SHALL 为 `UNKNOWN`
-
----
-
-### Requirement: research audit 必须引用证据而不是复制既有产物
-系统 MUST 在 `research_audit` 中引用已有 artifact 作为证据源，而不是复制完整 payload。
-
-#### Scenario: 引用现有实验产物
-- **WHEN** `research_audit` 生成完成
-- **THEN** `research_audit.evidence_refs` SHALL 至少包含 `run_meta`、`manifest`、`stage_summary`
-- **THEN** `research_audit.evidence_refs` SHALL 使用 artifact 路径或等价引用，而不是内嵌完整文件内容
-
-#### Scenario: validate_data 为可选证据
-- **WHEN** 本次实验没有可追溯的 `validate_data` 结果
-- **THEN** `research_audit.evidence_refs.validate_data` SHALL 为 `null`
-- **THEN** 系统 SHALL NOT 因缺少 `validate_data` 引用而拒绝生成 `research_audit`
-
-### Requirement: timing_alignment 必须优先消费显式 lineage 证据
-系统 MUST 在实验提供 execution lineage 证据时，优先依据 `signal_date`、`scheduled_date`、`fill_date` 和终态记录判断时间对齐风险，而不是仅依赖配置推断。
-
-系统 MUST 在实验提供 execution lineage 证据时，优先依据 `signal_date`、`scheduled_date`、`fill_date` 和终态记录判断时间对齐风险，而不是仅依赖配置推断。
-
-#### Scenario: 明确发现同日生成同日成交
-- **WHEN** lineage 证据显示某条以收盘后信号为前提的交易在同一交易日完成成交
-- **THEN** `research_audit.gates.timing_alignment.status` SHALL 为 `FAIL`
-
-#### Scenario: 明确证明 next-day contract 成立
-- **WHEN** lineage 证据显示信号在 T 日生成、订单在 T+1 排程并以符合合同的方式终结，且其他 PIT-safe 条件成立
-- **THEN** `research_audit.gates.timing_alignment` SHALL 可以基于显式 lineage 证据给出 `PASS`
-
-#### Scenario: lineage 证据缺失或不完整
-- **WHEN** 当前实验没有 lineage 证据，或证据不足以证明完整链路
-- **THEN** `timing_alignment` SHALL 回退到既有推断路径或输出 `UNKNOWN`
-- **THEN** 系统 SHALL NOT 因缺少显式 lineage 证据而伪造 `PASS`### Requirement: research_audit 必须包含 accounting_integrity gate
-系统 MUST 在 `research_audit.gates` 中新增 `accounting_integrity` gate，并基于主线 execution audit 的会计恒等式证据输出统一状态。
-
-系统 MUST 在 `research_audit.gates` 中新增 `accounting_integrity` gate，并基于主线 execution audit 的会计恒等式证据输出统一状态。
-
-#### Scenario: 会计恒等式出现失败
-- **WHEN** execution audit 证据显示现金守恒、持仓守恒、NAV 一致性、负现金或超仓上限中任一硬性检查失败
-- **THEN** `research_audit.gates.accounting_integrity.status` SHALL 为 `FAIL`
-
-#### Scenario: 证据完整且全部通过
-- **WHEN** execution audit 提供了完整的主线会计证据，且所有硬性检查均通过
-- **THEN** `research_audit.gates.accounting_integrity.status` SHALL 为 `PASS`
-
-#### Scenario: 主线证据不足
-- **WHEN** 当前实验缺少足够的主线会计快照，导致系统无法证明记账自洽
-- **THEN** `research_audit.gates.accounting_integrity.status` SHALL 为 `UNKNOWN`
-- **THEN** 该 gate SHALL 通过 `reason` 或等价字段说明证据不足，而不是默认为 `PASS`
-
-### Requirement: research audit 必须引用A股统一归因证据链
-当实验属于 Governed A 股主线时，`research_audit` MUST 引用统一的 `attribution_audit` 证据链，而不是自行重算或拼接 regime 语义。
-
-它至少 MUST 引用：
-- regime 的 `base_state_5 / effective_state_5`
-- `regime_confidence`
-- `regime_transition_reason`
-- `reason_codes`
-- `manual_override`
-- Governor 的 `budget_reason_codes`
-- sleeve budget 摘要
-
-`research_audit` SHALL NOT 仅根据 `market_state`、`trade_mode` 或收益结果对状态来源做推断。
-
-#### Scenario: Governed A股实验引用统一证据链
-- **WHEN** 实验运行属于 Governed A 股主线
-- **THEN** `research_audit` MUST 引用统一 attribution 证据，而不是独立再拼 regime 解释
-
-### Requirement: research audit 必须能回答仓位与状态来源
-当实验属于 Governed A 股主线时，research audit MUST 能回答以下问题：
-- 今天的有效市场状态是什么
-- 这个状态主要由什么原因形成或未切换
-- 当前预算是如何被 regime / drawdown / cooldown / override 共同决定的
-- 股票 alpha sleeve 与 ETF beta sleeve 为什么拿到当前预算
-
-对应产物至少 MUST 暴露：
-- 当前 `effective_state_5`
-- 当前 `regime_transition_reason`
-- 当前 `budget_reason_codes`
-- 当前 `manual_override` 摘要
-- 当前 `sleeve_budget` 摘要
-
-#### Scenario: audit 能解释为什么今天不是满仓
-- **WHEN** 用户查看 Governed A 股实验的 research audit
-- **THEN** 审计结果 MUST 能明确回答当前总仓位为什么没有开满，以及这是由状态、drawdown 还是 override 导致
-
+- **WHEN** baseline 的 `linked_exp_id` 缺失，或对应实验目录不可解析
+- **THEN** compare 或 audit MUST 将该 baseline 标记为不可 fully reproduce
+- **THEN** 相关研究结论 SHALL NOT 被解释为对 formal baseline 的可靠比较

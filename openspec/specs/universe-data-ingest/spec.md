@@ -1,4 +1,4 @@
-﻿# universe-data-ingest Specification
+# universe-data-ingest Specification
 
 ## Purpose
 Data import scripts for ingesting industry classification history and index constituent data from AKShare into the backtest database, providing the foundational data required by universe resolver modes (INDUSTRY, HS300_ZZ500).
@@ -167,5 +167,3 @@ Data import scripts for ingesting industry classification history and index cons
 - **WHEN** `CSI800` 导入完成
 - **THEN** 系统 MUST 输出至少包含 `rows`、`distinct_symbols`、`distinct_start_dates`、`open_rows`、`closed_rows` 和 `membership_source` 的导入摘要
 - **THEN** 正式 refresh MUST 将该摘要写入可复核的 `summary.json`
-
-

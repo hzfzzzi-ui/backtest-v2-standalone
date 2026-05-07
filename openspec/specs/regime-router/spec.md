@@ -1,4 +1,4 @@
-﻿# regime-router
+# regime-router Specification
 
 ## Purpose
 定义市场状态路由、兼容 trade_mode 输出、legacy overlay 与正式 regime engine 接入的统一合同，确保不同过滤器只在受控边界内影响执行层。
@@ -333,4 +333,3 @@ RegimeRouter 产生的所有 Signal MUST 包含以下 meta 字段（与现有 ad
 #### Scenario: 信号 meta 携带正式状态
 - **WHEN** RegimeRouter 产生任意 BUY/SELL 信号
 - **THEN** Signal.meta MUST 包含当前正式状态字段与 `regime_engine`
-

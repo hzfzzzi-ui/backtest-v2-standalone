@@ -1,86 +1,87 @@
 ﻿# market-snapshot-daily Specification
 
 ## Purpose
-TBD - created by archiving change add-a-share-market-snapshot. Update Purpose after archive.
+
+Define the formal capability boundary for `market-snapshot-daily` in the current mainline.
 ## Requirements
-### Requirement: 系统必须为指定交易日生成独立的全 A 股市场快照
-系统 SHALL 支持按交易日生成独立于回测实验的 `market_snapshot.json`，并将产物写入 `outputs/market_snapshots/YYYY-MM-DD/`。该快照必须以单一 `trade_date` 为锚点，且所有字段默认只使用该交易日收盘后及历史可得数据。
+### Requirement: 绯荤粺蹇呴』涓烘寚瀹氫氦鏄撴棩鐢熸垚鐙珛鐨勫叏 A 鑲″競鍦哄揩鐓?
+绯荤粺 SHALL 鏀寔鎸変氦鏄撴棩鐢熸垚鐙珛浜庡洖娴嬪疄楠岀殑 `market_snapshot.json`锛屽苟灏嗕骇鐗╁啓鍏?`outputs/market_snapshots/YYYY-MM-DD/`銆傝蹇収蹇呴』浠ュ崟涓€ `trade_date` 涓洪敋鐐癸紝涓旀墍鏈夊瓧娈甸粯璁ゅ彧浣跨敤璇ヤ氦鏄撴棩鏀剁洏鍚庡強鍘嗗彶鍙緱鏁版嵁銆?
 
-系统 SHALL 支持按交易日生成独立于回测实验的 `market_snapshot.json`，并将产物写入 `outputs/market_snapshots/YYYY-MM-DD/`。该快照必须以单一 `trade_date` 为锚点，且所有字段默认只使用该交易日收盘后及历史可得数据。
+绯荤粺 SHALL 鏀寔鎸変氦鏄撴棩鐢熸垚鐙珛浜庡洖娴嬪疄楠岀殑 `market_snapshot.json`锛屽苟灏嗕骇鐗╁啓鍏?`outputs/market_snapshots/YYYY-MM-DD/`銆傝蹇収蹇呴』浠ュ崟涓€ `trade_date` 涓洪敋鐐癸紝涓旀墍鏈夊瓧娈甸粯璁ゅ彧浣跨敤璇ヤ氦鏄撴棩鏀剁洏鍚庡強鍘嗗彶鍙緱鏁版嵁銆?
 
-#### Scenario: 为单个交易日生成快照
-- **WHEN** 用户或系统请求构建某一交易日的市场快照
-- **THEN** 系统必须在对应日期目录下生成 `market_snapshot.json`
-- **AND** 产物不得写入现有回测实验目录
+#### Scenario: 涓哄崟涓氦鏄撴棩鐢熸垚蹇収
+- **WHEN** 鐢ㄦ埛鎴栫郴缁熻姹傛瀯寤烘煇涓€浜ゆ槗鏃ョ殑甯傚満蹇収
+- **THEN** 绯荤粺蹇呴』鍦ㄥ搴旀棩鏈熺洰褰曚笅鐢熸垚 `market_snapshot.json`
+- **AND** 浜х墿涓嶅緱鍐欏叆鐜版湁鍥炴祴瀹為獙鐩綍
 
-#### Scenario: 同一交易日重复构建
-- **WHEN** 同一 `trade_date` 被再次构建
-- **THEN** 系统必须以幂等方式重写该日期快照
-- **AND** 不得改变无关日期目录的内容### Requirement: 市场快照必须覆盖六层市场状态字段
-系统 SHALL 在 `market_snapshot.json` 中至少输出以下六层结构：`index_layer`、`style_layer`、`breadth_layer`、`liquidity_layer`、`sentiment_layer`、`risk_layer`。每层字段必须有固定语义，不得把不同层的指标混成单一匿名分数。
+#### Scenario: 鍚屼竴浜ゆ槗鏃ラ噸澶嶆瀯寤?
+- **WHEN** 鍚屼竴 `trade_date` 琚啀娆℃瀯寤?
+- **THEN** 绯荤粺蹇呴』浠ュ箓绛夋柟寮忛噸鍐欒鏃ユ湡蹇収
+- **AND** 涓嶅緱鏀瑰彉鏃犲叧鏃ユ湡鐩綍鐨勫唴瀹?## Requirement: 甯傚満蹇収蹇呴』瑕嗙洊鍏眰甯傚満鐘舵€佸瓧娈?
+绯荤粺 SHALL 鍦?`market_snapshot.json` 涓嚦灏戣緭鍑轰互涓嬪叚灞傜粨鏋勶細`index_layer`銆乣style_layer`銆乣breadth_layer`銆乣liquidity_layer`銆乣sentiment_layer`銆乣risk_layer`銆傛瘡灞傚瓧娈靛繀椤绘湁鍥哄畾璇箟锛屼笉寰楁妸涓嶅悓灞傜殑鎸囨爣娣锋垚鍗曚竴鍖垮悕鍒嗘暟銆?
 
-#### Scenario: 输出最小六层 schema
-- **WHEN** 市场快照构建完成
-- **THEN** `market_snapshot.json` 必须包含六层字段对象
-- **AND** 缺失字段必须以 `warnings` 或覆盖率信息显式说明
+#### Scenario: 杈撳嚭鏈€灏忓叚灞?schema
+- **WHEN** 甯傚満蹇収鏋勫缓瀹屾垚
+- **THEN** `market_snapshot.json` 蹇呴』鍖呭惈鍏眰瀛楁瀵硅薄
+- **AND** 缂哄け瀛楁蹇呴』浠?`warnings` 鎴栬鐩栫巼淇℃伅鏄惧紡璇存槑
 
-#### Scenario: 使用历史滚动口径
-- **WHEN** 某字段需要 zscore、quantile 或 heat 计算
-- **THEN** 系统必须仅使用 `t` 日及之前的滚动窗口
-- **AND** 不得使用全样本统计量
+#### Scenario: 浣跨敤鍘嗗彶婊氬姩鍙ｅ緞
+- **WHEN** 鏌愬瓧娈甸渶瑕?zscore銆乹uantile 鎴?heat 璁＄畻
+- **THEN** 绯荤粺蹇呴』浠呬娇鐢?`t` 鏃ュ強涔嬪墠鐨勬粴鍔ㄧ獥鍙?
+- **AND** 涓嶅緱浣跨敤鍏ㄦ牱鏈粺璁￠噺
 
-### Requirement: 系统必须输出可人工阅读的市场简报
-系统 SHALL 基于同一份市场快照数据生成 `market_brief.md`，用于收盘后复盘和后续半自动化日更阅读。
+### Requirement: 绯荤粺蹇呴』杈撳嚭鍙汉宸ラ槄璇荤殑甯傚満绠€鎶?
+绯荤粺 SHALL 鍩轰簬鍚屼竴浠藉競鍦哄揩鐓ф暟鎹敓鎴?`market_brief.md`锛岀敤浜庢敹鐩樺悗澶嶇洏鍜屽悗缁崐鑷姩鍖栨棩鏇撮槄璇汇€?
 
-系统 SHALL 基于同一份市场快照数据生成 `market_brief.md`，用于收盘后复盘和后续半自动化日更阅读。
+绯荤粺 SHALL 鍩轰簬鍚屼竴浠藉競鍦哄揩鐓ф暟鎹敓鎴?`market_brief.md`锛岀敤浜庢敹鐩樺悗澶嶇洏鍜屽悗缁崐鑷姩鍖栨棩鏇撮槄璇汇€?
 
-#### Scenario: 生成市场简报
-- **WHEN** 某日市场快照构建完成
-- **THEN** 系统必须在同目录下生成 `market_brief.md`
-- **AND** 简报至少包含今日结论、指数与风格、广度与成交、情绪状态、风险提示五个部分### Requirement: 系统必须记录数据来源、覆盖率和告警
-系统 SHALL 为市场快照记录 `sources`、`warnings` 以及能够解释覆盖不足或发布时间滞后的辅助信息，以保证后续研究和 UI 可以判断该快照是否可靠。
+#### Scenario: 鐢熸垚甯傚満绠€鎶?
+- **WHEN** 鏌愭棩甯傚満蹇収鏋勫缓瀹屾垚
+- **THEN** 绯荤粺蹇呴』鍦ㄥ悓鐩綍涓嬬敓鎴?`market_brief.md`
+- **AND** 绠€鎶ヨ嚦灏戝寘鍚粖鏃ョ粨璁恒€佹寚鏁颁笌椋庢牸銆佸箍搴︿笌鎴愪氦銆佹儏缁姸鎬併€侀闄╂彁绀轰簲涓儴鍒?## Requirement: 绯荤粺蹇呴』璁板綍鏁版嵁鏉ユ簮銆佽鐩栫巼鍜屽憡璀?
+绯荤粺 SHALL 涓哄競鍦哄揩鐓ц褰?`sources`銆乣warnings` 浠ュ強鑳藉瑙ｉ噴瑕嗙洊涓嶈冻鎴栧彂甯冩椂闂存粸鍚庣殑杈呭姪淇℃伅锛屼互淇濊瘉鍚庣画鐮旂┒鍜?UI 鍙互鍒ゆ柇璇ュ揩鐓ф槸鍚﹀彲闈犮€?
 
-#### Scenario: 来源可追溯
-- **WHEN** 市场快照生成完成
-- **THEN** 产物必须记录各层主要字段的数据来源
-- **AND** 来源必须能够区分交易所/指数公司/本地派生计算等不同来源类型
+#### Scenario: 鏉ユ簮鍙拷婧?
+- **WHEN** 甯傚満蹇収鐢熸垚瀹屾垚
+- **THEN** 浜х墿蹇呴』璁板綍鍚勫眰涓昏瀛楁鐨勬暟鎹潵婧?
+- **AND** 鏉ユ簮蹇呴』鑳藉鍖哄垎浜ゆ槗鎵€/鎸囨暟鍏徃/鏈湴娲剧敓璁＄畻绛変笉鍚屾潵婧愮被鍨?
 
-#### Scenario: 数据不足时显式告警
-- **WHEN** 某层字段缺失、滞后或覆盖不足
-- **THEN** 系统必须在 `warnings` 中记录原因
-- **AND** 不得静默写零或伪造可用状态
+#### Scenario: 鏁版嵁涓嶈冻鏃舵樉寮忓憡璀?
+- **WHEN** 鏌愬眰瀛楁缂哄け銆佹粸鍚庢垨瑕嗙洊涓嶈冻
+- **THEN** 绯荤粺蹇呴』鍦?`warnings` 涓褰曞師鍥?
+- **AND** 涓嶅緱闈欓粯鍐欓浂鎴栦吉閫犲彲鐢ㄧ姸鎬?
 
-### Requirement: 首轮市场快照不得直接改变策略或 baseline 行为
-系统 SHALL 将市场快照定位为独立的描述性与研究辅助产物，首轮实现不得直接改变现有 `baseline_V9.1` 交易逻辑、回测指标或 `run_meta` 主 schema。
+### Requirement: 棣栬疆甯傚満蹇収涓嶅緱鐩存帴鏀瑰彉绛栫暐鎴?baseline 琛屼负
+绯荤粺 SHALL 灏嗗競鍦哄揩鐓у畾浣嶄负鐙珛鐨勬弿杩版€т笌鐮旂┒杈呭姪浜х墿锛岄杞疄鐜颁笉寰楃洿鎺ユ敼鍙樼幇鏈?`baseline_V9.1` 浜ゆ槗閫昏緫銆佸洖娴嬫寚鏍囨垨 `run_meta` 涓?schema銆?
 
-系统 SHALL 将市场快照定位为独立的描述性与研究辅助产物，首轮实现不得直接改变现有 `baseline_V9.1` 交易逻辑、回测指标或 `run_meta` 主 schema。
+绯荤粺 SHALL 灏嗗競鍦哄揩鐓у畾浣嶄负鐙珛鐨勬弿杩版€т笌鐮旂┒杈呭姪浜х墿锛岄杞疄鐜颁笉寰楃洿鎺ユ敼鍙樼幇鏈?`baseline_V9.1` 浜ゆ槗閫昏緫銆佸洖娴嬫寚鏍囨垨 `run_meta` 涓?schema銆?
 
-#### Scenario: 构建市场快照不影响 baseline
-- **WHEN** 开启或关闭市场快照构建
-- **THEN** 现有回测实验的 `perf.json`、`run_meta.json`、`nav.csv` 口径必须保持不变
-- **AND** `market_snapshot` 不得被写入现有 baseline 产物链作为必需字段### Requirement: 市场快照必须覆盖六层市场状态字段
-系统 SHALL 在 `market_snapshot.json` 中至少输出以下六层结构：`index_layer`、`style_layer`、`breadth_layer`、`liquidity_layer`、`sentiment_layer`、`risk_layer`。每层字段必须有固定语义，不得把不同层的指标混成单一匿名分数。
+#### Scenario: 鏋勫缓甯傚満蹇収涓嶅奖鍝?baseline
+- **WHEN** 寮€鍚垨鍏抽棴甯傚満蹇収鏋勫缓
+- **THEN** 鐜版湁鍥炴祴瀹為獙鐨?`perf.json`銆乣run_meta.json`銆乣nav.csv` 鍙ｅ緞蹇呴』淇濇寔涓嶅彉
+- **AND** `market_snapshot` 涓嶅緱琚啓鍏ョ幇鏈?baseline 浜х墿閾句綔涓哄繀闇€瀛楁### Requirement: 甯傚満蹇収蹇呴』瑕嗙洊鍏眰甯傚満鐘舵€佸瓧娈?
+绯荤粺 SHALL 鍦?`market_snapshot.json` 涓嚦灏戣緭鍑轰互涓嬪叚灞傜粨鏋勶細`index_layer`銆乣style_layer`銆乣breadth_layer`銆乣liquidity_layer`銆乣sentiment_layer`銆乣risk_layer`銆傛瘡灞傚瓧娈靛繀椤绘湁鍥哄畾璇箟锛屼笉寰楁妸涓嶅悓灞傜殑鎸囨爣娣锋垚鍗曚竴鍖垮悕鍒嗘暟銆?
 
-#### Scenario: 输出最小六层 schema
-- **WHEN** 市场快照构建完成
-- **THEN** `market_snapshot.json` 必须包含六层字段对象
-- **AND** 缺失字段必须以 `warnings` 或覆盖率信息显式说明
+#### Scenario: 杈撳嚭鏈€灏忓叚灞?schema
+- **WHEN** 甯傚満蹇収鏋勫缓瀹屾垚
+- **THEN** `market_snapshot.json` 蹇呴』鍖呭惈鍏眰瀛楁瀵硅薄
+- **AND** 缂哄け瀛楁蹇呴』浠?`warnings` 鎴栬鐩栫巼淇℃伅鏄惧紡璇存槑
 
-#### Scenario: 使用历史滚动口径
-- **WHEN** 某字段需要 zscore、quantile 或 heat 计算
-- **THEN** 系统必须仅使用 `t` 日及之前的滚动窗口
-- **AND** 不得使用全样本统计量
+#### Scenario: 浣跨敤鍘嗗彶婊氬姩鍙ｅ緞
+- **WHEN** 鏌愬瓧娈甸渶瑕?zscore銆乹uantile 鎴?heat 璁＄畻
+- **THEN** 绯荤粺蹇呴』浠呬娇鐢?`t` 鏃ュ強涔嬪墠鐨勬粴鍔ㄧ獥鍙?
+- **AND** 涓嶅緱浣跨敤鍏ㄦ牱鏈粺璁￠噺
 
-### Requirement: 系统必须记录数据来源、覆盖率和告警
-系统 SHALL 为市场快照记录 `sources`、`warnings` 以及能够解释覆盖不足或发布时间滞后的辅助信息，以保证后续研究和 UI 可以判断该快照是否可靠。
+### Requirement: 绯荤粺蹇呴』璁板綍鏁版嵁鏉ユ簮銆佽鐩栫巼鍜屽憡璀?
+绯荤粺 SHALL 涓哄競鍦哄揩鐓ц褰?`sources`銆乣warnings` 浠ュ強鑳藉瑙ｉ噴瑕嗙洊涓嶈冻鎴栧彂甯冩椂闂存粸鍚庣殑杈呭姪淇℃伅锛屼互淇濊瘉鍚庣画鐮旂┒鍜?UI 鍙互鍒ゆ柇璇ュ揩鐓ф槸鍚﹀彲闈犮€?
 
-#### Scenario: 来源可追溯
-- **WHEN** 市场快照生成完成
-- **THEN** 产物必须记录各层主要字段的数据来源
-- **AND** 来源必须能够区分交易所/指数公司/本地派生计算等不同来源类型
+#### Scenario: 鏉ユ簮鍙拷婧?
+- **WHEN** 甯傚満蹇収鐢熸垚瀹屾垚
+- **THEN** 浜х墿蹇呴』璁板綍鍚勫眰涓昏瀛楁鐨勬暟鎹潵婧?
+- **AND** 鏉ユ簮蹇呴』鑳藉鍖哄垎浜ゆ槗鎵€/鎸囨暟鍏徃/鏈湴娲剧敓璁＄畻绛変笉鍚屾潵婧愮被鍨?
 
-#### Scenario: 数据不足时显式告警
-- **WHEN** 某层字段缺失、滞后或覆盖不足
-- **THEN** 系统必须在 `warnings` 中记录原因
-- **AND** 不得静默写零或伪造可用状态
+#### Scenario: 鏁版嵁涓嶈冻鏃舵樉寮忓憡璀?
+- **WHEN** 鏌愬眰瀛楁缂哄け銆佹粸鍚庢垨瑕嗙洊涓嶈冻
+- **THEN** 绯荤粺蹇呴』鍦?`warnings` 涓褰曞師鍥?
+- **AND** 涓嶅緱闈欓粯鍐欓浂鎴栦吉閫犲彲鐢ㄧ姸鎬?
 

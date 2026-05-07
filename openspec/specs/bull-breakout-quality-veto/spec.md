@@ -1,80 +1,81 @@
 ﻿# bull-breakout-quality-veto Specification
 
 ## Purpose
-TBD - created by archiving change add-bull-breakout-quality-veto-ab. Update Purpose after archive.
+
+Define the formal capability boundary for `bull-breakout-quality-veto` in the current mainline.
 ## Requirements
 ### Requirement: BULL breakout quality veto
 
-系统 SHALL 支持一个可选的 `bull_breakout_quality_veto`，仅在 `BULL / TREND_MAIN` 语义下对 breakout 新买入候选执行低自由度、可解释的坏 breakout 阻断。
+绯荤粺 SHALL 鏀寔涓€涓彲閫夌殑 `bull_breakout_quality_veto`锛屼粎鍦?`BULL / TREND_MAIN` 璇箟涓嬪 breakout 鏂颁拱鍏ュ€欓€夋墽琛屼綆鑷敱搴︺€佸彲瑙ｉ噴鐨勫潖 breakout 闃绘柇銆?
 
-首轮 veto 只允许使用以下两个现有特征：
-
-- `residual_strength_score`
-- `breakout_margin_score`
-
-且只作用于：
-
-- `alpha_source = breakout`
-- `alpha_source = pullback_overlap`
-
-系统 SHALL 支持一个可选的 `bull_breakout_quality_veto`，仅在 `BULL / TREND_MAIN` 语义下对 breakout 新买入候选执行低自由度、可解释的坏 breakout 阻断。
-
-首轮 veto 只允许使用以下两个现有特征：
+棣栬疆 veto 鍙厑璁镐娇鐢ㄤ互涓嬩袱涓幇鏈夌壒寰侊細
 
 - `residual_strength_score`
 - `breakout_margin_score`
 
-且只作用于：
+涓斿彧浣滅敤浜庯細
 
 - `alpha_source = breakout`
 - `alpha_source = pullback_overlap`
 
-#### Scenario: veto 关闭时行为不变
-- **WHEN** `bull_breakout_quality_veto_enabled = false` 或未配置
-- **THEN** breakout provider 的买入候选行为 SHALL 与变更前完全一致
+绯荤粺 SHALL 鏀寔涓€涓彲閫夌殑 `bull_breakout_quality_veto`锛屼粎鍦?`BULL / TREND_MAIN` 璇箟涓嬪 breakout 鏂颁拱鍏ュ€欓€夋墽琛屼綆鑷敱搴︺€佸彲瑙ｉ噴鐨勫潖 breakout 闃绘柇銆?
 
-#### Scenario: 只在 BULL 主趋势语义下应用
-- **WHEN** `ctx.market_state != "BULL"` 或 `ctx.risk_on = false`
-- **THEN** bull breakout quality veto SHALL 不生效
+棣栬疆 veto 鍙厑璁镐娇鐢ㄤ互涓嬩袱涓幇鏈夌壒寰侊細
 
-#### Scenario: 只阻断 breakout / overlap
-- **WHEN** 候选 `alpha_source` 不属于 `breakout` 或 `pullback_overlap`
-- **THEN** bull breakout quality veto SHALL 不生效
+- `residual_strength_score`
+- `breakout_margin_score`
 
-#### Scenario: residual_strength 不达标时阻断
+涓斿彧浣滅敤浜庯細
+
+- `alpha_source = breakout`
+- `alpha_source = pullback_overlap`
+
+#### Scenario: veto 鍏抽棴鏃惰涓轰笉鍙?
+- **WHEN** `bull_breakout_quality_veto_enabled = false` 鎴栨湭閰嶇疆
+- **THEN** breakout provider 鐨勪拱鍏ュ€欓€夎涓?SHALL 涓庡彉鏇村墠瀹屽叏涓€鑷?
+
+#### Scenario: 鍙湪 BULL 涓昏秼鍔胯涔変笅搴旂敤
+- **WHEN** `ctx.market_state != "BULL"` 鎴?`ctx.risk_on = false`
+- **THEN** bull breakout quality veto SHALL 涓嶇敓鏁?
+
+#### Scenario: 鍙樆鏂?breakout / overlap
+- **WHEN** 鍊欓€?`alpha_source` 涓嶅睘浜?`breakout` 鎴?`pullback_overlap`
+- **THEN** bull breakout quality veto SHALL 涓嶇敓鏁?
+
+#### Scenario: residual_strength 涓嶈揪鏍囨椂闃绘柇
 - **WHEN** `bull_breakout_quality_veto_enabled = true`
 - **AND** `ctx.market_state = "BULL"`
-- **AND** 候选为 breakout / overlap
+- **AND** 鍊欓€変负 breakout / overlap
 - **AND** `residual_strength_score < bull_breakout_quality_veto_min_residual_strength_score`
-- **THEN** 该候选 SHALL 被阻断
-- **THEN** 阻断 reason_code SHALL 记录为 `BLOCK_BULL_QUALITY_VETO`
+- **THEN** 璇ュ€欓€?SHALL 琚樆鏂?
+- **THEN** 闃绘柇 reason_code SHALL 璁板綍涓?`BLOCK_BULL_QUALITY_VETO`
 
-#### Scenario: breakout_margin 不达标时阻断
+#### Scenario: breakout_margin 涓嶈揪鏍囨椂闃绘柇
 - **WHEN** `bull_breakout_quality_veto_enabled = true`
 - **AND** `ctx.market_state = "BULL"`
-- **AND** 候选为 breakout / overlap
+- **AND** 鍊欓€変负 breakout / overlap
 - **AND** `breakout_margin_score < bull_breakout_quality_veto_min_breakout_margin_score`
-- **THEN** 该候选 SHALL 被阻断
-- **THEN** 阻断 reason_code SHALL 记录为 `BLOCK_BULL_QUALITY_VETO`### Requirement: Bull breakout quality veto AB
+- **THEN** 璇ュ€欓€?SHALL 琚樆鏂?
+- **THEN** 闃绘柇 reason_code SHALL 璁板綍涓?`BLOCK_BULL_QUALITY_VETO`### Requirement: Bull breakout quality veto AB
 
-系统 SHALL 支持基于当前正式 `baseline_V10.2` 执行一轮最小 A/B：
+绯荤粺 SHALL 鏀寔鍩轰簬褰撳墠姝ｅ紡 `baseline_V10.2` 鎵ц涓€杞渶灏?A/B锛?
 
 - A = `baseline_V10.2`
 - B = `baseline_V10.2 + bull_breakout_quality_veto`
 
-AB 的唯一 intended diff SHALL 是：
+AB 鐨勫敮涓€ intended diff SHALL 鏄細
 
 - `bull_breakout_quality_veto_enabled = true`
 - `bull_breakout_quality_veto_min_residual_strength_score`
 - `bull_breakout_quality_veto_min_breakout_margin_score`
 
-#### Scenario: intended diff 单一
-- **WHEN** 运行本轮 A/B
-- **THEN** 除 veto 三个字段外，其余 universe / data_role / market_filter / exit / sizing / ranking 核 SHALL 保持一致
+#### Scenario: intended diff 鍗曚竴
+- **WHEN** 杩愯鏈疆 A/B
+- **THEN** 闄?veto 涓変釜瀛楁澶栵紝鍏朵綑 universe / data_role / market_filter / exit / sizing / ranking 鏍?SHALL 淇濇寔涓€鑷?
 
-#### Scenario: 输出正式对照产物
-- **WHEN** A/B 运行完成
-- **THEN** 输出目录 SHALL 至少包含：
+#### Scenario: 杈撳嚭姝ｅ紡瀵圭収浜х墿
+- **WHEN** A/B 杩愯瀹屾垚
+- **THEN** 杈撳嚭鐩綍 SHALL 鑷冲皯鍖呭惈锛?
   - `summary.json`
   - `report.md`
   - `performance_comparison.csv`
@@ -82,24 +83,24 @@ AB 的唯一 intended diff SHALL 是：
 
 ### Requirement: Bull breakout quality veto AB
 
-系统 SHALL 支持基于当前正式 `baseline_V10.2` 执行一轮最小 A/B：
+绯荤粺 SHALL 鏀寔鍩轰簬褰撳墠姝ｅ紡 `baseline_V10.2` 鎵ц涓€杞渶灏?A/B锛?
 
 - A = `baseline_V10.2`
 - B = `baseline_V10.2 + bull_breakout_quality_veto`
 
-AB 的唯一 intended diff SHALL 是：
+AB 鐨勫敮涓€ intended diff SHALL 鏄細
 
 - `bull_breakout_quality_veto_enabled = true`
 - `bull_breakout_quality_veto_min_residual_strength_score`
 - `bull_breakout_quality_veto_min_breakout_margin_score`
 
-#### Scenario: intended diff 单一
-- **WHEN** 运行本轮 A/B
-- **THEN** 除 veto 三个字段外，其余 universe / data_role / market_filter / exit / sizing / ranking 核 SHALL 保持一致
+#### Scenario: intended diff 鍗曚竴
+- **WHEN** 杩愯鏈疆 A/B
+- **THEN** 闄?veto 涓変釜瀛楁澶栵紝鍏朵綑 universe / data_role / market_filter / exit / sizing / ranking 鏍?SHALL 淇濇寔涓€鑷?
 
-#### Scenario: 输出正式对照产物
-- **WHEN** A/B 运行完成
-- **THEN** 输出目录 SHALL 至少包含：
+#### Scenario: 杈撳嚭姝ｅ紡瀵圭収浜х墿
+- **WHEN** A/B 杩愯瀹屾垚
+- **THEN** 杈撳嚭鐩綍 SHALL 鑷冲皯鍖呭惈锛?
   - `summary.json`
   - `report.md`
   - `performance_comparison.csv`

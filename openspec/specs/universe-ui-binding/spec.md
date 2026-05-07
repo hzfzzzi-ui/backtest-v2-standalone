@@ -1,4 +1,4 @@
-﻿# universe-ui-binding Specification
+# universe-ui-binding Specification
 
 ## Purpose
 Frontend UI binding for universe mode selection, including mode toggle buttons, industry picker component, and config draft construction that adapts to the selected universe mode.
@@ -78,4 +78,3 @@ Frontend UI binding for universe mode selection, including mode toggle buttons, 
 #### Scenario: 已保存配置回填
 - **WHEN** 系统载入一个包含 `universe.filters.exclude_star_market=true` 的配置
 - **THEN** 科创板过滤 checkbox SHALL 回填为勾选状态
-

@@ -1,4 +1,4 @@
-# dynamic-max-positions
+# dynamic-max-positions Specification
 
 ## Purpose
 

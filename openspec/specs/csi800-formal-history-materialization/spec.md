@@ -1,21 +1,23 @@
 ﻿# csi800-formal-history-materialization Specification
 
 ## Purpose
-TBD - created by archiving change restore-csi800-formal-history-coverage. Update Purpose after archive.
+
+Define the formal capability boundary for `csi800-formal-history-materialization` in the current mainline.
 ## Requirements
-### Requirement: CSI800 正式历史链物化
-系统 MUST 提供 `CSI800/000906.SH` 正式历史链物化能力，能够从覆盖 `2007+` 的长历史 seed 和可选尾部 patch 生成单一 formal chain，并输出可审计的 provenance/coverage 摘要。
+### Requirement: CSI800 姝ｅ紡鍘嗗彶閾剧墿鍖?
+绯荤粺 MUST 鎻愪緵 `CSI800/000906.SH` 姝ｅ紡鍘嗗彶閾剧墿鍖栬兘鍔涳紝鑳藉浠庤鐩?`2007+` 鐨勯暱鍘嗗彶 seed 鍜屽彲閫夊熬閮?patch 鐢熸垚鍗曚竴 formal chain锛屽苟杈撳嚭鍙璁＄殑 provenance/coverage 鎽樿銆?
 
-系统 MUST 提供 `CSI800/000906.SH` 正式历史链物化能力，能够从覆盖 `2007+` 的长历史 seed 和可选尾部 patch 生成单一 formal chain，并输出可审计的 provenance/coverage 摘要。
+绯荤粺 MUST 鎻愪緵 `CSI800/000906.SH` 姝ｅ紡鍘嗗彶閾剧墿鍖栬兘鍔涳紝鑳藉浠庤鐩?`2007+` 鐨勯暱鍘嗗彶 seed 鍜屽彲閫夊熬閮?patch 鐢熸垚鍗曚竴 formal chain锛屽苟杈撳嚭鍙璁＄殑 provenance/coverage 鎽樿銆?
 
-#### Scenario: 用长历史 seed 物化正式链
-- **WHEN** 运维提供覆盖 `2007+` 的 `000906.SH` seed CSV 以生成正式历史链
-- **THEN** 系统 MUST 输出可直接导入 `pit_index_constituents` 的 `changes.csv`
-- **THEN** 输出记录的 `source` MUST 统一为单一 formal source label
-- **THEN** summary MUST 包含 seed/patch 来源、最早起点、最晚终点和是否覆盖 `required_start`
+#### Scenario: 鐢ㄩ暱鍘嗗彶 seed 鐗╁寲姝ｅ紡閾?
+- **WHEN** 杩愮淮鎻愪緵瑕嗙洊 `2007+` 鐨?`000906.SH` seed CSV 浠ョ敓鎴愭寮忓巻鍙查摼
+- **THEN** 绯荤粺 MUST 杈撳嚭鍙洿鎺ュ鍏?`pit_index_constituents` 鐨?`changes.csv`
+- **THEN** 杈撳嚭璁板綍鐨?`source` MUST 缁熶竴涓哄崟涓€ formal source label
+- **THEN** summary MUST 鍖呭惈 seed/patch 鏉ユ簮銆佹渶鏃╄捣鐐广€佹渶鏅氱粓鐐瑰拰鏄惁瑕嗙洊 `required_start`
 
-#### Scenario: 用 patch 替换 seed 尾部
-- **WHEN** 运维同时提供 seed CSV 和 patch CSV
-- **THEN** 系统 MUST 仅从 patch 最早 `start_date` 起替换 seed 尾部
-- **THEN** 系统 MUST 保留 patch 边界之前的长历史记录
-- **THEN** summary MUST 明确输出 patch 边界和最终正式链统计
+#### Scenario: 鐢?patch 鏇挎崲 seed 灏鹃儴
+- **WHEN** 杩愮淮鍚屾椂鎻愪緵 seed CSV 鍜?patch CSV
+- **THEN** 绯荤粺 MUST 浠呬粠 patch 鏈€鏃?`start_date` 璧锋浛鎹?seed 灏鹃儴
+- **THEN** 绯荤粺 MUST 淇濈暀 patch 杈圭晫涔嬪墠鐨勯暱鍘嗗彶璁板綍
+- **THEN** summary MUST 鏄庣‘杈撳嚭 patch 杈圭晫鍜屾渶缁堟寮忛摼缁熻
+

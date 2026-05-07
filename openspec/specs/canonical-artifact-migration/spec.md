@@ -1,56 +1,57 @@
 ﻿# canonical-artifact-migration Specification
 
 ## Purpose
-TBD - created by archiving change cleanup-remaining-architecture-debt. Update Purpose after archive.
+
+Define the formal capability boundary for `canonical-artifact-migration` in the current mainline.
 ## Requirements
-### Requirement: 运行时读取链必须只认 canonical artifact schema
-系统 MUST 以 canonical artifact 命名、canonical counter 字段和 canonical manifest 资产上下文作为运行时唯一真相。查询服务、API 返回和前端主路径 SHALL NOT 长期依赖查询时临时补丁去推导历史资产上下文。
+### Requirement: 杩愯鏃惰鍙栭摼蹇呴』鍙 canonical artifact schema
+绯荤粺 MUST 浠?canonical artifact 鍛藉悕銆乧anonical counter 瀛楁鍜?canonical manifest 璧勪骇涓婁笅鏂囦綔涓鸿繍琛屾椂鍞竴鐪熺浉銆傛煡璇㈡湇鍔°€丄PI 杩斿洖鍜屽墠绔富璺緞 SHALL NOT 闀挎湡渚濊禆鏌ヨ鏃朵复鏃惰ˉ涓佸幓鎺ㄥ鍘嗗彶璧勪骇涓婁笅鏂囥€?
 
-系统 MUST 以 canonical artifact 命名和 canonical counter 字段作为运行时唯一真相。查询服务、API 返回和前端主路径 SHALL NOT 继续在运行时常驻历史 alias、legacy trades 文件名或旧 shell label 归一化逻辑。
+绯荤粺 MUST 浠?canonical artifact 鍛藉悕鍜?canonical counter 瀛楁浣滀负杩愯鏃跺敮涓€鐪熺浉銆傛煡璇㈡湇鍔°€丄PI 杩斿洖鍜屽墠绔富璺緞 SHALL NOT 缁х画鍦ㄨ繍琛屾椂甯搁┗鍘嗗彶 alias銆乴egacy trades 鏂囦欢鍚嶆垨鏃?shell label 褰掍竴鍖栭€昏緫銆?
 
-#### Scenario: 查询实验 artifact
-- **WHEN** 查询服务读取某个实验目录的标准 artifact
-- **THEN** 读取链 MUST 直接消费 canonical 文件命名、canonical counters 和 canonical manifest 字段
-- **THEN** 运行时 SHALL NOT 继续把历史 alias 或临时 asset context 推导当成长期主路径
+#### Scenario: 鏌ヨ瀹為獙 artifact
+- **WHEN** 鏌ヨ鏈嶅姟璇诲彇鏌愪釜瀹為獙鐩綍鐨勬爣鍑?artifact
+- **THEN** 璇诲彇閾?MUST 鐩存帴娑堣垂 canonical 鏂囦欢鍛藉悕銆乧anonical counters 鍜?canonical manifest 瀛楁
+- **THEN** 杩愯鏃?SHALL NOT 缁х画鎶婂巻鍙?alias 鎴栦复鏃?asset context 鎺ㄥ褰撴垚闀挎湡涓昏矾寰?
 
-#### Scenario: 新实验写出标准产物
-- **WHEN** 新实验写出 `manifest.json`、`perf.json`、`run_meta.json` 等标准产物
-- **THEN** 系统 MUST 只写出 canonical 命名和 canonical 资产上下文
-- **THEN** 新实验 SHALL NOT 生成新的历史 alias 或缺失资产上下文字段的 manifest
+#### Scenario: 鏂板疄楠屽啓鍑烘爣鍑嗕骇鐗?
+- **WHEN** 鏂板疄楠屽啓鍑?`manifest.json`銆乣perf.json`銆乣run_meta.json` 绛夋爣鍑嗕骇鐗?
+- **THEN** 绯荤粺 MUST 鍙啓鍑?canonical 鍛藉悕鍜?canonical 璧勪骇涓婁笅鏂?
+- **THEN** 鏂板疄楠?SHALL NOT 鐢熸垚鏂扮殑鍘嗗彶 alias 鎴栫己澶辫祫浜т笂涓嬫枃瀛楁鐨?manifest
 
-#### Scenario: 新实验写出产物
-- **WHEN** 新实验写出 `manifest.json`、`perf.json`、`run_meta.json` 等标准产物
-- **THEN** 系统 MUST 只写出 canonical 命名
-- **THEN** 新实验 SHALL NOT 再生成旧 alias### Requirement: 历史 artifact alias 必须通过离线迁移退出运行时
-系统 MUST 提供离线迁移和迁移审计，用于把历史 artifact、counter 字段、shell label 和缺失资产上下文的 `manifest.json` 批量更新为 canonical schema。迁移完成后，历史实验的磁盘 manifest MUST 自描述其 canonical 资产边界。
+#### Scenario: 鏂板疄楠屽啓鍑轰骇鐗?
+- **WHEN** 鏂板疄楠屽啓鍑?`manifest.json`銆乣perf.json`銆乣run_meta.json` 绛夋爣鍑嗕骇鐗?
+- **THEN** 绯荤粺 MUST 鍙啓鍑?canonical 鍛藉悕
+- **THEN** 鏂板疄楠?SHALL NOT 鍐嶇敓鎴愭棫 alias### Requirement: 鍘嗗彶 artifact alias 蹇呴』閫氳繃绂荤嚎杩佺Щ閫€鍑鸿繍琛屾椂
+绯荤粺 MUST 鎻愪緵绂荤嚎杩佺Щ鍜岃縼绉诲璁★紝鐢ㄤ簬鎶婂巻鍙?artifact銆乧ounter 瀛楁銆乻hell label 鍜岀己澶辫祫浜т笂涓嬫枃鐨?`manifest.json` 鎵归噺鏇存柊涓?canonical schema銆傝縼绉诲畬鎴愬悗锛屽巻鍙插疄楠岀殑纾佺洏 manifest MUST 鑷弿杩板叾 canonical 璧勪骇杈圭晫銆?
 
-系统 MUST 提供离线迁移和迁移审计，用于把历史 artifact、counter 字段、shell label 和缺失资产上下文的 `manifest.json` 批量更新为 canonical schema。迁移完成后，历史实验的磁盘 manifest MUST 自描述其 canonical 资产边界。
+绯荤粺 MUST 鎻愪緵绂荤嚎杩佺Щ鍜岃縼绉诲璁★紝鐢ㄤ簬鎶婂巻鍙?artifact銆乧ounter 瀛楁銆乻hell label 鍜岀己澶辫祫浜т笂涓嬫枃鐨?`manifest.json` 鎵归噺鏇存柊涓?canonical schema銆傝縼绉诲畬鎴愬悗锛屽巻鍙插疄楠岀殑纾佺洏 manifest MUST 鑷弿杩板叾 canonical 璧勪骇杈圭晫銆?
 
-#### Scenario: 回填历史 manifest 资产上下文
-- **WHEN** 某个历史实验的 `manifest.json` 缺少 `asset_scope`、`asset_profile_id`、`market_profile_id`、`execution_profile_id` 或 `asset_context`
-- **THEN** 迁移工具 MUST 从 `config.json`、`run_config.json`、`compiled_plan.json` 等标准输入推导并回填 canonical 字段
-- **THEN** 若无法可靠推导，迁移工具 MUST 记录跳过原因并输出到审计结果，而 SHALL NOT 静默写入不可信值
+#### Scenario: 鍥炲～鍘嗗彶 manifest 璧勪骇涓婁笅鏂?
+- **WHEN** 鏌愪釜鍘嗗彶瀹為獙鐨?`manifest.json` 缂哄皯 `asset_scope`銆乣asset_profile_id`銆乣market_profile_id`銆乣execution_profile_id` 鎴?`asset_context`
+- **THEN** 杩佺Щ宸ュ叿 MUST 浠?`config.json`銆乣run_config.json`銆乣compiled_plan.json` 绛夋爣鍑嗚緭鍏ユ帹瀵煎苟鍥炲～ canonical 瀛楁
+- **THEN** 鑻ユ棤娉曞彲闈犳帹瀵硷紝杩佺Щ宸ュ叿 MUST 璁板綍璺宠繃鍘熷洜骞惰緭鍑哄埌瀹¤缁撴灉锛岃€?SHALL NOT 闈欓粯鍐欏叆涓嶅彲淇″€?
 
-#### Scenario: 迁移历史产物
-- **WHEN** 需要清理历史 artifact alias
-- **THEN** 系统 MUST 先输出迁移审计报告，列出受影响目录、字段、文件名与回填结果
-- **THEN** 系统 MUST 通过离线迁移批量更新历史产物，再删除运行时长期 alias 归一化依赖
+#### Scenario: 杩佺Щ鍘嗗彶浜х墿
+- **WHEN** 闇€瑕佹竻鐞嗗巻鍙?artifact alias
+- **THEN** 绯荤粺 MUST 鍏堣緭鍑鸿縼绉诲璁℃姤鍛婏紝鍒楀嚭鍙楀奖鍝嶇洰褰曘€佸瓧娈点€佹枃浠跺悕涓庡洖濉粨鏋?
+- **THEN** 绯荤粺 MUST 閫氳繃绂荤嚎杩佺Щ鎵归噺鏇存柊鍘嗗彶浜х墿锛屽啀鍒犻櫎杩愯鏃堕暱鏈?alias 褰掍竴鍖栦緷璧?
 
-#### Scenario: 迁移后回归校验
-- **WHEN** 某批历史产物完成 canonical migration
-- **THEN** 系统 MUST 以前后对照 `V10.1 -> exp_20260314_144548534_7db9` 和代表性历史实验做读取回归
-- **THEN** 若结果或 manifest 语义发生漂移，迁移 SHALL NOT 进入主路径
+#### Scenario: 杩佺Щ鍚庡洖褰掓牎楠?
+- **WHEN** 鏌愭壒鍘嗗彶浜х墿瀹屾垚 canonical migration
+- **THEN** 绯荤粺 MUST 浠ュ墠鍚庡鐓?`V10.1 -> exp_20260314_144548534_7db9` 鍜屼唬琛ㄦ€у巻鍙插疄楠屽仛璇诲彇鍥炲綊
+- **THEN** 鑻ョ粨鏋滄垨 manifest 璇箟鍙戠敓婕傜Щ锛岃縼绉?SHALL NOT 杩涘叆涓昏矾寰?
 
-### Requirement: 历史产物兼容必须退出运行时并改为离线迁移
-系统 MUST 将历史 artifact alias、旧 counter 字段和旧 shell label 的处理限制在离线迁移工具与迁移审计中。运行时 contract SHALL NOT 再为这些历史名称保留常驻兼容读取。
+### Requirement: 鍘嗗彶浜х墿鍏煎蹇呴』閫€鍑鸿繍琛屾椂骞舵敼涓虹绾胯縼绉?
+绯荤粺 MUST 灏嗗巻鍙?artifact alias銆佹棫 counter 瀛楁鍜屾棫 shell label 鐨勫鐞嗛檺鍒跺湪绂荤嚎杩佺Щ宸ュ叿涓庤縼绉诲璁′腑銆傝繍琛屾椂 contract SHALL NOT 鍐嶄负杩欎簺鍘嗗彶鍚嶇О淇濈暀甯搁┗鍏煎璇诲彇銆?
 
-#### Scenario: 需要读取旧产物目录
-- **WHEN** 某批历史产物仍使用旧命名
-- **THEN** 系统 MUST 先通过离线 migration 将其转成 canonical schema
-- **THEN** 运行时接口 SHALL NOT 因这些旧产物继续保留兼容分支
+#### Scenario: 闇€瑕佽鍙栨棫浜х墿鐩綍
+- **WHEN** 鏌愭壒鍘嗗彶浜х墿浠嶄娇鐢ㄦ棫鍛藉悕
+- **THEN** 绯荤粺 MUST 鍏堥€氳繃绂荤嚎 migration 灏嗗叾杞垚 canonical schema
+- **THEN** 杩愯鏃舵帴鍙?SHALL NOT 鍥犺繖浜涙棫浜х墿缁х画淇濈暀鍏煎鍒嗘敮
 
-#### Scenario: 迁移后回归校验
-- **WHEN** 历史产物完成 canonical migration
-- **THEN** 系统 MUST 以前后对照 `baseline_V10.1 -> exp_20260314_144548534_7db9` 复核读取结果
-- **THEN** 若出现结果漂移，迁移 SHALL NOT 进入主路径
+#### Scenario: 杩佺Щ鍚庡洖褰掓牎楠?
+- **WHEN** 鍘嗗彶浜х墿瀹屾垚 canonical migration
+- **THEN** 绯荤粺 MUST 浠ュ墠鍚庡鐓?`baseline_V10.1 -> exp_20260314_144548534_7db9` 澶嶆牳璇诲彇缁撴灉
+- **THEN** 鑻ュ嚭鐜扮粨鏋滄紓绉伙紝杩佺Щ SHALL NOT 杩涘叆涓昏矾寰?
 

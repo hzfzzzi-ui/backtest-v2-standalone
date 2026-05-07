@@ -1,80 +1,81 @@
 ﻿# cn-daily-basic-liquidity-data Specification
 
 ## Purpose
-TBD - created by archiving change add-cn-daily-basic-liquidity-fields. Update Purpose after archive.
+
+Define the formal capability boundary for `cn-daily-basic-liquidity-data` in the current mainline.
 ## Requirements
-### Requirement: CN_A 日频流动性字段入库
-系统 SHALL 为 `pams_ohlcv_daily` 中 `market='CN_A'` 的日线记录存储与 `trade_date + symbol` 对齐的日频流动性字段，至少包括 `turnover_rate`、`turnover_rate_f`、`volume_ratio`。系统 MAY 一并存储 `float_share`、`free_share`、`circ_mv` 作为审计与扩展辅助字段。系统 MUST 保持现有 `volume` 和 `turnover` 字段语义不变，其中 `turnover` 继续表示成交额，不得改作换手率。
+### Requirement: CN_A 鏃ラ娴佸姩鎬у瓧娈靛叆搴?
+绯荤粺 SHALL 涓?`pams_ohlcv_daily` 涓?`market='CN_A'` 鐨勬棩绾胯褰曞瓨鍌ㄤ笌 `trade_date + symbol` 瀵归綈鐨勬棩棰戞祦鍔ㄦ€у瓧娈碉紝鑷冲皯鍖呮嫭 `turnover_rate`銆乣turnover_rate_f`銆乣volume_ratio`銆傜郴缁?MAY 涓€骞跺瓨鍌?`float_share`銆乣free_share`銆乣circ_mv` 浣滀负瀹¤涓庢墿灞曡緟鍔╁瓧娈点€傜郴缁?MUST 淇濇寔鐜版湁 `volume` 鍜?`turnover` 瀛楁璇箟涓嶅彉锛屽叾涓?`turnover` 缁х画琛ㄧず鎴愪氦棰濓紝涓嶅緱鏀逛綔鎹㈡墜鐜囥€?
 
-系统 SHALL 为 `pams_ohlcv_daily` 中 `market='CN_A'` 的日线记录存储与 `trade_date + symbol` 对齐的日频流动性字段，至少包括 `turnover_rate`、`turnover_rate_f`、`volume_ratio`。系统 MAY 一并存储 `float_share`、`free_share`、`circ_mv` 作为审计与扩展辅助字段。系统 MUST 保持现有 `volume` 和 `turnover` 字段语义不变，其中 `turnover` 继续表示成交额，不得改作换手率。
+绯荤粺 SHALL 涓?`pams_ohlcv_daily` 涓?`market='CN_A'` 鐨勬棩绾胯褰曞瓨鍌ㄤ笌 `trade_date + symbol` 瀵归綈鐨勬棩棰戞祦鍔ㄦ€у瓧娈碉紝鑷冲皯鍖呮嫭 `turnover_rate`銆乣turnover_rate_f`銆乣volume_ratio`銆傜郴缁?MAY 涓€骞跺瓨鍌?`float_share`銆乣free_share`銆乣circ_mv` 浣滀负瀹¤涓庢墿灞曡緟鍔╁瓧娈点€傜郴缁?MUST 淇濇寔鐜版湁 `volume` 鍜?`turnover` 瀛楁璇箟涓嶅彉锛屽叾涓?`turnover` 缁х画琛ㄧず鎴愪氦棰濓紝涓嶅緱鏀逛綔鎹㈡墜鐜囥€?
 
-#### Scenario: daily_basic 字段成功写入主表
-- **WHEN** 导入链路处理某个 `CN_A` 股票在某个 `trade_date` 的 daily_basic 记录
-- **THEN** 系统 SHALL 将 `turnover_rate`、`turnover_rate_f`、`volume_ratio` 写入与该 `symbol + trade_date` 对应的 `pams_ohlcv_daily` 行
+#### Scenario: daily_basic 瀛楁鎴愬姛鍐欏叆涓昏〃
+- **WHEN** 瀵煎叆閾捐矾澶勭悊鏌愪釜 `CN_A` 鑲＄エ鍦ㄦ煇涓?`trade_date` 鐨?daily_basic 璁板綍
+- **THEN** 绯荤粺 SHALL 灏?`turnover_rate`銆乣turnover_rate_f`銆乣volume_ratio` 鍐欏叆涓庤 `symbol + trade_date` 瀵瑰簲鐨?`pams_ohlcv_daily` 琛?
 
-#### Scenario: 现有成交额字段语义保持不变
-- **WHEN** 系统完成流动性字段回填
-- **THEN** 现有 `turnover` 字段 SHALL 继续表示成交额
-- **THEN** 系统 SHALL NOT 用 `turnover_rate` 或 `turnover_rate_f` 覆盖或重命名 `turnover`### Requirement: 运行时历史帧透传可选流动性字段
-系统 SHALL 在 `load_ohlcv_daily()` 返回的 history frame 中按同一 `date + symbol` 透传已存在的流动性字段，但 MUST 保持当前必需 canonical 列集合不变。若流动性字段在表中不存在或映射未配置，baseline 运行 MUST 继续成功，不得因新增字段缺失而改变现有默认行为。
+#### Scenario: 鐜版湁鎴愪氦棰濆瓧娈佃涔変繚鎸佷笉鍙?
+- **WHEN** 绯荤粺瀹屾垚娴佸姩鎬у瓧娈靛洖濉?
+- **THEN** 鐜版湁 `turnover` 瀛楁 SHALL 缁х画琛ㄧず鎴愪氦棰?
+- **THEN** 绯荤粺 SHALL NOT 鐢?`turnover_rate` 鎴?`turnover_rate_f` 瑕嗙洊鎴栭噸鍛藉悕 `turnover`### Requirement: 杩愯鏃跺巻鍙插抚閫忎紶鍙€夋祦鍔ㄦ€у瓧娈?
+绯荤粺 SHALL 鍦?`load_ohlcv_daily()` 杩斿洖鐨?history frame 涓寜鍚屼竴 `date + symbol` 閫忎紶宸插瓨鍦ㄧ殑娴佸姩鎬у瓧娈碉紝浣?MUST 淇濇寔褰撳墠蹇呴渶 canonical 鍒楅泦鍚堜笉鍙樸€傝嫢娴佸姩鎬у瓧娈靛湪琛ㄤ腑涓嶅瓨鍦ㄦ垨鏄犲皠鏈厤缃紝baseline 杩愯 MUST 缁х画鎴愬姛锛屼笉寰楀洜鏂板瀛楁缂哄け鑰屾敼鍙樼幇鏈夐粯璁よ涓恒€?
 
-#### Scenario: 表中存在流动性字段时透传到 history frame
-- **WHEN** `pams_ohlcv_daily` 包含 `turnover_rate_f` 且 schema mapping 已配置
-- **THEN** `load_ohlcv_daily()` 返回的 history frame SHALL 包含 `turnover_rate_f`
+#### Scenario: 琛ㄤ腑瀛樺湪娴佸姩鎬у瓧娈垫椂閫忎紶鍒?history frame
+- **WHEN** `pams_ohlcv_daily` 鍖呭惈 `turnover_rate_f` 涓?schema mapping 宸查厤缃?
+- **THEN** `load_ohlcv_daily()` 杩斿洖鐨?history frame SHALL 鍖呭惈 `turnover_rate_f`
 
-#### Scenario: 基线配置未启用新字段时保持兼容
-- **WHEN** 运行使用当前 baseline 配置且未配置任何新流动性字段映射
-- **THEN** `load_ohlcv_daily()` SHALL 继续返回现有必需列
-- **THEN** 回测结果 SHALL NOT 因新增字段缺失而失败
+#### Scenario: 鍩虹嚎閰嶇疆鏈惎鐢ㄦ柊瀛楁鏃朵繚鎸佸吋瀹?
+- **WHEN** 杩愯浣跨敤褰撳墠 baseline 閰嶇疆涓旀湭閰嶇疆浠讳綍鏂版祦鍔ㄦ€у瓧娈垫槧灏?
+- **THEN** `load_ohlcv_daily()` SHALL 缁х画杩斿洖鐜版湁蹇呴渶鍒?
+- **THEN** 鍥炴祴缁撴灉 SHALL NOT 鍥犳柊澧炲瓧娈电己澶辫€屽け璐?
 
-### Requirement: 换手率过滤使用独立配置且默认关闭
-系统 SHALL 提供独立于现有成交额过滤的换手率过滤配置。默认情况下换手率过滤关闭，现有 `min_avg_turnover_20d` 成交额过滤和 baseline 结果 MUST 保持不变。启用后，系统 SHALL 仅使用截至当日的历史 `turnover_rate` 或 `turnover_rate_f` 计算 rolling 20 日均值，并据此过滤候选股票。
+### Requirement: 鎹㈡墜鐜囪繃婊や娇鐢ㄧ嫭绔嬮厤缃笖榛樿鍏抽棴
+绯荤粺 SHALL 鎻愪緵鐙珛浜庣幇鏈夋垚浜ら杩囨护鐨勬崲鎵嬬巼杩囨护閰嶇疆銆傞粯璁ゆ儏鍐典笅鎹㈡墜鐜囪繃婊ゅ叧闂紝鐜版湁 `min_avg_turnover_20d` 鎴愪氦棰濊繃婊ゅ拰 baseline 缁撴灉 MUST 淇濇寔涓嶅彉銆傚惎鐢ㄥ悗锛岀郴缁?SHALL 浠呬娇鐢ㄦ埅鑷冲綋鏃ョ殑鍘嗗彶 `turnover_rate` 鎴?`turnover_rate_f` 璁＄畻 rolling 20 鏃ュ潎鍊硷紝骞舵嵁姝よ繃婊ゅ€欓€夎偂绁ㄣ€?
 
-系统 SHALL 提供独立于现有成交额过滤的换手率过滤配置。默认情况下换手率过滤关闭，现有 `min_avg_turnover_20d` 成交额过滤和 baseline 结果 MUST 保持不变。启用后，系统 SHALL 仅使用截至当日的历史 `turnover_rate` 或 `turnover_rate_f` 计算 rolling 20 日均值，并据此过滤候选股票。
+绯荤粺 SHALL 鎻愪緵鐙珛浜庣幇鏈夋垚浜ら杩囨护鐨勬崲鎵嬬巼杩囨护閰嶇疆銆傞粯璁ゆ儏鍐典笅鎹㈡墜鐜囪繃婊ゅ叧闂紝鐜版湁 `min_avg_turnover_20d` 鎴愪氦棰濊繃婊ゅ拰 baseline 缁撴灉 MUST 淇濇寔涓嶅彉銆傚惎鐢ㄥ悗锛岀郴缁?SHALL 浠呬娇鐢ㄦ埅鑷冲綋鏃ョ殑鍘嗗彶 `turnover_rate` 鎴?`turnover_rate_f` 璁＄畻 rolling 20 鏃ュ潎鍊硷紝骞舵嵁姝よ繃婊ゅ€欓€夎偂绁ㄣ€?
 
-#### Scenario: 默认配置不改变现有 amount-based 过滤
-- **WHEN** 用户未设置 `min_avg_turnover_rate_20d` 或其值为 `0`
-- **THEN** 系统 SHALL 不启用换手率过滤
-- **THEN** 现有 `min_avg_turnover_20d` 成交额过滤行为 SHALL 保持不变
+#### Scenario: 榛樿閰嶇疆涓嶆敼鍙樼幇鏈?amount-based 杩囨护
+- **WHEN** 鐢ㄦ埛鏈缃?`min_avg_turnover_rate_20d` 鎴栧叾鍊间负 `0`
+- **THEN** 绯荤粺 SHALL 涓嶅惎鐢ㄦ崲鎵嬬巼杩囨护
+- **THEN** 鐜版湁 `min_avg_turnover_20d` 鎴愪氦棰濊繃婊よ涓?SHALL 淇濇寔涓嶅彉
 
-#### Scenario: 启用自由流通换手率过滤时仅使用历史窗口
-- **WHEN** 用户设置 `min_avg_turnover_rate_20d > 0` 且 `turnover_rate_field='turnover_rate_f'`
-- **THEN** 系统 SHALL 基于截至当日的 `turnover_rate_f` 历史窗口计算 20 日均值
-- **THEN** 系统 SHALL NOT 使用未来交易日的换手率值参与当日过滤判断### Requirement: 流动性字段校验与审计
-当换手率过滤启用时，系统 MUST 在运行前检查所选流动性字段是否存在、是否为非负数值、是否按 `trade_date + symbol` 同日对齐。系统 MUST NOT 通过 `bfill` 或跨日 future fill 回填缺失换手率值。字段不可用时，系统 SHALL 返回明确的校验失败或审计告警，而不是静默回退成成交额过滤。
+#### Scenario: 鍚敤鑷敱娴侀€氭崲鎵嬬巼杩囨护鏃朵粎浣跨敤鍘嗗彶绐楀彛
+- **WHEN** 鐢ㄦ埛璁剧疆 `min_avg_turnover_rate_20d > 0` 涓?`turnover_rate_field='turnover_rate_f'`
+- **THEN** 绯荤粺 SHALL 鍩轰簬鎴嚦褰撴棩鐨?`turnover_rate_f` 鍘嗗彶绐楀彛璁＄畻 20 鏃ュ潎鍊?
+- **THEN** 绯荤粺 SHALL NOT 浣跨敤鏈潵浜ゆ槗鏃ョ殑鎹㈡墜鐜囧€煎弬涓庡綋鏃ヨ繃婊ゅ垽鏂?## Requirement: 娴佸姩鎬у瓧娈垫牎楠屼笌瀹¤
+褰撴崲鎵嬬巼杩囨护鍚敤鏃讹紝绯荤粺 MUST 鍦ㄨ繍琛屽墠妫€鏌ユ墍閫夋祦鍔ㄦ€у瓧娈垫槸鍚﹀瓨鍦ㄣ€佹槸鍚︿负闈炶礋鏁板€笺€佹槸鍚︽寜 `trade_date + symbol` 鍚屾棩瀵归綈銆傜郴缁?MUST NOT 閫氳繃 `bfill` 鎴栬法鏃?future fill 鍥炲～缂哄け鎹㈡墜鐜囧€笺€傚瓧娈典笉鍙敤鏃讹紝绯荤粺 SHALL 杩斿洖鏄庣‘鐨勬牎楠屽け璐ユ垨瀹¤鍛婅锛岃€屼笉鏄潤榛樺洖閫€鎴愭垚浜ら杩囨护銆?
 
-#### Scenario: 启用换手率过滤但字段缺失
-- **WHEN** 用户启用 `min_avg_turnover_rate_20d`，但所选 `turnover_rate_field` 在表中不存在或映射缺失
-- **THEN** 数据校验 SHALL 返回失败或明确告警
-- **THEN** 系统 SHALL NOT 静默改用 `turnover` 成交额字段继续运行
+#### Scenario: 鍚敤鎹㈡墜鐜囪繃婊や絾瀛楁缂哄け
+- **WHEN** 鐢ㄦ埛鍚敤 `min_avg_turnover_rate_20d`锛屼絾鎵€閫?`turnover_rate_field` 鍦ㄨ〃涓笉瀛樺湪鎴栨槧灏勭己澶?
+- **THEN** 鏁版嵁鏍￠獙 SHALL 杩斿洖澶辫触鎴栨槑纭憡璀?
+- **THEN** 绯荤粺 SHALL NOT 闈欓粯鏀圭敤 `turnover` 鎴愪氦棰濆瓧娈电户缁繍琛?
 
-#### Scenario: 日频流动性字段存在缺口
-- **WHEN** 某股票某日缺少 `turnover_rate` 或 `turnover_rate_f`
-- **THEN** 系统 SHALL 保留该值为缺失态或将该日标记为不可用于对应过滤
-- **THEN** 系统 SHALL NOT 使用未来日期的值回填该缺口
+#### Scenario: 鏃ラ娴佸姩鎬у瓧娈靛瓨鍦ㄧ己鍙?
+- **WHEN** 鏌愯偂绁ㄦ煇鏃ョ己灏?`turnover_rate` 鎴?`turnover_rate_f`
+- **THEN** 绯荤粺 SHALL 淇濈暀璇ュ€间负缂哄け鎬佹垨灏嗚鏃ユ爣璁颁负涓嶅彲鐢ㄤ簬瀵瑰簲杩囨护
+- **THEN** 绯荤粺 SHALL NOT 浣跨敤鏈潵鏃ユ湡鐨勫€煎洖濉缂哄彛
 
-### Requirement: 运行时历史帧透传可选流动性字段
-系统 SHALL 在 `load_ohlcv_daily()` 返回的 history frame 中按同一 `date + symbol` 透传已存在的流动性字段，但 MUST 保持当前必需 canonical 列集合不变。若流动性字段在表中不存在或映射未配置，baseline 运行 MUST 继续成功，不得因新增字段缺失而改变现有默认行为。
+### Requirement: 杩愯鏃跺巻鍙插抚閫忎紶鍙€夋祦鍔ㄦ€у瓧娈?
+绯荤粺 SHALL 鍦?`load_ohlcv_daily()` 杩斿洖鐨?history frame 涓寜鍚屼竴 `date + symbol` 閫忎紶宸插瓨鍦ㄧ殑娴佸姩鎬у瓧娈碉紝浣?MUST 淇濇寔褰撳墠蹇呴渶 canonical 鍒楅泦鍚堜笉鍙樸€傝嫢娴佸姩鎬у瓧娈靛湪琛ㄤ腑涓嶅瓨鍦ㄦ垨鏄犲皠鏈厤缃紝baseline 杩愯 MUST 缁х画鎴愬姛锛屼笉寰楀洜鏂板瀛楁缂哄け鑰屾敼鍙樼幇鏈夐粯璁よ涓恒€?
 
-#### Scenario: 表中存在流动性字段时透传到 history frame
-- **WHEN** `pams_ohlcv_daily` 包含 `turnover_rate_f` 且 schema mapping 已配置
-- **THEN** `load_ohlcv_daily()` 返回的 history frame SHALL 包含 `turnover_rate_f`
+#### Scenario: 琛ㄤ腑瀛樺湪娴佸姩鎬у瓧娈垫椂閫忎紶鍒?history frame
+- **WHEN** `pams_ohlcv_daily` 鍖呭惈 `turnover_rate_f` 涓?schema mapping 宸查厤缃?
+- **THEN** `load_ohlcv_daily()` 杩斿洖鐨?history frame SHALL 鍖呭惈 `turnover_rate_f`
 
-#### Scenario: 基线配置未启用新字段时保持兼容
-- **WHEN** 运行使用当前 baseline 配置且未配置任何新流动性字段映射
-- **THEN** `load_ohlcv_daily()` SHALL 继续返回现有必需列
-- **THEN** 回测结果 SHALL NOT 因新增字段缺失而失败
+#### Scenario: 鍩虹嚎閰嶇疆鏈惎鐢ㄦ柊瀛楁鏃朵繚鎸佸吋瀹?
+- **WHEN** 杩愯浣跨敤褰撳墠 baseline 閰嶇疆涓旀湭閰嶇疆浠讳綍鏂版祦鍔ㄦ€у瓧娈垫槧灏?
+- **THEN** `load_ohlcv_daily()` SHALL 缁х画杩斿洖鐜版湁蹇呴渶鍒?
+- **THEN** 鍥炴祴缁撴灉 SHALL NOT 鍥犳柊澧炲瓧娈电己澶辫€屽け璐?
 
-### Requirement: 流动性字段校验与审计
-当换手率过滤启用时，系统 MUST 在运行前检查所选流动性字段是否存在、是否为非负数值、是否按 `trade_date + symbol` 同日对齐。系统 MUST NOT 通过 `bfill` 或跨日 future fill 回填缺失换手率值。字段不可用时，系统 SHALL 返回明确的校验失败或审计告警，而不是静默回退成成交额过滤。
+### Requirement: 娴佸姩鎬у瓧娈垫牎楠屼笌瀹¤
+褰撴崲鎵嬬巼杩囨护鍚敤鏃讹紝绯荤粺 MUST 鍦ㄨ繍琛屽墠妫€鏌ユ墍閫夋祦鍔ㄦ€у瓧娈垫槸鍚﹀瓨鍦ㄣ€佹槸鍚︿负闈炶礋鏁板€笺€佹槸鍚︽寜 `trade_date + symbol` 鍚屾棩瀵归綈銆傜郴缁?MUST NOT 閫氳繃 `bfill` 鎴栬法鏃?future fill 鍥炲～缂哄け鎹㈡墜鐜囧€笺€傚瓧娈典笉鍙敤鏃讹紝绯荤粺 SHALL 杩斿洖鏄庣‘鐨勬牎楠屽け璐ユ垨瀹¤鍛婅锛岃€屼笉鏄潤榛樺洖閫€鎴愭垚浜ら杩囨护銆?
 
-#### Scenario: 启用换手率过滤但字段缺失
-- **WHEN** 用户启用 `min_avg_turnover_rate_20d`，但所选 `turnover_rate_field` 在表中不存在或映射缺失
-- **THEN** 数据校验 SHALL 返回失败或明确告警
-- **THEN** 系统 SHALL NOT 静默改用 `turnover` 成交额字段继续运行
+#### Scenario: 鍚敤鎹㈡墜鐜囪繃婊や絾瀛楁缂哄け
+- **WHEN** 鐢ㄦ埛鍚敤 `min_avg_turnover_rate_20d`锛屼絾鎵€閫?`turnover_rate_field` 鍦ㄨ〃涓笉瀛樺湪鎴栨槧灏勭己澶?
+- **THEN** 鏁版嵁鏍￠獙 SHALL 杩斿洖澶辫触鎴栨槑纭憡璀?
+- **THEN** 绯荤粺 SHALL NOT 闈欓粯鏀圭敤 `turnover` 鎴愪氦棰濆瓧娈电户缁繍琛?
 
-#### Scenario: 日频流动性字段存在缺口
-- **WHEN** 某股票某日缺少 `turnover_rate` 或 `turnover_rate_f`
-- **THEN** 系统 SHALL 保留该值为缺失态或将该日标记为不可用于对应过滤
-- **THEN** 系统 SHALL NOT 使用未来日期的值回填该缺口
+#### Scenario: 鏃ラ娴佸姩鎬у瓧娈靛瓨鍦ㄧ己鍙?
+- **WHEN** 鏌愯偂绁ㄦ煇鏃ョ己灏?`turnover_rate` 鎴?`turnover_rate_f`
+- **THEN** 绯荤粺 SHALL 淇濈暀璇ュ€间负缂哄け鎬佹垨灏嗚鏃ユ爣璁颁负涓嶅彲鐢ㄤ簬瀵瑰簲杩囨护
+- **THEN** 绯荤粺 SHALL NOT 浣跨敤鏈潵鏃ユ湡鐨勫€煎洖濉缂哄彛
 

@@ -44,17 +44,17 @@
 
 - `2016-2026`
 - `2012-2017`
-- `2007-2026`
+- `2012-2026`
 
-系统 SHALL NOT 继续把 `2007-2017` 作为 `V2 formal audit` 的硬门槛窗口。
+系统 SHALL NOT 继续把早期 `07/17` 或 `07/26` 历史窗口作为当前正式 `V2 formal audit` 的窗口口径。
 
 #### Scenario: 三窗口 formal audit 未补齐时标记 incomplete
-- **WHEN** `2016-2026`、`2012-2017`、`2007-2026` 任一窗口缺少正式 audit 产物
+- **WHEN** `2016-2026`、`2012-2017`、`2012-2026` 任一窗口缺少正式 audit 产物
 - **THEN** 系统 MUST 将 formal audit 状态标记为 incomplete
 - **THEN** 系统 SHALL NOT 把 formal audit 视为已补齐
 
 #### Scenario: 三窗口 formal audit 全部产出时标记 complete
-- **WHEN** 系统已产出 `2016-2026`、`2012-2017`、`2007-2026` 三个窗口的正式 audit summary
+- **WHEN** 系统已产出 `2016-2026`、`2012-2017`、`2012-2026` 三个窗口的正式 audit summary
 - **THEN** 系统 MUST 生成一份统一 formal audit 汇总
 - **THEN** 汇总 MUST 能指出每个窗口的 summary 路径和关键 gate 摘要
 
@@ -64,7 +64,7 @@
 - `2016-2026`
 - `2012-2017`
 
-系统 MAY 继续运行 `2007-2026` 作为全周期参考审计，但 SHALL NOT 将其作为 `V2` 升格的硬门槛。
+系统 MAY 继续运行 `2012-2026` 作为全周期参考审计，但 SHALL NOT 将其作为 `V2` 升格的硬门槛。
 
 #### Scenario: hard gate formal audit 未补齐时标记 incomplete
 - **WHEN** `2016-2026` 或 `2012-2017` 任一窗口缺少正式 audit 产物
@@ -72,9 +72,9 @@
 - **THEN** 系统 SHALL NOT 把 formal audit hard gate 视为已补齐
 
 #### Scenario: advisory 全周期审计不阻断 hard gate
-- **WHEN** `2007-2026` 审计产物尚未生成，或仍存在待治理的全周期异常
+- **WHEN** `2012-2026` 审计产物尚未生成，或仍存在待治理的全周期异常
 - **THEN** 系统 MAY 将其继续作为 advisory audit 保留
-- **THEN** 系统 SHALL NOT 仅因 `2007-2026` 未通过而阻断 hard gate 判定
+- **THEN** 系统 SHALL NOT 仅因 `2012-2026` 未通过而阻断 hard gate 判定
 
 #### Scenario: formal audit 汇总显式区分 hard gate 与 advisory
 - **WHEN** 系统执行 `V2 formal audit`
@@ -142,7 +142,7 @@
 系统 MUST 在 advisory 全周期中区分“已被显式 terminal override 收口的连续尾段”和“仍需继续保留的真实 unresolved”。命中 pre-window pause override 的记录 SHALL NOT 继续计入 `eligible_no_source` 或有效 `critical_exception_rows`。
 
 #### Scenario: pre-window pause override 命中的尾段不再计入 advisory blocker
-- **WHEN** `2007-2026` audit 覆盖到命中 pre-window pause override 的 `delist_tail_confirmed` 行
+- **WHEN** `2012-2026` audit 覆盖到命中 pre-window pause override 的 `delist_tail_confirmed` 行
 - **THEN** 这些行 MUST 不再计入 `eligible_no_source_rows`
 - **AND** 与之配对的 `pre_close_imputed_zero` 与 `turnover_rate_imputed_zero` SHALL 按既有 known source gap 规则处理
 - **AND** advisory `critical_exception_rows` 只保留仍未收敛的真实 unresolved 或其他未治理异常

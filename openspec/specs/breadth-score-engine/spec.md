@@ -1,4 +1,4 @@
-# breadth-score-engine
+# breadth-score-engine Specification
 
 ## Purpose
 

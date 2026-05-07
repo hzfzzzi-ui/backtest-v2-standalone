@@ -1,4 +1,4 @@
-﻿# cn-stock-raw-source-governance Specification
+# cn-stock-raw-source-governance Specification
 
 ## Purpose
 浠?2026-03-22 褰掓。鍙樻洿鎭㈠鐨勪富瑙勬牸銆?
@@ -44,4 +44,3 @@
 - **WHEN** 用户运行正式 `v2` raw、main、moneyflow、audit 或 full backfill 入口且未显式指定截止日期
 - **THEN** 系统 MUST 使用同一个 official window 终点
 - **THEN** 系统 SHALL NOT 继续在不同入口保留彼此不一致的硬编码默认终点
-

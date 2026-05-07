@@ -1,67 +1,79 @@
 ﻿# accounting-integrity-audit Specification
 
 ## Purpose
-TBD - created by archiving change add-formal-accounting-invariant-audit. Update Purpose after archive.
+
+Define the formal capability boundary for `accounting-integrity-audit` in the current mainline.
 ## Requirements
-### Requirement: 主线会计审计必须基于正式记账快照
-系统 MUST 从当前正式执行链的 canonical accounting snapshot 或等价正式快照生成会计审计证据，SHALL NOT 通过事后重放 `portfolio_trades.csv` 或复用历史旁路检查器作为唯一真相。
+### Requirement: 涓荤嚎浼氳瀹¤蹇呴』鍩轰簬姝ｅ紡璁拌处蹇収
+绯荤粺 MUST 浠庡綋鍓嶆寮忔墽琛岄摼鐨?canonical accounting snapshot 鎴栫瓑浠锋寮忓揩鐓х敓鎴愪細璁″璁¤瘉鎹紝SHALL NOT 閫氳繃浜嬪悗閲嶆斁 `portfolio_trades.csv` 鎴栧鐢ㄥ巻鍙叉梺璺鏌ュ櫒浣滀负鍞竴鐪熺浉銆?
 
-系统 MUST 从当前正式执行链的 canonical accounting snapshot 或等价正式快照生成会计审计证据，SHALL NOT 通过事后重放 `portfolio_trades.csv` 或复用历史旁路检查器作为唯一真相。
+绯荤粺 MUST 浠庡綋鍓嶆寮忔墽琛岄摼鐨?canonical accounting snapshot 鎴栫瓑浠锋寮忓揩鐓х敓鎴愪細璁″璁¤瘉鎹紝SHALL NOT 閫氳繃浜嬪悗閲嶆斁 `portfolio_trades.csv` 鎴栧鐢ㄥ巻鍙叉梺璺鏌ュ櫒浣滀负鍞竴鐪熺浉銆?
 
-#### Scenario: stage pipeline 路径提供正式快照
-- **WHEN** 当前正式 stage pipeline 完成某个交易日的 fill accounting 和 daily accounting
-- **THEN** 会计审计 SHALL 使用该交易日的正式记账快照作为现金、持仓和 NAV 校验输入
-- **THEN** 同一交易日的会计审计结果 SHALL 可被后续 `audit.json` 与 `research_audit` 复用### Requirement: 会计审计必须校验现金守恒与持仓守恒
-系统 MUST 对每个交易日校验 `cash_before + sell_net - buy_net = cash_after`，并校验每个标的与组合层的持仓数量守恒关系。
+#### Scenario: stage pipeline 璺緞鎻愪緵姝ｅ紡蹇収
+- **WHEN** 褰撳墠姝ｅ紡 stage pipeline 瀹屾垚鏌愪釜浜ゆ槗鏃ョ殑 fill accounting 鍜?daily accounting
+- **THEN** 浼氳瀹¤ SHALL 浣跨敤璇ヤ氦鏄撴棩鐨勬寮忚璐﹀揩鐓т綔涓虹幇閲戙€佹寔浠撳拰 NAV 鏍￠獙杈撳叆
+- **THEN** 鍚屼竴浜ゆ槗鏃ョ殑浼氳瀹¤缁撴灉 SHALL 鍙鍚庣画 `audit.json` 涓?`research_audit` 澶嶇敤### Requirement: 浼氳瀹¤蹇呴』鏍￠獙鐜伴噾瀹堟亽涓庢寔浠撳畧鎭?
+绯荤粺 MUST 瀵规瘡涓氦鏄撴棩鏍￠獙 `cash_before + sell_net - buy_net = cash_after`锛屽苟鏍￠獙姣忎釜鏍囩殑涓庣粍鍚堝眰鐨勬寔浠撴暟閲忓畧鎭掑叧绯汇€?
 
-#### Scenario: 现金与持仓守恒通过
-- **WHEN** 某交易日的买卖成交、现金变动和收盘后持仓数量全部与正式记账快照一致
-- **THEN** 该交易日 SHALL 被标记为现金守恒通过且持仓守恒通过
-- **THEN** 会计审计摘要 SHALL 累加相应通过计数
+#### Scenario: 鐜伴噾涓庢寔浠撳畧鎭掗€氳繃
+- **WHEN** 鏌愪氦鏄撴棩鐨勪拱鍗栨垚浜ゃ€佺幇閲戝彉鍔ㄥ拰鏀剁洏鍚庢寔浠撴暟閲忓叏閮ㄤ笌姝ｅ紡璁拌处蹇収涓€鑷?
+- **THEN** 璇ヤ氦鏄撴棩 SHALL 琚爣璁颁负鐜伴噾瀹堟亽閫氳繃涓旀寔浠撳畧鎭掗€氳繃
+- **THEN** 浼氳瀹¤鎽樿 SHALL 绱姞鐩稿簲閫氳繃璁℃暟
 
-#### Scenario: 现金或持仓守恒失败
-- **WHEN** 某交易日的 `cash_after` 与期望现金不一致，或任一标的 `position_after != position_before + qty_buy - qty_sell`
-- **THEN** 该交易日 SHALL 被标记为会计异常
-- **THEN** 会计审计 SHALL 记录失败类型、日期和受控样本
+#### Scenario: 鐜伴噾鎴栨寔浠撳畧鎭掑け璐?
+- **WHEN** 鏌愪氦鏄撴棩鐨?`cash_after` 涓庢湡鏈涚幇閲戜笉涓€鑷达紝鎴栦换涓€鏍囩殑 `position_after != position_before + qty_buy - qty_sell`
+- **THEN** 璇ヤ氦鏄撴棩 SHALL 琚爣璁颁负浼氳寮傚父
+- **THEN** 浼氳瀹¤ SHALL 璁板綍澶辫触绫诲瀷銆佹棩鏈熷拰鍙楁帶鏍锋湰
 
-### Requirement: 会计审计必须校验 NAV 一致性与硬边界
-系统 MUST 校验 `nav = cash + market_value`，并把负现金、超出 `max_positions` 上限和非法 NAV 视为硬性异常。
+### Requirement: 浼氳瀹¤蹇呴』鏍￠獙 NAV 涓€鑷存€т笌纭竟鐣?
+绯荤粺 MUST 鏍￠獙 `nav = cash + market_value`锛屽苟鎶婅礋鐜伴噾銆佽秴鍑?`max_positions` 涓婇檺鍜岄潪娉?NAV 瑙嗕负纭€у紓甯搞€?
 
-系统 MUST 校验 `nav = cash + market_value`，并把负现金、超出 `max_positions` 上限和非法 NAV 视为硬性异常。
+绯荤粺 MUST 鏍￠獙 `nav = cash + market_value`锛屽苟鎶婅礋鐜伴噾銆佽秴鍑?`max_positions` 涓婇檺鍜岄潪娉?NAV 瑙嗕负纭€у紓甯搞€?
 
-#### Scenario: NAV 一致且硬边界通过
-- **WHEN** 某交易日的 `nav` 与 `cash + market_value` 在约定容差内一致，且 `cash >= 0`、持仓数未超过上限
-- **THEN** 该交易日 SHALL 被标记为 NAV 校验通过
+#### Scenario: NAV 涓€鑷翠笖纭竟鐣岄€氳繃
+- **WHEN** 鏌愪氦鏄撴棩鐨?`nav` 涓?`cash + market_value` 鍦ㄧ害瀹氬宸唴涓€鑷达紝涓?`cash >= 0`銆佹寔浠撴暟鏈秴杩囦笂闄?
+- **THEN** 璇ヤ氦鏄撴棩 SHALL 琚爣璁颁负 NAV 鏍￠獙閫氳繃
 
-#### Scenario: 出现硬性异常
-- **WHEN** 某交易日出现负现金、超仓上限、负 NAV、NaN NAV 或 NAV 恒等式不成立
-- **THEN** 会计审计 SHALL 将该交易日标记为硬性失败
-- **THEN** 会计审计摘要 SHALL 记录对应异常计数### Requirement: 会计审计必须输出受控摘要与失败样本
-系统 MUST 输出可供正式审计消费的会计摘要，包括通过/失败计数、异常类别计数和受控失败样本；系统 SHALL NOT 将全量日级快照直接内联到主审计文件中。
+#### Scenario: 鍑虹幇纭€у紓甯?
+- **WHEN** 鏌愪氦鏄撴棩鍑虹幇璐熺幇閲戙€佽秴浠撲笂闄愩€佽礋 NAV銆丯aN NAV 鎴?NAV 鎭掔瓑寮忎笉鎴愮珛
+- **THEN** 浼氳瀹¤ SHALL 灏嗚浜ゆ槗鏃ユ爣璁颁负纭€уけ璐?
+- **THEN** 浼氳瀹¤鎽樿 SHALL 璁板綍瀵瑰簲寮傚父璁℃暟### Requirement: 浼氳瀹¤蹇呴』杈撳嚭鍙楁帶鎽樿涓庡け璐ユ牱鏈?
+绯荤粺 MUST 杈撳嚭鍙緵姝ｅ紡瀹¤娑堣垂鐨勪細璁℃憳瑕侊紝鍖呮嫭閫氳繃/澶辫触璁℃暟銆佸紓甯哥被鍒鏁板拰鍙楁帶澶辫触鏍锋湰锛涚郴缁?SHALL NOT 灏嗗叏閲忔棩绾у揩鐓х洿鎺ュ唴鑱斿埌涓诲璁℃枃浠朵腑銆?
 
-#### Scenario: 写入受控摘要
-- **WHEN** 一次实验完成并生成正式 execution audit
-- **THEN** 会计审计输出 SHALL 包含现金守恒、持仓守恒、NAV 校验、负现金和超仓异常的摘要计数
-- **THEN** 每类失败 SHALL 至少保留有限数量的样本记录供人工复核
+#### Scenario: 鍐欏叆鍙楁帶鎽樿
+- **WHEN** 涓€娆″疄楠屽畬鎴愬苟鐢熸垚姝ｅ紡 execution audit
+- **THEN** 浼氳瀹¤杈撳嚭 SHALL 鍖呭惈鐜伴噾瀹堟亽銆佹寔浠撳畧鎭掋€丯AV 鏍￠獙銆佽礋鐜伴噾鍜岃秴浠撳紓甯哥殑鎽樿璁℃暟
+- **THEN** 姣忕被澶辫触 SHALL 鑷冲皯淇濈暀鏈夐檺鏁伴噺鐨勬牱鏈褰曚緵浜哄伐澶嶆牳
 
-### Requirement: 会计审计必须校验现金守恒与持仓守恒
-系统 MUST 对每个交易日校验 `cash_before + sell_net - buy_net = cash_after`，并校验每个标的与组合层的持仓数量守恒关系。
+### Requirement: 浼氳瀹¤蹇呴』鏍￠獙鐜伴噾瀹堟亽涓庢寔浠撳畧鎭?
+绯荤粺 MUST 瀵规瘡涓氦鏄撴棩鏍￠獙 `cash_before + sell_net - buy_net = cash_after`锛屽苟鏍￠獙姣忎釜鏍囩殑涓庣粍鍚堝眰鐨勬寔浠撴暟閲忓畧鎭掑叧绯汇€?
 
-#### Scenario: 现金与持仓守恒通过
-- **WHEN** 某交易日的买卖成交、现金变动和收盘后持仓数量全部与正式记账快照一致
-- **THEN** 该交易日 SHALL 被标记为现金守恒通过且持仓守恒通过
-- **THEN** 会计审计摘要 SHALL 累加相应通过计数
+#### Scenario: 鐜伴噾涓庢寔浠撳畧鎭掗€氳繃
+- **WHEN** 鏌愪氦鏄撴棩鐨勪拱鍗栨垚浜ゃ€佺幇閲戝彉鍔ㄥ拰鏀剁洏鍚庢寔浠撴暟閲忓叏閮ㄤ笌姝ｅ紡璁拌处蹇収涓€鑷?
+- **THEN** 璇ヤ氦鏄撴棩 SHALL 琚爣璁颁负鐜伴噾瀹堟亽閫氳繃涓旀寔浠撳畧鎭掗€氳繃
+- **THEN** 浼氳瀹¤鎽樿 SHALL 绱姞鐩稿簲閫氳繃璁℃暟
 
-#### Scenario: 现金或持仓守恒失败
-- **WHEN** 某交易日的 `cash_after` 与期望现金不一致，或任一标的 `position_after != position_before + qty_buy - qty_sell`
-- **THEN** 该交易日 SHALL 被标记为会计异常
-- **THEN** 会计审计 SHALL 记录失败类型、日期和受控样本
+#### Scenario: 鐜伴噾鎴栨寔浠撳畧鎭掑け璐?
+- **WHEN** 鏌愪氦鏄撴棩鐨?`cash_after` 涓庢湡鏈涚幇閲戜笉涓€鑷达紝鎴栦换涓€鏍囩殑 `position_after != position_before + qty_buy - qty_sell`
+- **THEN** 璇ヤ氦鏄撴棩 SHALL 琚爣璁颁负浼氳寮傚父
+- **THEN** 浼氳瀹¤ SHALL 璁板綍澶辫触绫诲瀷銆佹棩鏈熷拰鍙楁帶鏍锋湰
 
-### Requirement: 会计审计必须输出受控摘要与失败样本
-系统 MUST 输出可供正式审计消费的会计摘要，包括通过/失败计数、异常类别计数和受控失败样本；系统 SHALL NOT 将全量日级快照直接内联到主审计文件中。
+### Requirement: 浼氳瀹¤蹇呴』杈撳嚭鍙楁帶鎽樿涓庡け璐ユ牱鏈?
+绯荤粺 MUST 杈撳嚭鍙緵姝ｅ紡瀹¤娑堣垂鐨勪細璁℃憳瑕侊紝鍖呮嫭閫氳繃/澶辫触璁℃暟銆佸紓甯哥被鍒鏁板拰鍙楁帶澶辫触鏍锋湰锛涚郴缁?SHALL NOT 灏嗗叏閲忔棩绾у揩鐓х洿鎺ュ唴鑱斿埌涓诲璁℃枃浠朵腑銆?
 
-#### Scenario: 写入受控摘要
-- **WHEN** 一次实验完成并生成正式 execution audit
-- **THEN** 会计审计输出 SHALL 包含现金守恒、持仓守恒、NAV 校验、负现金和超仓异常的摘要计数
-- **THEN** 每类失败 SHALL 至少保留有限数量的样本记录供人工复核
+#### Scenario: 鍐欏叆鍙楁帶鎽樿
+- **WHEN** 涓€娆″疄楠屽畬鎴愬苟鐢熸垚姝ｅ紡 execution audit
+- **THEN** 浼氳瀹¤杈撳嚭 SHALL 鍖呭惈鐜伴噾瀹堟亽銆佹寔浠撳畧鎭掋€丯AV 鏍￠獙銆佽礋鐜伴噾鍜岃秴浠撳紓甯哥殑鎽樿璁℃暟
+- **THEN** 姣忕被澶辫触 SHALL 鑷冲皯淇濈暀鏈夐檺鏁伴噺鐨勬牱鏈褰曚緵浜哄伐澶嶆牳
+
+### Requirement: 主线会计审计必须校验显式分红应收与到账闭环
+主线会计审计 MUST 在 canonical accounting snapshot 中同时验证 ETF 分红应收创建、到账结转与现金/NAV 闭环。
+
+#### Scenario: pay-date 口径下应收与到账闭环通过
+- **WHEN** 某 ETF 分红在除息日创建 `dividend_receivable`，并在到账日转入 `cash`
+- **THEN** 会计审计同时通过 receivable 守恒、cash 守恒与 NAV 一致性检查
+
+#### Scenario: 分红到账缺失会被审计标记
+- **WHEN** 某 ETF 分红已在除息日创建 receivable，但到账日未完成结转或重复结转
+- **THEN** 会计审计 SHALL 记录对应失败样本与失败类型
 

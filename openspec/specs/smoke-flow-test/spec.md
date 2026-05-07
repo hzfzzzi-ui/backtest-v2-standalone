@@ -1,4 +1,4 @@
-# Capability: smoke-flow-test
+# smoke-flow-test Specification
 
 ## Purpose
 
@@ -67,4 +67,3 @@ End-to-end smoke test that exercises the critical path of the backtest system --
 #### Scenario: Explicit smoke run
 - **WHEN** 运行 `pytest -m smoke`
 - **THEN** smoke flow test 被执行
-

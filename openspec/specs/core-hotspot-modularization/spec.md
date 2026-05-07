@@ -1,4 +1,4 @@
-﻿# core-hotspot-modularization Specification
+# core-hotspot-modularization Specification
 
 ## Purpose
 约束默认 runtime route 和热点 signal provider 的模块化方式，确保热点文件拆分为 facade 与阶段模块后仍保持 `baseline_V10.1` 行为稳定。
@@ -70,5 +70,3 @@
 - **WHEN** 后续资产类型需要复用某个核心模块
 - **THEN** 拆分后的模块 MUST 提供清晰的输入输出与单一职责
 - **THEN** 新资产接入 SHALL NOT 被旧耦合结构阻塞
-
-

@@ -1,4 +1,4 @@
-﻿# http-surface-boundary-split Specification
+# http-surface-boundary-split Specification
 
 ## Purpose
 定义桌面与移动端 HTTP surface 的正式边界，确保结果读取统一收敛到 `manifest`、`surface` 与按需 `surface/{section}`，并让实验级资产上下文成为稳定输出的一部分。
@@ -149,4 +149,3 @@
 - **WHEN** 某个 compat 模块尚未删除
 - **THEN** 它 MAY 依赖新实现
 - **THEN** 依赖方向 SHALL NOT 反过来
-

@@ -1,4 +1,4 @@
-# regime-filter-engine
+# regime-filter-engine Specification
 
 ## Purpose
 

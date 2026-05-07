@@ -1,107 +1,108 @@
-﻿# results-workbench-finalization Specification
+﻿# results-workbench-finalization 规范
 
-## Purpose
-定义结果工作台成为结果区唯一渲染 owner 后的最终契约。
-## Requirements
-### Requirement: 结果工作台必须成为结果区唯一渲染 owner
-当 Vue 结果工作台挂载成功后，系统 MUST 仅由结果工作台渲染结果概览、KPI、主图、个股排名、9 阶段漏斗、交易明细和 AI Markdown 报告。legacy 脚本 SHALL NOT 继续直接写入可见结果区 DOM。
+## 目标
 
-当 Vue 结果工作台挂载成功后，系统 MUST 仅由结果工作台渲染结果概览、KPI、主图、个股排名、阶段漏斗、交易明细和 AI Markdown 报告。旧 DOM 结果面和 fallback 容器 SHALL NOT 再作为生产路径保留。
+结果工作台必须成为结果区唯一可见渲染 owner，旧 DOM fallback 和旧脚本直接渲染路径必须退出生产主链。
 
-#### Scenario: Vue 挂载成功
-- **WHEN** 页面加载并成功挂载结果工作台
-- **THEN** 可见结果区 SHALL 仅由 Vue 渲染
-- **THEN** 页面 SHALL NOT 再保留可见的 fallback 结果容器
+## 要求
 
-#### Scenario: Vue 挂载失败
-- **WHEN** 结果工作台挂载失败
-- **THEN** 系统 MUST 记录失败状态到前端状态或诊断输出
-- **THEN** 页面 SHALL NOT 回退到独立 legacy 结果区
+### 要求 1：结果工作台必须成为唯一可见结果 owner
 
-#### Scenario: Vue 正常挂载
+当 Vue 结果工作台挂载成功后，系统只能由结果工作台渲染结果概览、KPI、主图、个股排名、阶段漏斗、交易明细和 Markdown 报告。
+
+#### 场景：Vue 正常挂载
 - **WHEN** 页面成功挂载结果工作台
-- **THEN** 可见结果区 MUST 仅由 Vue workbench 渲染
-- **THEN** 页面 SHALL NOT 再保留可见 fallback 结果容器
+- **THEN** 可见结果区仅由 Vue workbench 渲染
+- **THEN** 页面不得保留可见 fallback 结果容器
 
-#### Scenario: 旧脚本尝试写入结果 DOM
-- **WHEN** 旧控制器或旧 helper 试图直接更新结果区 DOM
-- **THEN** 这些脚本 MUST 只更新 snapshot 或调用 workbench bridge
-- **THEN** 它们 SHALL NOT 再直接拥有结果区 DOM### Requirement: 结果工作台不得依赖 legacy 全局 helper
-结果工作台用于构造漏斗、退出原因、Markdown 报告和结果格式化的逻辑 MUST 通过前端模块 import 获取。结果工作台 SHALL NOT 依赖 `window._finalBuildStageRows`、`window.renderUnifiedStageFunnel`、`window.reasonByPrefix`、`window.buildAgentMarkdownReport` 这类 legacy 全局 helper。
+### 要求 2：旧脚本不得直接写入结果 DOM
 
-#### Scenario: 漏斗 view model 构造
-- **WHEN** 结果工作台渲染 9 阶段漏斗
-- **THEN** 数据准备 SHALL 来自纯模块函数
-- **THEN** 不得从 `window.*` 读取漏斗构造函数
+旧脚本或桌面壳模块只能更新 snapshot 或调用 workbench bridge，不得直接写入可见结果 DOM。
 
-#### Scenario: Markdown 报告构造
-- **WHEN** 结果工作台渲染 AI Markdown 报告
-- **THEN** 报告拼装 SHALL 来自纯模块函数
-- **THEN** 不得从 `window.*` 读取报告构造函数
+#### 场景：桌面结果刷新
+- **WHEN** 页面刷新结果快照或切换实验
+- **THEN** 旧脚本只能更新 snapshot / bridge
+- **THEN** 不允许直接接管结果 DOM
 
-### Requirement: 结果区展开状态必须由单一状态源控制
-结果区 accordion、dock 和展开/收起状态 MUST 由单一状态源控制。多个原生脚本 SHALL NOT 并行修改同一批结果区节点的 `open`、`wb-open` 或 `hidden` 状态。
+### 要求 3：结果工作台必须保留 unavailable 与真实 0 的区分
 
-#### Scenario: 点击结果面板标题展开
-- **WHEN** 用户点击个股排名、9 阶段漏斗或交易明细的标题
-- **THEN** 展开状态 SHALL 由单一状态源更新
-- **THEN** 不得出现“命中点击但内容不展开”的情况
+结果工作台在渲染交易漏斗和诊断计数时，必须区分 unavailable、`null` 与真实 `0`。
 
-#### Scenario: 从 dock 切换到结果面板
-- **WHEN** 用户通过 dock 切换到某一个结果面板
-- **THEN** 系统 SHALL 打开对应面板
-- **THEN** 不得与点击逻辑产生冲突或双写
+#### 场景：渲染 unavailable 阶段
+- **WHEN** 某阶段 `available=false` 或关键计数为 `null`
+- **THEN** 前端显示 unavailable 或“未单独计数”
+- **THEN** 不得把它格式化成 `0`
 
-### Requirement: baseline 页面在 100% 缩放下必须稳定
-使用 `baseline_V1` 加载结果工作台时，系统 MUST 在浏览器 100% 缩放下完整显示结果区，不得出现横向溢出、卡片错位、折叠内容被压扁或主图遮挡。
+#### 场景：渲染真实 0 阶段
+- **WHEN** 某阶段 `available=true` 且计数真实为 `0`
+- **THEN** 前端直接显示 `0`
+- **THEN** 不得误标为 unavailable
 
-#### Scenario: baseline 默认加载
-- **WHEN** 页面以 `baseline_V1` 作为默认加载对象打开
-- **THEN** 结果区 SHALL 正常显示概览、KPI、主图和折叠面板
-- **THEN** 页面 SHALL NOT 发生持续向右滚动
+### 要求 4：结果工作台必须保持图表优先结构
 
-#### Scenario: baseline 展开面板
-- **WHEN** 用户在 100% 缩放下展开个股排名、9 阶段漏斗或交易明细
-- **THEN** 面板内容 SHALL 完整显示
-- **THEN** 下面的结果区块 SHALL 被正常推开而不是覆盖
+结果页顶层结构必须保持“核心结果 / 图表分析 / 交易与信号 / 阶段漏斗 / 深层审计”的组织方式。
 
-### Requirement: 生产主路径必须移除 fallback 结果 DOM
-系统 MUST 从生产主路径中移除 fallback 结果 DOM。桌面结果区在正常运行下 SHALL 只保留 Vue results workbench 作为唯一可见结果渲染 owner。
+#### 场景：用户打开结果页
+- **WHEN** 用户进入结果工作台首屏
+- **THEN** 图表和核心结果位于主入口
+- **THEN** 低价值诊断不得占据默认主入口
 
-#### Scenario: 桌面页正常加载
-- **WHEN** 用户正常打开桌面研究页并加载实验结果
-- **THEN** 结果区 MUST 仅由 Vue results workbench 渲染
-- **THEN** 页面 SHALL NOT 再保留可见的 fallback 结果容器
+### 要求 5：结果工作台必须在主图中支持基准 K 线与 NAV 叠加
 
-#### Scenario: 旧脚本尝试更新结果 DOM
-- **WHEN** `backtest_v2.js`、`artifacts.js` 或其他旧脚本参与结果刷新
-- **THEN** 这些脚本 MUST 只更新 snapshot 或调用 workbench 桥接层
-- **THEN** 它们 SHALL NOT 直接写入旧结果面 DOM
+结果工作台 SHALL 在 `wbNavChart` 中使用正式图表组件渲染基准 K 线，并叠加策略 NAV 曲线。
 
-### Requirement: desktop-research-page 必须成为唯一结果协调层
-系统 MUST 让 `desktop-research-page` 成为桌面结果加载、snapshot 组装与 workbench 推送的唯一协调层。其他旧控制器 SHALL NOT 绕过该层直接接管结果渲染流程。
+#### 场景：存在 Benchmark OHLC 与 NAV 数据
+- **WHEN** 回测完成且返回 Benchmark OHLC 与策略 NAV
+- **THEN** `wbNavChart` 显示基准蜡烛图
+- **THEN** `wbNavChart` 同时叠加策略 NAV 折线
 
-#### Scenario: 加载某个实验 surface
-- **WHEN** 桌面页请求某个实验的主 surface 或 section
-- **THEN** `desktop-research-page` MUST 负责组装 `ResultsWorkbenchSnapshot`
-- **THEN** Vue workbench MUST 仅消费该 snapshot
+#### 场景：只有 NAV 没有 Benchmark
+- **WHEN** 基准数据为空但 NAV 有效
+- **THEN** 图表仅显示 NAV 折线
+- **THEN** 不得因为缺少 Benchmark 导致渲染失败
 
-### Requirement: 结果工作台必须区分未单独计数与真实零值
-结果工作台在渲染交易漏斗时 MUST 保留后端提供的 `available` 与 `null` 语义。对于 `available=false` 或阶段计数为 `null` 的阶段，结果工作台 MUST 显示“未单独计数”或等价状态，并 MUST NOT 将该阶段格式化为数值 `0`。对于 `available=true` 且阶段计数真实为 `0` 的阶段，结果工作台 MUST 按真实零值显示。
+### 要求 6：收益图与回撤图必须时间轴同步
 
-结果工作台在渲染交易漏斗时 MUST 保留后端提供的 `available` 与 `null` 语义。对于 `available=false` 或阶段计数为 `null` 的阶段，结果工作台 MUST 显示“未单独计数”或等价状态，并 MUST NOT 将该阶段格式化为数值 `0`。对于 `available=true` 且阶段计数真实为 `0` 的阶段，结果工作台 MUST 按真实零值显示。
+收益曲线与回撤曲线 MUST 共享同一时间轴，缩放和平移行为必须联动。
 
-#### Scenario: 渲染 unavailable 阶段
-- **WHEN** 结果工作台收到某个漏斗阶段 `available=false`，或 `input_count / output_count / filtered_count` 为 `null`
-- **THEN** 该阶段 SHALL 显示 unavailable 或未单独计数状态
-- **THEN** 该阶段的数值位 SHALL NOT 渲染为 `0`
+#### 场景：收益图缩放
+- **WHEN** 用户在收益图上缩放到某一时间区间
+- **THEN** 回撤图同步切换到相同时间区间
 
-#### Scenario: 渲染真实零值阶段
-- **WHEN** 结果工作台收到某个漏斗阶段 `available=true` 且计数值真实为 `0`
-- **THEN** 该阶段 SHALL 直接显示 `0`
-- **THEN** 该阶段 SHALL NOT 被标记为 unavailable 或 missing
+#### 场景：回撤图平移
+- **WHEN** 用户在回撤图上平移
+- **THEN** 收益图同步平移相同范围
 
-#### Scenario: view model 不得吞掉空值语义
-- **WHEN** 结果工作台 helper 或 view model 构造漏斗面板数据
-- **THEN** helper SHALL 保留 `available=false` 与 `null` 语义到最终渲染层
-- **THEN** helper SHALL NOT 通过数值格式化或 `Number()` 收敛把空值阶段改写成 `0`
+### 要求 7：结果主图必须支持市场状态蒙版
+
+结果工作台 SHALL 在主图中叠加市场状态蒙版，用于表达 regime / market-state 信息。
+
+#### 场景：存在市场状态数据
+- **WHEN** 回测结果包含 market_state 序列
+- **THEN** 主图使用正式 overlay 渲染半透明状态色带
+
+### 要求 8：个股图必须清晰标注停牌区间
+
+个股模式下，停牌区间必须通过停牌样式显式标注，而不污染市场状态蒙版语义。
+
+#### 场景：个股存在停牌区间
+- **WHEN** 个股序列包含连续停牌区间
+- **THEN** 图表以独立停牌样式标注该区间
+- **THEN** 市场状态蒙版继续只表达市场状态，不承担停牌语义
+
+### 要求 9：个股对照图必须叠加交易标记
+
+个股模式下，图表 MUST 叠加买卖交易标记，并与时间轴严格对齐。
+
+#### 场景：存在买卖记录
+- **WHEN** 当前个股存在 BUY / SELL 成交
+- **THEN** 图表按成交日期叠加买卖标记
+- **THEN** 缩放和平移必须保持价格序列与标记同步
+
+### 要求 10：约束触发统计必须作为正式结果面板的一部分
+
+Position & Risk 面板 SHALL 使用中文标签展示约束触发统计，并保证运行后稳定可见。
+
+#### 场景：运行完成并加载结果
+- **WHEN** 回测运行完成且结果已加载
+- **THEN** 面板展示平均持仓、空余仓位、个股上限触发、行业上限触发、资金不足跳过、最小手数跳过

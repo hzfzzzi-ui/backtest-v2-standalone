@@ -1,4 +1,4 @@
-# adaptive-regime-strategy
+# adaptive-regime-strategy Specification
 
 ## Purpose
 

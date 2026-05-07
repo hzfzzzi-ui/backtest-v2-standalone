@@ -1,4 +1,4 @@
-﻿# experiment-artifact-service Specification
+# experiment-artifact-service Specification
 
 ## Purpose
 定义核心 experiment artifact service 的职责边界与兼容契约。

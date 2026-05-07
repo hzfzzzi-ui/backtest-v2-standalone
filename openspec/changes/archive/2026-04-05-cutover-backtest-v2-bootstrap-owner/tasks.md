@@ -1,0 +1,5 @@
+﻿- [x] 新增 `frontend/assets/js/desktop-shell/host.js`，接管共享 `state` 初始化并暴露 host 启动入口。
+- [x] 调整 `frontend/index.html` 的 script 顺序与 DOM ready 启动入口，使主链改为 host owner。
+- [x] 修改 `frontend/assets/js/backtest_v2.js`，使其复用 host 创建的共享 `state`，不再覆盖 owner。
+- [x] 修改 `tests/frontend/multi_alpha_workbench_harness.cjs`，使测试主链与页面真实装载链一致。
+- [x] 更新变更说明，明确本次只完成 bootstrap/state owner cutover，不等于已经删除 `backtest_v2.js`。

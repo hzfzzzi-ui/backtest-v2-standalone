@@ -1,34 +1,35 @@
-# private-mobile-pwa-access Specification
+﻿# private-mobile-pwa-access Specification
 
 ## Purpose
-TBD - created by archiving change add-mobile-semi-auto-trade-workflow. Update Purpose after archive.
+
+Define the formal capability boundary for `private-mobile-pwa-access` in the current mainline.
 ## Requirements
-### Requirement: 正式 PWA 安装必须运行在私有 HTTPS 安全上下文中
-系统 MUST 支持在不暴露公网域名的前提下，以私有 HTTPS 域名、私有网络证书或等效安全上下文向手机端提供 PWA 安装能力。系统 SHALL NOT 以公网域名作为默认安装前提。
+### Requirement: 姝ｅ紡 PWA 瀹夎蹇呴』杩愯鍦ㄧ鏈?HTTPS 瀹夊叏涓婁笅鏂囦腑
+绯荤粺 MUST 鏀寔鍦ㄤ笉鏆撮湶鍏綉鍩熷悕鐨勫墠鎻愪笅锛屼互绉佹湁 HTTPS 鍩熷悕銆佺鏈夌綉缁滆瘉涔︽垨绛夋晥瀹夊叏涓婁笅鏂囧悜鎵嬫満绔彁渚?PWA 瀹夎鑳藉姏銆傜郴缁?SHALL NOT 浠ュ叕缃戝煙鍚嶄綔涓洪粯璁ゅ畨瑁呭墠鎻愩€?
 
-#### Scenario: 私有 HTTPS 访问移动端
-- **WHEN** 用户通过私有 HTTPS 域名访问移动端入口
-- **THEN** 系统 SHALL 提供符合 PWA 安装前提的 manifest 与相关前端资源
-- **THEN** 该入口 SHALL 继续受私有访问限制约束
+#### Scenario: 绉佹湁 HTTPS 璁块棶绉诲姩绔?
+- **WHEN** 鐢ㄦ埛閫氳繃绉佹湁 HTTPS 鍩熷悕璁块棶绉诲姩绔叆鍙?
+- **THEN** 绯荤粺 SHALL 鎻愪緵绗﹀悎 PWA 瀹夎鍓嶆彁鐨?manifest 涓庣浉鍏冲墠绔祫婧?
+- **THEN** 璇ュ叆鍙?SHALL 缁х画鍙楃鏈夎闂檺鍒剁害鏉?
 
-#### Scenario: 本机 localhost 开发访问
-- **WHEN** 开发者通过 `localhost` 访问移动端
-- **THEN** 系统 SHALL 允许本地开发与调试
-- **THEN** 开发模式 SHALL NOT 被解释为正式手机部署方案
+#### Scenario: 鏈満 localhost 寮€鍙戣闂?
+- **WHEN** 寮€鍙戣€呴€氳繃 `localhost` 璁块棶绉诲姩绔?
+- **THEN** 绯荤粺 SHALL 鍏佽鏈湴寮€鍙戜笌璋冭瘯
+- **THEN** 寮€鍙戞ā寮?SHALL NOT 琚В閲婁负姝ｅ紡鎵嬫満閮ㄧ讲鏂规
 
-### Requirement: 非安全上下文的私有 HTTP 只能降级为浏览器模式
-当移动端通过非安全上下文的私有 HTTP 访问时，系统 MUST 继续允许浏览器模式使用已有移动看板，但 SHALL NOT 宣称提供完整 PWA 安装能力，也 SHALL NOT 显示误导性的安装提示。
+### Requirement: 闈炲畨鍏ㄤ笂涓嬫枃鐨勭鏈?HTTP 鍙兘闄嶇骇涓烘祻瑙堝櫒妯″紡
+褰撶Щ鍔ㄧ閫氳繃闈炲畨鍏ㄤ笂涓嬫枃鐨勭鏈?HTTP 璁块棶鏃讹紝绯荤粺 MUST 缁х画鍏佽娴忚鍣ㄦā寮忎娇鐢ㄥ凡鏈夌Щ鍔ㄧ湅鏉匡紝浣?SHALL NOT 瀹ｇО鎻愪緵瀹屾暣 PWA 瀹夎鑳藉姏锛屼篃 SHALL NOT 鏄剧ず璇鎬х殑瀹夎鎻愮ず銆?
 
-#### Scenario: 局域网 HTTP 打开移动端
-- **WHEN** 用户通过 `http://192.168.x.x/...` 访问移动端
-- **THEN** 系统 SHALL 正常提供浏览器模式页面
-- **THEN** 页面 SHALL 隐藏或禁用仅适用于 PWA 安装的提示与入口
+#### Scenario: 灞€鍩熺綉 HTTP 鎵撳紑绉诲姩绔?
+- **WHEN** 鐢ㄦ埛閫氳繃 `http://192.168.x.x/...` 璁块棶绉诲姩绔?
+- **THEN** 绯荤粺 SHALL 姝ｅ父鎻愪緵娴忚鍣ㄦā寮忛〉闈?
+- **THEN** 椤甸潰 SHALL 闅愯棌鎴栫鐢ㄤ粎閫傜敤浜?PWA 瀹夎鐨勬彁绀轰笌鍏ュ彛
 
-### Requirement: 私有 PWA 入口仍必须禁止公网暴露
-系统 MUST 对 PWA 入口、manifest、service worker 相关资源和移动端 API 继续执行私有访问限制。未经显式允许的公网 Host SHALL NOT 获得移动端资源。
+### Requirement: 绉佹湁 PWA 鍏ュ彛浠嶅繀椤荤姝㈠叕缃戞毚闇?
+绯荤粺 MUST 瀵?PWA 鍏ュ彛銆乵anifest銆乻ervice worker 鐩稿叧璧勬簮鍜岀Щ鍔ㄧ API 缁х画鎵ц绉佹湁璁块棶闄愬埗銆傛湭缁忔樉寮忓厑璁哥殑鍏綉 Host SHALL NOT 鑾峰緱绉诲姩绔祫婧愩€?
 
-#### Scenario: 公网 Host 请求 PWA 资源
-- **WHEN** 请求使用公网域名或未允许的 Host 访问移动端入口、manifest 或 service worker
-- **THEN** 系统 SHALL 返回拒绝响应
-- **THEN** 系统 SHALL NOT 暴露可安装资源或移动端操作接口
+#### Scenario: 鍏綉 Host 璇锋眰 PWA 璧勬簮
+- **WHEN** 璇锋眰浣跨敤鍏綉鍩熷悕鎴栨湭鍏佽鐨?Host 璁块棶绉诲姩绔叆鍙ｃ€乵anifest 鎴?service worker
+- **THEN** 绯荤粺 SHALL 杩斿洖鎷掔粷鍝嶅簲
+- **THEN** 绯荤粺 SHALL NOT 鏆撮湶鍙畨瑁呰祫婧愭垨绉诲姩绔搷浣滄帴鍙?
 

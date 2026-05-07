@@ -1,4 +1,4 @@
-# sector-data-loader
+# sector-data-loader Specification
 
 ## Purpose
 

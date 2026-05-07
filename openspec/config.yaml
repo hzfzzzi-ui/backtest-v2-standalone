@@ -1,51 +1,40 @@
 schema: spec-driven
 
 context: |
-  你正在参与的项目：半自动交易策略（A股回测系统 backtest_V2）。
-  目标：把回测系统产品化为“研究台/仪表盘”，实现 spec 驱动开发、实验可复现、产物可观测、前后端一致的配置协议。
+  你正在维护的项目是“个人多资产趋势配置系统”。
+  当前主线目标不是继续堆功能，而是固化研发秩序、稳住系统边界、保持研究与执行合同可审计。
 
-  【强制语言规则】
-  - 与用户的沟通、所有注释、README、spec、报告说明：全部使用中文（必要时保留英文专有名词）。
-  - 代码变量/函数名仍使用英文（Python/JS 常规习惯），但注释与文档必须中文。
+  当前正式主路径：
+  - backend/api
+  - backend/core
+  - backend/research
+  - frontend
+  - research
+  - tests
+  - openspec
 
-  【当前系统关键模块（请优先遵循）】
-  - 实验总线：experiment_runner（矩阵实验/对照实验）
-  - 引擎：engine_vector（向量化高性能 + 严格模式）
-  - 产物：artifacts + stabilize（固定输出协议，供前端渲染）
-  - 前端工作台：frontend/assets/js/backtest_v2.js（结果曲线、表格、诊断面板）
+  当前桌面前端正式主链：
+  - frontend/index.html
+  - frontend/assets/js/desktop-shell/host.js
+  - frontend/assets/js/desktop-shell/runtime-surface.js
+  - frontend/assets/js/desktop-shell/app-shell.js
+  - frontend/assets/js/desktop-shell/*
+  - frontend/app/results-workbench/
 
-  【核心工程原则】
-  - 配置必须“唯一真相”：前端配置 -> 后端接收 -> 编译为运行时参数 -> 引擎执行（禁止字段漂移）。
-  - 可观测性优先：任何风控/过滤/退出规则，都必须在产物中有计数器与 reason_code，可被 UI 验证“是否生效”。
-  - 实验可复现：每次运行必须输出 run_meta.json（包含 git hash、配置快照、数据版本、运行时间、随机种子）。
-  - 禁止“看起来有效但无法证伪”的实现：新增规则必须提供最小诊断输出（样本行、触发次数、分布摘要）。
+  当前 unified combo 正式口径：
+  - 组件来源真相：component_source_contract
+  - 结果展示真相：comboTruth
+  - 组件实验引用：config.component_experiments
 
-  【默认目录约定】
-  - 配置：configs/ 或 runs/<run_id>/config.json|yaml
-  - 产物：runs/<run_id>/artifacts/（或 artifacts/<run_id>/）
-  - 调试：runs/<run_id>/debug/（如 debug_atr.csv, reason_code_stats.csv）
+  强制语言规则：
+  - 与用户沟通、注释、README、spec、报告说明：全部使用中文
+  - 代码变量/函数名使用英文
 
-  【默认产物协议】
-  - 必需（强制每次回测输出）：
-    - perf.json（关键绩效指标：收益/回撤/夏普/换手/胜率/集中度等）
-    - nav.csv（日期、净值、回撤）
-    - trades.csv（成交/交易列表）
-    - orders.csv（委托/订单）
-    - run_meta.json（配置快照 + 运行元信息）
-  - 强烈建议：
-    - funnel.csv（raw_signal/blocked/orders/skipped/closed_trades 分层漏斗）
-    - reason_codes.csv（按 reason_code 汇总次数与贡献）
-    - benchmark_curve.csv（基准与超额）
-  - 诊断类（涉及风控/退出/过滤时强制输出）：
-    - debug_atr.csv（ATR 触发样本，含 atr/stop_line/price 等关键字段）
-    - atr_metrics.json（atr_stop_exit_count/atr_trail_exit_count/atr_trail_update_count）
-
-  【默认质量门槛】
-  - 新增功能必须同时给出：
-    1) 变更影响范围（哪些模块/文件）
-    2) 可复现运行命令
-    3) 产物字段说明（UI 如何验证）
-    4) reason_code 列表增量（如新增）
+  核心工程原则：
+  - 配置必须保持单一真相
+  - 可观测性优先
+  - 结果必须可复现
+  - 禁止用展示逻辑反向污染研究口径
 
 defaults:
   language:
@@ -53,115 +42,59 @@ defaults:
     documentation: zh-CN
     commit_message: zh-CN
   style:
-    tone: "专业、直接、可执行"
-    verbosity: "中等偏高（重视可复现与可观测性）"
+    tone: 专业、直接、可执行
+    verbosity: 中等
   workflow:
     spec_first: true
     always_include:
-      - "目标与范围"
-      - "非目标（Non-goals）"
-      - "接口/数据结构"
-      - "边界条件与失败模式"
-      - "验收标准"
-      - "回滚方案（如涉及行为变更）"
-    require_traceability:
-      - "每个需求点必须对应一个可验证产物/指标/测试"
+      - 目标与范围
+      - 非目标
+      - 接口/数据结构
+      - 边界条件与失败模式
+      - 验收标准
+      - 回退方案
   reporting:
-    # 你要求：回测报告用墨西哥时间（America/Mexico_City）
-    timezone: "America/Mexico_City"
-    date_format: "YYYY-MM-DD"
+    timezone: America/Mexico_City
+    date_format: YYYY-MM-DD
   safety:
     refuse_unsafe_trading_advice: true
     allow_research_backtest: true
 
 rules:
   spec:
-    - "必须全中文撰写（专有名词可保留英文）"
-    - "必须包含：目标/范围、非目标、数据流、产物协议、验收标准、回滚策略"
-    - "涉及配置字段时，必须给出字段来源（UI/配置文件）与编译映射（runtime 参数）"
-    - "涉及风控/退出/过滤时，必须定义：reason_code、计数器、debug 样本输出"
-
+    - 必须用中文撰写
+    - 涉及配置字段时，必须说明字段来源与运行时映射
+    - 涉及风控/退出/过滤时，必须说明 reason_code、计数器或诊断产物
   tasks:
-    - "任务拆分粒度：每个任务 <= 2 小时工作量"
-    - "每个任务必须包含：完成定义（DoD）、验证方式（对应产物/测试）、风险点"
-    - "优先级排序：先打通配置生效链路与可观测性，再做策略扩展"
-
+    - 每个任务都应包含 DoD、验证方式和风险点
+    - 优先打通配置生效链路和可观测性，再做策略扩展
   code_patch:
-    - "代码注释必须中文；函数/变量命名用英文"
-    - "变更必须最小化、可回滚"
-    - "每个关键逻辑分支必须有 reason_code 或计数器落地"
-    - "必须输出或更新：run_meta.json 字段（若影响运行参数）"
-    - "涉及 backtest 输出时，必须更新产物协议文档/README（中文）"
-
+    - 注释必须中文，命名英文
+    - 变更必须最小化且可回退
+    - 涉及运行参数时必须说明 run_meta 或产物变化
   report:
-    - "回测报告必须全中文"
-    - "报告展示时间轴使用 America/Mexico_City（墨西哥时间）"
-    - "必须包含：收益曲线、回撤曲线、交易统计、漏斗、reason_code TOP、集中度"
-    - "若启用 walk-forward，必须区分：训练/验证/测试，并默认突出测试期表现"
-    - "明确写出：本次实验对照组/变量、结论与不确定性"
-
-  ui_mock:
-    - "UI 文案全中文，字段名可英文（与产物一致）"
-    - "默认布局：左侧参数折叠面板 + 右侧三块（曲线/表格/诊断）"
-    - "当缺少产物时必须展示：缺失项清单 + 生成路径建议"
-
+    - 回测报告必须中文
+    - 报告时间轴使用 America/Mexico_City
   dataset_artifacts:
-    - "CSV/JSON 字段必须给出 schema（列名、类型、含义）"
-    - "必须保证可增量写入（追加）与可追溯（含 run_id/date/symbol）"
-    - "诊断类 CSV 必须包含最小复现字段（date,symbol,price,threshold,reason_code）"
+    - 产物字段必须给出 schema 与含义
+    - 诊断 CSV 必须包含最小复现场景字段
 
 preferences:
   python:
-    formatting: "black"
-    lint: "ruff"
-    typing: "pyright"
-    test: "pytest"
-
+    formatting: black
+    lint: ruff
+    typing: pyright
+    test: pytest
   js:
-    # 你说“当前先保持不变”：不强行引入新框架，按现有前端结构推进
-    formatting: "prettier"
-    lint: "eslint"
-    frontend_stack: "keep_current"
-
+    formatting: prettier
+    lint: eslint
+    frontend_stack: keep_current
   git:
     conventional_commits: true
-    branch_naming: "feature/<topic>, fix/<topic>, exp/<topic>"
-
+    branch_naming: feature/<topic>, fix/<topic>, exp/<topic>
   backtest_defaults:
-    market: "A股"
-    currency: "CNY"
+    market: A股
+    currency: CNY
     seed: 42
-
-    # 注意：回测数据的“交易日/开收盘”天然是中国市场节奏，
-    # 但你要求报告展示用墨西哥时间；因此这里拆分为两类时区。
-    timezone_data: "Asia/Shanghai"
-    timezone_report: "America/Mexico_City"
-
-    # 你要求：按“A股散户默认配置”
-    # 这里给一套常见且保守的默认值（可在具体运行中覆盖）。
-    costs:
-      # 双边佣金：常见万2.5~万3，折算约 2.5~3 bps（不含最低 5 元限制）
-      commission_bps: 3
-      # 印花税：卖出单边千1 = 10 bps
-      stamp_duty_bps_sell: 10
-      # 过户费（上交所常见极小）：这里给近似占位（不启用也可）
-      transfer_fee_bps_sh: 0.1
-      # 滑点：给保守默认，避免“无摩擦”过拟合
-      slippage_bps: 5
-      # 最低佣金（散户常见 5 元），若引擎支持请启用
-      min_commission_cny: 5
-
-    artifacts:
-      required:
-        - "perf.json"
-        - "nav.csv"
-        - "trades.csv"
-        - "orders.csv"
-        - "run_meta.json"
-      recommended:
-        - "funnel.csv"
-        - "reason_codes.csv"
-        - "benchmark_curve.csv"
-      diagnostics:
-        - "debug_atr.csv"
-        - "atr_metrics.json"
+    timezone_data: Asia/Shanghai
+    timezone_report: America/Mexico_City
