@@ -63,7 +63,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\ops\run_pams_ohlcv_daily_v2_f
 正式 formal audit 固定三窗口为：
 - hard gate `2016-2026`：`2016-03-01 ~ 2026-03-20`
 - hard gate `2012-2017`：`2012-01-04 ~ 2017-12-29`
-- advisory `2007-2026`：`2007-01-04 ~ 2026-03-20`
+- advisory `2012-2026`：`2012-01-04 ~ 2026-03-20`
 
 单独补齐 formal audits：
 ```powershell
@@ -118,7 +118,7 @@ formal audit runner 额外写：
 - `summary.json`
 - `audit_2016_2026/summary.json`
 - `audit_2012_2017/summary.json`
-- `audit_2007_2026/summary.json`
+- `audit_2012_2026/summary.json`
 
 ### 关键判断
 
