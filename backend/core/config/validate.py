@@ -33,3 +33,5 @@ def validate_config(cfg: BacktestConfig) -> None:
         )
     if cfg.costs.slippage_mode not in {"price_adjustment_only", "cost_only"}:
         raise ValueError("costs.slippage_mode must be 'price_adjustment_only' or 'cost_only'")
+    if cfg.execution.dividend_cash_timing_mode not in {"ex_date", "pay_date"}:
+        raise ValueError("execution.dividend_cash_timing_mode must be 'ex_date' or 'pay_date'")

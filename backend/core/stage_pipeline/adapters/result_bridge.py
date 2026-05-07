@@ -204,8 +204,17 @@ def _build_multi_alpha_audit(runtime: Any) -> dict[str, Any] | None:
 
 def augment_metrics(runtime: Any, metrics: dict[str, Any]) -> None:
     candidate_diag_reason_counts = dict(getattr(runtime.provider, "diag_reason_counts", {}) or {})
-    _merge_count_map(candidate_diag_reason_counts, getattr(runtime, "order_reject_reason_counts", {}) or {})
+    planning_reject_reason_counts = dict(getattr(runtime, "order_reject_reason_counts", {}) or {})
+    fill_reject_reason_counts = dict(getattr(runtime, "fill_reject_reason_counts", {}) or {})
+    _merge_count_map(candidate_diag_reason_counts, planning_reject_reason_counts)
     metrics["candidate_diag_reason_counts"] = dict(sorted(candidate_diag_reason_counts.items()))
+    metrics["planning_reject_reason_counts"] = dict(sorted(planning_reject_reason_counts.items()))
+    metrics["fill_reject_reason_counts"] = dict(sorted(fill_reject_reason_counts.items()))
+    metrics["planning_cash_skip_count"] = int(
+        int(planning_reject_reason_counts.get("SKIP_NO_CASH", 0) or 0)
+        + int(planning_reject_reason_counts.get("SKIP_CASH_INSUFFICIENT", 0) or 0)
+    )
+    metrics["fill_cash_reject_count"] = int(fill_reject_reason_counts.get("INSUFFICIENT_CASH", 0) or 0)
     metrics["blocked_by_trend_count"] = int(getattr(runtime.provider, "blocked_by_trend_count", 0) or 0)
     metrics["total_buy_signals"] = int(getattr(runtime.provider, "total_buy_signals", 0) or 0)
     metrics["min_hold_block_count"] = int(getattr(runtime.provider, "min_hold_block_count", 0) or 0)
@@ -224,7 +233,11 @@ def augment_metrics(runtime: Any, metrics: dict[str, Any]) -> None:
         daily_snapshots=getattr(runtime, "accounting_audit_rows", ()),
     )
     execution_lineage_rows = finalize_execution_lineage(runtime)
-    execution_lineage = build_execution_lineage_audit(execution_lineage_rows)
+    execution_lineage = build_execution_lineage_audit(
+        execution_lineage_rows,
+        planning_reject_reason_counts=planning_reject_reason_counts,
+        fill_reject_reason_counts=fill_reject_reason_counts,
+    )
     audit_payload = dict(metrics.get("audit") or {})
     audit_payload["accounting_integrity"] = accounting_integrity
     audit_payload["execution_lineage"] = execution_lineage
@@ -348,6 +361,7 @@ def build_portfolio_backtest_result(runtime: Any) -> PortfolioBacktestResult:
     daily_df = pd.DataFrame(runtime.daily_rows)
     trades_df = pd.DataFrame(runtime.trade_rows)
     candidates_df = pd.DataFrame(runtime.candidate_rows)
+    cash_events_df = pd.DataFrame(getattr(runtime, "dividend_event_rows", []) or [])
     metrics = _compute_metrics(
         daily_df,
         trades_df,
@@ -367,4 +381,5 @@ def build_portfolio_backtest_result(runtime: Any) -> PortfolioBacktestResult:
         trades=trades_df,
         candidates=candidates_df,
         metrics=metrics,
+        cash_events=cash_events_df,
     )

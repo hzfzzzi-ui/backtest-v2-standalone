@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from backend.core.data.market_data_access import MarketDataAccess, build_market_data_access
 from backend.core.services.market_snapshot_utils import (
     annualized_vol as _annualized_vol,
     dedupe_warnings as _dedupe_warnings,
@@ -67,8 +68,13 @@ class MarketSnapshotArtifacts:
 
 
 class MarketSnapshotRepository:
-    def __init__(self, access: RuntimeDataAccess) -> None:
+    def __init__(
+        self,
+        access: RuntimeDataAccess,
+        market_data_access: MarketDataAccess | None = None,
+    ) -> None:
         self.access = access
+        self.market_data_access = market_data_access
 
     def _connect(self):
         if psycopg is None:  # pragma: no cover
@@ -100,6 +106,22 @@ class MarketSnapshotRepository:
         return pd.Timestamp(row[0]).date()
 
     def latest_market_trade_date(self, requested_trade_date: date) -> date | None:
+        if self.market_data_access is not None:
+            calendar_result = self.market_data_access.load_trading_calendar(
+                start=requested_trade_date - timedelta(days=60),
+                end=requested_trade_date,
+                asset_scope="cn_a_equity",
+                market="CN_A",
+            )
+            if calendar_result.frame.empty:
+                return None
+            max_trade_date = pd.to_datetime(
+                calendar_result.frame["trade_date"],
+                errors="coerce",
+            ).dropna().max()
+            if pd.isna(max_trade_date):
+                return None
+            return pd.Timestamp(max_trade_date).date()
         return self.max_trade_date(
             table="pams_ohlcv_daily",
             date_col="trade_date",
@@ -877,7 +899,8 @@ def build_market_snapshot(
 ) -> dict[str, Any]:
     requested_trade_date = date.fromisoformat(trade_date) if isinstance(trade_date, str) else trade_date
     runtime_access = access or load_runtime_data_access(bt_root)
-    repository = MarketSnapshotRepository(runtime_access)
+    market_data_access = build_market_data_access(runtime_access)
+    repository = MarketSnapshotRepository(runtime_access, market_data_access=market_data_access)
 
     market_effective_date = repository.latest_market_trade_date(requested_trade_date)
     if market_effective_date is None:
@@ -888,16 +911,42 @@ def build_market_snapshot(
         as_of=market_effective_date,
         db=runtime_access.cfg_obj.db,
         runtime=runtime_access.cfg_obj.db_runtime,
+        asset_scope="cn_a_equity",
+        market_data_access=market_data_access,
     )
-    history_start = _history_start_from_calendar(runtime_access, market_effective_date, MARKET_LOOKBACK_DAYS)
-    market_history = runtime_access.provider.load_ohlcv_daily(symbols, history_start, market_effective_date, source="market_snapshot")
+    history_start = _history_start_from_calendar(
+        market_data_access,
+        market_effective_date,
+        MARKET_LOOKBACK_DAYS,
+    )
+    market_history_result = market_data_access.load_price_history(
+        symbols=symbols,
+        start=history_start,
+        end=market_effective_date,
+        asset_scope="cn_a_equity",
+        market="CN_A",
+    )
+    market_history = market_history_result.frame
+    provider_query_audit = list(market_history_result.audit.provider_query_audit)
 
-    index_history_start = _history_start_from_calendar(runtime_access, market_effective_date, INDEX_LOOKBACK_DAYS)
+    index_history_start = _history_start_from_calendar(
+        market_data_access,
+        market_effective_date,
+        INDEX_LOOKBACK_DAYS,
+    )
     index_histories: dict[str, pd.DataFrame] = {}
     for spec in INDEX_SPECS:
         symbol = spec["symbol"]
         try:
-            frame = runtime_access.provider.load_benchmark_daily(symbol, index_history_start, requested_trade_date)
+            benchmark_result = market_data_access.load_benchmark_history(
+                symbol=symbol,
+                start=index_history_start,
+                end=requested_trade_date,
+                asset_scope="cn_a_equity",
+                market="CN_A",
+            )
+            frame = benchmark_result.frame
+            provider_query_audit.extend(benchmark_result.audit.provider_query_audit)
         except Exception:
             frame = pd.DataFrame(columns=["date", "symbol", "close", "volume", "amount"])
         index_histories[symbol] = frame
@@ -908,7 +957,7 @@ def build_market_snapshot(
         market_history=market_history,
         index_histories=index_histories,
         sentiment_history=sentiment_history,
-        provider_query_audit=runtime_access.provider.query_audit,
+        provider_query_audit=provider_query_audit,
     )
     snapshot["build_meta"]["universe_meta"] = universe_meta
     snapshot["build_meta"]["resolved_symbol_count"] = int(len(symbols))

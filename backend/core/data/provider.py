@@ -59,6 +59,29 @@ class DataProvider(ABC):
             ]
         )
 
+    def load_cn_etf_dividend_events(
+        self,
+        symbols: list[str] | None,
+        start: date,
+        end: date,
+    ) -> pd.DataFrame:
+        """Load cn_etf dividend event rows covering the requested window."""
+        return pd.DataFrame(
+            columns=[
+                "event_id",
+                "ts_code",
+                "symbol",
+                "ann_date",
+                "record_date",
+                "ex_date",
+                "pay_date",
+                "earpay_date",
+                "net_ex_date",
+                "div_cash",
+                "div_proc",
+            ]
+        )
+
     def load_st_history(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
         """Return ST history: columns ts_code, start_date, end_date, st_type.
 

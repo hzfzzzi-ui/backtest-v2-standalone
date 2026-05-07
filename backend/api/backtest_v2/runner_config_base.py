@@ -11,6 +11,49 @@ from fastapi import HTTPException
 from backend.api.shared.json_utils import sanitize_json
 from backend.core.tools.locked_candidate_presets import build_locked_candidate_cfg
 
+_LEGACY_CN_STOCKS_TABLE = "pams_ohlcv_daily"
+_CANONICAL_CN_STOCKS_TABLE = "pams_ohlcv_daily_v2"
+_COMPAT_CN_STOCKS_TABLE = "pams_ohlcv_daily_v2_runtime"
+_CANONICAL_MARKET_CONTRACT = "canonical_market"
+_COMPAT_MARKET_CONTRACT = "compat_runtime_migration"
+
+
+def normalize_market_data_contract(cfg: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(cfg or {})
+    data_source = dict(payload.get("data_source") or {})
+    schema_mapping = dict(payload.get("schema_mapping") or {})
+
+    explicit_role = str(data_source.get("data_role") or "").strip().lower()
+    stocks_table = str(data_source.get("stocks_table") or "").strip()
+    is_cn_stock_contract = explicit_role in {"v2_canonical", "v2_runtime"} or stocks_table in {
+        "",
+        _LEGACY_CN_STOCKS_TABLE,
+        _CANONICAL_CN_STOCKS_TABLE,
+        _COMPAT_CN_STOCKS_TABLE,
+    }
+    if not is_cn_stock_contract:
+        return sanitize_json(payload)
+
+    contract = _COMPAT_MARKET_CONTRACT if (
+        explicit_role == "v2_runtime" or stocks_table == _COMPAT_CN_STOCKS_TABLE
+    ) else _CANONICAL_MARKET_CONTRACT
+    if stocks_table in {"", _LEGACY_CN_STOCKS_TABLE}:
+        data_source["stocks_table"] = _CANONICAL_CN_STOCKS_TABLE
+
+    data_source.setdefault("v2_canonical_stocks_table", _CANONICAL_CN_STOCKS_TABLE)
+    data_source.setdefault("v2_runtime_stocks_table", _COMPAT_CN_STOCKS_TABLE)
+    data_source.setdefault("v2_schema_mapping_table", _CANONICAL_CN_STOCKS_TABLE)
+
+    base_mapping = dict(schema_mapping.get(_LEGACY_CN_STOCKS_TABLE) or {})
+    canonical_mapping = dict(schema_mapping.get(_CANONICAL_CN_STOCKS_TABLE) or base_mapping)
+    if canonical_mapping:
+        schema_mapping[_CANONICAL_CN_STOCKS_TABLE] = canonical_mapping
+
+    payload["data_source"] = sanitize_json(data_source)
+    payload["schema_mapping"] = sanitize_json(schema_mapping)
+    payload["market_data_contract"] = contract
+    return sanitize_json(payload)
+
 
 def load_base_config(bt_root: Path) -> dict[str, Any]:
     cfg_path = bt_root / "configs" / "pams_cn_pg.json"
@@ -20,7 +63,7 @@ def load_base_config(bt_root: Path) -> dict[str, Any]:
             cfg_path = cfg_path_alt
         else:
             raise HTTPException(status_code=500, detail=f"missing config template: {cfg_path}")
-    return json.loads(cfg_path.read_text(encoding="utf-8-sig"))
+    return normalize_market_data_contract(json.loads(cfg_path.read_text(encoding="utf-8-sig")))
 
 
 def assert_locked_candidate_request_supported(body: Any) -> None:

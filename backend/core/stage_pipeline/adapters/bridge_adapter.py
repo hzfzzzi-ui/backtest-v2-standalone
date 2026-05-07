@@ -25,11 +25,11 @@ from backend.core.config.models import (
 from backend.core.engine_vector.signal_provider import DayContext as ProviderDayContext
 from backend.core.engine_vector.signal_provider import DaySignals, ExitCounts
 from backend.core.portfolio.types import PortfolioBacktestResult
-from backend.core.stage_pipeline.adapters.candidate_flow import build_candidate_stage_output, is_candidate_flow_stage
+from backend.core.stage_pipeline.adapters.candidate_boundary import build_candidate_boundary_result
+from backend.core.stage_pipeline.adapters.candidate_plan import build_candidate_plan_result
 from backend.core.stage_pipeline.adapters.daily_accounting import apply_daily_decision_diagnostics, prepare_daily_snapshot
 from backend.core.stage_pipeline.adapters.day_controls import compute_day_controls
 from backend.core.stage_pipeline.adapters.fill_accounting import apply_open_fills
-from backend.core.stage_pipeline.adapters.holding_flow import build_holding_stage_output, is_holding_flow_stage
 from backend.core.stage_pipeline.adapters.order_planning import build_s7_order_stage_output
 from backend.core.stage_pipeline.adapters.result_bridge import build_portfolio_backtest_result
 from backend.core.stage_pipeline.adapters.lineage import attach_signal_lineage
@@ -46,7 +46,6 @@ from backend.core.stage_pipeline.adapters.runtime_state import (
     initialize_runtime_ledger,
 )
 from backend.core.stage_pipeline.adapters.signal_postprocess import postprocess_day_signals
-from backend.core.stage_pipeline.adapters.stage_applicability import is_stage_disabled, stage_is_applicable
 from backend.core.stage_pipeline.context import DataBundleView, DayContext, PortfolioState
 from backend.core.stage_pipeline.contracts import StageInputs, StageOutputs
 from backend.core.stage_pipeline.shell import StageHandler, StagePipelineRequest, StagePipelineResult, run_stage_pipeline
@@ -75,6 +74,7 @@ class StagePipelineBridgeRequest:
     exit_cfg: ExitConfig | None = None
     sizing_cfg: SizingConfig | None = None
     base_order_value: float = 0.0
+    dividend_cash_timing_mode: str = "pay_date"
     risk_budget_cfg: RiskBudgetConfig | None = None
     market_filter_cfg: MarketFilterConfig | None = None
     benchmark_regime_cfg: BenchmarkRegimeConfig | None = None
@@ -94,6 +94,10 @@ class StagePipelineBridgeRequest:
         object.__setattr__(self, "mf_concentrate_scale", float(self.mf_concentrate_scale))
         object.__setattr__(self, "momentum_top_pct", float(self.momentum_top_pct))
         object.__setattr__(self, "base_order_value", float(self.base_order_value))
+        mode = str(self.dividend_cash_timing_mode or "pay_date").strip().lower()
+        if mode not in {"ex_date", "pay_date"}:
+            mode = "pay_date"
+        object.__setattr__(self, "dividend_cash_timing_mode", mode)
         object.__setattr__(
             self,
             "disabled_stages",
@@ -108,6 +112,249 @@ class StagePipelineBridgeBacktestResult:
     portfolio_result: PortfolioBacktestResult
     pipeline_result: StagePipelineResult
     route_id: str
+
+
+CANDIDATE_FLOW_STAGE_KEYS: tuple[str, ...] = ("S1", "S2", "S3", "S4", "S5", "S6")
+HOLDING_FLOW_STAGE_KEYS: tuple[str, ...] = ("S9", "S8")
+
+
+def is_candidate_flow_stage(stage_key: str) -> bool:
+    return str(stage_key).upper() in CANDIDATE_FLOW_STAGE_KEYS
+
+
+def is_holding_flow_stage(stage_key: str) -> bool:
+    return str(stage_key).upper() in HOLDING_FLOW_STAGE_KEYS
+
+
+def is_stage_disabled(disabled_stages: Sequence[str], stage_key: str) -> bool:
+    return str(stage_key).upper() in {str(stage).upper() for stage in disabled_stages}
+
+
+def stage_is_applicable(runtime: Any, stage_key: str) -> bool:
+    key = str(stage_key).upper()
+    if is_stage_disabled(getattr(runtime.request, "disabled_stages", ()), key):
+        return False
+    if key == "S2":
+        return bool(
+            runtime.route_id in {"provider_breakout_runtime", "regime_router_inline_runtime", "multi_alpha_inline_runtime"}
+            or (runtime._market_filter_cfg is not None and runtime._market_filter_cfg.enabled)
+            or (runtime._benchmark_regime_cfg is not None and runtime._benchmark_regime_cfg.enabled)
+        )
+    if key == "S3":
+        return bool(getattr(runtime.request.strategy, "enable_sector_gate", False))
+    if key == "S8":
+        return bool(runtime._dd_enabled)
+    return True
+
+
+def build_candidate_stage_output(
+    *,
+    stage_key: str,
+    stage_inputs: StageInputs,
+    current_day: Mapping[str, Any],
+    enabled: bool,
+) -> StageOutputs:
+    key = str(stage_key).upper()
+    if key not in CANDIDATE_FLOW_STAGE_KEYS:
+        raise ValueError(f"unsupported candidate flow stage: {stage_key}")
+    if not enabled:
+        return StageOutputs.neutral(
+            key,
+            stage_inputs,
+            summary_fragment={"reason": "disabled_or_not_applicable"},
+        )
+
+    day_signals: DaySignals = current_day["day_signals"]
+    candidate_boundary = dict(current_day.get("candidate_boundary") or {})
+    candidate_boundary_payload = dict(candidate_boundary.get("payload") or {})
+    candidate_plan = dict(current_day.get("candidate_plan") or {})
+    candidate_plan_payload = dict(candidate_plan.get("payload") or {})
+    controls = dict(current_day.get("controls") or {})
+    holdings = tuple(current_day.get("holding_symbols") or ())
+    boundary_buy_signals = list(candidate_boundary.get("buy_signals") or day_signals.buy_signals or ())
+    candidate_symbols = tuple(str(sig.symbol).lower() for sig in boundary_buy_signals)
+
+    if key == "S6":
+        return StageOutputs(
+            stage_key=key,
+            candidate_symbols=candidate_symbols,
+            holding_symbols=holdings,
+            buy_symbols=candidate_symbols,
+            sell_symbols=stage_inputs.sell_symbols,
+            payload={
+                **dict(stage_inputs.payload or {}),
+                "candidate_boundary": candidate_boundary_payload,
+                "candidate_plan": candidate_plan_payload,
+            },
+            summary_fragment={
+                "mode": "inline_stage_flow",
+                "buy_signal_count": len(candidate_symbols),
+                "candidate_boundary_mode": str(candidate_boundary_payload.get("boundary_mode") or ""),
+                "candidate_plan_mode": str(candidate_plan_payload.get("plan_mode") or ""),
+            },
+        )
+    if key == "S2":
+        return StageOutputs(
+            stage_key=key,
+            candidate_symbols=stage_inputs.candidate_symbols or candidate_symbols,
+            holding_symbols=holdings,
+            sell_symbols=stage_inputs.sell_symbols,
+            payload={
+                **dict(stage_inputs.payload or {}),
+                "candidate_boundary": candidate_boundary_payload,
+                "candidate_plan": candidate_plan_payload,
+            },
+            summary_fragment={
+                "mode": "inline_stage_flow",
+                "risk_on_today": bool(controls["risk_on_today"]),
+                "benchmark_regime_on": bool(controls["benchmark_regime_on"]),
+                "market_state": str(controls["market_state"]),
+            },
+        )
+    if key == "S3":
+        return StageOutputs(
+            stage_key=key,
+            candidate_symbols=stage_inputs.candidate_symbols or candidate_symbols,
+            holding_symbols=holdings,
+            sell_symbols=stage_inputs.sell_symbols,
+            payload=stage_inputs.payload,
+            summary_fragment={
+                "mode": "inline_stage_flow",
+                "sector_gate_enabled": True,
+            },
+        )
+    return StageOutputs(
+        stage_key=key,
+        candidate_symbols=stage_inputs.candidate_symbols or candidate_symbols,
+        holding_symbols=holdings,
+        sell_symbols=stage_inputs.sell_symbols,
+        payload={
+            **dict(stage_inputs.payload or {}),
+            "candidate_boundary": candidate_boundary_payload,
+            "candidate_plan": candidate_plan_payload,
+        },
+        summary_fragment={
+            "mode": "inline_stage_flow",
+            "candidate_count": len(stage_inputs.candidate_symbols or candidate_symbols),
+            "candidate_boundary_mode": str(candidate_boundary_payload.get("boundary_mode") or ""),
+            "candidate_plan_mode": str(candidate_plan_payload.get("plan_mode") or ""),
+        },
+    )
+
+
+def build_holding_stage_output(
+    *,
+    stage_key: str,
+    stage_inputs: StageInputs,
+    current_day: Mapping[str, Any],
+    enabled: bool,
+) -> StageOutputs:
+    key = str(stage_key).upper()
+    if key not in HOLDING_FLOW_STAGE_KEYS:
+        raise ValueError(f"unsupported holding flow stage: {stage_key}")
+    if not enabled:
+        return StageOutputs.neutral(
+            key,
+            stage_inputs,
+            summary_fragment={"reason": "disabled_or_not_applicable"},
+        )
+
+    day_signals: DaySignals = current_day["day_signals"]
+    holdings = tuple(current_day.get("holding_symbols") or ())
+    sell_symbols = tuple(str(sig.symbol).lower() for sig in day_signals.sell_signals)
+
+    if key == "S9":
+        return StageOutputs(
+            stage_key=key,
+            holding_symbols=holdings,
+            sell_symbols=sell_symbols,
+            payload=stage_inputs.payload,
+            summary_fragment={
+                "mode": "inline_stage_flow",
+                "sell_signal_count": len(sell_symbols),
+            },
+        )
+    return StageOutputs(
+        stage_key=key,
+        holding_symbols=holdings,
+        sell_symbols=stage_inputs.sell_symbols or sell_symbols,
+        payload=stage_inputs.payload,
+        summary_fragment={
+            "mode": "inline_stage_flow",
+            "effective_max_positions": int(current_day["controls"]["effective_max_positions"]),
+        },
+    )
+
+
+def _merge_runtime_reject_reason_counts(runtime: Any, reject_reason_counts: Mapping[str, Any] | None) -> None:
+    if not isinstance(reject_reason_counts, Mapping) or not reject_reason_counts:
+        return
+    target = getattr(runtime, "order_reject_reason_counts", None)
+    if not isinstance(target, dict):
+        target = {}
+        setattr(runtime, "order_reject_reason_counts", target)
+    for reason, count in reject_reason_counts.items():
+        key = str(reason or "").strip()
+        if not key:
+            continue
+        target[key] = int(target.get(key, 0)) + int(count or 0)
+
+
+def _retain_fast_mode_candidate_diagnostics(rows: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+    kept: list[dict[str, Any]] = []
+    for row in list(rows or ()):
+        payload = dict(row or {})
+        reason = str(payload.get("reject_reason", "") or "").strip().upper()
+        blocked = bool(payload.get("cash_blocked_flag", False))
+        if blocked or reason == "SKIP_NO_CASH":
+            kept.append(payload)
+    return kept
+
+
+def apply_s7_order_stage_side_effects(runtime: Any, stage_output: StageOutputs) -> None:
+    current_day = getattr(runtime, "_current_day", None)
+    if not isinstance(current_day, Mapping):
+        raise RuntimeError("current day must be prepared before applying S7 side effects")
+
+    payload = dict(getattr(stage_output, "payload", {}) or {})
+    candidate_boundary = dict(current_day.get("candidate_boundary") or {})
+    candidate_plan = dict(current_day.get("candidate_plan") or {})
+    execution_kernel = dict(payload.get("execution_kernel") or {})
+
+    day_candidate_rows: list[dict[str, Any]] = [
+        *[dict(row) for row in list(candidate_boundary.get("candidate_rows") or ())],
+        *[dict(row) for row in list(candidate_plan.get("candidate_rows") or ())],
+        *[dict(row) for row in list(execution_kernel.get("candidate_rows") or ())],
+    ]
+    target_rows = getattr(runtime, "candidate_rows", None)
+    if not isinstance(target_rows, list):
+        target_rows = []
+        setattr(runtime, "candidate_rows", target_rows)
+    if bool(getattr(getattr(runtime, "request", None), "fast_mode", False)):
+        target_rows.extend(_retain_fast_mode_candidate_diagnostics(day_candidate_rows))
+    else:
+        target_rows.extend(day_candidate_rows)
+
+    execution_reject_reason_counts = dict(execution_kernel.get("reject_reason_counts") or {})
+    _merge_runtime_reject_reason_counts(runtime, execution_reject_reason_counts)
+
+    merged_debug_plan: dict[str, Any] = {
+        **dict(candidate_boundary.get("debug_plan") or {}),
+        **dict(candidate_plan.get("debug_plan") or {}),
+        **dict(execution_kernel.get("debug_plan") or {}),
+    }
+    apply_daily_decision = getattr(runtime, "_apply_daily_decision_diagnostics", None)
+    if callable(apply_daily_decision):
+        apply_daily_decision(
+            day_signals=current_day["day_signals"],
+            debug_plan=merged_debug_plan,
+        )
+    else:
+        apply_daily_decision_diagnostics(
+            runtime,
+            day_signals=current_day["day_signals"],
+            debug_plan=merged_debug_plan,
+        )
 
 
 class StagePipelineBridgeRuntime:
@@ -129,6 +376,7 @@ class StagePipelineBridgeRuntime:
         self._comm_rate = float(bootstrap.comm_rate)
         self._comm_min = float(bootstrap.comm_min)
         self._stamp_rate = float(bootstrap.stamp_rate)
+        self._slippage_mode = str(bootstrap.slippage_mode)
         self._sizing_cfg = bootstrap.sizing_cfg
         self._weight_mode = str(bootstrap.weight_mode)
         self._min_positions_cfg = int(bootstrap.min_positions_cfg)
@@ -141,6 +389,7 @@ class StagePipelineBridgeRuntime:
         self._dd_reduce_scale = float(bootstrap.dd_reduce_scale)
         self._portfolio_mode = str(bootstrap.portfolio_mode)
         self._min_trade_price = float(bootstrap.min_trade_price)
+        self._dividend_cash_timing_mode = str(bootstrap.dividend_cash_timing_mode)
         self.open_idx = bootstrap.open_idx
         self.close_idx = bootstrap.close_idx
         self.hfq_close_idx = bootstrap.hfq_close_idx
@@ -150,17 +399,25 @@ class StagePipelineBridgeRuntime:
         self.suspended_idx = bootstrap.suspended_idx
         self.limit_up_idx = bootstrap.limit_up_idx
         self.limit_down_idx = bootstrap.limit_down_idx
+        self.dividend_events_ex_idx = bootstrap.dividend_events_ex_idx
+        self.dividend_events_pay_idx = bootstrap.dividend_events_pay_idx
 
         ledger = initialize_runtime_ledger(request.initial_cash)
         self.cash = float(ledger.cash)
+        self.dividend_receivable = float(ledger.dividend_receivable)
         self.positions = ledger.positions
         self.position_avg_cost = ledger.position_avg_cost
         self.position_entry_adj = ledger.position_entry_adj
+        self.pending_dividend_receivables = ledger.pending_dividend_receivables
+        self.processed_dividend_ex_event_ids = ledger.processed_dividend_ex_event_ids
+        self.processed_dividend_cash_event_ids = ledger.processed_dividend_cash_event_ids
+        self.dividend_event_rows = ledger.dividend_event_rows
         self.holding_sources = ledger.holding_sources
         self.composition_audit_rows = ledger.composition_audit_rows
         self.accounting_audit_rows = ledger.accounting_audit_rows
         self.execution_lineage_records = ledger.execution_lineage_records
         self.order_reject_reason_counts = ledger.order_reject_reason_counts
+        self.fill_reject_reason_counts = ledger.fill_reject_reason_counts
         self.peak_nav = float(ledger.peak_nav)
         self.prev_nav = float(ledger.prev_nav)
         self.trade_rows = ledger.trade_rows
@@ -170,9 +427,13 @@ class StagePipelineBridgeRuntime:
         self._prepared_day_index = ledger.prepared_day_index
         self._current_day = ledger.current_day
         self._traded_value_today = float(ledger.traded_value_today)
+        self._dividend_cash_credit_today = float(ledger.dividend_cash_credit_today)
+        self._dividend_receivable_create_today = float(ledger.dividend_receivable_create_today)
+        self._dividend_receivable_settle_today = float(ledger.dividend_receivable_settle_today)
         self._simulation_t0 = float(ledger.simulation_t0)
         self._last_accounting_snapshot = None
         self._last_trade_rows_today: tuple[dict[str, Any], ...] = ()
+        self._last_fill_reject_reason_counts_today: dict[str, int] = {}
 
         counters = initialize_runtime_counters()
         self.market_filter_bull_days = int(counters.market_filter_bull_days)
@@ -273,6 +534,12 @@ class StagePipelineBridgeRuntime:
             day_signals = self.provider.day_signals(day_context.trading_day, day_context.day_index, provider_ctx)
             day_signals = self._postprocess_day_signals(day_context.day_index, day_signals, controls)
             attach_signal_lineage(day_signals)
+            candidate_boundary = build_candidate_boundary_result(
+                self,
+                day=day_context.trading_day,
+                controls=controls,
+                day_signals=day_signals,
+            )
             next_open = {
                 symbol: float(self.open_idx.get((day_context.next_trading_day, symbol), 0.0) or 0.0)
                 for symbol in set(
@@ -280,6 +547,15 @@ class StagePipelineBridgeRuntime:
                     + list(self.positions.keys())
                 )
             }
+            candidate_plan = build_candidate_plan_result(
+                self,
+                day=day_context.trading_day,
+                controls=controls,
+                day_signals=day_signals,
+                candidate_boundary=candidate_boundary,
+                next_open=next_open,
+                nav=nav,
+            )
 
         self._current_day = {
             "day": day_context.trading_day,
@@ -288,6 +564,41 @@ class StagePipelineBridgeRuntime:
             "controls": controls,
             "accounting_snapshot": getattr(snapshot, "accounting_snapshot", None),
             "day_signals": day_signals,
+            "candidate_boundary": candidate_boundary if not day_context.is_last_day else {
+                "buy_signals": [],
+                "candidate_rows": [],
+                "reject_reason_counts": {},
+                "debug_plan": {},
+                "payload": {
+                    "contract_version": "candidate_boundary_v1",
+                    "decision_date": day_context.trading_day.isoformat(),
+                    "boundary_mode": "final_day_no_trade",
+                    "selected_candidates": [],
+                    "owner_system_slot_caps": {},
+                    "owner_system_available_slots": {},
+                    "owner_system_candidate_counts": {},
+                    "owner_system_selected_counts": {},
+                    "reject_reason_counts": {},
+                    "notes": {"final_day": True},
+                },
+            },
+            "candidate_plan": candidate_plan if not day_context.is_last_day else {
+                "buy_signals": [],
+                "planned_rotation_sell_signals": [],
+                "candidate_rows": [],
+                "reject_reason_counts": {},
+                "rotation_pair_meta_by_symbol": {},
+                "debug_plan": {},
+                "payload": {
+                    "contract_version": "candidate_plan_v1",
+                    "decision_date": day_context.trading_day.isoformat(),
+                    "plan_mode": "final_day_no_trade",
+                    "planned_candidates": [],
+                    "planned_rotation_sell_symbols": [],
+                    "reject_reason_counts": {},
+                    "notes": {"final_day": True},
+                },
+            },
             "next_open": next_open,
             "next_trading_day": day_context.next_trading_day,
             "holding_symbols": tuple(sorted(sym for sym, qty in self.positions.items() if int(qty) > 0)),
@@ -298,10 +609,14 @@ class StagePipelineBridgeRuntime:
             getattr(getattr(self, "request", None), "max_positions", controls["effective_max_positions"])
         )
         snapshot_accounting = getattr(snapshot, "accounting_snapshot", None)
+        snapshot_daily_marks = dict(getattr(snapshot_accounting, "daily_marks", {}) or {})
         self.accounting_audit_rows.append(
             {
                 "day": day_context.trading_day.isoformat(),
                 "cash_after": float(getattr(snapshot_accounting, "cash", self.cash)),
+                "dividend_receivable_after": float(
+                    getattr(snapshot_accounting, "dividend_receivable", getattr(self, "dividend_receivable", 0.0))
+                ),
                 "positions_after": {
                     str(symbol).lower(): int(qty)
                     for symbol, qty in dict(getattr(snapshot_accounting, "positions", {}) or {}).items()
@@ -309,6 +624,20 @@ class StagePipelineBridgeRuntime:
                 },
                 "filled_orders": [dict(item) for item in list(getattr(snapshot_accounting, "filled_orders", ()) or ())],
                 "trade_rows": [dict(item) for item in list(getattr(snapshot_accounting, "trade_rows", ()) or ())],
+                "dividend_cash_credit_today": float(
+                    (snapshot_daily_marks.get("dividend_cash_credit_today", 0.0) or 0.0)
+                ),
+                "dividend_receivable_create_today": float(
+                    (snapshot_daily_marks.get("dividend_receivable_create_today", 0.0) or 0.0)
+                ),
+                "dividend_receivable_settle_today": float(
+                    (snapshot_daily_marks.get("dividend_receivable_settle_today", 0.0) or 0.0)
+                ),
+                "corporate_action_adjustments": [
+                    dict(item)
+                    for item in list(snapshot_daily_marks.get("corporate_action_adjustments") or ())
+                    if isinstance(item, Mapping)
+                ],
                 "nav": float(nav),
                 "market_value": float(market_value),
                 "max_positions": request_max_positions,
@@ -345,7 +674,9 @@ class StagePipelineBridgeRuntime:
         )
 
     def plan_orders(self) -> StageOutputs:
-        return build_s7_order_stage_output(self)
+        output = build_s7_order_stage_output(self)
+        apply_s7_order_stage_side_effects(self, output)
+        return output
 
     def to_backtest_result(self) -> PortfolioBacktestResult:
         return build_portfolio_backtest_result(self)

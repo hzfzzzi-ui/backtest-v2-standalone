@@ -220,7 +220,7 @@ class GenericSignalProvider:
         positions_before_sell = int(sum(1 for _q in positions.values() if int(_q) > 0))
 
         # ── 退出规则 ──
-        exit_rule_sells, exit_rule_syms, ecounts = evaluate_engine_exits(
+        exit_rule_sells, exit_rule_syms, ecounts, _fragility_diagnostics = evaluate_engine_exits(
             positions=positions,
             day=day,
             close_idx=close_idx,

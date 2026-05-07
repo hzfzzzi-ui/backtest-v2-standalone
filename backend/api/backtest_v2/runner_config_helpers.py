@@ -44,6 +44,7 @@ def _execution_override_snapshot(overrides: dict[str, Any]) -> dict[str, Any]:
         "strength_top_k_mode",
         "enable_multifactor_rank",
         "mf_topk",
+        "mf_concentrate_topn",
         "mf_concentrate_scale",
         "mf_rank_gate_mode",
         "momentum_top_pct",

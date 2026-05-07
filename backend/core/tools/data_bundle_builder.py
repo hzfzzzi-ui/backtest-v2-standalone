@@ -12,7 +12,7 @@ from backend.core.config.cn_a_governed_mainline import build_governed_a_share_co
 from backend.core.config.etf_beta_contract import build_etf_beta_phase1_summary as build_cn_etf_beta_phase1_summary
 from backend.core.config.models import BacktestConfig
 from backend.core.data.cn_etf_catalog import normalize_cn_etf_symbol, normalize_cn_etf_ts_code
-from backend.core.data.pg_provider import PostgresDataProvider
+from backend.core.data.provider_factory import build_runtime_provider_from_config
 from backend.core.data.price_adjust import apply_price_adjustment
 from backend.core.data.provider import DataProvider
 from backend.core.universe.membership_audit import audit_membership_history, should_block_static_fallback
@@ -46,6 +46,23 @@ class DataBundle:
     price_adj_mode: str
     adj_factor_stats: dict[str, Any]
     summary: dict[str, Any]
+    dividend_events: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(
+            columns=[
+                "event_id",
+                "ts_code",
+                "symbol",
+                "ann_date",
+                "record_date",
+                "ex_date",
+                "pay_date",
+                "earpay_date",
+                "net_ex_date",
+                "div_cash",
+                "div_proc",
+            ]
+        )
+    )
     membership_history: pd.DataFrame = field(
         default_factory=lambda: pd.DataFrame(columns=["index_code", "symbol", "start_date", "end_date"])
     )
@@ -160,19 +177,11 @@ def _load_dynamic_index_membership_bundle(
 
 
 def _create_data_provider(cfg_obj: BacktestConfig, rules_path: str | Path) -> DataProvider:
-    pg_provider = PostgresDataProvider(
-        db=cfg_obj.db,
-        runtime=cfg_obj.db_runtime,
-        data_source=cfg_obj.data_source,
-        schema_mapping=cfg_obj.schema_mapping,
-        rules_path=rules_path,
+    return build_runtime_provider_from_config(
+        cfg_obj,
+        rules_path,
+        use_cache=True,
     )
-    try:
-        from backend.core.data.cached_provider import CachedDataProvider
-
-        return CachedDataProvider(pg_provider)
-    except ImportError:
-        return pg_provider
 
 
 def _build_data_bundle_summary(
@@ -189,8 +198,10 @@ def _build_data_bundle_summary(
     industry_map: dict[str, str],
     industry_history: pd.DataFrame,
     price_adj_mode: str,
+    adj_factor_stats: dict[str, Any],
     dynamic_all_a_entry: bool,
     membership_history: pd.DataFrame,
+    dividend_events: pd.DataFrame,
 ) -> dict[str, Any]:
     etf_beta_phase1_summary = dict(universe_meta.get("etf_beta_phase1_summary") or {})
     history_date_min = None
@@ -209,6 +220,14 @@ def _build_data_bundle_summary(
     calendar_end = str(trading_days[-1]) if trading_days else None
     missing_history_close = int(raw_history["close"].isna().sum()) if "close" in raw_history.columns else 0
     missing_benchmark_close = int(benchmark["close"].isna().sum()) if "close" in benchmark.columns else 0
+    dividend_event_rows = int(len(dividend_events))
+    dividend_event_ex_start = None
+    dividend_event_ex_end = None
+    if dividend_event_rows > 0 and "ex_date" in dividend_events.columns:
+        ex_dates = pd.to_datetime(dividend_events["ex_date"], errors="coerce").dropna()
+        if not ex_dates.empty:
+            dividend_event_ex_start = str(ex_dates.min().date())
+            dividend_event_ex_end = str(ex_dates.max().date())
 
     return {
         "universe_mode": str(universe_meta.get("universe_mode") or ""),
@@ -252,11 +271,101 @@ def _build_data_bundle_summary(
         "coverage_end": universe_meta.get("coverage_end"),
         "daily_table": universe_meta.get("daily_table"),
         "price_series_semantics": universe_meta.get("price_series_semantics"),
+        "dividend_event_rows": dividend_event_rows,
+        "dividend_event_ex_start": dividend_event_ex_start,
+        "dividend_event_ex_end": dividend_event_ex_end,
         "etf_beta_source_entry_type": etf_beta_phase1_summary.get("source_entry_type"),
         "etf_beta_eligible_count": int(len(etf_beta_phase1_summary.get("eligible_etfs") or [])),
         "etf_beta_selected_count": int(len(etf_beta_phase1_summary.get("selected_etfs") or [])),
         "etf_beta_out_of_scope_count": int(len(etf_beta_phase1_summary.get("out_of_scope_etfs") or [])),
+        "adj_factor_null_count": int(adj_factor_stats.get("null_count") or 0),
+        "adj_factor_symbols_with_missing_count": int(adj_factor_stats.get("symbols_with_missing_count") or 0),
+        "adj_factor_max_consecutive_missing_rows": int(adj_factor_stats.get("max_consecutive_missing_rows") or 0),
+        "adj_factor_max_consecutive_missing_after_valid_rows": int(
+            adj_factor_stats.get("max_consecutive_missing_after_valid_rows") or 0
+        ),
+        "adj_factor_symbols_exceeding_warn_count": int(adj_factor_stats.get("symbols_exceeding_warn_count") or 0),
+        "adj_factor_symbols_exceeding_fail_count": int(adj_factor_stats.get("symbols_exceeding_fail_count") or 0),
+        "adj_factor_stale_warn_threshold_rows": int(adj_factor_stats.get("warn_threshold_rows") or 0),
+        "adj_factor_stale_fail_threshold_rows": int(adj_factor_stats.get("fail_threshold_rows") or 0),
     }
+
+
+def _build_adj_factor_stats(history: pd.DataFrame) -> dict[str, Any]:
+    stats: dict[str, Any] = {
+        "min": None,
+        "max": None,
+        "null_count": 0,
+        "symbol_count": 0,
+        "symbols_with_missing_count": 0,
+        "max_consecutive_missing_rows": 0,
+        "max_consecutive_missing_after_valid_rows": 0,
+        "worst_after_valid_symbol": None,
+        "worst_after_valid_end_date": None,
+        "warn_threshold_rows": 5,
+        "fail_threshold_rows": 20,
+        "symbols_exceeding_warn_count": 0,
+        "symbols_exceeding_fail_count": 0,
+    }
+    if history.empty or "adj_factor" not in history.columns or "symbol" not in history.columns:
+        return stats
+
+    frame = history.loc[:, [col for col in ("symbol", "date", "adj_factor") if col in history.columns]].copy()
+    if "date" in frame.columns:
+        frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+        frame = frame.sort_values(["symbol", "date"], kind="stable")
+    else:
+        frame = frame.sort_values(["symbol"], kind="stable")
+
+    adj_series = pd.to_numeric(frame["adj_factor"], errors="coerce")
+    valid = adj_series.dropna()
+    stats["min"] = float(valid.min()) if not valid.empty else None
+    stats["max"] = float(valid.max()) if not valid.empty else None
+    stats["null_count"] = int(adj_series.isna().sum())
+    stats["symbol_count"] = int(frame["symbol"].astype(str).nunique())
+
+    warn_threshold = int(stats["warn_threshold_rows"])
+    fail_threshold = int(stats["fail_threshold_rows"])
+    for symbol, grp in frame.groupby("symbol", sort=False):
+        missing = pd.to_numeric(grp["adj_factor"], errors="coerce").isna().tolist()
+        if any(missing):
+            stats["symbols_with_missing_count"] = int(stats["symbols_with_missing_count"]) + 1
+        dates = (
+            pd.to_datetime(grp["date"], errors="coerce").tolist()
+            if "date" in grp.columns
+            else [pd.NaT] * int(len(grp))
+        )
+        seen_valid = False
+        current_missing = 0
+        current_after_valid = 0
+        max_missing = 0
+        max_after_valid = 0
+        for is_missing, row_date in zip(missing, dates):
+            if is_missing:
+                current_missing += 1
+                max_missing = max(max_missing, current_missing)
+                if seen_valid:
+                    current_after_valid += 1
+                    if current_after_valid > max_after_valid:
+                        max_after_valid = current_after_valid
+                        stats["worst_after_valid_symbol"] = str(symbol)
+                        stats["worst_after_valid_end_date"] = (
+                            None if pd.isna(row_date) else str(pd.Timestamp(row_date).date())
+                        )
+            else:
+                seen_valid = True
+                current_missing = 0
+                current_after_valid = 0
+        stats["max_consecutive_missing_rows"] = max(int(stats["max_consecutive_missing_rows"]), int(max_missing))
+        stats["max_consecutive_missing_after_valid_rows"] = max(
+            int(stats["max_consecutive_missing_after_valid_rows"]),
+            int(max_after_valid),
+        )
+        if max_after_valid >= warn_threshold:
+            stats["symbols_exceeding_warn_count"] = int(stats["symbols_exceeding_warn_count"]) + 1
+        if max_after_valid >= fail_threshold:
+            stats["symbols_exceeding_fail_count"] = int(stats["symbols_exceeding_fail_count"]) + 1
+    return stats
 
 
 def build_data_bundle(
@@ -296,6 +405,21 @@ def build_data_bundle(
     )
     asset_scope = canonical_asset_scope(asset_context.get("asset_scope"))
     membership_history = pd.DataFrame(columns=["index_code", "symbol", "start_date", "end_date"])
+    dividend_events = pd.DataFrame(
+        columns=[
+            "event_id",
+            "ts_code",
+            "symbol",
+            "ann_date",
+            "record_date",
+            "ex_date",
+            "pay_date",
+            "earpay_date",
+            "net_ex_date",
+            "div_cash",
+            "div_proc",
+        ]
+    )
     dynamic_membership_entry = membership_mode == "PIT_DYNAMIC"
 
     _emit_progress(progress_hook, 10, f"Resolving universe ({universe_mode})")
@@ -425,6 +549,11 @@ def build_data_bundle(
         if isinstance(etf_beta_phase1_summary, dict):
             universe_meta["etf_beta_phase1_summary"] = etf_beta_phase1_summary
         cfg_obj.data_source.stocks_table = str(universe_meta.get("daily_table") or "pams_cn_etf_daily")
+        dividend_events = provider.load_cn_etf_dividend_events(
+            symbols=universe_meta.get("etf_symbols") or symbols,
+            start=cfg_obj.universe.start,
+            end=cfg_obj.universe.end,
+        )
 
     uf_cfg = None
     if universe_filters_raw and asset_scope == "cn_a_equity":
@@ -545,14 +674,7 @@ def build_data_bundle(
     if price_adj_mode not in ("hfq", "qfq", "none"):
         price_adj_mode = default_price_adj
     raw_history = history
-    adj_factor_stats: dict[str, Any] = {}
-    if "adj_factor" in history.columns:
-        af = history["adj_factor"]
-        adj_factor_stats = {
-            "min": float(af.min()),
-            "max": float(af.max()),
-            "null_count": int(af.isna().sum()),
-        }
+    adj_factor_stats = _build_adj_factor_stats(history)
     signal_history = apply_price_adjustment(history, price_adj_mode) if price_adj_mode != "none" else history
 
     _emit_progress(progress_hook, 40, "Loading auxiliary data")
@@ -592,8 +714,10 @@ def build_data_bundle(
         industry_map=industry_map,
         industry_history=industry_history,
         price_adj_mode=price_adj_mode,
+        adj_factor_stats=adj_factor_stats,
         dynamic_all_a_entry=dynamic_all_a_entry,
         membership_history=membership_history,
+        dividend_events=dividend_events,
     )
 
     return DataBundle(
@@ -615,5 +739,6 @@ def build_data_bundle(
         price_adj_mode=price_adj_mode,
         adj_factor_stats=adj_factor_stats,
         summary=summary,
+        dividend_events=dividend_events,
         membership_history=membership_history,
     )

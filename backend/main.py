@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -50,7 +52,16 @@ class PrivateMobileAccessMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-app = FastAPI(title="backtest-v2-standalone", version="1.0.0")
+@asynccontextmanager
+async def app_lifespan(_: FastAPI) -> AsyncIterator[None]:
+    start_market_data_sync_scheduler()
+    try:
+        yield
+    finally:
+        stop_market_data_sync_scheduler()
+
+
+app = FastAPI(title="backtest-v2-standalone", version="1.0.0", lifespan=app_lifespan)
 app.add_middleware(NoCacheMiddleware)
 app.add_middleware(PrivateMobileAccessMiddleware)
 app.include_router(backtest_v2_router)
@@ -104,13 +115,3 @@ def mobile_service_worker() -> FileResponse:
         headers={**_NO_CACHE, "Service-Worker-Allowed": "/"},
         media_type="application/javascript",
     )
-
-
-@app.on_event("startup")
-def startup_market_data_sync_scheduler() -> None:
-    start_market_data_sync_scheduler()
-
-
-@app.on_event("shutdown")
-def shutdown_market_data_sync_scheduler() -> None:
-    stop_market_data_sync_scheduler()

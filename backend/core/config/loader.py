@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from backend.core.data.pg_env import env_or_file
 from .models import (
     BacktestConfig,
     BenchmarkRegimeConfig,
@@ -29,7 +30,7 @@ from .models import (
 
 
 def _env(key: str, fallback: Any) -> Any:
-    value = os.getenv(key)
+    value = env_or_file(key)
     return fallback if value is None else value
 
 
@@ -57,7 +58,7 @@ def load_config(path: str | Path) -> tuple[BacktestConfig, str]:
         port=int(_env("PAMS_PG_PORT", db_raw.get("port", 5432))),
         dbname=str(_env("PAMS_PG_DBNAME", db_raw["dbname"])),
         user=str(_env("PAMS_PG_USER", db_raw["user"])),
-        password=str(_env("PAMS_PG_PASSWORD", db_raw.get("password", ""))),
+        password=str(_env("PAMS_PG_PASSWORD", _env("POSTGRES_PASSWORD", db_raw.get("password", "")))),
     )
 
     runtime = DBRuntimeConfig(**raw.get("db_runtime", {}))

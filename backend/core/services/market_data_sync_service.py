@@ -12,6 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.cli.managed import pams_ohlcv_daily_v2_common as v2_common
+from backend.cli.managed import refresh_cn_etf_daily as etf_daily_refresher
 from backend.cli.managed import refresh_csi800_pit as csi800_pit_refresher
 from backend.cli.managed import update_pams_ohlcv_daily as daily_updater
 from backend.cli.managed import update_pams_ohlcv_daily_v2 as v2_main_updater
@@ -43,6 +44,7 @@ _SCHEDULER_LOCK = threading.Lock()
 _SCHEDULER_STOP = threading.Event()
 _SCHEDULER_THREAD: threading.Thread | None = None
 _RUN_LOCK = threading.Lock()
+_ETF_RUN_LOCK = threading.Lock()
 
 
 @dataclass(slots=True)
@@ -70,6 +72,10 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 def sync_scheduler_enabled() -> bool:
     return _env_flag("CN_DAILY_SYNC_ENABLED", default=False)
+
+
+def etf_sync_scheduler_enabled() -> bool:
+    return _env_flag("CN_ETF_DAILY_SYNC_ENABLED", default=sync_scheduler_enabled())
 
 
 def _poll_seconds() -> int:
@@ -115,6 +121,14 @@ def _scheduled_local_time() -> dt_time:
     except Exception:
         LOGGER.warning("invalid CN_DAILY_SYNC_TIME=%s, fallback to %s", raw, DEFAULT_SCHEDULE_TIME)
         return dt_time(hour=18, minute=30)
+
+
+def _results_root() -> Path:
+    raw = str(os.environ.get("RESULTS_ROOT") or "").strip()
+    if raw:
+        path = Path(raw)
+        return path if path.is_absolute() else (daily_updater.ROOT / path).resolve()
+    return daily_updater.ROOT / "outputs"
 
 
 def _schedule_window_open(now: datetime | None = None) -> bool:
@@ -714,7 +728,7 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
             summary["csi800_pit_refresh"] = pit_summary
             try:
                 auto_sync_summary = sim_account_auto_sync_service.run_auto_sync(
-                    daily_updater.DEFAULT_OUTPUT_ROOT,
+                    _results_root(),
                     target_trade_date=target_trade_date,
                 )
             except Exception as exc:
@@ -801,6 +815,119 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
             _advisory_unlock(lock_conn, SYNC_KEY)
             lock_conn.close()
         _RUN_LOCK.release()
+
+
+def run_cn_etf_daily_sync_once(now: datetime | None = None, *, force: bool = False) -> dict[str, Any]:
+    local_now = _now_local(now)
+    target_trade_date = resolve_target_trade_date(local_now)
+    if target_trade_date is None:
+        return {
+            "status": "failed",
+            "sync_key": ETF_SYNC_KEY,
+            "asset_scope": ETF_ASSET_SCOPE,
+            "target_trade_date": None,
+            "message": "target_trade_date unavailable from pit_trade_cal",
+        }
+
+    if not force and not etf_sync_scheduler_enabled():
+        return {
+            "status": "disabled",
+            "sync_key": ETF_SYNC_KEY,
+            "asset_scope": ETF_ASSET_SCOPE,
+            "target_trade_date": target_trade_date.isoformat(),
+            "message": "CN ETF daily sync scheduler disabled",
+        }
+
+    if not _ETF_RUN_LOCK.acquire(blocking=False):
+        return {
+            "status": "running",
+            "sync_key": ETF_SYNC_KEY,
+            "asset_scope": ETF_ASSET_SCOPE,
+            "target_trade_date": target_trade_date.isoformat(),
+            "message": "ETF sync already running in process",
+        }
+
+    lock_conn = None
+    try:
+        lock_conn = _connect()
+        if not _advisory_lock(lock_conn, ETF_SYNC_KEY):
+            return {
+                "status": "running",
+                "sync_key": ETF_SYNC_KEY,
+                "asset_scope": ETF_ASSET_SCOPE,
+                "target_trade_date": target_trade_date.isoformat(),
+                "message": "ETF sync already locked by another process",
+            }
+
+        latest_before = _latest_cn_etf_trade_date(conn=lock_conn)
+        if not force and latest_before is not None and latest_before >= target_trade_date:
+            return {
+                "status": "skipped",
+                "sync_key": ETF_SYNC_KEY,
+                "asset_scope": ETF_ASSET_SCOPE,
+                "target_trade_date": target_trade_date.isoformat(),
+                "latest_trade_date_before": latest_before.isoformat(),
+                "latest_trade_date_after": latest_before.isoformat(),
+                "freshness_basis": ETF_FRESHNESS_BASIS,
+                "message": "already synced to target trade date",
+            }
+
+        token = str(os.environ.get("TUSHARE_TOKEN") or "").strip()
+        if not token:
+            return {
+                "status": "failed",
+                "sync_key": ETF_SYNC_KEY,
+                "asset_scope": ETF_ASSET_SCOPE,
+                "target_trade_date": target_trade_date.isoformat(),
+                "latest_trade_date_before": _serialize_date(latest_before),
+                "error": "tushare_token_missing",
+                "message": "TUSHARE_TOKEN is required for CN ETF daily sync",
+            }
+
+        start_date = latest_before + timedelta(days=1) if latest_before is not None else None
+        start_text = start_date.isoformat() if start_date is not None and start_date <= target_trade_date else ""
+        output_dir = _results_root() / "ops" / "cn_etf_daily_sync" / local_now.strftime("%Y%m%dT%H%M%S")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            refresh_summary = etf_daily_refresher.run_refresh(
+                token=token,
+                start=start_text,
+                end=target_trade_date.isoformat(),
+                summary_out=output_dir / "summary.json",
+            )
+        except Exception as exc:
+            LOGGER.exception("CN ETF daily sync run failed")
+            return {
+                "status": "failed",
+                "sync_key": ETF_SYNC_KEY,
+                "asset_scope": ETF_ASSET_SCOPE,
+                "target_trade_date": target_trade_date.isoformat(),
+                "latest_trade_date_before": _serialize_date(latest_before),
+                "error": str(exc),
+                "message": str(exc) or "CN ETF daily sync failed",
+                "output_dir": str(output_dir),
+            }
+
+        latest_after = _latest_cn_etf_trade_date(conn=lock_conn)
+        success = latest_after is not None and latest_after >= target_trade_date
+        return {
+            "status": "success" if success else "failed",
+            "sync_key": ETF_SYNC_KEY,
+            "asset_scope": ETF_ASSET_SCOPE,
+            "target_trade_date": target_trade_date.isoformat(),
+            "latest_trade_date_before": _serialize_date(latest_before),
+            "latest_trade_date_after": _serialize_date(latest_after),
+            "freshness_basis": ETF_FRESHNESS_BASIS,
+            "rows_upserted": int(refresh_summary.get("rows_inserted") or 0),
+            "refresh_summary": refresh_summary,
+            "output_dir": str(output_dir),
+            "message": "CN ETF daily sync completed" if success else "CN ETF daily sync finished without reaching target trade date",
+        }
+    finally:
+        if lock_conn is not None:
+            _advisory_unlock(lock_conn, ETF_SYNC_KEY)
+            lock_conn.close()
+        _ETF_RUN_LOCK.release()
 
 
 def _format_status_message(
@@ -903,7 +1030,7 @@ def _build_cn_etf_market_data_sync_status(now: datetime | None = None) -> dict[s
 
     payload = _build_status_payload(
         status=status,
-        scheduler_enabled=False,
+        scheduler_enabled=etf_sync_scheduler_enabled(),
         target_trade_date=target_trade_date,
         latest_success_trade_date=latest_available_trade_date,
         latest_available_trade_date=latest_available_trade_date,
@@ -1038,20 +1165,26 @@ def build_market_data_sync_status(
 
 
 def _scheduler_loop() -> None:
-    LOGGER.info("CN daily sync scheduler started")
+    LOGGER.info("CN market data sync scheduler started")
     while not _SCHEDULER_STOP.wait(_poll_seconds()):
         if not _schedule_window_open():
             continue
-        try:
-            run_cn_daily_sync_once()
-        except Exception:
-            LOGGER.exception("CN daily sync run failed")
+        if sync_scheduler_enabled():
+            try:
+                run_cn_daily_sync_once()
+            except Exception:
+                LOGGER.exception("CN A-share daily sync run failed")
+        if etf_sync_scheduler_enabled():
+            try:
+                run_cn_etf_daily_sync_once()
+            except Exception:
+                LOGGER.exception("CN ETF daily sync run failed")
 
 
 def start_market_data_sync_scheduler() -> None:
     global _SCHEDULER_THREAD
-    if not sync_scheduler_enabled():
-        LOGGER.info("CN daily sync scheduler disabled")
+    if not sync_scheduler_enabled() and not etf_sync_scheduler_enabled():
+        LOGGER.info("CN market data sync scheduler disabled")
         return
     with _SCHEDULER_LOCK:
         if _SCHEDULER_THREAD is not None and _SCHEDULER_THREAD.is_alive():
@@ -1063,7 +1196,8 @@ def start_market_data_sync_scheduler() -> None:
             daemon=True,
         )
         try:
-            ensure_sync_runs_table()
+            if sync_scheduler_enabled():
+                ensure_sync_runs_table()
         except Exception:
             LOGGER.exception("failed to initialize CN daily sync status table during startup; scheduler will retry")
         _SCHEDULER_THREAD.start()
@@ -1087,7 +1221,9 @@ __all__ = [
     "ensure_sync_runs_table",
     "resolve_target_trade_date",
     "run_cn_daily_sync_once",
+    "run_cn_etf_daily_sync_once",
     "_schedule_window_open",
+    "etf_sync_scheduler_enabled",
     "start_market_data_sync_scheduler",
     "stop_market_data_sync_scheduler",
     "sync_scheduler_enabled",

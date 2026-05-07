@@ -36,6 +36,8 @@ def apply_universe_runtime_cfg(
     if "benchmark" in wb_universe and wb_universe.get("benchmark") is not None:
         universe["benchmark"] = str(wb_universe.get("benchmark"))
         benchmark_written = True
+    if "price_adj" in wb_universe and wb_universe.get("price_adj") is not None:
+        universe["price_adj"] = str(wb_universe.get("price_adj"))
     if isinstance(wb_universe.get("symbols"), list):
         universe["symbols"] = list(wb_universe.get("symbols") or [])
     if wb_universe.get("membership_mode") is not None:
@@ -50,6 +52,8 @@ def apply_universe_runtime_cfg(
         if getattr(body, "benchmark", None) is not None:
             universe["benchmark"] = str(getattr(body, "benchmark"))
             benchmark_written = True
+        if getattr(body, "price_adj", None) is not None:
+            universe["price_adj"] = str(getattr(body, "price_adj"))
         if getattr(body, "symbols", None):
             universe["symbols"] = list(getattr(body, "symbols"))
     if asset_scope == "cn_etf" and not benchmark_written:

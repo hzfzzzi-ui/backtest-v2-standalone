@@ -999,9 +999,11 @@ class MultiAlphaSignalProvider:
         meta["alpha_family"] = alpha_family
         meta["alpha_source"] = alpha_id
         meta["sleeve_id"] = sleeve_id
+        meta["owner_system"] = sleeve_id
         meta["entry_alpha_id"] = alpha_id
         meta["entry_sleeve_id"] = sleeve_id
         meta["entry_reason_code"] = str(signal.reason_code or signal.reason or "")
+        meta["formal_reason_codes"] = [str(signal.reason_code or signal.reason or "")]
         if raw_score is not None:
             meta["raw_score"] = float(raw_score)
         if compose_score is not None:

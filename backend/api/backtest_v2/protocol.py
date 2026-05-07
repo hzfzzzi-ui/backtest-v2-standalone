@@ -11,6 +11,7 @@ ARTIFACT_FILENAMES: dict[str, str] = {
     "reason_codes": "reason_codes.csv",
     "config": "config.json",
     "run_meta": "run_meta.json",
+    "execution_contract": "execution_contract.json",
     "trades": "portfolio_trades.csv",
     "orders": "orders.csv",
     "daily": "portfolio_daily.csv",

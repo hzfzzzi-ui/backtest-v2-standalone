@@ -37,6 +37,7 @@ class DataSourceConfig:
     v2_runtime_stocks_table: str = "pams_ohlcv_daily_v2_runtime"
     v2_schema_mapping_table: str = "pams_ohlcv_daily_v2"
     index_table: str = "pit_index_daily"
+    cn_etf_dividend_table: str = "pit_cn_etf_dividend_events"
     prefer_index_table: bool = True
     allow_cn_index_in_stocks_table: bool = False
     cn_index_filter_column: str = "market"
@@ -82,6 +83,7 @@ class ExecutionConfig:
     block_buy_if_holding: bool = True
     allow_pyramiding: bool = False
     skip_if_no_cash: bool = True
+    dividend_cash_timing_mode: str = "pay_date"
 
 
 @dataclass(slots=True)
@@ -98,7 +100,7 @@ class SizingConfig:
     weight_mode: str = "equal"
     # Minimum position count for sizing denominator (prevents over-concentration)
     min_positions: int = 10
-    # Light rank-based tilt on top of equal sizing. Uses existing mf_rank ordering.
+    # Light rank-based tilt on top of equal sizing. Canonical runtime ordering is final_score_rank.
     tilt_strength: float = 0.0
     tilt_top_n: int = 3
     tilt_bottom_n: int = 2
@@ -203,6 +205,9 @@ class MarketFilterConfig:
     trans_up_multiplier: float | None = None
     bear_multiplier: float | None = None
     freeze_trans_up_entries: bool = False
+    allow_trans_up_recovery_entries_when_benchmark_off: bool = True
+    trans_up_recovery_entry_scale_when_benchmark_off: float = 1.0
+    trans_up_recovery_confirmed_top_up_scale_when_benchmark_on: float = 0.0
     ema_light_fast: int = 5
     ema_light_slow: int = 20
 

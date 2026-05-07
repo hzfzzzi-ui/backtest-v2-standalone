@@ -14,8 +14,10 @@ from backend.api.backtest_v2.semantic_config_compiler import (
 )
 from backend.api.shared.json_utils import sanitize_json
 from backend.core.config.asset_profiles import build_asset_context, canonical_asset_scope
+from backend.core.engine_vector.factor_insertion_contracts import validate_asset_context_factor_insertion_contracts
 from backend.core.services.cn_stock_etf_unified_runtime_service import run_cn_stock_etf_unified_runtime
 from backend.core.services.experiment_artifact_service import stabilize_experiment_output
+from backend.core.tools import baseline_access
 from backend.core.tools.locked_candidate_presets import is_locked_candidate_preset
 from backend.core.tools.saved_config_access import resolve_runtime_config_source
 
@@ -113,7 +115,30 @@ def run_experiment_request_body(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"invalid config json: {cfg_path} ({exc})")
 
-    semantic_cfg_input = validate_semantic_config_json(body.config_json) if isinstance(body.config_json, dict) else None
+    config_json_payload = body.config_json if isinstance(body.config_json, dict) else None
+    baseline_id = str(getattr(body, "baseline_id", "") or "").strip()
+    if isinstance(config_json_payload, dict) and baseline_id:
+        try:
+            bound_execution_contract = baseline_access.load_baseline_execution_contract(baseline_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"baseline execution contract could not be resolved: {baseline_id} ({exc})",
+            ) from exc
+        config_json_payload = sanitize_json(dict(config_json_payload))
+        unified_runtime_seed = (
+            config_json_payload.get("unified_runtime")
+            if isinstance(config_json_payload.get("unified_runtime"), dict)
+            else {}
+        )
+        config_json_payload["unified_runtime"] = sanitize_json(
+            {
+                **dict(unified_runtime_seed or {}),
+                "execution_contract": bound_execution_contract,
+            }
+        )
+
+    semantic_cfg_input = validate_semantic_config_json(config_json_payload) if isinstance(config_json_payload, dict) else None
     semantic_compile: dict[str, Any] | None = None
     if isinstance(semantic_cfg_input, dict):
         coexisting_inputs_present = [
@@ -273,6 +298,12 @@ def run_experiment_request_body(
         if key in _CANONICAL_ASSET_CONTEXT_KEYS:
             continue
         merged_asset_context[key] = value
+    contract_errors = validate_asset_context_factor_insertion_contracts(merged_asset_context)
+    if contract_errors:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "invalid asset_context factor insertion contracts", "errors": contract_errors},
+        )
     overrides["asset_context"] = sanitize_json(merged_asset_context)
     if use_script_cfg or runtime_config_supplied:
         wb_uni = effective_wb_cfg_dict.get("universe") if isinstance(effective_wb_cfg_dict.get("universe"), dict) else {}
@@ -295,18 +326,24 @@ def run_experiment_request_body(
             overrides["industries"] = list(body.industries)
         if body.price_adj and not runtime_config_supplied:
             overrides["price_adj"] = str(body.price_adj)
-        if body.enable_strength_rank is not None and not runtime_config_supplied:
-            overrides["enable_strength_rank"] = bool(body.enable_strength_rank)
-        if body.strength_ma is not None and not runtime_config_supplied:
-            overrides["strength_ma"] = int(body.strength_ma)
-        if body.strength_top_k_mode is not None and not runtime_config_supplied:
-            overrides["strength_top_k_mode"] = str(body.strength_top_k_mode)
-        if body.enable_multifactor_rank is not None and not runtime_config_supplied:
-            overrides["enable_multifactor_rank"] = bool(body.enable_multifactor_rank)
-        if body.mf_topk is not None and not runtime_config_supplied:
-            overrides["mf_topk"] = int(body.mf_topk)
-        if body.momentum_top_pct is not None and not runtime_config_supplied:
-            overrides["momentum_top_pct"] = float(body.momentum_top_pct)
+    if body.enable_strength_rank is not None:
+        overrides["enable_strength_rank"] = bool(body.enable_strength_rank)
+    if body.strength_ma is not None:
+        overrides["strength_ma"] = int(body.strength_ma)
+    if body.strength_top_k_mode is not None:
+        overrides["strength_top_k_mode"] = str(body.strength_top_k_mode)
+    if body.enable_multifactor_rank is not None:
+        overrides["enable_multifactor_rank"] = bool(body.enable_multifactor_rank)
+    if body.mf_topk is not None:
+        overrides["mf_topk"] = int(body.mf_topk)
+    if getattr(body, "mf_concentrate_topn", None) is not None:
+        overrides["mf_concentrate_topn"] = int(body.mf_concentrate_topn)
+    if getattr(body, "mf_concentrate_scale", None) is not None:
+        overrides["mf_concentrate_scale"] = float(body.mf_concentrate_scale)
+    if getattr(body, "mf_rank_gate_mode", None) is not None:
+        overrides["mf_rank_gate_mode"] = str(body.mf_rank_gate_mode)
+    if body.momentum_top_pct is not None:
+        overrides["momentum_top_pct"] = float(body.momentum_top_pct)
     if semantic_compile is not None:
         semantic_compile["compiled_plan"] = sanitize_json(
             {
@@ -323,11 +360,19 @@ def run_experiment_request_body(
         "PAMS_PG_USER": os.environ.get("PAMS_PG_USER"),
         "PAMS_PG_PASSWORD": os.environ.get("PAMS_PG_PASSWORD"),
     }
-    os.environ["PAMS_PG_HOST"] = os.environ.get("PGHOST", env_backup["PAMS_PG_HOST"] or "pams-postgres")
-    os.environ["PAMS_PG_PORT"] = os.environ.get("PGPORT", env_backup["PAMS_PG_PORT"] or "5432")
-    os.environ["PAMS_PG_DBNAME"] = os.environ.get("PGDATABASE", env_backup["PAMS_PG_DBNAME"] or "pams")
-    os.environ["PAMS_PG_USER"] = os.environ.get("PGUSER", env_backup["PAMS_PG_USER"] or "pams")
-    os.environ["PAMS_PG_PASSWORD"] = os.environ.get("PGPASSWORD", env_backup["PAMS_PG_PASSWORD"] or "")
+    # Only mirror explicit PG* overrides into PAMS_PG_* for the public runtime entry.
+    # When PG* is absent, keep PAMS_PG_* untouched so load_config can still fall back to .env.
+    pg_override_map = {
+        "PAMS_PG_HOST": os.environ.get("PGHOST"),
+        "PAMS_PG_PORT": os.environ.get("PGPORT"),
+        "PAMS_PG_DBNAME": os.environ.get("PGDATABASE"),
+        "PAMS_PG_USER": os.environ.get("PGUSER"),
+        "PAMS_PG_PASSWORD": os.environ.get("PGPASSWORD"),
+    }
+    for key, value in pg_override_map.items():
+        text = str(value or "").strip()
+        if text:
+            os.environ[key] = text
 
     try:
         unified_runtime = (

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from backend.core.services.sim_account_reconcile_service import run_position_aware_reconcile
+from backend.core.services import sim_account_domain_service as sim_account_domain
 from backend.core.services.sim_account_service import (
     default_sim_account_id,
     load_latest_holdings_snapshot,
@@ -120,8 +121,7 @@ def _resolve_source_path(source_path: str | None = None) -> Path | None:
 
 def auto_sync_enabled(source_path: str | None = None) -> bool:
     path = _source_path_text(source_path)
-    default = bool(path)
-    return _env_flag("SIM_ACCOUNT_AUTO_SYNC_ENABLED", default=default) and bool(path)
+    return _env_flag("SIM_ACCOUNT_AUTO_SYNC_ENABLED", default=False) and bool(path)
 
 
 def _base_status(*, account_id: str, source_path: str) -> dict[str, Any]:
@@ -146,6 +146,21 @@ def _write_status(results_root: Path, account_id: str, payload: Mapping[str, Any
     merged = {**base, **dict(payload or {})}
     merged["updated_at"] = str(merged.get("updated_at") or _now_iso())
     _atomic_write_json(_status_path(results_root, account_id), merged)
+    sim_account_domain.write_sync_log_entry(
+        results_root,
+        account_id=_normalize_account_id(account_id),
+        entry={
+            "event_type": f"auto_sync_{str(merged.get('status') or 'unknown')}",
+            "status": str(merged.get("status") or ""),
+            "snapshot_id": str(merged.get("snapshot_id") or ""),
+            "trade_date": str(merged.get("trade_date") or ""),
+            "reconcile_id": str(merged.get("reconcile_id") or ""),
+            "source_type": "auto_sync",
+            "message": str(merged.get("message") or ""),
+            "error": str(merged.get("error") or ""),
+            "created_at": str(merged.get("updated_at") or _now_iso()),
+        },
+    )
     return merged
 
 
@@ -199,6 +214,11 @@ def run_auto_sync(
     target_trade_date_text = target_trade_day.isoformat() if target_trade_day is not None else ""
 
     if not auto_sync_enabled(source_path):
+        disabled_message = (
+            "auto sync source path is not configured"
+            if not source_path_text
+            else "auto sync disabled by SIM_ACCOUNT_AUTO_SYNC_ENABLED"
+        )
         status_payload = _write_status(
             results_root,
             normalized_account_id,
@@ -206,7 +226,7 @@ def run_auto_sync(
                 "source_path": source_path_text,
                 "target_trade_date": target_trade_date_text,
                 "status": "disabled",
-                "message": "auto sync source path is not configured",
+                "message": disabled_message,
                 "error": "",
             },
         )
@@ -415,6 +435,24 @@ def run_auto_sync(
         return status_payload
 
     stored_snapshot_id = str(stored_snapshot.get("snapshot_id") or "")
+    previous_cash = float(previous_snapshot.get("cash") or 0.0) if isinstance(previous_snapshot, dict) else 0.0
+    current_cash = float(stored_snapshot.get("cash") or 0.0)
+    if current_cash != previous_cash:
+        sim_account_domain.write_cash_ledger_entry(
+            results_root,
+            account_id=normalized_account_id,
+            entry={
+                "entry_type": "snapshot_cash_refresh",
+                "amount": round(current_cash - previous_cash, 6),
+                "balance_before": previous_cash,
+                "balance_after": current_cash,
+                "reference_id": stored_snapshot_id,
+                "source_type": "auto_sync",
+                "message": "auto sync refreshed cash balance",
+                "created_at": str(stored_snapshot.get("synced_at") or _now_iso(now_ts)),
+            },
+            now_ts=now_ts,
+        )
     if target_trade_day is not None and snapshot_trade_day is not None and snapshot_trade_day < target_trade_day:
         status_payload = _write_status(
             results_root,

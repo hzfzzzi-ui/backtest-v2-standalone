@@ -901,3 +901,86 @@ class PostgresDataProvider(DataProvider):
                 "end": "",
             },
         )
+
+    def load_cn_etf_dividend_events(
+        self,
+        symbols: list[str] | None,
+        start: date,
+        end: date,
+    ) -> pd.DataFrame:
+        table = str(self._source.cn_etf_dividend_table or "pit_cn_etf_dividend_events")
+        try:
+            existing = self._get_table_columns(table)
+        except Exception:
+            return super().load_cn_etf_dividend_events(symbols, start, end)
+        if not existing:
+            return super().load_cn_etf_dividend_events(symbols, start, end)
+
+        cols = [
+            col
+            for col in (
+                "event_id",
+                "ts_code",
+                "symbol",
+                "ann_date",
+                "imp_ann_date",
+                "record_date",
+                "ex_date",
+                "pay_date",
+                "earpay_date",
+                "net_ex_date",
+                "div_cash",
+                "div_proc",
+                "base_date",
+                "base_unit",
+                "ear_distr",
+            )
+            if col in existing
+        ]
+        if not {"event_id", "symbol", "ts_code", "ex_date", "div_cash"}.issubset(set(cols)):
+            return super().load_cn_etf_dividend_events(symbols, start, end)
+
+        date_cols = {"ann_date", "imp_ann_date", "record_date", "ex_date", "pay_date", "earpay_date", "net_ex_date", "base_date"}
+        select_exprs = [
+            f"CAST({safe_ident(col)} AS TEXT) AS {safe_ident(col)}"
+            if col in date_cols
+            else safe_ident(col)
+            for col in cols
+        ]
+
+        q = (
+            f"SELECT {', '.join(select_exprs)} "
+            f"FROM {safe_ident(table)} "
+            "WHERE ex_date <= %s "
+            "AND COALESCE(pay_date, earpay_date, ex_date) >= %s "
+        )
+        params: list[Any] = [end, start]
+        if symbols:
+            normalized_symbols = sorted({normalize_cn_etf_symbol(symbol) for symbol in symbols if str(symbol).strip()})
+            normalized_ts_codes = sorted({normalize_cn_etf_ts_code(symbol) for symbol in symbols if str(symbol).strip()})
+            q += "AND (symbol = ANY(%s) OR ts_code = ANY(%s)) "
+            params.extend([normalized_symbols, normalized_ts_codes])
+        q += "ORDER BY ex_date, symbol, event_id"
+        raw = self._exec_df(
+            q,
+            tuple(params),
+            {
+                "provider": "postgres",
+                "source": "cn_etf_dividend_events",
+                "table": table,
+                "symbols": sorted(symbols or []),
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+        )
+        if raw.empty:
+            return pd.DataFrame(columns=cols)
+        out = raw.copy()
+        out["symbol"] = out["symbol"].astype(str).map(normalize_cn_etf_symbol)
+        out["ts_code"] = out["ts_code"].astype(str).map(normalize_cn_etf_ts_code)
+        for col in ("ann_date", "imp_ann_date", "record_date", "ex_date", "pay_date", "earpay_date", "net_ex_date", "base_date"):
+            if col in out.columns:
+                out[col] = pd.to_datetime(out[col], errors="coerce").dt.normalize()
+        if "div_cash" in out.columns:
+            out["div_cash"] = pd.to_numeric(out["div_cash"], errors="coerce")
+        return out

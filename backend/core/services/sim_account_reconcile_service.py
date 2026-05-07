@@ -25,10 +25,13 @@ from backend.core.services.sim_account_service import (
     default_sim_account_id,
     load_latest_holdings_snapshot,
 )
+from backend.core.services import sim_account_domain_service as sim_account_domain
 from backend.core.stage_pipeline.adapters.bridge_adapter import (
     StagePipelineBridgeRequest,
     StagePipelineBridgeRuntime,
 )
+from backend.core.stage_pipeline.adapters.candidate_boundary import build_candidate_boundary_result
+from backend.core.stage_pipeline.adapters.candidate_plan import build_candidate_plan_result
 from backend.core.stage_pipeline.adapters.daily_accounting import prepare_daily_snapshot
 from backend.core.stage_pipeline.contracts import StageOutputs
 from backend.core.strategies.registry import build_strategy
@@ -560,6 +563,24 @@ def _prepare_runtime_day(
         close_idx=runtime.close_idx,
         as_of_day=as_of_day,
     )
+    if not getattr(runtime, "_current_day", None) or not isinstance(runtime._current_day, dict):
+        runtime._current_day = {}
+    candidate_boundary = build_candidate_boundary_result(
+        runtime,
+        day=as_of_day,
+        controls=controls,
+        day_signals=day_signals,
+    )
+    next_open = _close_reference_map(runtime, as_of_day=as_of_day, day_signals=day_signals)
+    candidate_plan = build_candidate_plan_result(
+        runtime,
+        day=as_of_day,
+        controls=controls,
+        day_signals=day_signals,
+        candidate_boundary=candidate_boundary,
+        next_open=next_open,
+        nav=float(snapshot_day.nav),
+    )
     runtime._current_day = {
         "day": as_of_day,
         "nav": float(snapshot_day.nav),
@@ -567,7 +588,9 @@ def _prepare_runtime_day(
         "controls": controls,
         "accounting_snapshot": getattr(snapshot_day, "accounting_snapshot", None),
         "day_signals": day_signals,
-        "next_open": _close_reference_map(runtime, as_of_day=as_of_day, day_signals=day_signals),
+        "candidate_boundary": candidate_boundary,
+        "candidate_plan": candidate_plan,
+        "next_open": next_open,
         "holding_symbols": tuple(sorted(symbol for symbol, qty in runtime.positions.items() if int(qty) > 0)),
     }
     runtime._prepared_day_index = int(day_index)
@@ -792,6 +815,23 @@ def run_position_aware_reconcile(
     as_of_day = _parse_trade_date(resolved_as_of_date)
     _reset_runtime_ledger(runtime, snapshot, as_of_day=as_of_day)
     blocked_rows, stage_output = _prepare_runtime_day(runtime, as_of_day=as_of_day, snapshot=snapshot)
+    stage_payload = dict(stage_output.payload or {})
+    candidate_plan_payload = dict(stage_payload.get("candidate_plan") or {})
+    execution_kernel_payload = dict(stage_payload.get("execution_kernel") or {})
+    candidate_plan_reject_reason_counts = dict(candidate_plan_payload.get("reject_reason_counts") or {})
+    execution_kernel_reject_reason_counts = dict(execution_kernel_payload.get("reject_reason_counts") or {})
+    merged_reason_counts = dict(stage_output.reason_counts or {})
+    for reason, count in candidate_plan_reject_reason_counts.items():
+        key = str(reason or "").strip()
+        if not key:
+            continue
+        merged_reason_counts[key] = int(merged_reason_counts.get(key, 0)) + int(count or 0)
+    merged_order_reject_counts = dict(runtime.order_reject_reason_counts or {})
+    for reason, count in execution_kernel_reject_reason_counts.items():
+        key = str(reason or "").strip()
+        if not key:
+            continue
+        merged_order_reject_counts[key] = int(merged_order_reject_counts.get(key, 0)) + int(count or 0)
     action_sheet_payload = _build_action_sheet(
         snapshot,
         stage_output=stage_output,
@@ -801,8 +841,8 @@ def run_position_aware_reconcile(
         as_of_day=as_of_day,
     )
     diagnostics = {
-        "reason_counts": dict(stage_output.reason_counts or {}),
-        "order_reject_reason_counts": dict(runtime.order_reject_reason_counts or {}),
+        "reason_counts": merged_reason_counts,
+        "order_reject_reason_counts": merged_order_reject_counts,
         "blocked_count": len(blocked_rows),
         "market_state": str(((runtime._current_day or {}).get("controls") or {}).get("market_state") or ""),
         "trade_mode": str(((runtime._current_day or {}).get("controls") or {}).get("trade_mode") or ""),
@@ -821,7 +861,7 @@ def run_position_aware_reconcile(
                 "suggested_qty": row.get("suggested_qty"),
                 "target_qty": row.get("target_qty"),
                 "reference_price": row.get("reference_price"),
-                "reason_code": row.get("reason_code"),
+            "reason_code": row.get("reason_code"),
             }
             for row in list(action_sheet_payload.get("action_sheet") or [])
         ],
@@ -862,13 +902,13 @@ def run_position_aware_reconcile(
         },
         "action_sheet": action_sheet_payload["action_sheet"],
         "diagnostics": diagnostics,
-        "execution_intent": dict(((stage_output.payload or {}).get("execution_intent") or {})),
     }
 
     latest_path = _latest_reconcile_path(results_root, normalized_account_id)
     history_path = _reconcile_history_root(results_root, normalized_account_id) / f"{reconcile_id}.json"
     _atomic_write_json(history_path, payload)
     _atomic_write_json(latest_path, payload)
+    sim_account_domain.write_reconcile_summary(results_root, payload)
     _append_jsonl(
         _audit_log_path(results_root, normalized_account_id),
             {
@@ -890,7 +930,14 @@ def run_position_aware_reconcile(
     return payload
 
 
+def load_latest_reconcile_summary(results_root: Path, account_id: str | None = None) -> dict[str, Any] | None:
+    normalized_account_id = _normalize_account_id(str(account_id or default_sim_account_id()))
+    payload = sim_account_domain.load_latest_reconcile_summary(results_root, normalized_account_id)
+    return payload or None
+
+
 __all__ = [
     "load_latest_reconcile_run",
+    "load_latest_reconcile_summary",
     "run_position_aware_reconcile",
 ]

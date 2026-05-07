@@ -26,6 +26,9 @@ from backend.core.data.price_limits import (
     compute_limit_prices as _shared_compute_limit_prices,
     limit_pct_for_symbol as _shared_limit_pct_for_symbol,
 )
+from backend.core.data.pg_env import connect as pg_connect
+from backend.core.data.pg_env import load_db_settings as load_shared_db_settings
+from backend.core.data.pg_env import read_env_file as read_shared_env_file
 from backend.core.data.mapping import normalize_index_symbol
 
 DEFAULT_OUTPUT_ROOT = ROOT / "outputs" / "ops"
@@ -100,52 +103,18 @@ def _normalize_stock_symbol(symbol: str) -> str:
 
 
 def _load_env_file() -> dict[str, str]:
-    env_path = ROOT / ".env"
-    out: dict[str, str] = {}
-    if not env_path.exists():
-        return out
-    for raw in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        out[key.strip()] = value.strip()
-    return out
+    return read_shared_env_file(ROOT)
 
 
 def _load_db_settings() -> DbSettings:
-    file_env = _load_env_file()
-    cfg = {}
-    if DEFAULT_CONFIG_PATH.exists():
-        cfg = json.loads(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8-sig"))
-    db_cfg = dict(cfg.get("db") or {})
-    return DbSettings(
-        host=str(os.environ.get("PGHOST") or os.environ.get("PAMS_PG_HOST") or db_cfg.get("host") or "pams-postgres"),
-        port=int(os.environ.get("PGPORT") or os.environ.get("PAMS_PG_PORT") or db_cfg.get("port") or 5432),
-        dbname=str(os.environ.get("PGDATABASE") or os.environ.get("PAMS_PG_DBNAME") or db_cfg.get("dbname") or "pams"),
-        user=str(os.environ.get("PGUSER") or os.environ.get("PAMS_PG_USER") or db_cfg.get("user") or "pams"),
-        password=str(
-            os.environ.get("PGPASSWORD")
-            or os.environ.get("PAMS_PG_PASSWORD")
-            or file_env.get("POSTGRES_PASSWORD")
-            or db_cfg.get("password")
-            or ""
-        ),
-    )
+    settings = load_shared_db_settings(config_path=DEFAULT_CONFIG_PATH, root=ROOT)
+    return DbSettings(settings.host, settings.port, settings.dbname, settings.user, settings.password)
 
 
 def _connect():
     if psycopg is None:  # pragma: no cover
         raise RuntimeError("psycopg is required")
-    db = _load_db_settings()
-    return psycopg.connect(
-        host=db.host,
-        port=db.port,
-        dbname=db.dbname,
-        user=db.user,
-        password=db.password,
-        autocommit=False,
-    )
+    return pg_connect(config_path=DEFAULT_CONFIG_PATH, root=ROOT, autocommit=False)
 
 
 def _iter_dates(start: date, end: date) -> Iterable[date]:

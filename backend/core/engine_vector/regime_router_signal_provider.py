@@ -170,7 +170,7 @@ class RegimeRouterSignalProvider:
                 self.regime_mr_days += 1
 
         positions_before_sell = int(sum(1 for qty in positions.values() if int(qty) > 0))
-        exit_rule_sells, exit_rule_syms, ecounts = evaluate_engine_exits(
+        exit_rule_sells, exit_rule_syms, ecounts, _fragility_diagnostics = evaluate_engine_exits(
             positions=positions,
             day=day,
             close_idx=close_idx,

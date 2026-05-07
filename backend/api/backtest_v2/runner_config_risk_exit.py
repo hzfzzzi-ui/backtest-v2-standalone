@@ -308,6 +308,15 @@ def _apply_market_filter_cfg(cfg: dict[str, Any], pos_risk: dict[str, Any]) -> N
     if mf_cfg.get("bear_multiplier") is not None:
         market_filter["bear_multiplier"] = float(mf_cfg.get("bear_multiplier"))
     market_filter["freeze_trans_up_entries"] = bool(mf_cfg.get("freeze_trans_up_entries", False))
+    market_filter["allow_trans_up_recovery_entries_when_benchmark_off"] = bool(
+        mf_cfg.get("allow_trans_up_recovery_entries_when_benchmark_off", True)
+    )
+    market_filter["trans_up_recovery_entry_scale_when_benchmark_off"] = float(
+        mf_cfg.get("trans_up_recovery_entry_scale_when_benchmark_off", 1.0) or 1.0
+    )
+    market_filter["trans_up_recovery_confirmed_top_up_scale_when_benchmark_on"] = float(
+        mf_cfg.get("trans_up_recovery_confirmed_top_up_scale_when_benchmark_on", 0.0) or 0.0
+    )
     market_filter["ema_light_fast"] = int(mf_cfg.get("ema_light_fast", 5))
     market_filter["ema_light_slow"] = int(mf_cfg.get("ema_light_slow", 20))
 

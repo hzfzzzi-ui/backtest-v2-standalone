@@ -221,9 +221,9 @@ FORMAL_AUDIT_WINDOWS: tuple[FormalAuditWindow, ...] = (
         end_date=date(2017, 12, 29),
     ),
     FormalAuditWindow(
-        key="2007_2026",
-        label="2007-2026",
-        start_date=DEFAULT_BACKFILL_START,
+        key="2012_2026",
+        label="2012-2026",
+        start_date=date(2012, 1, 4),
         end_date=OFFICIAL_END_DATE,
     ),
 )
@@ -234,7 +234,7 @@ FORMAL_AUDIT_REQUIRED_WINDOW_KEYS: tuple[str, ...] = (
 )
 
 FORMAL_AUDIT_ADVISORY_WINDOW_KEYS: tuple[str, ...] = (
-    "2007_2026",
+    "2012_2026",
 )
 
 

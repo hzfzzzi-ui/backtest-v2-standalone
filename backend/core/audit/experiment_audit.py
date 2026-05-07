@@ -59,6 +59,25 @@ def _normalize_positions(raw: Any) -> dict[str, int] | None:
     return out
 
 
+def _normalize_corporate_action_deltas(raw: Any) -> dict[str, int]:
+    if not isinstance(raw, list):
+        return {}
+    out: dict[str, int] = {}
+    for item in list(raw):
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").lower().strip()
+        prev_qty = _safe_int(item.get("prev_qty"))
+        adjusted_qty = _safe_int(item.get("adjusted_qty"))
+        if not symbol or prev_qty is None or adjusted_qty is None:
+            continue
+        delta = int(adjusted_qty) - int(prev_qty)
+        if delta == 0:
+            continue
+        out[symbol] = int(out.get(symbol, 0)) + int(delta)
+    return out
+
+
 def _append_sample(target: list[dict[str, Any]], sample: dict[str, Any]) -> None:
     if len(target) < _MAX_ACCOUNTING_SAMPLES:
         target.append(sample)
@@ -85,6 +104,8 @@ def _unknown_accounting_integrity(reason: str) -> dict[str, Any]:
             "missing_evidence_days": 0,
             "cash_check_pass": 0,
             "cash_check_fail": 0,
+            "receivable_check_pass": 0,
+            "receivable_check_fail": 0,
             "position_check_pass": 0,
             "position_check_fail": 0,
             "nav_check_pass": 0,
@@ -96,6 +117,7 @@ def _unknown_accounting_integrity(reason: str) -> dict[str, Any]:
         "samples": {
             "missing_evidence": [],
             "cash_check_fail": [],
+            "receivable_check_fail": [],
             "position_check_fail": [],
             "nav_check_fail": [],
             "invalid_nav": [],
@@ -120,10 +142,12 @@ def build_accounting_integrity_audit(
         return _unknown_accounting_integrity("Insufficient canonical accounting snapshots.")
 
     prev_positions: dict[str, int] = {}
+    receivable_before = 0.0
     prev_effective_max_positions: int | None = None
     samples = {
         "missing_evidence": [],
         "cash_check_fail": [],
+        "receivable_check_fail": [],
         "position_check_fail": [],
         "nav_check_fail": [],
         "invalid_nav": [],
@@ -136,6 +160,8 @@ def build_accounting_integrity_audit(
         "missing_evidence_days": 0,
         "cash_check_pass": 0,
         "cash_check_fail": 0,
+        "receivable_check_pass": 0,
+        "receivable_check_fail": 0,
         "position_check_pass": 0,
         "position_check_fail": 0,
         "nav_check_pass": 0,
@@ -149,6 +175,7 @@ def build_accounting_integrity_audit(
         row = dict(raw_row or {})
         day = str(row.get("day") or "").strip()
         cash_after = _safe_float(row.get("cash_after"))
+        dividend_receivable_after = _safe_float(row.get("dividend_receivable_after"))
         nav = _safe_float(row.get("nav"))
         market_value = _safe_float(row.get("market_value"))
         effective_max_positions = _safe_int(row.get("effective_max_positions"))
@@ -171,6 +198,7 @@ def build_accounting_integrity_audit(
                 {
                     "day": day or None,
                     "cash_after_present": cash_after is not None,
+                    "dividend_receivable_after_present": dividend_receivable_after is not None,
                     "nav_present": nav is not None,
                     "market_value_present": market_value is not None,
                     "positions_after_present": positions_after is not None,
@@ -183,6 +211,9 @@ def build_accounting_integrity_audit(
 
         buy_net = 0.0
         sell_net = 0.0
+        dividend_cash_credit = _safe_float(row.get("dividend_cash_credit_today")) or 0.0
+        dividend_receivable_create = _safe_float(row.get("dividend_receivable_create_today")) or 0.0
+        dividend_receivable_settle = _safe_float(row.get("dividend_receivable_settle_today")) or 0.0
         trade_deltas: dict[str, int] = {}
         trade_rows_valid = True
         for raw_trade in trade_rows:
@@ -214,7 +245,7 @@ def build_accounting_integrity_audit(
 
         summary["days_with_evidence"] += 1
 
-        expected_cash_after = float(cash_before) + float(sell_net) - float(buy_net)
+        expected_cash_after = float(cash_before) + float(sell_net) + float(dividend_cash_credit) - float(buy_net)
         cash_tol = _cash_tolerance(expected_cash_after, cash_after, trade_count=len(trade_rows))
         cash_ok = abs(float(cash_after) - float(expected_cash_after)) <= cash_tol
         if cash_ok:
@@ -229,11 +260,39 @@ def build_accounting_integrity_audit(
                     "cash_after": round(float(cash_after), 4),
                     "expected_cash_after": round(float(expected_cash_after), 4),
                     "sell_net": round(float(sell_net), 4),
+                    "dividend_cash_credit": round(float(dividend_cash_credit), 4),
                     "buy_net": round(float(buy_net), 4),
                 },
             )
 
+        expected_receivable_after = float(receivable_before) + float(dividend_receivable_create) - float(dividend_receivable_settle)
+        actual_receivable_after = float(dividend_receivable_after or 0.0)
+        receivable_tol = _accounting_scale_tolerance(
+            expected_receivable_after,
+            actual_receivable_after,
+            floor=_NAV_TOL,
+        )
+        receivable_ok = abs(actual_receivable_after - float(expected_receivable_after)) <= receivable_tol
+        if receivable_ok:
+            summary["receivable_check_pass"] += 1
+        else:
+            summary["receivable_check_fail"] += 1
+            _append_sample(
+                samples["receivable_check_fail"],
+                {
+                    "day": day,
+                    "receivable_before": round(float(receivable_before), 4),
+                    "receivable_after": round(float(actual_receivable_after), 4),
+                    "expected_receivable_after": round(float(expected_receivable_after), 4),
+                    "dividend_receivable_create": round(float(dividend_receivable_create), 4),
+                    "dividend_receivable_settle": round(float(dividend_receivable_settle), 4),
+                },
+            )
+
         expected_positions = dict(prev_positions)
+        corporate_action_deltas = _normalize_corporate_action_deltas(row.get("corporate_action_adjustments"))
+        for symbol, delta in corporate_action_deltas.items():
+            expected_positions[symbol] = int(expected_positions.get(symbol, 0)) + int(delta)
         for symbol, delta in trade_deltas.items():
             expected_positions[symbol] = int(expected_positions.get(symbol, 0)) + int(delta)
         expected_positions = {symbol: qty for symbol, qty in expected_positions.items() if int(qty) > 0}
@@ -256,6 +315,7 @@ def build_accounting_integrity_audit(
                         for symbol in mismatch_symbols
                         if int(expected_positions.get(symbol, 0)) != int(positions_after.get(symbol, 0))
                     ][:5],
+                    "corporate_action_symbols": sorted(corporate_action_deltas),
                 },
             )
 
@@ -271,7 +331,7 @@ def build_accounting_integrity_audit(
                 },
             )
         else:
-            expected_nav = float(cash_after) + float(market_value)
+            expected_nav = float(cash_after) + float(actual_receivable_after) + float(market_value)
             nav_tol = _accounting_scale_tolerance(expected_nav, nav, floor=_NAV_TOL)
             nav_ok = abs(float(nav) - float(expected_nav)) <= nav_tol
             if nav_ok:
@@ -285,6 +345,7 @@ def build_accounting_integrity_audit(
                         "nav": round(float(nav), 4),
                         "expected_nav": round(float(expected_nav), 4),
                         "cash_after": round(float(cash_after), 4),
+                        "dividend_receivable_after": round(float(actual_receivable_after), 4),
                         "market_value": round(float(market_value), 4),
                     },
                 )
@@ -329,6 +390,7 @@ def build_accounting_integrity_audit(
             )
 
         cash_before = float(cash_after)
+        receivable_before = float(actual_receivable_after)
         prev_positions = dict(positions_after)
         prev_effective_max_positions = (
             int(effective_max_positions)
@@ -338,6 +400,7 @@ def build_accounting_integrity_audit(
 
     hard_fail_count = (
         int(summary["cash_check_fail"])
+        + int(summary["receivable_check_fail"])
         + int(summary["position_check_fail"])
         + int(summary["nav_check_fail"])
         + int(summary["negative_cash_days"])

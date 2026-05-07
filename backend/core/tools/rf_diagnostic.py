@@ -17,8 +17,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
 from backend.core.config.loader import load_config
-from backend.core.data.cached_provider import CachedDataProvider
-from backend.core.data.pg_provider import PostgresDataProvider
+from backend.core.data.provider_factory import build_runtime_provider_from_config
 from backend.core.data.price_adjust import apply_price_adjustment
 from backend.core.engine_vector.data_matrix import OhlcMatrices, build_ohlc_matrices_from_history
 from backend.core.engine_vector.regime_filter import RegimeFilter, RegimeFilterConfig
@@ -29,14 +28,10 @@ def main():
     cfg_path = ROOT / "backend" / "configs" / "sweep" / "r3_regime_filter_csi800.json"
     cfg_obj, _ = load_config(str(cfg_path))
 
-    provider = CachedDataProvider(
-        inner=PostgresDataProvider(
-            db=cfg_obj.db,
-            runtime=cfg_obj.db_runtime,
-            data_source=cfg_obj.data_source,
-            schema_mapping=cfg_obj.schema_mapping,
-            rules_path=cfg_path.parent / "instrument_rules_cn.csv",
-        )
+    provider = build_runtime_provider_from_config(
+        cfg_obj,
+        cfg_path.parent / "instrument_rules_cn.csv",
+        use_cache=True,
     )
 
     # ── Universe ──

@@ -84,6 +84,7 @@ def write_manifest(results_dir: Path, result: dict[str, Any]) -> tuple[Path, dic
         "reason_codes",
         "config",
         "run_meta",
+        "execution_contract",
         "trades",
         "daily",
         "input_config",

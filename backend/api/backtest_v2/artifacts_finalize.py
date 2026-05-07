@@ -27,6 +27,11 @@ from backend.api.backtest_v2.artifacts_io import (
     _write_canonical_csv,
 )
 from backend.api.backtest_v2.artifacts_manifest import _generate_experiment_label
+from backend.api.backtest_v2.runner_output_helpers import (
+    build_execution_contract_ref,
+    build_single_execution_contract,
+    write_execution_contract_snapshot,
+)
 from backend.api.backtest_v2.artifacts_stage_summary import (
     _extract_stage_pipeline_summary,
     _extract_stage_summary,
@@ -38,6 +43,7 @@ from backend.core.audit.experiment_audit import merge_experiment_audit
 from backend.core.audit.attribution_audit import build_attribution_audit
 from backend.core.audit.regime_audit import write_regime_audit_artifacts
 from backend.core.audit.research_audit import build_research_audit
+from backend.core.data.pg_env import connect as pg_connect
 from backend.core.config.asset_profiles import build_asset_context
 from backend.core.config.cn_a_governed_mainline import (
     build_governed_a_share_contract,
@@ -52,6 +58,23 @@ from backend.core.config.models import DataSourceConfig
 from backend.core.stage_pipeline.adapters.lineage import LINEAGE_LEDGER_COLUMNS
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_market_data_contract(
+    *,
+    base_cfg: dict[str, Any],
+    runtime_cfg: dict[str, Any],
+    resolved_stocks_table: str,
+) -> str:
+    for candidate in (runtime_cfg.get("market_data_contract"), base_cfg.get("market_data_contract")):
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    if resolved_stocks_table == "pams_ohlcv_daily_v2_runtime":
+        return "compat_runtime_migration"
+    if resolved_stocks_table == "pams_ohlcv_daily_v2":
+        return "canonical_market"
+    return ""
 
 
 def _write_nav_csv(results_dir: Path, result: dict[str, Any]) -> Path:
@@ -132,9 +155,9 @@ def _resolve_regime_meta(base_cfg: dict[str, Any], runtime_cfg: dict[str, Any]) 
             "regime_semantics": regime_semantics,
             "state_contract": {
                 "primary": "five_state",
-                "primary_states": ["BULL", "TRANS_UP", "LIGHT", "TRANS_DOWN", "RISK_OFF"],
-                "coarse": "derived_three_state",
-                "coarse_states": ["RISK_ON", "NEUTRAL", "RISK_OFF"],
+                "primary_states": ["BULL", "TRANS_UP", "TRANS_DOWN", "RISK_OFF"],
+                "coarse": "derived_two_state",
+                "coarse_states": ["RISK_ON", "RISK_OFF"],
             },
             "subscore_contract": {
                 "technical": "required",
@@ -227,7 +250,9 @@ def _extract_latest_regime_snapshot(daily_df: pd.DataFrame) -> dict[str, Any] | 
                 "scope": parsed_override.get("scope"),
                 "actor": parsed_override.get("actor"),
                 "effective_window": parsed_override.get("effective_window"),
-                "target_state_5": parsed_override.get("target_state_5"),
+                "target_state_5": canonical_state_5(parsed_override.get("target_state_5"))
+                if str(parsed_override.get("target_state_5") or "").strip()
+                else None,
                 "risk_budget_multiplier": _safe_float(parsed_override.get("risk_budget_multiplier")),
                 "defense_bias": _safe_float(parsed_override.get("defense_bias")),
             }
@@ -326,7 +351,6 @@ def _load_close_history_df(
     if not symbols or not start_date or not end_date:
         return _empty_close_history_frame()
     try:
-        import psycopg
         from backend.core.data.mapping import safe_ident
 
         ds = dict(base_cfg.get("data_source") or {})
@@ -346,18 +370,10 @@ def _load_close_history_df(
             f"AND {safe_ident(symbol_col)} = ANY(%s) "
             f"ORDER BY {safe_ident(date_col)} ASC"
         )
-        conn = psycopg.connect(
-            host=os.environ.get("PGHOST", os.environ.get("PAMS_PG_HOST", "pams-postgres")),
-            port=int(os.environ.get("PGPORT", os.environ.get("PAMS_PG_PORT", "5432"))),
-            dbname=os.environ.get("PGDATABASE", os.environ.get("PAMS_PG_DBNAME", "pams")),
-            user=os.environ.get("PGUSER", os.environ.get("PAMS_PG_USER", "pams")),
-            password=os.environ.get("PGPASSWORD", os.environ.get("PAMS_PG_PASSWORD", "")),
-            autocommit=True,
-        )
-        with conn.cursor() as cur:
+        root = Path(__file__).resolve().parents[3]
+        with pg_connect(root=root, autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(query, (start_date, end_date, list({str(s).lower() for s in symbols})))
             rows = cur.fetchall()
-        conn.close()
         if not rows:
             return _empty_close_history_frame()
         df = pd.DataFrame(rows, columns=["symbol", "trade_date", "close"])
@@ -605,9 +621,24 @@ def ensure_standard_artifacts(
     runtime_ds = dict(runtime_cfg.get("data_source") or {}) if isinstance(runtime_cfg.get("data_source"), dict) else {}
     base_ds = dict(base_cfg.get("data_source") or {}) if isinstance(base_cfg.get("data_source"), dict) else {}
     ds_cfg = DataSourceConfig(**{**base_ds, **runtime_ds})
-    resolved_data_role = str(runtime_ds.get("data_role") or overrides.get("data_role") or base_ds.get("data_role") or ds_cfg.resolved_data_role())
     resolved_stocks_table = ds_cfg.resolved_stocks_table()
     resolved_stocks_mapping_table = ds_cfg.resolved_stocks_mapping_table()
+    resolved_market_data_contract = _resolve_market_data_contract(
+        base_cfg=base_cfg,
+        runtime_cfg=runtime_cfg,
+        resolved_stocks_table=resolved_stocks_table,
+    )
+    explicit_data_role = str(
+        runtime_ds.get("data_role") or overrides.get("data_role") or base_ds.get("data_role") or ""
+    ).strip()
+    if explicit_data_role:
+        resolved_data_role = explicit_data_role
+    elif resolved_market_data_contract == "compat_runtime_migration":
+        resolved_data_role = "v2_runtime"
+    elif resolved_market_data_contract == "canonical_market" and resolved_stocks_table == "pams_ohlcv_daily_v2":
+        resolved_data_role = "v2_canonical"
+    else:
+        resolved_data_role = ds_cfg.resolved_data_role()
 
     def _pick_with_source(candidates: list[tuple[Any, str]]) -> tuple[Any, str]:
         for value, source in candidates:
@@ -640,6 +671,9 @@ def ensure_standard_artifacts(
     if resolved_config_meta is not None and resolved_data_role and not resolved_config_meta.get("data_role"):
         resolved_config_meta = dict(resolved_config_meta)
         resolved_config_meta["data_role"] = resolved_data_role
+    if resolved_config_meta is not None and resolved_market_data_contract and not resolved_config_meta.get("market_data_contract"):
+        resolved_config_meta = dict(resolved_config_meta)
+        resolved_config_meta["market_data_contract"] = resolved_market_data_contract
     universe_meta_obj = dict(result.get("universe_meta") or {}) if isinstance(result.get("universe_meta"), dict) else {}
     asset_context = sanitize_json(
         build_asset_context(
@@ -647,6 +681,24 @@ def ensure_standard_artifacts(
             config_json=base_cfg,
             metadata_scope=(resolved_config_meta or {}).get("asset_scope"),
         )
+    )
+    execution_contract_obj = build_single_execution_contract(
+        runtime_config=runtime_cfg,
+        asset_context=asset_context,
+    )
+    execution_contract_path = write_execution_contract_snapshot(
+        results_dir=results_dir,
+        execution_contract=execution_contract_obj,
+        filename=ARTIFACT_FILENAMES["execution_contract"],
+    )
+    execution_contract_rel = (
+        _to_rel(execution_contract_path, results_dir)
+        if isinstance(execution_contract_path, Path) and execution_contract_path.exists()
+        else None
+    )
+    execution_contract_ref = build_execution_contract_ref(
+        execution_contract=execution_contract_obj,
+        artifact_rel=execution_contract_rel,
     )
     governed_a_share_meta = _resolve_governed_a_share_meta(
         base_cfg,
@@ -700,6 +752,7 @@ def ensure_standard_artifacts(
         etf_beta_phase1_summary = build_cn_etf_beta_phase1_summary(
             governed_contract=governed_a_share_meta,
             universe_meta=universe_meta_obj,
+            effective_state_5=((regime_meta.get("latest_state") or {}).get("effective_state") if isinstance(regime_meta, dict) else None),
         )
 
     stage_summary_obj = _extract_stage_summary(result)
@@ -723,6 +776,7 @@ def ensure_standard_artifacts(
             "compare_symbol": overrides.get("compare_symbol") or base_cfg.get("universe", {}).get("benchmark_compare_symbol"),
             "universe_limit": _safe_int(overrides.get("universe_limit")),
             "asset_scope": str(asset_context.get("asset_scope") or "cn_a_equity"),
+            "market_data_contract": resolved_market_data_contract,
             "data_role": resolved_data_role,
             "stocks_table": resolved_stocks_table,
             "stocks_mapping_table": resolved_stocks_mapping_table,
@@ -738,6 +792,14 @@ def ensure_standard_artifacts(
         "missing_fields": sorted(set(missing_fields)),
         "warmup": sanitize_json(result.get("warmup_analysis") or {}),
         "asset_context": asset_context,
+        "execution_contract_ref": execution_contract_ref,
+        "provenance": {
+            "config_source": str(overrides.get("config_source") or "unknown"),
+            "resolved_config_mode": resolved_config_mode,
+            "resolved_config_id": str(resolved_config_id or "") or None,
+            "resolved_config_hash": resolved_config_hash or None,
+            "resolved_config_meta": resolved_config_meta,
+        },
         "regime": regime_meta,
         "governed_a_share": governed_a_share_meta,
         "etf_beta": sanitize_json(etf_beta_phase1_summary) if isinstance(etf_beta_phase1_summary, dict) else None,
@@ -748,6 +810,7 @@ def ensure_standard_artifacts(
             "resolved_config_mode": resolved_config_mode,
             "resolved_config_id": str(resolved_config_id or "") or None,
             "resolved_config_hash": resolved_config_hash or None,
+            "market_data_contract": resolved_market_data_contract,
             "data_role": resolved_data_role,
             "stocks_table": resolved_stocks_table,
             "stocks_mapping_table": resolved_stocks_mapping_table,
@@ -818,6 +881,7 @@ def ensure_standard_artifacts(
             daily_df_for_regime = pd.DataFrame()
         if not daily_df_for_regime.empty:
             run_meta_needs_rewrite = False
+            latest_regime_snapshot = _extract_latest_regime_snapshot(daily_df_for_regime)
             governor_snapshot = _extract_latest_governor_snapshot(daily_df_for_regime)
             etf_beta_runtime_selection = extract_latest_etf_beta_runtime_selection(daily_df_for_regime)
             if isinstance(governor_snapshot, dict) and governed_a_share_meta:
@@ -829,6 +893,7 @@ def ensure_standard_artifacts(
                     universe_meta=universe_meta_obj,
                     governor_snapshot=governor_snapshot if isinstance(governor_snapshot, dict) else None,
                     runtime_selection_summary=etf_beta_runtime_selection if isinstance(etf_beta_runtime_selection, dict) else None,
+                    effective_state_5=(latest_regime_snapshot or {}).get("effective_state"),
                 )
                 if isinstance(etf_beta_phase1_summary, dict):
                     run_meta_obj["etf_beta"] = sanitize_json(etf_beta_phase1_summary)
@@ -844,7 +909,9 @@ def ensure_standard_artifacts(
                     )
                     run_meta_obj["report_consistency"] = report_consistency
                     prior_snapshot = dict(run_meta_obj.get("governed_snapshot") or {})
-                    sleeve_budget_used = dict(etf_beta_phase1_summary.get("sleeve_budget_used") or {})
+                    etf_formal_view = dict(etf_beta_phase1_summary.get("formal_view") or {})
+                    etf_research_view = dict(etf_beta_phase1_summary.get("research_view") or {})
+                    sleeve_budget_used = dict(etf_research_view.get("sleeve_budget_used") or etf_beta_phase1_summary.get("sleeve_budget_used") or {})
                     etf_sleeve_budget = sanitize_json(
                         {
                             "system_role": str(etf_beta_phase1_summary.get("system_role") or "market_beta_sleeve"),
@@ -866,17 +933,17 @@ def ensure_standard_artifacts(
                     sleeve_selection_summary = dict(prior_snapshot.get("sleeve_selection_summary") or {})
                     sleeve_selection_summary["cn_etf_beta"] = sanitize_json(
                         {
-                            "eligible_etfs": list(etf_beta_phase1_summary.get("eligible_etfs") or []),
-                            "selected_etfs": list(etf_beta_phase1_summary.get("selected_etfs") or []),
-                            "selection_reason_codes": dict(etf_beta_phase1_summary.get("selection_reason_codes") or {}),
-                            "runtime_reason_codes": list(etf_beta_phase1_summary.get("runtime_reason_codes") or []),
-                            "target_selected_count": etf_beta_phase1_summary.get("target_selected_count"),
-                            "target_exposure": etf_beta_phase1_summary.get("target_exposure"),
-                            "min_deployable_exposure": etf_beta_phase1_summary.get("min_deployable_exposure"),
-                            "fallback_allowed": etf_beta_phase1_summary.get("fallback_allowed"),
-                            "under_deploy_reason_codes": list(etf_beta_phase1_summary.get("under_deploy_reason_codes") or []),
-                            "out_of_scope_etfs": list(etf_beta_phase1_summary.get("out_of_scope_etfs") or []),
-                            "sleeve_budget_used": etf_beta_phase1_summary.get("sleeve_budget_used"),
+                            "eligible_etfs": list(etf_formal_view.get("eligible_etfs") or etf_beta_phase1_summary.get("eligible_etfs") or []),
+                            "selected_etfs": list(etf_formal_view.get("selected_etfs") or etf_beta_phase1_summary.get("selected_etfs") or []),
+                            "selection_reason_codes": dict(etf_formal_view.get("selection_reason_codes") or etf_beta_phase1_summary.get("selection_reason_codes") or {}),
+                            "runtime_reason_codes": list(etf_research_view.get("runtime_reason_codes") or etf_beta_phase1_summary.get("runtime_reason_codes") or []),
+                            "target_selected_count": etf_formal_view.get("target_selected_count", etf_beta_phase1_summary.get("target_selected_count")),
+                            "target_exposure": etf_formal_view.get("target_exposure", etf_beta_phase1_summary.get("target_exposure")),
+                            "min_deployable_exposure": etf_formal_view.get("min_deployable_exposure", etf_beta_phase1_summary.get("min_deployable_exposure")),
+                            "fallback_allowed": etf_formal_view.get("fallback_allowed", etf_beta_phase1_summary.get("fallback_allowed")),
+                            "under_deploy_reason_codes": list(etf_research_view.get("under_deploy_reason_codes") or etf_beta_phase1_summary.get("under_deploy_reason_codes") or []),
+                            "out_of_scope_etfs": list(etf_formal_view.get("out_of_scope_etfs") or etf_beta_phase1_summary.get("out_of_scope_etfs") or []),
+                            "research_view": etf_research_view,
                         }
                     )
                     run_meta_obj["governed_snapshot"] = sanitize_json(
@@ -922,7 +989,6 @@ def ensure_standard_artifacts(
                 regime_artifacts = None
             if isinstance(regime_artifacts, dict):
                 regime_audit_summary_obj = sanitize_json(regime_artifacts.get("summary") or {})
-                latest_regime_snapshot = _extract_latest_regime_snapshot(daily_df_for_regime)
                 if isinstance(latest_regime_snapshot, dict) and latest_regime_snapshot:
                     run_meta_obj["regime"]["latest_state"] = latest_regime_snapshot
                     if isinstance(governed_a_share_meta, dict) and governed_a_share_meta:
@@ -1045,6 +1111,7 @@ def ensure_standard_artifacts(
         "reason_codes": _to_rel(reason_path, results_dir),
         "config": _to_rel(config_path, results_dir),
         "run_meta": _to_rel(run_meta_path, results_dir),
+        "execution_contract": execution_contract_rel,
         "stock_names": _to_rel(stock_names_path, results_dir),
         "trade_st_flags": _to_rel(trade_st_flags_path, results_dir),
         "symbol_performance": _to_rel(symbol_perf_csv_path, results_dir),

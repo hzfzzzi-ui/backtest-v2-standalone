@@ -291,13 +291,25 @@ def _compute_conditional_tiebreak_matrices(
     amount20 = pd.DataFrame(amount).rolling(20, min_periods=15).mean().to_numpy(dtype=float)
 
     valid_limit = ~np.isnan(limit_up) & (limit_up > 1e-8)
+    high_limit_ratio = np.divide(
+        high_raw,
+        limit_up,
+        out=np.full(shape, np.nan, dtype=float),
+        where=valid_limit,
+    )
+    close_limit_ratio = np.divide(
+        close_raw,
+        limit_up,
+        out=np.full(shape, np.nan, dtype=float),
+        where=valid_limit,
+    )
     near_limit_up = valid_limit & (
-        ((high_raw / limit_up) >= 0.995)
-        | ((close_raw / limit_up) >= 0.985)
+        (high_limit_ratio >= 0.995)
+        | (close_limit_ratio >= 0.985)
     )
     limit_hit_up = valid_limit & (
-        ((high_raw / limit_up) >= 0.999)
-        | ((close_raw / limit_up) >= 0.999)
+        (high_limit_ratio >= 0.999)
+        | (close_limit_ratio >= 0.999)
     )
     recent_limit_hit_3d = _rolling_any(limit_hit_up, 3)
 

@@ -394,6 +394,12 @@ def _run_vector_portfolio_backtest_generic_signals(
             mf_concentrate_scale=float(mf_concentrate_scale),
             mf_gate_on_today=bool(mf_gate_on_today),
             mf_score_map={},
+            overlay_mode=str(getattr(ds, "overlay_mode", "off") or "off"),
+            overlay_gate_on_today=bool(getattr(ds, "overlay_gate_on_today", False)),
+            overlay_score_map=dict(getattr(ds, "overlay_score_map", {}) or {}),
+            overlay_band_limit=int(getattr(ds, "overlay_band_limit", 0) or 0),
+            overlay_observation_date=getattr(ds, "overlay_observation_date", None),
+            overlay_score_source=str(getattr(ds, "overlay_score_source", "") or ""),
             momentum_top_pct=float(momentum_top_pct),
             decision_date=day,
             candidate_audit=(None if bool(fast_mode) else day_candidate_rows),
@@ -460,6 +466,11 @@ def _run_vector_portfolio_backtest_generic_signals(
         daily_rows[-1]["mf_topk_reject_count"] = int((debug_plan or {}).get("mf_topk_reject_count", 0) or 0)
         daily_rows[-1]["mf_concentrated_selected_count"] = int((debug_plan or {}).get("mf_concentrated_selected_count", 0) or 0)
         daily_rows[-1]["mf_gate_on"] = 1 if bool((debug_plan or {}).get("mf_gate_on", False)) else 0
+        daily_rows[-1]["moneyflow_overlay_enabled"] = 1 if bool((debug_plan or {}).get("moneyflow_overlay_enabled", False)) else 0
+        daily_rows[-1]["moneyflow_overlay_mode"] = str((debug_plan or {}).get("moneyflow_overlay_mode", "off") or "off")
+        daily_rows[-1]["moneyflow_overlay_gate_on"] = 1 if bool((debug_plan or {}).get("moneyflow_overlay_gate_on", False)) else 0
+        daily_rows[-1]["moneyflow_overlay_observation_date"] = str((debug_plan or {}).get("moneyflow_overlay_observation_date", "") or "")
+        daily_rows[-1]["moneyflow_overlay_score_source"] = str((debug_plan or {}).get("moneyflow_overlay_score_source", "") or "")
         daily_rows[-1]["strong_risk_on"] = 1 if bool(strong_risk_on_today) else 0
         cands_now = int((debug_plan or {}).get("buy_candidates_count", 0) or 0)
         slots_now = int((debug_plan or {}).get("buy_slots", 0) or 0)

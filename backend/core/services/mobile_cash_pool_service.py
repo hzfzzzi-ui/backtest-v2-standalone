@@ -13,6 +13,7 @@ from backend.core.services.sim_account_reconcile_service import (
     load_latest_reconcile_run,
     run_position_aware_reconcile,
 )
+from backend.core.services import sim_account_domain_service as sim_account_domain
 from backend.core.services.sim_account_service import (
     default_sim_account_id,
     load_latest_holdings_snapshot,
@@ -121,6 +122,7 @@ def _patch_reconcile_surface_snapshot(
             "at": _now_iso(now_ts),
         },
     )
+    sim_account_domain.write_reconcile_summary(results_root, payload)
     return payload
 
 
@@ -142,7 +144,6 @@ def _base_refresh_status(*, account_id: str) -> dict[str, Any]:
 
 def _resolve_strategy_as_of_date(previous_reconcile: dict[str, Any] | None, snapshot: dict[str, Any] | None) -> str:
     payload = previous_reconcile if isinstance(previous_reconcile, dict) else {}
-    execution_intent = payload.get("execution_intent") if isinstance(payload.get("execution_intent"), dict) else {}
     action_sheet = list(payload.get("action_sheet") or [])
     action_dates = sorted(
         {
@@ -154,7 +155,6 @@ def _resolve_strategy_as_of_date(previous_reconcile: dict[str, Any] | None, snap
     )
     return (
         str(payload.get("as_of_date") or "").strip()
-        or str(execution_intent.get("as_of_date") or "").strip()
         or (action_dates[0] if action_dates else "")
         or str((snapshot or {}).get("trade_date") or "").strip()
     )
@@ -335,6 +335,21 @@ def deposit_cash_into_pool(
             "cash": round(cash_before + deposit_amount, 6),
             "positions": list(previous_snapshot.get("positions") or []),
             "source_type": "mobile_cash_deposit",
+        },
+        now_ts=now_ts,
+    )
+    sim_account_domain.write_cash_ledger_entry(
+        results_root,
+        account_id=normalized_account_id,
+        entry={
+            "entry_type": "cash_deposit",
+            "amount": deposit_amount,
+            "balance_before": cash_before,
+            "balance_after": float(updated_snapshot.get("cash") or 0.0),
+            "reference_id": str(updated_snapshot.get("snapshot_id") or ""),
+            "source_type": "mobile_cash_pool",
+            "message": "cash pool deposit recorded",
+            "created_at": _now_iso(now_ts),
         },
         now_ts=now_ts,
     )

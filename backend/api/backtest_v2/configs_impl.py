@@ -19,7 +19,6 @@ from backend.core.tools.saved_config_access import (
     write_saved_config_record,
 )
 from backend.core.tools.baseline_access import (
-    ensure_default_baseline_v1,
     list_baseline_records,
     load_baseline_record,
     write_baseline_record,
@@ -44,6 +43,10 @@ class BacktestV2BaselineSaveRequest(BaseModel):
     display_name: str | None = None
     config_json: dict[str, Any]
     linked_exp_id: str | None = None
+    execution_contract_ref: dict[str, Any] | None = None
+    status: str | None = None
+    effective_period: str | None = None
+    superseded_by: str | None = None
     owner: str | None = None
     locked: bool | None = None
 
@@ -80,7 +83,7 @@ def list_backtest_v2_configs(latest: int = Query(20, ge=1, le=200)):
     _ensure_builtin_champion_configs()
     root = _configs_root()
     rows: list[dict[str, Any]] = []
-    for p in root.glob("cfg_*.json"):
+    for p in root.glob("*.json"):
         try:
             obj = json.loads(p.read_text(encoding="utf-8-sig"))
         except Exception:
@@ -113,13 +116,11 @@ def list_backtest_v2_configs(latest: int = Query(20, ge=1, le=200)):
 
 @router.get("/api/backtest_v2/baselines")
 def list_backtest_v2_baselines():
-    ensure_default_baseline_v1()
     return _sanitize_for_json({"items": list_baseline_records()})
 
 
 @router.get("/api/backtest_v2/baselines/{baseline_id}")
 def get_backtest_v2_baseline(baseline_id: str):
-    ensure_default_baseline_v1()
     record = load_baseline_record(baseline_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"baseline not found: {baseline_id}")
@@ -135,6 +136,10 @@ def save_backtest_v2_baseline(body: BacktestV2BaselineSaveRequest):
             "display_name": str(body.display_name or body.name or body.baseline_id or "").strip(),
             "config_json": sanitize_json(body.config_json),
             "linked_exp_id": str(body.linked_exp_id or "").strip() or None,
+            "execution_contract_ref": sanitize_json(body.execution_contract_ref) if isinstance(body.execution_contract_ref, dict) else None,
+            "status": str(body.status or "").strip() or None,
+            "effective_period": str(body.effective_period or "").strip() or None,
+            "superseded_by": str(body.superseded_by or "").strip() or None,
             "owner": str(body.owner or "manual"),
             "locked": True if body.locked is None else bool(body.locked),
         }

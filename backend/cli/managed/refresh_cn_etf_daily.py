@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -13,6 +13,7 @@ from . import cn_side_table_common as common
 
 DAILY_TABLE = "pams_cn_etf_daily"
 COVERAGE_TABLE = "cn_etf_data_coverage_daily"
+DIVIDEND_TABLE = "pit_cn_etf_dividend_events"
 PRICE_SERIES_SEMANTICS = "executable_price_only_not_total_return"
 
 
@@ -30,6 +31,7 @@ def _ensure_tables(cur) -> None:
             volume DOUBLE PRECISION,
             turnover DOUBLE PRECISION,
             amount DOUBLE PRECISION,
+            adj_factor DOUBLE PRECISION,
             price_adjust_mode TEXT NOT NULL DEFAULT 'none',
             price_series_semantics TEXT NOT NULL DEFAULT '{PRICE_SERIES_SEMANTICS}',
             source TEXT NOT NULL,
@@ -41,6 +43,7 @@ def _ensure_tables(cur) -> None:
         )
         """
     )
+    cur.execute(f"ALTER TABLE public.{DAILY_TABLE} ADD COLUMN IF NOT EXISTS adj_factor DOUBLE PRECISION")
     cur.execute(
         f"""
         CREATE TABLE IF NOT EXISTS public.{COVERAGE_TABLE} (
@@ -54,6 +57,32 @@ def _ensure_tables(cur) -> None:
             latest_refresh_at TIMESTAMPTZ,
             daily_table TEXT NOT NULL DEFAULT '{DAILY_TABLE}',
             price_series_semantics TEXT NOT NULL DEFAULT '{PRICE_SERIES_SEMANTICS}',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+    cur.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS public.{DIVIDEND_TABLE} (
+            event_id TEXT PRIMARY KEY,
+            ts_code VARCHAR(16) NOT NULL,
+            symbol VARCHAR(16) NOT NULL,
+            ann_date DATE,
+            imp_ann_date DATE,
+            base_date DATE,
+            record_date DATE,
+            ex_date DATE NOT NULL,
+            pay_date DATE,
+            earpay_date DATE,
+            net_ex_date DATE,
+            div_proc TEXT,
+            div_cash DOUBLE PRECISION NOT NULL,
+            base_unit DOUBLE PRECISION,
+            ear_distr DOUBLE PRECISION,
+            source TEXT NOT NULL,
+            build_run_id TEXT NOT NULL,
+            latest_refresh_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
@@ -92,6 +121,63 @@ def _load_tushare_daily(pro, ts_code: str, start_date: date, end_date: date) -> 
     return raw.copy()
 
 
+def _load_tushare_adj_factor(pro, ts_code: str, start_date: date, end_date: date) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    window_start = start_date
+    window_days = 1200
+    while window_start <= end_date:
+        window_end = min(window_start + timedelta(days=window_days - 1), end_date)
+        raw = pro.query(
+            "fund_adj",
+            ts_code=ts_code,
+            start_date=window_start.strftime("%Y%m%d"),
+            end_date=window_end.strftime("%Y%m%d"),
+        )
+        if raw is not None and not raw.empty:
+            frames.append(raw.copy())
+        window_start = window_end + timedelta(days=1)
+    if not frames:
+        return pd.DataFrame(columns=["trade_date", "ts_code", "adj_factor"])
+    merged = pd.concat(frames, ignore_index=True)
+    merged = merged.drop_duplicates(subset=["trade_date"], keep="last")
+    return merged
+
+
+def _load_tushare_dividend_events(pro, ts_code: str) -> pd.DataFrame:
+    loader = getattr(pro, "fund_div", None)
+    if callable(loader):
+        raw = loader(ts_code=ts_code)
+    else:
+        raw = pro.query("fund_div", ts_code=ts_code)
+    if raw is None or raw.empty:
+        return pd.DataFrame(
+            columns=[
+                "ts_code",
+                "ann_date",
+                "imp_ann_date",
+                "base_date",
+                "div_proc",
+                "record_date",
+                "ex_date",
+                "pay_date",
+                "earpay_date",
+                "net_ex_date",
+                "div_cash",
+                "base_unit",
+                "ear_distr",
+            ]
+        )
+    return raw.copy()
+
+
+def _normalize_event_id(ts_code: str, row: pd.Series) -> str:
+    ex_date = str(row.get("ex_date") or "")
+    pay_date = str(row.get("pay_date") or row.get("earpay_date") or "")
+    record_date = str(row.get("record_date") or "")
+    div_cash = float(pd.to_numeric(row.get("div_cash"), errors="coerce") or 0.0)
+    return f"{normalize_cn_etf_ts_code(ts_code)}|{ex_date}|{pay_date}|{record_date}|{div_cash:.8f}"
+
+
 def run_refresh(
     *,
     token: str,
@@ -106,6 +192,7 @@ def run_refresh(
     requested_start = date.fromisoformat(str(start).strip()) if str(start or "").strip() else date(2013, 1, 1)
     build_run_id = f"cn_etf_daily_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
     rows_inserted = 0
+    dividend_rows_inserted = 0
     per_symbol_summary: list[dict[str, object]] = []
 
     with common.connect() as conn:
@@ -118,8 +205,29 @@ def run_refresh(
                 if raw.empty:
                     per_symbol_summary.append({"ts_code": ts_code, "symbol": entry.symbol, "rows": 0})
                     continue
+                raw_adj = _load_tushare_adj_factor(pro, ts_code, requested_start, target_end)
                 raw["trade_date"] = pd.to_datetime(raw["trade_date"], format="%Y%m%d", errors="coerce").dt.date
                 raw = raw.dropna(subset=["trade_date"]).sort_values("trade_date")
+                if not raw_adj.empty:
+                    raw_adj["trade_date"] = pd.to_datetime(raw_adj["trade_date"], format="%Y%m%d", errors="coerce").dt.date
+                    raw_adj["adj_factor"] = pd.to_numeric(raw_adj["adj_factor"], errors="coerce")
+                    raw_adj = raw_adj.dropna(subset=["trade_date"]).sort_values("trade_date")
+                    raw = raw.merge(
+                        raw_adj.loc[:, ["trade_date", "adj_factor"]],
+                        on="trade_date",
+                        how="left",
+                    )
+                raw["adj_factor"] = pd.to_numeric(raw.get("adj_factor"), errors="coerce").fillna(1.0)
+                raw_div = _load_tushare_dividend_events(pro, ts_code)
+                if not raw_div.empty:
+                    for col in ("ann_date", "imp_anndate", "base_date", "record_date", "ex_date", "pay_date", "earpay_date", "net_ex_date"):
+                        if col in raw_div.columns:
+                            raw_div[col] = pd.to_datetime(raw_div[col], format="%Y%m%d", errors="coerce").dt.date
+                    raw_div = raw_div.rename(columns={"imp_anndate": "imp_ann_date"})
+                    raw_div["div_cash"] = pd.to_numeric(raw_div.get("div_cash"), errors="coerce")
+                    raw_div = raw_div.dropna(subset=["ex_date", "div_cash"]).sort_values(["ex_date", "pay_date", "record_date"])
+                    raw_div["event_id"] = raw_div.apply(lambda row: _normalize_event_id(ts_code, row), axis=1)
+                    raw_div = raw_div.drop_duplicates(subset=["event_id"], keep="last")
                 for row in raw.itertuples(index=False):
                     cur.execute(
                         f"""
@@ -135,6 +243,7 @@ def run_refresh(
                                 volume,
                                 turnover,
                                 amount,
+                                adj_factor,
                                 price_adjust_mode,
                                 price_series_semantics,
                                 source,
@@ -142,7 +251,7 @@ def run_refresh(
                                 latest_refresh_at,
                                 updated_at
                             )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                         ON CONFLICT (trade_date, symbol) DO UPDATE SET
                             ts_code = EXCLUDED.ts_code,
                             open = EXCLUDED.open,
@@ -152,6 +261,7 @@ def run_refresh(
                             volume = EXCLUDED.volume,
                             turnover = EXCLUDED.turnover,
                             amount = EXCLUDED.amount,
+                            adj_factor = EXCLUDED.adj_factor,
                             price_adjust_mode = EXCLUDED.price_adjust_mode,
                             price_series_semantics = EXCLUDED.price_series_semantics,
                             source = EXCLUDED.source,
@@ -170,6 +280,7 @@ def run_refresh(
                             float(getattr(row, "vol", 0.0) or 0.0),
                             float(getattr(row, "amount", 0.0) or 0.0),
                             float(getattr(row, "amount", 0.0) or 0.0),
+                            float(getattr(row, "adj_factor", 1.0) or 1.0),
                             "none",
                             PRICE_SERIES_SEMANTICS,
                             "tushare_fund_daily",
@@ -177,6 +288,74 @@ def run_refresh(
                         ),
                     )
                 rows_inserted += int(len(raw))
+                if not raw_div.empty:
+                    for row in raw_div.itertuples(index=False):
+                        cur.execute(
+                            f"""
+                            INSERT INTO public.{DIVIDEND_TABLE}
+                                (
+                                    event_id,
+                                    ts_code,
+                                    symbol,
+                                    ann_date,
+                                    imp_ann_date,
+                                    base_date,
+                                    record_date,
+                                    ex_date,
+                                    pay_date,
+                                    earpay_date,
+                                    net_ex_date,
+                                    div_proc,
+                                    div_cash,
+                                    base_unit,
+                                    ear_distr,
+                                    source,
+                                    build_run_id,
+                                    latest_refresh_at,
+                                    updated_at
+                                )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                            ON CONFLICT (event_id) DO UPDATE SET
+                                ts_code = EXCLUDED.ts_code,
+                                symbol = EXCLUDED.symbol,
+                                ann_date = EXCLUDED.ann_date,
+                                imp_ann_date = EXCLUDED.imp_ann_date,
+                                base_date = EXCLUDED.base_date,
+                                record_date = EXCLUDED.record_date,
+                                ex_date = EXCLUDED.ex_date,
+                                pay_date = EXCLUDED.pay_date,
+                                earpay_date = EXCLUDED.earpay_date,
+                                net_ex_date = EXCLUDED.net_ex_date,
+                                div_proc = EXCLUDED.div_proc,
+                                div_cash = EXCLUDED.div_cash,
+                                base_unit = EXCLUDED.base_unit,
+                                ear_distr = EXCLUDED.ear_distr,
+                                source = EXCLUDED.source,
+                                build_run_id = EXCLUDED.build_run_id,
+                                latest_refresh_at = NOW(),
+                                updated_at = NOW()
+                            """,
+                            (
+                                str(getattr(row, "event_id")),
+                                ts_code,
+                                entry.symbol,
+                                getattr(row, "ann_date", None),
+                                getattr(row, "imp_ann_date", None),
+                                getattr(row, "base_date", None),
+                                getattr(row, "record_date", None),
+                                getattr(row, "ex_date", None),
+                                getattr(row, "pay_date", None),
+                                getattr(row, "earpay_date", None),
+                                getattr(row, "net_ex_date", None),
+                                str(getattr(row, "div_proc", "") or ""),
+                                float(getattr(row, "div_cash", 0.0) or 0.0),
+                                float(getattr(row, "base_unit", 0.0) or 0.0),
+                                float(getattr(row, "ear_distr", 0.0) or 0.0),
+                                "tushare_fund_div",
+                                build_run_id,
+                            ),
+                        )
+                    dividend_rows_inserted += int(len(raw_div))
                 cur.execute(
                     f"""
                     INSERT INTO public.{COVERAGE_TABLE}
@@ -237,6 +416,7 @@ def run_refresh(
                         "rows": int(len(raw)),
                         "coverage_start": raw["trade_date"].min().isoformat(),
                         "coverage_end": raw["trade_date"].max().isoformat(),
+                        "dividend_events": int(len(raw_div)),
                     }
                 )
         conn.commit()
@@ -244,11 +424,13 @@ def run_refresh(
     payload = {
         "daily_table": DAILY_TABLE,
         "coverage_table": COVERAGE_TABLE,
+        "dividend_table": DIVIDEND_TABLE,
         "build_run_id": build_run_id,
         "start_date": requested_start.isoformat(),
         "end_date": target_end.isoformat(),
         "symbols": selected_symbols,
         "rows_inserted": rows_inserted,
+        "dividend_rows_inserted": dividend_rows_inserted,
         "price_series_semantics": PRICE_SERIES_SEMANTICS,
         "per_symbol": per_symbol_summary,
     }

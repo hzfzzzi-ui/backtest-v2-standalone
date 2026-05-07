@@ -13,7 +13,7 @@ from backend.core.config.asset_profiles import UnsupportedAssetScopeError, resol
 from backend.core.config.loader import load_config
 from backend.core.config.models import BacktestConfig
 from backend.core.data.cn_etf_catalog import normalize_cn_etf_symbol, normalize_cn_etf_ts_code
-from backend.core.data.pg_provider import PostgresDataProvider
+from backend.core.data.provider_factory import build_runtime_provider_from_config
 from backend.core.data.provider import DataProvider
 from backend.core.universe.hs300_csi500 import (
     UniverseFilterConfig,
@@ -117,12 +117,9 @@ def load_runtime_data_access(
         raise FileNotFoundError(f"config not found: {cfg_path}")
     cfg_obj, _ = load_config(str(cfg_path))
     _inject_db_env(cfg_obj)
-    provider = PostgresDataProvider(
-        db=cfg_obj.db,
-        runtime=cfg_obj.db_runtime,
-        data_source=cfg_obj.data_source,
-        schema_mapping=cfg_obj.schema_mapping,
-        rules_path=cfg_path.parent / "instrument_rules_cn.csv",
+    provider = build_runtime_provider_from_config(
+        cfg_obj,
+        cfg_path.parent / "instrument_rules_cn.csv",
     )
     return RuntimeDataAccess(
         bt_root=root,
@@ -211,6 +208,9 @@ def resolve_validation_universe(
 ) -> ValidationUniverseSnapshot:
     asset_profile = resolve_asset_profile(asset_scope)
     access = load_runtime_data_access(bt_root, asset_scope=asset_profile.asset_scope)
+    from backend.core.data.market_data_access import build_market_data_access
+
+    market_data_access = build_market_data_access(access)
     resolve_asof, dynamic_all_a_entry = resolve_universe_timing(
         universe_mode,
         start=start,
@@ -225,6 +225,7 @@ def resolve_validation_universe(
         industries=industries,
         symbols=symbols,
         universe_limit=universe_limit,
+        market_data_access=market_data_access,
     )
     resolved_meta = annotate_universe_meta(
         resolved_meta,

@@ -511,8 +511,16 @@ def _build_counters(
     counters["avg_positions"] = float(result.get("avg_positions", 0.0) or 0.0)
     counters["max_positions"] = int(result.get("max_positions", 10) or 10)
     counters["trend_slope_block_count"] = int(result.get("trend_slope_block_count", 0) or 0)
-    counters["mf_rank_applied_rate"] = float(result.get("mf_rank_applied_rate", 0.0) or 0.0)
-    counters["gate_on_rate"] = float(result.get("mf_gate_on_rate", result.get("gate_on_rate", 0.0)) or 0.0)
+    final_score_rank_applied_rate = float(
+        result.get("final_score_rank_applied_rate", result.get("mf_rank_applied_rate", 0.0)) or 0.0
+    )
+    final_score_rank_gate_on_rate = float(
+        result.get("final_score_rank_gate_on_rate", result.get("mf_gate_on_rate", result.get("gate_on_rate", 0.0))) or 0.0
+    )
+    counters["final_score_rank_applied_rate"] = final_score_rank_applied_rate
+    counters["final_score_rank_gate_on_rate"] = final_score_rank_gate_on_rate
+    counters["mf_rank_applied_rate"] = final_score_rank_applied_rate
+    counters["gate_on_rate"] = final_score_rank_gate_on_rate
     _f = dict(funnel_obj or {})
     counters["raw_signal"] = int(_f.get("raw_signal", result.get("raw_signal", 0)) or 0)
     counters["blocked"] = int(_f.get("blocked", result.get("blocked", 0)) or 0)
@@ -527,19 +535,20 @@ def _build_counters(
         except Exception:
             ddf = pd.DataFrame()
         if not ddf.empty:
-            def _num_series(name: str) -> pd.Series:
-                if name not in ddf.columns:
-                    return pd.Series(0.0, index=ddf.index, dtype=float)
-                return pd.to_numeric(ddf[name], errors="coerce").fillna(0.0)
+            def _num_series(*names: str) -> pd.Series:
+                for name in names:
+                    if name in ddf.columns:
+                        return pd.to_numeric(ddf[name], errors="coerce").fillna(0.0)
+                return pd.Series(0.0, index=ddf.index, dtype=float)
 
-            mtr = _num_series("mf_rank_triggered")
-            mra = _num_series("mf_rank_applied")
-            mfc = _num_series("mf_candidates_when_triggered")
-            mtk = _num_series("mf_topk_reject_count")
-            mcs = _num_series("mf_concentrated_selected_count")
-            mg = _num_series("mf_gate_on")
+            mtr = _num_series("final_score_rank_triggered", "mf_rank_triggered")
+            mra = _num_series("final_score_rank_applied", "mf_rank_applied")
+            mfc = _num_series("final_score_candidates_when_triggered", "mf_candidates_when_triggered")
+            mtk = _num_series("final_score_topk_reject_count", "mf_topk_reject_count")
+            mcs = _num_series("final_score_concentrated_selected_count", "mf_concentrated_selected_count")
+            mg = _num_series("final_score_rank_gate_on", "mf_gate_on")
             sro = _num_series("strong_risk_on")
-            mssg = _num_series("mf_rank_suppressed_by_strong_gate")
+            mssg = _num_series("final_score_rank_suppressed_by_strong_gate", "mf_rank_suppressed_by_strong_gate")
             selected_count = _num_series("selected_count")
 
             mf_rank_trigger_days = int((mtr > 0).sum())
@@ -548,19 +557,35 @@ def _build_counters(
             strong_risk_on_days = int((sro > 0).sum())
             mf_rank_suppressed_by_strong_gate_days = int((mssg > 0).sum())
 
+            rank_trigger_rate = float((mtr > 0).mean()) if len(mtr) > 0 else 0.0
+            rank_applied_rate = float((mra > 0).mean()) if len(mra) > 0 else counters["final_score_rank_applied_rate"]
+            avg_candidates_when_triggered = float(mfc[mtr > 0].mean()) if mf_rank_trigger_days > 0 else 0.0
+            topk_reject_count = int(mtk.sum())
+            counters["final_score_rank_trigger_days"] = mf_rank_trigger_days
+            counters["final_score_rank_trigger_rate"] = rank_trigger_rate
+            counters["final_score_rank_applied_days"] = mf_rank_applied_days
+            counters["final_score_rank_applied_rate"] = rank_applied_rate
+            counters["final_score_avg_candidates_when_triggered"] = avg_candidates_when_triggered
+            counters["final_score_topk_reject_count"] = topk_reject_count
             counters["mf_rank_trigger_days"] = mf_rank_trigger_days
-            counters["mf_rank_trigger_rate"] = float((mtr > 0).mean()) if len(mtr) > 0 else 0.0
+            counters["mf_rank_trigger_rate"] = rank_trigger_rate
             counters["mf_rank_applied_days"] = mf_rank_applied_days
-            counters["mf_rank_applied_rate"] = float((mra > 0).mean()) if len(mra) > 0 else counters["mf_rank_applied_rate"]
-            counters["mf_avg_candidates_when_triggered"] = float(mfc[mtr > 0].mean()) if mf_rank_trigger_days > 0 else 0.0
-            counters["mf_topk_reject_count"] = int(mtk.sum())
+            counters["mf_rank_applied_rate"] = rank_applied_rate
+            counters["mf_avg_candidates_when_triggered"] = avg_candidates_when_triggered
+            counters["mf_topk_reject_count"] = topk_reject_count
             selected_sum = float(selected_count.sum())
-            counters["mf_concentrated_buy_rate"] = float(float(mcs.sum()) / selected_sum) if selected_sum > 0 else 0.0
+            concentrated_buy_rate = float(float(mcs.sum()) / selected_sum) if selected_sum > 0 else 0.0
+            gate_on_rate = float((mg > 0).mean()) if len(mg) > 0 else 0.0
+            counters["final_score_concentrated_buy_rate"] = concentrated_buy_rate
+            counters["final_score_rank_gate_on_days"] = mf_gate_on_days
+            counters["final_score_rank_gate_on_rate"] = gate_on_rate
+            counters["mf_concentrated_buy_rate"] = concentrated_buy_rate
             counters["mf_gate_on_days"] = mf_gate_on_days
-            counters["mf_gate_on_rate"] = float((mg > 0).mean()) if len(mg) > 0 else 0.0
-            counters["gate_on_rate"] = float(counters["mf_gate_on_rate"])
+            counters["mf_gate_on_rate"] = gate_on_rate
+            counters["gate_on_rate"] = gate_on_rate
             counters["strong_risk_on_days"] = strong_risk_on_days
             counters["strong_risk_on_rate"] = float((sro > 0).mean()) if len(sro) > 0 else 0.0
+            counters["final_score_rank_suppressed_by_strong_gate_days"] = mf_rank_suppressed_by_strong_gate_days
             counters["mf_rank_suppressed_by_strong_gate_days"] = mf_rank_suppressed_by_strong_gate_days
 
     trades_path = results_dir / ARTIFACT_FILENAMES["trades"]
@@ -601,7 +626,16 @@ def _build_counters(
     counters["dd_reduced_count"] = int(result.get("dd_reduced_count", 0) or 0)
 
     diag = dict(result.get("candidate_diag_reason_counts") or {})
-    counters["cash_skip_count"] = _sum_reason_aliases(diag, "SKIP_CASH_INSUFFICIENT", "SKIP_NO_CASH")
+    planning_reason_counts = dict(result.get("planning_reject_reason_counts") or {})
+    fill_reason_counts = dict(result.get("fill_reject_reason_counts") or {})
+    planning_cash_skip_count = (
+        _sum_reason_aliases(planning_reason_counts, "SKIP_CASH_INSUFFICIENT", "SKIP_NO_CASH")
+        if planning_reason_counts
+        else _sum_reason_aliases(diag, "SKIP_CASH_INSUFFICIENT", "SKIP_NO_CASH")
+    )
+    counters["cash_skip_count"] = int(planning_cash_skip_count)
+    counters["planning_cash_skip_count"] = int(planning_cash_skip_count)
+    counters["fill_cash_reject_count"] = _sum_reason_aliases(fill_reason_counts, "INSUFFICIENT_CASH")
     counters["lot_skip_count"] = _sum_reason_aliases(diag, "SKIP_LOT_TOO_SMALL", "SKIP_QTY_ZERO")
     counters["cap_hit_single"] = int(diag.get("BLOCK_SINGLE_CAP", 0) or 0)
     counters["cap_hit_industry"] = int(diag.get("BLOCK_INDUSTRY_CAP", 0) or 0)

@@ -30,6 +30,11 @@ def resolve_experiment_dir_by_id(exp_id: str | None) -> Path | None:
     path = (experiments_root() / text).resolve()
     if path.exists() and path.is_dir():
         return path
+    archive_root = (experiments_root() / "archive").resolve()
+    if archive_root.exists():
+        for candidate in archive_root.rglob(text):
+            if candidate.is_dir():
+                return candidate.resolve()
     return None
 
 

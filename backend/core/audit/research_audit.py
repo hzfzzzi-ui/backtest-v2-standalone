@@ -9,7 +9,13 @@ from typing import Any, Mapping
 import pandas as pd
 
 from backend.core.data.price_limits import round_price_to_tick
-from backend.core.config.etf_beta_contract import build_etf_beta_phase1_summary as build_cn_etf_beta_phase1_summary
+from backend.core.config.etf_beta_contract import (
+    _is_formal_stabilizer_role,
+    build_etf_beta_formal_view,
+    build_etf_beta_phase1_summary as build_cn_etf_beta_phase1_summary,
+    build_etf_beta_research_view,
+)
+from backend.core.data.provider_factory import build_scoped_postgres_provider
 from backend.core.tools.runtime_data_access import load_runtime_data_access
 from backend.core.universe.lineage import get_universe_lineage, normalize_universe_mode
 from backend.api.backtest_v2.protocol import ARTIFACT_FILENAMES
@@ -19,10 +25,44 @@ RESEARCH_AUDIT_STATUSES = ("PASS", "WARN", "FAIL", "UNKNOWN")
 UNIVERSE_LINEAGE_MODES = ("PIT_DYNAMIC", "DIRECT_SYMBOLS", "START_SNAPSHOT", "CURRENT_SNAPSHOT", "UNKNOWN")
 _PRICE_ONLY_STRATEGIES = ("BREAKOUT_TREND", "BREAKOUT", "SMA_CROSS", "EMA_CROSS", "RSI_REVERSAL")
 _NEXT_DAY_MATCHING_MODES = ("NEXT_OPEN", "NEXT_DAY", "NEXT_TRADING_DAY", "NEXT_BAR_OPEN")
+_ADJ_FACTOR_STALE_WARN_THRESHOLD = 5
+_ADJ_FACTOR_STALE_FAIL_THRESHOLD = 20
 
 _LIMIT_LOCK_FAIL_RATIO = 0.01
 _CONCENTRATION_WARN_THRESHOLD = 0.8
 _REQUIRED_SNAPSHOTS = ("input_config", "resolved_config", "compiled_plan")
+
+
+def _likely_cn_etf_symbol(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    if len(text) != 8:
+        return False
+    return text.startswith(("sh5", "sz1"))
+
+
+def _load_etf_bar_supplement(
+    *,
+    access: Any,
+    symbols: list[str],
+    start: Any,
+    end: Any,
+) -> tuple[pd.DataFrame, int]:
+    etf_symbols = sorted({str(symbol).strip().lower() for symbol in symbols if _likely_cn_etf_symbol(symbol)})
+    if not etf_symbols:
+        return pd.DataFrame(), 0
+    etf_provider = build_scoped_postgres_provider(
+        access.cfg_obj,
+        access.cfg_path.parent / "instrument_rules_cn.csv",
+        stocks_table="pams_cn_etf_daily",
+    )
+    extra = etf_provider.load_ohlcv_daily(
+        etf_symbols,
+        start,
+        end,
+        source="research_audit_execution_realism_etf",
+    )
+    query_count = len(getattr(etf_provider, "query_audit", []) or [])
+    return extra, query_count
 
 
 def _safe_float(value: Any) -> float | None:
@@ -101,6 +141,40 @@ def _clean_ref(path: Path, *, root: Path) -> str | None:
         return str(path.resolve().relative_to(root.resolve())).replace("\\", "/")
     except Exception:
         return str(path).replace("\\", "/")
+
+
+def _load_combo_component_records(
+    *,
+    run_meta: Mapping[str, Any] | None,
+    results_dir: str | Path | None,
+) -> dict[str, dict[str, Any]]:
+    run_meta_obj = dict(run_meta or {})
+    sleeves = dict(run_meta_obj.get("sleeves") or {})
+    root = Path(results_dir).resolve() if results_dir is not None else None
+    records: dict[str, dict[str, Any]] = {}
+    for sleeve_name, sleeve_payload in sleeves.items():
+        if not isinstance(sleeve_payload, Mapping):
+            continue
+        sleeve_obj = dict(sleeve_payload)
+        sleeve_root = None
+        raw_results_dir = str(sleeve_obj.get("results_dir") or "").strip()
+        if raw_results_dir:
+            sleeve_root = Path(raw_results_dir).resolve()
+        else:
+            exp_id = str(sleeve_obj.get("exp_id") or "").strip()
+            if exp_id and root is not None:
+                sleeve_root = (root.parent / exp_id).resolve()
+        component_run_meta = None
+        read_error = None
+        if sleeve_root is not None:
+            component_run_meta, read_error = _read_json(sleeve_root / "run_meta.json")
+        records[str(sleeve_name)] = {
+            "exp_id": str(sleeve_obj.get("exp_id") or "").strip() or None,
+            "results_dir": sleeve_root,
+            "run_meta": component_run_meta if isinstance(component_run_meta, Mapping) else None,
+            "read_error": read_error,
+        }
+    return records
 
 
 def _normalize_trade_df(trades_df: pd.DataFrame) -> pd.DataFrame:
@@ -190,6 +264,262 @@ def _series_bool(df: pd.DataFrame, column: str) -> pd.Series:
     return df[column].fillna(False).astype(bool)
 
 
+def _normalize_etf_symbol_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    if text.startswith(("sh", "sz", "bj")) and len(text) > 2:
+        return text
+    if "." in text:
+        code, suffix = text.split(".", 1)
+        exchange = suffix.strip().lower()
+        prefix = {"sh": "sh", "ss": "sh", "sz": "sz", "bj": "bj"}.get(exchange[:2], "")
+        if prefix and code.strip():
+            return f"{prefix}{code.strip().lower()}"
+    return text
+
+
+def _extract_cn_etf_buy_order_meta(orders_df: pd.DataFrame) -> pd.DataFrame:
+    if orders_df.empty or "meta_json" not in orders_df.columns:
+        return pd.DataFrame()
+    rows: list[dict[str, Any]] = []
+    for _, row in orders_df.iterrows():
+        side = str(row.get("side") or "").strip().upper()
+        if side and side != "BUY":
+            continue
+        raw_meta = row.get("meta_json")
+        if not isinstance(raw_meta, str) or not raw_meta.strip():
+            continue
+        try:
+            meta = dict(json.loads(raw_meta) or {})
+        except Exception:
+            continue
+        if str(meta.get("sleeve_id") or meta.get("alpha_id") or "").strip() != "cn_etf_beta":
+            continue
+        rows.append(
+            {
+                "date": str(row.get("date") or "").strip(),
+                "symbol": str(row.get("symbol") or "").strip(),
+                "reason_code": str(row.get("reason_code") or "").strip(),
+                "state_5": str(meta.get("state_5") or "").strip(),
+                "execution_path": str(meta.get("execution_path") or "").strip(),
+                "target_weight": _safe_float(meta.get("target_weight")),
+                "requested_target_weight": _safe_float(meta.get("requested_target_weight")),
+                "final_target_weight": _safe_float(meta.get("final_target_weight")),
+                "target_weight_basis": str(meta.get("target_weight_basis") or "").strip(),
+                "target_exposure": _safe_float(meta.get("target_exposure")),
+                "decision_date": str(meta.get("signal_date") or row.get("signal_date") or "").strip(),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _parse_runtime_diagnostics_payload(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        payload = dict(json.loads(raw) or {})
+    except Exception:
+        return {}
+    diagnostics = payload.get("diagnostics")
+    return dict(diagnostics or payload) if isinstance(diagnostics or payload, dict) else {}
+
+
+def _extract_etf_diagnostics_views(raw: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    diagnostics = _parse_runtime_diagnostics_payload(raw)
+    formal_view = dict(diagnostics.get("etf_beta_formal_view") or {})
+    research_view = dict(diagnostics.get("etf_beta_research_view") or {})
+    return diagnostics, formal_view, research_view
+
+
+def _build_etf_diagnostics_view_frame(portfolio_daily: pd.DataFrame) -> pd.DataFrame:
+    if portfolio_daily.empty:
+        return pd.DataFrame(index=portfolio_daily.index)
+    records: list[dict[str, Any]] = []
+    for _, row in portfolio_daily.iterrows():
+        diagnostics, formal_view, research_view = _extract_etf_diagnostics_views(row.get("diagnostics_input_json"))
+        records.append(
+            {
+                "diagnostics_target_exposure": _safe_float(
+                    formal_view.get("target_exposure", diagnostics.get("etf_beta_target_exposure"))
+                ),
+                "strategic_floor_target": _safe_float(research_view.get("strategic_floor_cap")),
+                "tactical_overlay_target": _safe_float(research_view.get("tactical_overlay_cap")),
+                "limited_defense_target": _safe_float(research_view.get("limited_defense_cap")),
+                "deployment_pace": _safe_float(research_view.get("deployment_pace")),
+                "pace_policy_gap": _safe_float(research_view.get("pace_policy_gap")),
+                "rebalance_timing_gap": _safe_float(research_view.get("rebalance_timing_gap")),
+                "execution_residual_gap": _safe_float(research_view.get("execution_residual_gap")),
+                "deployability_gap": _safe_float(research_view.get("deployability_gap")),
+                "execution_path": str(research_view.get("execution_path") or diagnostics.get("etf_beta_execution_path") or "").strip(),
+                "bull_partial_overlay_pace_ratio": _safe_float(research_view.get("bull_partial_overlay_pace_ratio")),
+                "bull_pace_mode": str(research_view.get("bull_pace_mode") or "").strip(),
+                "layering_band": str(research_view.get("layering_band") or "").strip(),
+                "layering_reason_codes": list(research_view.get("layering_reason_codes") or []),
+                "under_deploy_reason_codes": list(research_view.get("under_deploy_reason_codes") or []),
+                "hard_block_flags": list(research_view.get("hard_block_flags") or []),
+                "trans_up_contract_mode": str(research_view.get("trans_up_contract_mode") or "").strip(),
+                "trans_up_single_seat_core_recovery": bool(research_view.get("trans_up_single_seat_core_recovery", False)),
+                "trans_up_redeploy_active": bool(research_view.get("trans_up_redeploy_active", False)),
+                "trans_up_redeploy_reason_code": str(research_view.get("trans_up_redeploy_reason_code") or "").strip(),
+                "trans_up_redeploy_reject_reason": str(research_view.get("trans_up_redeploy_reject_reason") or "").strip(),
+                "trans_up_redeploy_floor_gap": _safe_float(research_view.get("trans_up_redeploy_floor_gap")),
+                "trans_up_redeploy_edge_from_state": str(research_view.get("trans_up_redeploy_edge_from_state") or "").strip(),
+                "requested_budget": _safe_float(research_view.get("requested_budget")),
+                "applied_budget": _safe_float(research_view.get("applied_budget")),
+                "fallback_allowed_source": str(formal_view.get("fallback_allowed_source") or "").strip(),
+                "target_selected_count_source": str(formal_view.get("target_selected_count_source") or "").strip(),
+                "exposure_policy_family": str(formal_view.get("exposure_policy_family") or "").strip(),
+                "policy_scope": str(formal_view.get("policy_scope") or "").strip(),
+                "broad_based_only": bool(formal_view.get("broad_based_only", False)),
+                "absolute_filter_reject_count": int(_safe_float(research_view.get("absolute_filter_reject_count")) or 0),
+                "absolute_filter_reject_reason_counts": dict(research_view.get("absolute_filter_reject_reason_counts") or {}),
+                "candidate_pool_reject_reason_counts": dict(research_view.get("candidate_pool_reject_reason_counts") or {}),
+                "selection_chain_winner_counts": dict(research_view.get("selection_chain_winner_counts") or {}),
+                "selection_chain_reject_reason_counts": dict(research_view.get("selection_chain_reject_reason_counts") or {}),
+            }
+        )
+    return pd.DataFrame(records, index=portfolio_daily.index)
+
+
+def _summarize_etf_bull_trans_up_bottleneck(portfolio_daily: pd.DataFrame, orders_df: pd.DataFrame) -> dict[str, Any]:
+    if portfolio_daily.empty:
+        return {}
+    diagnostics_view_df = _build_etf_diagnostics_view_frame(portfolio_daily)
+    state_series = _series_text(portfolio_daily, "effective_state_5").replace("nan", "")
+    if state_series.str.strip().eq("").all():
+        state_series = _series_text(portfolio_daily, "market_state_5").replace("nan", "")
+    order_meta_df = _extract_cn_etf_buy_order_meta(orders_df)
+    summary: dict[str, Any] = {}
+    for state in ("BULL", "TRANS_UP"):
+        mask = state_series.eq(state)
+        if not bool(mask.any()):
+            summary[state] = {
+                "day_count": 0,
+                "avg_target_exposure": None,
+                "avg_actual_exposure": None,
+                "avg_strategic_floor_target": None,
+                "avg_tactical_overlay_target": None,
+                "avg_deployment_pace": None,
+                "bull_partial_overlay_pace_ratio": None,
+                "bull_pace_mode": None,
+                "avg_pace_policy_gap": None,
+                "avg_rebalance_timing_gap": None,
+                "avg_execution_residual_gap": None,
+                "positive_target_zero_actual_days": 0,
+                "avg_effective_max_positions": None,
+                "execution_path_day_counts": {},
+                "buy_count": 0,
+                "buy_reason_code_counts": {},
+                "buy_execution_path_counts": {},
+            }
+            continue
+        state_daily = portfolio_daily.loc[mask].copy()
+        state_view = diagnostics_view_df.loc[mask].copy() if not diagnostics_view_df.empty else pd.DataFrame(index=state_daily.index)
+        execution_paths = (
+            state_view.get("execution_path", pd.Series("", index=state_daily.index, dtype=object))
+            .fillna("")
+            .astype(str)
+            .replace("nan", "")
+            .str.strip()
+        )
+        bull_pace_modes = (
+            state_view.get("bull_pace_mode", pd.Series("", index=state_daily.index, dtype=object))
+            .fillna("")
+            .astype(str)
+        )
+        bull_pace_modes = bull_pace_modes.str.strip()
+        bull_pace_modes = bull_pace_modes.mask(
+            bull_pace_modes.str.lower().isin({"nan", "none", "<na>"}),
+            "",
+        )
+        state_orders = (
+            order_meta_df.loc[order_meta_df["state_5"].astype(str).str.strip().eq(state)].copy()
+            if not order_meta_df.empty and "state_5" in order_meta_df.columns
+            else pd.DataFrame()
+        )
+        target_series = _series_numeric(state_daily, "etf_target_exposure")
+        actual_series = _series_numeric(state_daily, "etf_actual_exposure")
+        strategic_floor_series = pd.to_numeric(state_view.get("strategic_floor_target"), errors="coerce")
+        tactical_overlay_series = pd.to_numeric(state_view.get("tactical_overlay_target"), errors="coerce")
+        deployment_pace_series = pd.to_numeric(state_view.get("deployment_pace"), errors="coerce")
+        bull_partial_overlay_pace_ratio_series = pd.to_numeric(
+            state_view.get("bull_partial_overlay_pace_ratio"), errors="coerce"
+        )
+        pace_policy_gap_series = pd.to_numeric(state_view.get("pace_policy_gap"), errors="coerce")
+        rebalance_timing_gap_series = pd.to_numeric(state_view.get("rebalance_timing_gap"), errors="coerce")
+        execution_residual_gap_series = pd.to_numeric(state_view.get("execution_residual_gap"), errors="coerce")
+        summary[state] = {
+            "day_count": int(len(state_daily.index)),
+            "avg_target_exposure": float(target_series.dropna().mean()) if not target_series.dropna().empty else None,
+            "avg_actual_exposure": float(actual_series.dropna().mean()) if not actual_series.dropna().empty else None,
+            "avg_strategic_floor_target": (
+                float(strategic_floor_series.dropna().mean())
+                if not strategic_floor_series.dropna().empty
+                else None
+            ),
+            "avg_tactical_overlay_target": (
+                float(tactical_overlay_series.dropna().mean())
+                if not tactical_overlay_series.dropna().empty
+                else None
+            ),
+            "avg_deployment_pace": (
+                float(deployment_pace_series.dropna().mean())
+                if not deployment_pace_series.dropna().empty
+                else None
+            ),
+            "bull_partial_overlay_pace_ratio": (
+                float(bull_partial_overlay_pace_ratio_series.dropna().mean())
+                if not bull_partial_overlay_pace_ratio_series.dropna().empty
+                else None
+            ),
+            "bull_pace_mode": (
+                str(bull_pace_modes[bull_pace_modes.ne("")].iloc[0])
+                if not bull_pace_modes[bull_pace_modes.ne("")].empty
+                else None
+            ),
+            "avg_pace_policy_gap": (
+                float(pace_policy_gap_series.dropna().mean())
+                if not pace_policy_gap_series.dropna().empty
+                else None
+            ),
+            "avg_rebalance_timing_gap": (
+                float(rebalance_timing_gap_series.dropna().mean())
+                if not rebalance_timing_gap_series.dropna().empty
+                else None
+            ),
+            "avg_execution_residual_gap": (
+                float(execution_residual_gap_series.dropna().mean())
+                if not execution_residual_gap_series.dropna().empty
+                else None
+            ),
+            "positive_target_zero_actual_days": int(
+                ((target_series.fillna(0.0) > 1e-12) & (actual_series.fillna(0.0) <= 1e-12)).sum()
+            ),
+            "avg_effective_max_positions": (
+                float(_series_numeric(state_daily, "effective_max_positions").dropna().mean())
+                if not _series_numeric(state_daily, "effective_max_positions").dropna().empty
+                else None
+            ),
+            "execution_path_day_counts": {
+                str(key): int(value)
+                for key, value in execution_paths[execution_paths.ne("")].value_counts().to_dict().items()
+            },
+            "buy_count": int(len(state_orders.index)),
+            "buy_reason_code_counts": (
+                {str(key): int(value) for key, value in state_orders["reason_code"].value_counts().to_dict().items()}
+                if not state_orders.empty and "reason_code" in state_orders.columns
+                else {}
+            ),
+            "buy_execution_path_counts": (
+                {str(key): int(value) for key, value in state_orders["execution_path"].value_counts().to_dict().items()}
+                if not state_orders.empty and "execution_path" in state_orders.columns
+                else {}
+            ),
+        }
+    return summary
+
+
 def summarize_validation_audit_ref(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, Mapping):
         return None
@@ -272,11 +602,11 @@ def _infer_timing_meta_from_artifacts(
     if not isinstance(compiled_plan_obj, Mapping) and not isinstance(input_config_obj, Mapping):
         return {}
 
-    runtime_config = (
-        dict(compiled_plan_obj.get("runtime_config") or {})
-        if isinstance(compiled_plan_obj, Mapping)
-        else {}
-    )
+    runtime_config = {}
+    if isinstance(compiled_plan_obj, Mapping):
+        runtime_config = dict(compiled_plan_obj.get("runtime_config") or {})
+        if not runtime_config:
+            runtime_config = dict(compiled_plan_obj)
     execution_cfg = dict(runtime_config.get("execution") or {})
     strategy_cfg = dict(runtime_config.get("strategy") or {})
     strategy_params = dict(strategy_cfg.get("params") or {})
@@ -313,6 +643,8 @@ def _infer_timing_meta_from_artifacts(
     ).strip().upper()
     t_plus_one = _coerce_bool(execution_cfg.get("t_plus_one"))
     next_day_shell = bool(execution_shell) and daily_loop_mode == "single_day_loop"
+    if not matching_mode and execution_shell == "stage_pipeline_shell_bridge" and next_day_shell and t_plus_one:
+        matching_mode = "NEXT_OPEN"
     contract_proved = next_day_shell and t_plus_one and matching_mode in _NEXT_DAY_MATCHING_MODES
 
     uses_fundamental_data = any(
@@ -485,6 +817,28 @@ def evaluate_timing_alignment(
     mismatch_fields: list[str] = []
     summary_obj = dict(stage_summary or {})
     pipeline_obj = dict(stage_pipeline or {})
+    asset_role = str(((run_meta_obj.get("data") or {}).get("asset_role")) or "").strip().lower()
+    execution_shell = str(summary_obj.get("execution_shell") or pipeline_obj.get("execution_shell") or "").strip().lower()
+    daily_loop_mode = str(summary_obj.get("daily_loop_mode") or pipeline_obj.get("daily_loop_mode") or "").strip().lower()
+    is_combo_runtime = asset_role == "unified_multi_sleeve_combo" or execution_shell == "unified_combo_phase1" or daily_loop_mode == "unified_combo_phase1"
+    component_timing_gates: dict[str, dict[str, Any]] = {}
+    if is_combo_runtime:
+        for sleeve_name, component in _load_combo_component_records(run_meta=run_meta_obj, results_dir=results_dir).items():
+            component_run_meta = component.get("run_meta")
+            component_root = component.get("results_dir")
+            if not isinstance(component_run_meta, Mapping):
+                component_timing_gates[sleeve_name] = {
+                    "status": "UNKNOWN",
+                    "reason": str(component.get("read_error") or "component run_meta unavailable"),
+                }
+                continue
+            component_timing_gates[sleeve_name] = evaluate_timing_alignment(
+                stage_summary=None,
+                stage_pipeline=(component_run_meta or {}).get("stage_pipeline"),
+                result=None,
+                run_meta=component_run_meta,
+                results_dir=component_root,
+            )
     for field in ("schema_version", "execution_shell", "daily_loop_mode", "route_id", "stage_order", "enabled_stages"):
         left = summary_obj.get(field)
         right = pipeline_obj.get(field)
@@ -493,16 +847,37 @@ def evaluate_timing_alignment(
         if left != right:
             mismatch_fields.append(field)
 
+    component_statuses = {
+        name: _normalize_status((gate or {}).get("status"))
+        for name, gate in component_timing_gates.items()
+        if isinstance(gate, Mapping)
+    }
+    component_counts = Counter(component_statuses.values())
+    all_component_pass = bool(component_statuses) and all(status == "PASS" for status in component_statuses.values())
+    any_component_fail = any(status == "FAIL" for status in component_statuses.values())
+    any_component_warn = any(status == "WARN" for status in component_statuses.values())
+    contract_proved = bool(timing_meta.get("contract_proved")) or (is_combo_runtime and execution_shell == "unified_combo_phase1" and all_component_pass)
+    pit_safe = bool(timing_meta.get("pit_safe")) or (is_combo_runtime and all_component_pass)
+
     if bool(timing_meta.get("same_day_close_fill")) or bool(timing_meta.get("future_input_detected")):
         status = "FAIL"
         reason = "Detected explicit same-day fill or future-input risk."
+    elif any_component_fail:
+        status = "FAIL"
+        reason = "Unified combo delegates to at least one sleeve with FAIL timing alignment."
     elif _normalize_status(timing_meta.get("status")) == "FAIL":
         status = "FAIL"
         reason = str(timing_meta.get("reason") or "Timing audit reported FAIL explicitly.")
     elif mismatch_fields:
         status = "WARN"
         reason = f"Stage execution metadata mismatch: {', ' .join(mismatch_fields)}"
-    elif bool(timing_meta.get("contract_proved")) and bool(timing_meta.get("pit_safe")):
+    elif is_combo_runtime and execution_shell == "unified_combo_phase1" and all_component_pass:
+        status = "PASS"
+        reason = "Unified combo shell delegates to sleeve runs that all prove a next-day timing contract."
+    elif any_component_warn:
+        status = "WARN"
+        reason = "Unified combo delegates to at least one sleeve with WARN timing alignment."
+    elif contract_proved and pit_safe:
         status = "PASS"
         reason = str(timing_meta.get("reason") or "Signal inputs and execution timing satisfy a next-day contract.")
     elif summary_obj or pipeline_obj:
@@ -517,6 +892,7 @@ def evaluate_timing_alignment(
         "daily_loop_mode": str(summary_obj.get("daily_loop_mode") or pipeline_obj.get("daily_loop_mode") or ""),
         "route_id": str(summary_obj.get("route_id") or pipeline_obj.get("route_id") or ""),
         "mismatch_fields": mismatch_fields,
+        "component_timing_statuses": component_statuses,
         "matching_mode": timing_meta.get("matching_mode"),
         "strategy_name": timing_meta.get("strategy_name"),
         "signal_observation_bar": timing_meta.get("signal_observation_bar"),
@@ -528,8 +904,12 @@ def evaluate_timing_alignment(
         "stage_pipeline_present": bool(pipeline_obj),
         "explicit_timing_meta_present": bool(explicit_timing_meta),
         "derived_timing_meta_present": bool(derived_timing_meta),
-        "contract_proved": bool(timing_meta.get("contract_proved")),
-        "pit_safe": bool(timing_meta.get("pit_safe")),
+        "component_count": int(len(component_statuses)),
+        "component_pass_count": int(component_counts.get("PASS", 0)),
+        "component_warn_count": int(component_counts.get("WARN", 0)),
+        "component_fail_count": int(component_counts.get("FAIL", 0)),
+        "contract_proved": contract_proved,
+        "pit_safe": pit_safe,
         "uses_fundamental_data": bool(timing_meta.get("uses_fundamental_data")),
         "uses_membership_signal": bool(timing_meta.get("uses_membership_signal")),
         "lineage_rows": _safe_int((timing_meta.get("lineage_metrics") or {}).get("rows")),
@@ -540,15 +920,71 @@ def evaluate_timing_alignment(
     return {"status": status, "reason": reason, "evidence": evidence, "metrics": metrics}
 
 
-def evaluate_universe_lineage(*, run_meta: Mapping[str, Any] | None) -> dict[str, Any]:
+def evaluate_universe_lineage(
+    *,
+    run_meta: Mapping[str, Any] | None,
+    results_dir: str | Path | None = None,
+) -> dict[str, Any]:
     run_meta_obj = dict(run_meta or {})
     universe_meta = dict(run_meta_obj.get("universe") or {})
     data_meta = dict(run_meta_obj.get("data") or {})
+    stage_pipeline = dict(run_meta_obj.get("stage_pipeline") or {})
     asset_scope = str(
         universe_meta.get("asset_scope")
         or data_meta.get("asset_scope")
         or ""
     ).strip().lower()
+    asset_role = str(data_meta.get("asset_role") or "").strip().lower()
+    execution_shell = str(stage_pipeline.get("execution_shell") or "").strip().lower()
+    if asset_role == "unified_multi_sleeve_combo" or execution_shell == "unified_combo_phase1":
+        component_gates: dict[str, dict[str, Any]] = {}
+        component_modes: dict[str, str] = {}
+        for sleeve_name, component in _load_combo_component_records(run_meta=run_meta_obj, results_dir=results_dir).items():
+            component_run_meta = component.get("run_meta")
+            if not isinstance(component_run_meta, Mapping):
+                component_gates[sleeve_name] = {
+                    "status": "UNKNOWN",
+                    "reason": str(component.get("read_error") or "component run_meta unavailable"),
+                }
+                component_modes[sleeve_name] = "UNKNOWN"
+                continue
+            gate = evaluate_universe_lineage(run_meta=component_run_meta, results_dir=component.get("results_dir"))
+            component_gates[sleeve_name] = gate
+            component_modes[sleeve_name] = str(gate.get("lineage_mode") or "UNKNOWN")
+        component_statuses = {
+            name: _normalize_status((gate or {}).get("status"))
+            for name, gate in component_gates.items()
+            if isinstance(gate, Mapping)
+        }
+        counts = Counter(component_statuses.values())
+        if component_statuses and all(status == "PASS" for status in component_statuses.values()):
+            status = "PASS"
+            reason = "Unified combo aggregates only sleeve universes that already pass lineage audit."
+        elif any(status == "FAIL" for status in component_statuses.values()):
+            status = "FAIL"
+            reason = "Unified combo aggregates at least one sleeve with FAIL universe lineage."
+        elif any(status == "WARN" for status in component_statuses.values()):
+            status = "WARN"
+            reason = "Unified combo aggregates at least one sleeve with WARN universe lineage."
+        else:
+            status = "UNKNOWN"
+            reason = "Unified combo lacks sufficient sleeve lineage evidence."
+        return {
+            "status": status,
+            "lineage_mode": "COMPONENT_AGGREGATED",
+            "reason": reason,
+            "evidence": {
+                "execution_shell": execution_shell or None,
+                "component_statuses": component_statuses,
+                "component_lineage_modes": component_modes,
+            },
+            "metrics": {
+                "component_count": int(len(component_statuses)),
+                "component_pass_count": int(counts.get("PASS", 0)),
+                "component_warn_count": int(counts.get("WARN", 0)),
+                "component_fail_count": int(counts.get("FAIL", 0)),
+            },
+        }
     raw_mode = universe_meta.get("universe_mode") or data_meta.get("universe_mode")
     mode = normalize_universe_mode(raw_mode)
     explicit_mode = str(universe_meta.get("lineage_mode") or universe_meta.get("membership_history_mode") or "").strip().upper()
@@ -673,6 +1109,111 @@ def evaluate_universe_lineage(*, run_meta: Mapping[str, Any] | None) -> dict[str
     }
 
 
+def evaluate_price_adjustment_integrity(
+    *,
+    run_meta: Mapping[str, Any] | None,
+    results_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    run_meta_obj = dict(run_meta or {})
+    data_meta = dict(run_meta_obj.get("data") or {})
+    universe_meta = dict(run_meta_obj.get("universe") or {})
+    stage_pipeline = dict(run_meta_obj.get("stage_pipeline") or {})
+    data_bundle_meta = dict(run_meta_obj.get("data_bundle") or {})
+    asset_role = str(data_meta.get("asset_role") or "").strip().lower()
+    execution_shell = str(stage_pipeline.get("execution_shell") or "").strip().lower()
+    if asset_role == "unified_multi_sleeve_combo" or execution_shell == "unified_combo_phase1":
+        component_gates: dict[str, dict[str, Any]] = {}
+        for sleeve_name, component in _load_combo_component_records(run_meta=run_meta_obj, results_dir=results_dir).items():
+            component_run_meta = component.get("run_meta")
+            if not isinstance(component_run_meta, Mapping):
+                component_gates[sleeve_name] = {
+                    "status": "UNKNOWN",
+                    "reason": str(component.get("read_error") or "component run_meta unavailable"),
+                }
+                continue
+            component_gates[sleeve_name] = evaluate_price_adjustment_integrity(
+                run_meta=component_run_meta,
+                results_dir=component.get("results_dir"),
+            )
+        component_statuses = {
+            name: _normalize_status((gate or {}).get("status"))
+            for name, gate in component_gates.items()
+            if isinstance(gate, Mapping)
+        }
+        counts = Counter(component_statuses.values())
+        if component_statuses and all(status == "PASS" for status in component_statuses.values()):
+            status = "PASS"
+            reason = "Unified combo aggregates only sleeves with PASS price-adjustment integrity."
+        elif any(status == "FAIL" for status in component_statuses.values()):
+            status = "FAIL"
+            reason = "Unified combo aggregates at least one sleeve with FAIL price-adjustment integrity."
+        elif any(status == "WARN" for status in component_statuses.values()):
+            status = "WARN"
+            reason = "Unified combo aggregates at least one sleeve with WARN price-adjustment integrity."
+        else:
+            status = "UNKNOWN"
+            reason = "Unified combo lacks sufficient sleeve price-adjustment evidence."
+        return {
+            "status": status,
+            "reason": reason,
+            "evidence": {"component_statuses": component_statuses},
+            "metrics": {
+                "component_count": int(len(component_statuses)),
+                "component_pass_count": int(counts.get("PASS", 0)),
+                "component_warn_count": int(counts.get("WARN", 0)),
+                "component_fail_count": int(counts.get("FAIL", 0)),
+            },
+        }
+
+    price_adj_mode = str(
+        data_bundle_meta.get("price_adj_mode")
+        or universe_meta.get("price_adj_mode")
+        or run_meta_obj.get("price_adj_mode")
+        or "none"
+    ).strip().lower()
+    adj_stats = dict(run_meta_obj.get("adj_factor_stats") or data_bundle_meta.get("adj_factor_stats") or {})
+    if price_adj_mode == "none":
+        status = "PASS"
+        reason = "Price adjustment is disabled for this run."
+    elif not adj_stats:
+        status = "UNKNOWN"
+        reason = "Price adjustment is enabled, but adj_factor stale statistics are missing."
+    else:
+        fail_count = int(adj_stats.get("symbols_exceeding_fail_count") or 0)
+        warn_count = int(adj_stats.get("symbols_exceeding_warn_count") or 0)
+        null_count = int(adj_stats.get("null_count") or 0)
+        symbol_count = int(adj_stats.get("symbol_count") or 0)
+        if symbol_count <= 0:
+            status = "UNKNOWN"
+            reason = "Price adjustment is enabled, but adj_factor statistics cover zero symbols."
+        elif fail_count > 0:
+            status = "FAIL"
+            reason = "adj_factor contains stale spans beyond the fail threshold."
+        elif warn_count > 0 or null_count > 0:
+            status = "WARN"
+            reason = "adj_factor contains missing or stale spans that require review."
+        else:
+            status = "PASS"
+            reason = "adj_factor statistics do not show stale spans beyond warning thresholds."
+    evidence = {
+        "price_adj_mode": price_adj_mode,
+        "worst_after_valid_symbol": adj_stats.get("worst_after_valid_symbol"),
+        "worst_after_valid_end_date": adj_stats.get("worst_after_valid_end_date"),
+    }
+    metrics = {
+        "symbol_count": int(adj_stats.get("symbol_count") or 0),
+        "null_count": int(adj_stats.get("null_count") or 0),
+        "symbols_with_missing_count": int(adj_stats.get("symbols_with_missing_count") or 0),
+        "max_consecutive_missing_rows": int(adj_stats.get("max_consecutive_missing_rows") or 0),
+        "max_consecutive_missing_after_valid_rows": int(adj_stats.get("max_consecutive_missing_after_valid_rows") or 0),
+        "symbols_exceeding_warn_count": int(adj_stats.get("symbols_exceeding_warn_count") or 0),
+        "symbols_exceeding_fail_count": int(adj_stats.get("symbols_exceeding_fail_count") or 0),
+        "warn_threshold_rows": int(adj_stats.get("warn_threshold_rows") or _ADJ_FACTOR_STALE_WARN_THRESHOLD),
+        "fail_threshold_rows": int(adj_stats.get("fail_threshold_rows") or _ADJ_FACTOR_STALE_FAIL_THRESHOLD),
+    }
+    return {"status": status, "reason": reason, "evidence": evidence, "metrics": metrics}
+
+
 def evaluate_etf_beta_sleeve(
     *,
     run_meta: Mapping[str, Any] | None,
@@ -689,12 +1230,77 @@ def evaluate_etf_beta_sleeve(
         or ""
     ).strip().lower()
     etf_meta = dict(governed_meta.get("etf_beta") or {})
-    if asset_scope != "cn_etf" and not bool(etf_meta.get("enabled")):
-        return None
-    if asset_scope != "cn_etf":
-        return None
-
     summary = run_meta_obj.get("etf_beta")
+    has_etf_summary = isinstance(summary, Mapping)
+    combo_etf_budget_roles = dict(run_meta_obj.get("etf_budget_roles") or {})
+    combo_sleeves = dict(run_meta_obj.get("sleeves") or {})
+    has_combo_etf_evidence = bool(combo_etf_budget_roles) or isinstance(combo_sleeves.get("etf_beta"), Mapping)
+    if asset_scope != "cn_etf" and not bool(etf_meta.get("enabled")) and not has_etf_summary and not has_combo_etf_evidence:
+        return None
+    if asset_scope not in {"cn_etf", "cn_a_equity", "cn_a_multi_sleeve"}:
+        return None
+    governed_snapshot = dict(run_meta_obj.get("governed_snapshot") or {})
+    account_budget_runtime_reference = dict(
+        run_meta_obj.get("account_budget_runtime_reference")
+        or {}
+    )
+    etf_budget_roles = dict(
+        governed_snapshot.get("etf_budget_roles")
+        or account_budget_runtime_reference.get("etf_budget_roles")
+        or {}
+    )
+    etf_budget_roles_target = dict(etf_budget_roles.get("target") or {})
+    etf_budget_roles_actual = dict(etf_budget_roles.get("actual") or {})
+    etf_budget_roles_deviation = dict(etf_budget_roles.get("deviation") or {})
+    etf_budget_roles_contract_version = str(etf_budget_roles.get("contract_version") or "").strip() or None
+    etf_budget_roles_effective_state_5 = str(etf_budget_roles.get("effective_state_5") or "").strip() or None
+
+    if asset_scope != "cn_etf" and not isinstance(summary, Mapping):
+        etf_component = dict(combo_sleeves.get("etf_beta") or {})
+        component_exp_id = str(etf_component.get("exp_id") or "").strip()
+        component_results_dir = str(etf_component.get("results_dir") or "").strip()
+        component_root: Path | None = None
+        if component_results_dir:
+            candidate_root = Path(component_results_dir)
+            if candidate_root.exists():
+                component_root = candidate_root
+        if component_root is None and component_exp_id and results_dir is not None:
+            combo_root = Path(results_dir)
+            candidate_root = combo_root.parent / component_exp_id
+            if candidate_root.exists():
+                component_root = candidate_root
+        if component_root is not None:
+            component_run_meta, _ = _read_json(component_root / "run_meta.json")
+            if isinstance(component_run_meta, Mapping):
+                component_gate = evaluate_etf_beta_sleeve(
+                    run_meta=component_run_meta,
+                    results_dir=component_root,
+                )
+                if isinstance(component_gate, dict):
+                    component_evidence = dict(component_gate.get("evidence") or {})
+                    component_metrics = dict(component_gate.get("metrics") or {})
+                    component_evidence["combo_component_exp_id"] = component_exp_id or None
+                    component_evidence["combo_component_results_dir"] = str(component_root)
+                    component_evidence["etf_budget_roles_contract_version"] = etf_budget_roles_contract_version or None
+                    component_evidence["etf_budget_roles_effective_state_5"] = etf_budget_roles_effective_state_5 or None
+                    component_evidence["etf_budget_roles_target"] = etf_budget_roles_target
+                    component_evidence["etf_budget_roles_actual"] = etf_budget_roles_actual
+                    component_evidence["etf_budget_roles_deviation"] = etf_budget_roles_deviation
+                    component_metrics["avg_target_defense_budget"] = _safe_float(etf_budget_roles_target.get("defense"))
+                    component_metrics["avg_target_core_beta_budget"] = _safe_float(etf_budget_roles_target.get("core_beta"))
+                    component_metrics["avg_target_alpha_budget"] = _safe_float(etf_budget_roles_target.get("alpha"))
+                    component_metrics["avg_actual_defense_budget"] = _safe_float(etf_budget_roles_actual.get("defense"))
+                    component_metrics["avg_actual_core_beta_budget"] = _safe_float(etf_budget_roles_actual.get("core_beta"))
+                    component_metrics["avg_actual_alpha_budget"] = _safe_float(etf_budget_roles_actual.get("alpha"))
+                    component_metrics["avg_defense_budget_gap"] = _safe_float(etf_budget_roles_deviation.get("defense_gap"))
+                    component_metrics["avg_core_beta_budget_gap"] = _safe_float(etf_budget_roles_deviation.get("core_beta_gap"))
+                    component_metrics["avg_alpha_budget_gap"] = _safe_float(etf_budget_roles_deviation.get("alpha_gap"))
+                    return {
+                        **component_gate,
+                        "evidence": component_evidence,
+                        "metrics": component_metrics,
+                    }
+
     if not isinstance(summary, Mapping):
         summary = build_cn_etf_beta_phase1_summary(
             governed_contract=governed_meta,
@@ -727,37 +1333,58 @@ def evaluate_etf_beta_sleeve(
                 if key not in summary_obj or summary_obj.get(key) in (None, "", [], {}):
                     summary_obj[key] = rebuilt_obj.get(key)
 
+    formal_view = build_etf_beta_formal_view(summary_obj.get("formal_view") or summary_obj)
+    research_view = build_etf_beta_research_view(summary_obj.get("research_view") or summary_obj)
+
     input_etfs = [str(item).strip().upper() for item in list(summary_obj.get("input_etfs") or ()) if str(item).strip()]
-    eligible_etfs = [str(item).strip().upper() for item in list(summary_obj.get("eligible_etfs") or ()) if str(item).strip()]
-    selected_etfs = [str(item).strip().upper() for item in list(summary_obj.get("selected_etfs") or ()) if str(item).strip()]
-    out_of_scope_etfs = [str(item).strip().upper() for item in list(summary_obj.get("out_of_scope_etfs") or ()) if str(item).strip()]
+    eligible_etfs = [
+        str(item).strip().upper()
+        for item in list(summary_obj.get("eligible_etfs") or formal_view.get("eligible_etfs") or ())
+        if str(item).strip()
+    ]
+    selected_etfs = [
+        str(item).strip().upper()
+        for item in list(summary_obj.get("selected_etfs") or formal_view.get("selected_etfs") or ())
+        if str(item).strip()
+    ]
+    out_of_scope_etfs = [
+        str(item).strip().upper()
+        for item in list(summary_obj.get("out_of_scope_etfs") or formal_view.get("out_of_scope_etfs") or ())
+        if str(item).strip()
+    ]
     formal_scope = {
         str(item).strip().upper()
-        for item in list(summary_obj.get("formal_core_beta_symbols") or ()) + list(summary_obj.get("limited_defense_candidates") or ())
+        for item in list(summary_obj.get("formal_core_beta_symbols") or formal_view.get("formal_core_beta_symbols") or ())
+        + list(summary_obj.get("limited_defense_candidates") or formal_view.get("limited_defense_candidates") or ())
         if str(item).strip()
     }
     selection_reason_codes = {
         str(symbol).strip().upper(): [str(code).strip() for code in list(codes or ()) if str(code).strip()]
-        for symbol, codes in dict(summary_obj.get("selection_reason_codes") or {}).items()
+        for symbol, codes in dict(summary_obj.get("selection_reason_codes") or formal_view.get("selection_reason_codes") or {}).items()
         if str(symbol).strip()
     }
     out_of_scope_reason_codes = {
         str(symbol).strip().upper(): [str(code).strip() for code in list(codes or ()) if str(code).strip()]
-        for symbol, codes in dict(summary_obj.get("out_of_scope_reason_codes") or {}).items()
+        for symbol, codes in dict(summary_obj.get("out_of_scope_reason_codes") or formal_view.get("out_of_scope_reason_codes") or {}).items()
         if str(symbol).strip()
     }
     invalid_selected = [symbol for symbol in selected_etfs if symbol not in formal_scope]
     missing_selected_reasons = [symbol for symbol in selected_etfs if symbol not in selection_reason_codes]
     missing_out_of_scope_reasons = [symbol for symbol in out_of_scope_etfs if symbol not in out_of_scope_reason_codes]
-    sleeve_budget_used = dict(summary_obj.get("sleeve_budget_used") or {})
-    vol_target = dict(summary_obj.get("vol_target") or {})
+    vol_target = dict(research_view.get("vol_target") or {})
     source_entry_type = str(summary_obj.get("source_entry_type") or "").strip()
-    strategy_role = str(summary_obj.get("strategy_role") or "").strip()
-    governor_boundary_mode = str(summary_obj.get("governor_boundary_mode") or "").strip()
-    local_policy_mode = str(summary_obj.get("local_policy_mode") or "").strip()
-    controlled_accumulation_mode = str(summary_obj.get("controlled_accumulation_mode") or "").strip()
-    governor_boundary = dict(summary_obj.get("governor_boundary") or {})
-    local_policy_decision = dict(summary_obj.get("local_policy_decision") or {})
+    strategy_role = str(formal_view.get("strategy_role") or summary_obj.get("strategy_role") or "").strip()
+    governor_boundary_mode = str(formal_view.get("governor_boundary_mode") or summary_obj.get("governor_boundary_mode") or "").strip()
+    local_policy_mode = str(formal_view.get("local_policy_mode") or summary_obj.get("local_policy_mode") or "").strip()
+    controlled_accumulation_mode = str(research_view.get("controlled_accumulation_mode") or summary_obj.get("controlled_accumulation_mode") or "").strip()
+    governor_boundary = dict(formal_view.get("governor_boundary") or summary_obj.get("governor_boundary") or {})
+    local_policy_decision = dict(formal_view.get("local_policy_decision") or summary_obj.get("local_policy_decision") or {})
+    boundary_policy_mode = str(
+        summary_obj.get("boundary_policy_mode")
+        or governor_boundary.get("boundary_policy_mode")
+        or local_policy_decision.get("boundary_policy_mode")
+        or ""
+    ).strip()
     formal_alignment_reference = str(summary_obj.get("formal_alignment_reference") or "").strip() or None
     formal_alignment_status = str(summary_obj.get("formal_alignment_status") or "").strip().lower()
     if formal_alignment_status not in {"formal_mainline", "research_only", "do_not_promote"}:
@@ -772,27 +1399,64 @@ def evaluate_etf_beta_sleeve(
     counters = dict(run_meta_obj.get("counters") or {})
     order_count = _safe_int(counters.get("orders"))
     trade_count = _safe_int(counters.get("closed_trades"))
-    target_exposure = _safe_float(summary_obj.get("target_exposure"))
-    min_deployable_exposure = _safe_float(summary_obj.get("min_deployable_exposure"))
-    fallback_allowed = bool(summary_obj.get("fallback_allowed", False))
-    exposure_policy_family = str(summary_obj.get("exposure_policy_family") or "").strip()
-    policy_scope = str(summary_obj.get("policy_scope") or "").strip()
-    broad_based_only = bool(summary_obj.get("broad_based_only", False))
-    layering_policy = str(summary_obj.get("layering_policy") or "").strip()
-    layering_band = str(summary_obj.get("layering_band") or "").strip()
-    layering_active = bool(summary_obj.get("layering_active", False))
+    target_exposure = _safe_float(formal_view.get("target_exposure"))
+    min_deployable_exposure = _safe_float(formal_view.get("min_deployable_exposure"))
+    fallback_allowed = bool(formal_view.get("fallback_allowed", False))
+    exposure_policy_family = str(formal_view.get("exposure_policy_family") or "").strip()
+    policy_scope = str(formal_view.get("policy_scope") or "").strip()
+    broad_based_only = bool(formal_view.get("broad_based_only", False))
+    layering_policy = str(research_view.get("layering_policy") or "").strip()
+    layering_band = str(research_view.get("layering_band") or "").strip()
+    layering_active = bool(research_view.get("layering_active", False))
     layering_reason_codes = [
         str(code).strip()
-        for code in list(summary_obj.get("layering_reason_codes") or ())
+        for code in list(research_view.get("layering_reason_codes") or ())
         if str(code).strip()
     ]
-    target_selected_count_source = str(summary_obj.get("target_selected_count_source") or "").strip()
-    fallback_allowed_source = str(summary_obj.get("fallback_allowed_source") or "").strip()
+    target_selected_count_source = str(formal_view.get("target_selected_count_source") or "").strip()
+    fallback_allowed_source = str(formal_view.get("fallback_allowed_source") or "").strip()
+    trans_up_contract_mode = str(research_view.get("trans_up_contract_mode") or "").strip()
+    trans_up_single_seat_core_recovery = bool(research_view.get("trans_up_single_seat_core_recovery", False))
     configured_under_deploy_reason_codes = [
         str(code).strip()
-        for code in list(summary_obj.get("under_deploy_reason_codes") or ())
+        for code in list(research_view.get("under_deploy_reason_codes") or ())
         if str(code).strip()
     ]
+    governor_hard_blocked = bool(
+        formal_view.get("governor_hard_blocked", governor_boundary.get("hard_blocked", False))
+    )
+    governor_hard_block_reason_codes = [
+        str(code).strip()
+        for code in list(
+            formal_view.get("governor_hard_block_reason_codes")
+            or governor_boundary.get("hard_block_reason_codes")
+            or ()
+        )
+        if str(code).strip()
+    ]
+    local_boundary_state = str(
+        formal_view.get("local_boundary_state")
+        or local_policy_decision.get("boundary_state")
+        or ""
+    ).strip()
+    local_boundary_reason_codes = [
+        str(code).strip()
+        for code in list(
+            formal_view.get("local_boundary_reason_codes")
+            or local_policy_decision.get("boundary_reason_codes")
+            or ()
+        )
+        if str(code).strip()
+    ]
+    avg_target_defense_budget = None
+    avg_target_core_beta_budget = None
+    avg_target_alpha_budget = None
+    avg_actual_defense_budget = None
+    avg_actual_core_beta_budget = None
+    avg_actual_alpha_budget = None
+    avg_defense_budget_gap = None
+    avg_core_beta_budget_gap = None
+    avg_alpha_budget_gap = None
 
     deployment_metrics: dict[str, Any] = {
         "observed_day_count": 0,
@@ -800,10 +1464,30 @@ def evaluate_etf_beta_sleeve(
         "invested_day_ratio": None,
         "avg_target_exposure": None,
         "avg_actual_exposure": None,
+        "median_actual_exposure": None,
         "avg_actual_exposure_on_invested_days": None,
         "avg_actual_risk_exposure": None,
         "avg_actual_fallback_exposure": None,
         "avg_actual_other_exposure": None,
+        "avg_actual_core_exposure": None,
+        "avg_actual_satellite_exposure": None,
+        "avg_actual_defense_exposure": None,
+        "avg_target_defense_budget": None,
+        "avg_target_core_beta_budget": None,
+        "avg_target_alpha_budget": None,
+        "avg_actual_defense_budget": None,
+        "avg_actual_core_beta_budget": None,
+        "avg_actual_alpha_budget": None,
+        "avg_defense_budget_gap": None,
+        "avg_core_beta_budget_gap": None,
+        "avg_alpha_budget_gap": None,
+        "avg_cash_share": None,
+        "avg_risk_asset_share": None,
+        "avg_defense_asset_share": None,
+        "empty_day_ratio": None,
+        "below_30_ratio": None,
+        "below_50_ratio": None,
+        "below_80_ratio": None,
         "avg_deployability_gap": None,
         "fallback_exposure_day_count": 0,
         "fallback_exposure_day_ratio": None,
@@ -821,10 +1505,29 @@ def evaluate_etf_beta_sleeve(
         "candidate_pool_reject_reason_counts": {},
         "selection_chain_winner_counts": {},
         "selection_chain_reject_reason_counts": {},
+        "signal_count": 0,
+        "buy_signal_count": 0,
+        "sell_signal_count": 0,
+        "unfilled_order_count": 0,
         "primary_bottleneck_layer": None,
         "deployment_assessment": "UNKNOWN",
         "has_governor_boundary_split": bool(governor_boundary),
         "has_local_policy_split": bool(local_policy_decision),
+        "boundary_policy_mode": boundary_policy_mode or None,
+        "governor_hard_blocked": governor_hard_blocked,
+        "zero_deploy_owner": None,
+        "reduced_allocation_owner": None,
+        "target_contract_drift_detected": False,
+        "target_contract_drift_day_count": 0,
+        "strategic_floor_target": None,
+        "tactical_overlay_target": None,
+        "limited_defense_target": None,
+        "deployment_pace": None,
+        "avg_pace_policy_gap": None,
+        "avg_rebalance_timing_gap": None,
+        "avg_execution_residual_gap": None,
+        "bull_trans_up_bottleneck_summary": {},
+        "hard_block_flag_count": 0,
     }
     deployment_evidence: dict[str, Any] = {}
     root = Path(results_dir).resolve() if results_dir is not None else None
@@ -832,6 +1535,7 @@ def evaluate_etf_beta_sleeve(
         portfolio_daily, _ = _read_csv(root / "portfolio_daily.csv")
         orders_df, _ = _read_csv(root / "orders.csv")
         if not portfolio_daily.empty:
+            diagnostics_view_df = _build_etf_diagnostics_view_frame(portfolio_daily)
             gross_exposure = _series_numeric(portfolio_daily, "gross_exposure")
             actual_exposure_series = _series_numeric(portfolio_daily, "etf_actual_exposure")
             if actual_exposure_series.dropna().empty:
@@ -839,20 +1543,39 @@ def evaluate_etf_beta_sleeve(
             actual_risk_exposure_series = _series_numeric(portfolio_daily, "etf_actual_risk_exposure")
             actual_fallback_exposure_series = _series_numeric(portfolio_daily, "etf_actual_fallback_exposure")
             actual_other_exposure_series = _series_numeric(portfolio_daily, "etf_actual_other_exposure")
+            actual_core_exposure_series = _series_numeric(portfolio_daily, "etf_actual_core_exposure")
+            actual_satellite_exposure_series = _series_numeric(portfolio_daily, "etf_actual_satellite_exposure")
+            actual_defense_exposure_series = _series_numeric(portfolio_daily, "etf_actual_defense_exposure")
             target_exposure_series = _series_numeric(portfolio_daily, "etf_target_exposure")
-            deployability_gap_series = _series_numeric(portfolio_daily, "etf_deployability_gap")
+            strategic_floor_target_series = pd.to_numeric(diagnostics_view_df.get("strategic_floor_target"), errors="coerce")
+            tactical_overlay_target_series = pd.to_numeric(diagnostics_view_df.get("tactical_overlay_target"), errors="coerce")
+            limited_defense_target_series = pd.to_numeric(diagnostics_view_df.get("limited_defense_target"), errors="coerce")
+            deployment_pace_series = pd.to_numeric(diagnostics_view_df.get("deployment_pace"), errors="coerce")
+            pace_policy_gap_series = pd.to_numeric(diagnostics_view_df.get("pace_policy_gap"), errors="coerce")
+            rebalance_timing_gap_series = pd.to_numeric(diagnostics_view_df.get("rebalance_timing_gap"), errors="coerce")
+            execution_residual_gap_series = pd.to_numeric(diagnostics_view_df.get("execution_residual_gap"), errors="coerce")
+            deployability_gap_series = pd.to_numeric(diagnostics_view_df.get("deployability_gap"), errors="coerce")
+            cash_series = _series_numeric(portfolio_daily, "cash")
+            nav_series = _series_numeric(portfolio_daily, "nav")
             valid_exposure = actual_exposure_series.dropna()
             invested_mask = actual_exposure_series.fillna(0.0) > 1e-9
             fallback_exposure_mask = actual_fallback_exposure_series.fillna(0.0) > 1e-9
+            cash_share_series = cash_series.divide(nav_series.where(nav_series.abs() > 1e-12, float("nan")))
             observed_day_count = int(len(portfolio_daily.index))
             invested_day_count = int(invested_mask.sum())
             fallback_exposure_day_count = int(fallback_exposure_mask.sum())
             avg_actual_exposure = float(valid_exposure.mean()) if not valid_exposure.empty else None
+            median_actual_exposure = float(valid_exposure.median()) if not valid_exposure.empty else None
             avg_actual_on_invested = (
                 float(actual_exposure_series.loc[invested_mask].mean()) if bool(invested_mask.any()) else None
             )
             avg_target_exposure = (
                 float(target_exposure_series.dropna().mean()) if not target_exposure_series.dropna().empty else None
+            )
+            avg_target_on_invested = (
+                float(target_exposure_series.loc[invested_mask].mean())
+                if bool(invested_mask.any()) and not target_exposure_series.loc[invested_mask].dropna().empty
+                else None
             )
             avg_actual_risk_exposure = (
                 float(actual_risk_exposure_series.dropna().mean())
@@ -869,11 +1592,75 @@ def evaluate_etf_beta_sleeve(
                 if not actual_other_exposure_series.dropna().empty
                 else None
             )
+            avg_actual_core_exposure = (
+                float(actual_core_exposure_series.dropna().mean())
+                if not actual_core_exposure_series.dropna().empty
+                else None
+            )
+            avg_actual_satellite_exposure = (
+                float(actual_satellite_exposure_series.dropna().mean())
+                if not actual_satellite_exposure_series.dropna().empty
+                else None
+            )
+            avg_actual_defense_exposure = (
+                float(actual_defense_exposure_series.dropna().mean())
+                if not actual_defense_exposure_series.dropna().empty
+                else None
+            )
+            strategic_floor_target = (
+                float(strategic_floor_target_series.dropna().mean())
+                if not strategic_floor_target_series.dropna().empty
+                else None
+            )
+            tactical_overlay_target = (
+                float(tactical_overlay_target_series.dropna().mean())
+                if not tactical_overlay_target_series.dropna().empty
+                else None
+            )
+            limited_defense_target = (
+                float(limited_defense_target_series.dropna().mean())
+                if not limited_defense_target_series.dropna().empty
+                else None
+            )
+            avg_deployment_pace = (
+                float(deployment_pace_series.dropna().mean())
+                if not deployment_pace_series.dropna().empty
+                else None
+            )
+            avg_pace_policy_gap = (
+                float(pace_policy_gap_series.dropna().mean())
+                if not pace_policy_gap_series.dropna().empty
+                else None
+            )
+            avg_rebalance_timing_gap = (
+                float(rebalance_timing_gap_series.dropna().mean())
+                if not rebalance_timing_gap_series.dropna().empty
+                else None
+            )
+            avg_execution_residual_gap = (
+                float(execution_residual_gap_series.dropna().mean())
+                if not execution_residual_gap_series.dropna().empty
+                else None
+            )
+            avg_cash_share = float(cash_share_series.dropna().mean()) if not cash_share_series.dropna().empty else None
             avg_deployability_gap = (
                 float(deployability_gap_series.dropna().mean())
                 if not deployability_gap_series.dropna().empty
                 else None
             )
+            avg_target_defense_budget = _safe_float(etf_budget_roles_target.get("defense"))
+            avg_target_core_beta_budget = _safe_float(etf_budget_roles_target.get("core_beta"))
+            avg_target_alpha_budget = _safe_float(etf_budget_roles_target.get("alpha"))
+            avg_actual_defense_budget = _safe_float(etf_budget_roles_actual.get("defense"))
+            avg_actual_core_beta_budget = _safe_float(etf_budget_roles_actual.get("core_beta"))
+            avg_actual_alpha_budget = _safe_float(etf_budget_roles_actual.get("alpha"))
+            avg_defense_budget_gap = _safe_float(etf_budget_roles_deviation.get("defense_gap"))
+            avg_core_beta_budget_gap = _safe_float(etf_budget_roles_deviation.get("core_beta_gap"))
+            avg_alpha_budget_gap = _safe_float(etf_budget_roles_deviation.get("alpha_gap"))
+            empty_day_ratio = float((actual_exposure_series.fillna(0.0) <= 1e-9).mean())
+            below_30_ratio = float((actual_exposure_series.fillna(0.0) < 0.30).mean())
+            below_50_ratio = float((actual_exposure_series.fillna(0.0) < 0.50).mean())
+            below_80_ratio = float((actual_exposure_series.fillna(0.0) < 0.80).mean())
             under_deploy_counter: Counter[str] = Counter()
             layering_band_counter: Counter[str] = Counter()
             absolute_filter_reject_counter: Counter[str] = Counter()
@@ -886,63 +1673,107 @@ def evaluate_etf_beta_sleeve(
             longest_fallback_streak = 0
             latest_governor_snapshot: dict[str, Any] | None = None
             latest_diagnostics_snapshot: dict[str, Any] | None = None
+            portfolio_target_by_date: dict[str, float] = {}
+            governor_target_by_date: dict[str, float] = {}
+            diagnostics_target_by_date: dict[str, float] = {}
+            diagnostics_target_weight_by_date: dict[str, float] = {}
+            diagnostics_target_weight_by_date_symbol: dict[str, dict[str, float]] = {}
+            hard_block_flag_counter: Counter[str] = Counter()
             for _idx, row in portfolio_daily.iterrows():
                 governor_payload: dict[str, Any] = {}
                 diagnostics_payload: dict[str, Any] = {}
+                diagnostics_formal_view: dict[str, Any] = {}
+                diagnostics_research_view: dict[str, Any] = {}
+                row_date = str(row.get("date") or "").strip()
                 raw_governor = row.get("governor_budget_json")
                 raw_diagnostics = row.get("diagnostics_input_json")
+                row_target_exposure = _safe_float(row.get("etf_target_exposure"))
+                if row_date and row_target_exposure is not None:
+                    portfolio_target_by_date[row_date] = float(row_target_exposure)
                 if isinstance(raw_governor, str) and raw_governor.strip():
                     try:
                         governor_payload = dict(json.loads(raw_governor) or {})
                     except Exception:
                         governor_payload = {}
-                if isinstance(raw_diagnostics, str) and raw_diagnostics.strip():
-                    try:
-                        diagnostics_payload = dict(json.loads(raw_diagnostics) or {})
-                        diagnostics_payload = dict(diagnostics_payload.get("diagnostics") or diagnostics_payload)
-                    except Exception:
-                        diagnostics_payload = {}
+                diagnostics_payload, diagnostics_formal_view, diagnostics_research_view = _extract_etf_diagnostics_views(raw_diagnostics)
                 if governor_payload:
                     latest_governor_snapshot = governor_payload
+                    governor_target_exposure = _safe_float(governor_payload.get("target_exposure"))
+                    if row_date and governor_target_exposure is not None:
+                        governor_target_by_date[row_date] = float(governor_target_exposure)
                     for code in list(governor_payload.get("under_deploy_reason_codes") or ()):
                         text = str(code).strip()
                         if text:
                             under_deploy_counter[text] += 1
+                    for code in list(governor_payload.get("hard_block_flags") or ()):
+                        text = str(code).strip()
+                        if text:
+                            hard_block_flag_counter[text] += 1
                     governor_layering_band = str(governor_payload.get("layering_band") or "").strip()
                     if governor_layering_band:
                         layering_band_counter[governor_layering_band] += 1
                         if governor_layering_band in {"LIGHT_ACCUMULATE", "CONTROLLED_TRANS_DOWN"}:
                             controlled_accumulation_day_count += 1
                 if diagnostics_payload:
-                    latest_diagnostics_snapshot = diagnostics_payload
-                    for code in list(diagnostics_payload.get("etf_beta_under_deploy_reason_codes") or ()):
+                    latest_diagnostics_snapshot = {
+                        **diagnostics_payload,
+                        "formal_view": diagnostics_formal_view,
+                        "research_view": diagnostics_research_view,
+                    }
+                    diagnostics_targets = {
+                        str(symbol).strip().upper(): _safe_float(value)
+                        for symbol, value in dict(diagnostics_formal_view.get("targets") or {}).items()
+                        if str(symbol).strip()
+                    }
+                    diagnostics_target_exposure = _safe_float(
+                        diagnostics_formal_view.get("target_exposure", diagnostics_payload.get("etf_beta_target_exposure"))
+                    )
+                    if row_date and diagnostics_target_exposure is not None:
+                        diagnostics_target_by_date[row_date] = float(diagnostics_target_exposure)
+                    diagnostics_target_weight = sum(
+                        float(value)
+                        for value in diagnostics_targets.values()
+                        if value is not None
+                    )
+                    if row_date and diagnostics_targets:
+                        diagnostics_target_weight_by_date[row_date] = float(diagnostics_target_weight)
+                        diagnostics_target_weight_by_date_symbol[row_date] = {
+                            _normalize_etf_symbol_key(symbol): float(value)
+                            for symbol, value in diagnostics_targets.items()
+                            if value is not None and _normalize_etf_symbol_key(symbol)
+                        }
+                    for code in list(diagnostics_research_view.get("under_deploy_reason_codes") or ()):
                         text = str(code).strip()
                         if text:
                             under_deploy_counter[text] += 1
-                    filter_reject_count = int(_safe_float(diagnostics_payload.get("etf_beta_absolute_filter_reject_count")) or 0)
+                    for code in list(diagnostics_research_view.get("hard_block_flags") or ()):
+                        text = str(code).strip()
+                        if text:
+                            hard_block_flag_counter[text] += 1
+                    filter_reject_count = int(_safe_float(diagnostics_research_view.get("absolute_filter_reject_count")) or 0)
                     if filter_reject_count > 0:
                         absolute_filter_reject_day_count += 1
-                    for code, count in dict(diagnostics_payload.get("etf_beta_absolute_filter_reject_reason_counts") or {}).items():
+                    for code, count in dict(diagnostics_research_view.get("absolute_filter_reject_reason_counts") or {}).items():
                         text = str(code).strip()
                         value = int(_safe_float(count) or 0)
                         if text and value > 0:
                             absolute_filter_reject_counter[text] += value
-                    for code, count in dict(diagnostics_payload.get("etf_beta_candidate_pool_reject_reason_counts") or {}).items():
+                    for code, count in dict(diagnostics_research_view.get("candidate_pool_reject_reason_counts") or {}).items():
                         text = str(code).strip()
                         value = int(_safe_float(count) or 0)
                         if text and value > 0:
                             candidate_pool_reject_counter[text] = max(candidate_pool_reject_counter.get(text, 0), value)
-                    for code, count in dict(diagnostics_payload.get("etf_beta_selection_chain_winner_counts") or {}).items():
+                    for code, count in dict(diagnostics_research_view.get("selection_chain_winner_counts") or {}).items():
                         text = str(code).strip()
                         value = int(_safe_float(count) or 0)
                         if text and value > 0:
                             selection_chain_winner_counter[text] += value
-                    for code, count in dict(diagnostics_payload.get("etf_beta_selection_chain_reject_reason_counts") or {}).items():
+                    for code, count in dict(diagnostics_research_view.get("selection_chain_reject_reason_counts") or {}).items():
                         text = str(code).strip()
                         value = int(_safe_float(count) or 0)
                         if text and value > 0:
                             selection_chain_reject_counter[text] += value
-                    diagnostics_layering_band = str(diagnostics_payload.get("etf_beta_layering_band") or "").strip()
+                    diagnostics_layering_band = str(diagnostics_research_view.get("layering_band") or "").strip()
                     if diagnostics_layering_band:
                         layering_band_counter[diagnostics_layering_band] += 1
                         if (
@@ -975,6 +1806,16 @@ def evaluate_etf_beta_sleeve(
                     ]
                 fallback_allowed_source = fallback_allowed_source or str(latest_governor_snapshot.get("fallback_allowed_source") or "").strip()
                 target_selected_count_source = target_selected_count_source or str(latest_governor_snapshot.get("target_selected_count_source") or "").strip()
+                trans_up_contract_mode = trans_up_contract_mode or str(latest_governor_snapshot.get("trans_up_contract_mode") or "").strip()
+                trans_up_single_seat_core_recovery = bool(
+                    latest_governor_snapshot.get("trans_up_single_seat_core_recovery", trans_up_single_seat_core_recovery)
+                )
+                if strategic_floor_target is None:
+                    strategic_floor_target = _safe_float(latest_governor_snapshot.get("strategic_floor_cap"))
+                if tactical_overlay_target is None:
+                    tactical_overlay_target = _safe_float(latest_governor_snapshot.get("tactical_overlay_cap"))
+                if avg_deployment_pace is None:
+                    avg_deployment_pace = _safe_float(latest_governor_snapshot.get("deployment_pace"))
             if avg_target_exposure is None:
                 avg_target_exposure = target_exposure
             if latest_governor_snapshot is not None:
@@ -983,25 +1824,49 @@ def evaluate_etf_beta_sleeve(
                 fallback_mode_text = str(latest_diagnostics_snapshot.get("etf_beta_fallback_mode") or "").strip().lower()
                 fallback_allowed = fallback_mode_text in {"cash", "single_symbol"}
             if latest_diagnostics_snapshot is not None:
-                exposure_policy_family = exposure_policy_family or str(latest_diagnostics_snapshot.get("etf_beta_exposure_policy_family") or "").strip()
-                policy_scope = policy_scope or str(latest_diagnostics_snapshot.get("etf_beta_policy_scope") or "").strip()
-                broad_based_only = bool(latest_diagnostics_snapshot.get("etf_beta_broad_based_only", broad_based_only))
-                layering_policy = layering_policy or str(latest_diagnostics_snapshot.get("etf_beta_layering_policy") or "").strip()
-                layering_band = layering_band or str(latest_diagnostics_snapshot.get("etf_beta_layering_band") or "").strip()
-                layering_active = bool(latest_diagnostics_snapshot.get("etf_beta_layering_active", layering_active))
+                latest_diagnostics_formal = dict(latest_diagnostics_snapshot.get("formal_view") or {})
+                latest_diagnostics_research = dict(latest_diagnostics_snapshot.get("research_view") or {})
+                exposure_policy_family = exposure_policy_family or str(latest_diagnostics_formal.get("exposure_policy_family") or "").strip()
+                policy_scope = policy_scope or str(latest_diagnostics_formal.get("policy_scope") or "").strip()
+                broad_based_only = bool(latest_diagnostics_formal.get("broad_based_only", broad_based_only))
+                layering_policy = layering_policy or str(latest_diagnostics_research.get("layering_policy") or "").strip()
+                layering_band = layering_band or str(latest_diagnostics_research.get("layering_band") or "").strip()
+                layering_active = bool(latest_diagnostics_research.get("layering_active", layering_active))
                 if not layering_reason_codes:
                     layering_reason_codes = [
                         str(code).strip()
-                        for code in list(latest_diagnostics_snapshot.get("etf_beta_layering_reason_codes") or ())
+                        for code in list(latest_diagnostics_research.get("layering_reason_codes") or ())
                         if str(code).strip()
                     ]
-                fallback_allowed_source = fallback_allowed_source or str(latest_diagnostics_snapshot.get("etf_beta_fallback_allowed_source") or "").strip()
-                target_selected_count_source = target_selected_count_source or str(latest_diagnostics_snapshot.get("etf_beta_target_selected_count_source") or "").strip()
+                fallback_allowed_source = fallback_allowed_source or str(latest_diagnostics_formal.get("fallback_allowed_source") or "").strip()
+                target_selected_count_source = target_selected_count_source or str(latest_diagnostics_formal.get("target_selected_count_source") or "").strip()
+                trans_up_contract_mode = trans_up_contract_mode or str(latest_diagnostics_research.get("trans_up_contract_mode") or "").strip()
+                trans_up_single_seat_core_recovery = bool(
+                    latest_diagnostics_research.get("trans_up_single_seat_core_recovery", trans_up_single_seat_core_recovery)
+                )
+                if strategic_floor_target is None:
+                    strategic_floor_target = _safe_float(latest_diagnostics_research.get("strategic_floor_cap"))
+                if tactical_overlay_target is None:
+                    tactical_overlay_target = _safe_float(latest_diagnostics_research.get("tactical_overlay_cap"))
+                if limited_defense_target is None:
+                    limited_defense_target = _safe_float(latest_diagnostics_research.get("limited_defense_cap"))
+                if avg_deployment_pace is None:
+                    avg_deployment_pace = _safe_float(latest_diagnostics_research.get("deployment_pace"))
 
             deployment_assessment = "TRACEABLE"
+            target_exposure_reference = avg_target_exposure if avg_target_exposure is not None else target_exposure
+            actual_exposure_reference = avg_actual_exposure
+            if _is_formal_stabilizer_role(strategy_role, local_policy_mode) and avg_actual_on_invested is not None:
+                actual_exposure_reference = avg_actual_on_invested
+                if avg_target_on_invested is not None:
+                    target_exposure_reference = avg_target_on_invested
             if invested_day_count <= 0:
                 deployment_assessment = "NO_DEPLOYMENT"
-            elif target_exposure is not None and avg_actual_exposure is not None and avg_actual_exposure < float(target_exposure) * 0.5:
+            elif (
+                target_exposure_reference is not None
+                and actual_exposure_reference is not None
+                and actual_exposure_reference < float(target_exposure_reference) * 0.5
+            ):
                 deployment_assessment = "UNDERDEPLOYED"
             elif (
                 min_deployable_exposure is not None
@@ -1027,10 +1892,30 @@ def evaluate_etf_beta_sleeve(
                     "invested_day_ratio": (float(invested_day_count) / float(observed_day_count)) if observed_day_count > 0 else None,
                     "avg_target_exposure": avg_target_exposure,
                     "avg_actual_exposure": avg_actual_exposure,
+                    "median_actual_exposure": median_actual_exposure,
                     "avg_actual_exposure_on_invested_days": avg_actual_on_invested,
                     "avg_actual_risk_exposure": avg_actual_risk_exposure,
                     "avg_actual_fallback_exposure": avg_actual_fallback_exposure,
                     "avg_actual_other_exposure": avg_actual_other_exposure,
+                    "avg_actual_core_exposure": avg_actual_core_exposure,
+                    "avg_actual_satellite_exposure": avg_actual_satellite_exposure,
+            "avg_actual_defense_exposure": avg_actual_defense_exposure,
+            "avg_target_defense_budget": avg_target_defense_budget,
+            "avg_target_core_beta_budget": avg_target_core_beta_budget,
+            "avg_target_alpha_budget": avg_target_alpha_budget,
+            "avg_actual_defense_budget": avg_actual_defense_budget,
+            "avg_actual_core_beta_budget": avg_actual_core_beta_budget,
+            "avg_actual_alpha_budget": avg_actual_alpha_budget,
+            "avg_defense_budget_gap": avg_defense_budget_gap,
+            "avg_core_beta_budget_gap": avg_core_beta_budget_gap,
+            "avg_alpha_budget_gap": avg_alpha_budget_gap,
+            "avg_cash_share": avg_cash_share,
+                    "avg_risk_asset_share": avg_actual_risk_exposure,
+                    "avg_defense_asset_share": avg_actual_fallback_exposure,
+                    "empty_day_ratio": empty_day_ratio,
+                    "below_30_ratio": below_30_ratio,
+                    "below_50_ratio": below_50_ratio,
+                    "below_80_ratio": below_80_ratio,
                     "avg_deployability_gap": avg_deployability_gap,
                     "fallback_exposure_day_count": fallback_exposure_day_count,
                     "fallback_exposure_day_ratio": (
@@ -1046,8 +1931,19 @@ def evaluate_etf_beta_sleeve(
                         else None
                     ),
                     "target_exposure": target_exposure,
+                    "strategic_floor_target": strategic_floor_target,
+                    "tactical_overlay_target": tactical_overlay_target,
+                    "limited_defense_target": limited_defense_target,
+                    "deployment_pace": avg_deployment_pace,
+                    "avg_pace_policy_gap": avg_pace_policy_gap,
+                    "avg_rebalance_timing_gap": avg_rebalance_timing_gap,
+                    "avg_execution_residual_gap": avg_execution_residual_gap,
+                    "trans_up_contract_mode": trans_up_contract_mode or None,
+                    "trans_up_single_seat_core_recovery": bool(trans_up_single_seat_core_recovery),
+                    "hard_block_flag_count": int(sum(hard_block_flag_counter.values())),
                     "min_deployable_exposure": min_deployable_exposure,
                     "under_deploy_reason_counts": dict(sorted(under_deploy_counter.items())),
+                    "hard_block_flag_counts": dict(sorted(hard_block_flag_counter.items())),
                     "layering_band_counts": dict(sorted(layering_band_counter.items())),
                     "absolute_filter_reject_day_count": absolute_filter_reject_day_count,
                     "absolute_filter_reject_reason_counts": dict(sorted(absolute_filter_reject_counter.items())),
@@ -1058,8 +1954,18 @@ def evaluate_etf_beta_sleeve(
                     "deployment_assessment": deployment_assessment,
                 }
             )
+            deployment_metrics["bull_trans_up_bottleneck_summary"] = _summarize_etf_bull_trans_up_bottleneck(
+                portfolio_daily,
+                orders_df,
+            )
             deployment_evidence["latest_governor_snapshot"] = latest_governor_snapshot
             deployment_evidence["latest_diagnostics_snapshot"] = latest_diagnostics_snapshot
+            deployment_evidence["bull_trans_up_bottleneck_summary"] = dict(
+                deployment_metrics.get("bull_trans_up_bottleneck_summary") or {}
+            )
+            deployment_metrics["buy_signal_count"] = int(_series_numeric(portfolio_daily, "composed_buy_signal_count").fillna(0.0).sum())
+            deployment_metrics["sell_signal_count"] = int(_series_numeric(portfolio_daily, "composed_sell_signal_count").fillna(0.0).sum())
+            deployment_metrics["signal_count"] = int(deployment_metrics["buy_signal_count"]) + int(deployment_metrics["sell_signal_count"])
         if not orders_df.empty:
             order_reasons = orders_df.get("reason_code", pd.Series(index=orders_df.index, dtype=object)).astype(str).str.strip()
             fallback_mask = order_reasons.eq("ETF_BETA_FALLBACK_BUY")
@@ -1074,15 +1980,197 @@ def evaluate_etf_beta_sleeve(
             else:
                 deployment_metrics["fallback_buy_count"] = 0
                 deployment_metrics["fallback_buy_day_count"] = 0
+            target_contract_drift_examples: list[dict[str, Any]] = []
+            if "meta_json" in orders_df.columns:
+                aggregated_order_targets: dict[tuple[str, str], float] = {}
+                aggregated_delta_targets: dict[tuple[str, str], float] = {}
+                aggregated_order_dates: dict[tuple[str, str], str] = {}
+                aggregated_order_context: dict[tuple[str, str], dict[str, bool]] = {}
+                for _idx, row in orders_df.iterrows():
+                    raw_meta = row.get("meta_json")
+                    if not isinstance(raw_meta, str) or not raw_meta.strip():
+                        continue
+                    try:
+                        meta = dict(json.loads(raw_meta) or {})
+                    except Exception:
+                        continue
+                    if str(meta.get("sleeve_id") or meta.get("alpha_id") or "").strip() != "cn_etf_beta":
+                        continue
+                    order_date = str(row.get("date") or "").strip()
+                    if not order_date:
+                        continue
+                    symbol = str(row.get("symbol") or "").strip().lower()
+                    if not symbol:
+                        continue
+                    decision_date = str(
+                        meta.get("signal_date")
+                        or row.get("signal_date")
+                        or ""
+                    ).strip()
+                    compare_date = decision_date or order_date
+                    order_target_weight = _safe_float(meta.get("target_weight"))
+                    final_target_weight = _safe_float(meta.get("final_target_weight"))
+                    compare_target_weight = final_target_weight if final_target_weight is not None else order_target_weight
+                    if compare_target_weight is None:
+                        continue
+                    compare_key = (compare_date, symbol)
+                    aggregated_order_targets[compare_key] = float(aggregated_order_targets.get(compare_key, 0.0)) + float(compare_target_weight)
+                    if order_target_weight is not None:
+                        aggregated_delta_targets[compare_key] = float(aggregated_delta_targets.get(compare_key, 0.0)) + float(order_target_weight)
+                    aggregated_order_dates.setdefault(compare_key, order_date)
+                    selection_reason_codes = meta.get("selection_reason_codes")
+                    if isinstance(selection_reason_codes, str):
+                        selection_reason_codes = [selection_reason_codes]
+                    normalized_selection_reason_codes = {
+                        str(code or "").strip()
+                        for code in (selection_reason_codes or [])
+                        if str(code or "").strip()
+                    }
+                    context = aggregated_order_context.setdefault(
+                        compare_key,
+                        {
+                            "has_final_target_weight": False,
+                            "has_delta_deploy_gap": False,
+                            "is_fallback_buy": False,
+                            "is_fallback_single_symbol": False,
+                        },
+                    )
+                    if final_target_weight is not None:
+                        context["has_final_target_weight"] = True
+                    if str(meta.get("target_weight_basis") or "").strip() == "delta_deploy_gap":
+                        context["has_delta_deploy_gap"] = True
+                    if str(row.get("reason_code") or "").strip() == "ETF_BETA_FALLBACK_BUY":
+                        context["is_fallback_buy"] = True
+                    if "ETF_BETA_FALLBACK_SINGLE_SYMBOL" in normalized_selection_reason_codes:
+                        context["is_fallback_single_symbol"] = True
+                for (compare_date, symbol), order_target_weight in aggregated_order_targets.items():
+                    formal_targets_by_symbol = diagnostics_target_weight_by_date_symbol.get(compare_date) or {}
+                    formal_target_weight = formal_targets_by_symbol.get(symbol)
+                    compared_targets = {
+                        "formal_target_weight": formal_target_weight,
+                        "portfolio_daily_target_exposure": portfolio_target_by_date.get(compare_date),
+                        "governor_target_exposure": governor_target_by_date.get(compare_date),
+                        "diagnostics_target_exposure": diagnostics_target_by_date.get(compare_date),
+                    }
+                    order_context = aggregated_order_context.get((compare_date, symbol)) or {}
+                    matches_live_target = any(
+                        value is not None and abs(float(order_target_weight) - float(value)) <= 1e-9
+                        for key, value in compared_targets.items()
+                        if key != "formal_target_weight"
+                    )
+                    allow_fallback_full_replacement = (
+                        formal_target_weight is None
+                        and bool(formal_targets_by_symbol)
+                        and bool(order_context.get("has_final_target_weight"))
+                        and bool(order_context.get("has_delta_deploy_gap"))
+                        and bool(order_context.get("is_fallback_buy"))
+                        and bool(order_context.get("is_fallback_single_symbol"))
+                        and matches_live_target
+                    )
+                    if formal_target_weight is not None:
+                        mismatch = abs(float(order_target_weight) - float(formal_target_weight)) > 1e-9
+                    elif formal_targets_by_symbol:
+                        mismatch = (not allow_fallback_full_replacement) and abs(float(order_target_weight)) > 1e-9
+                    else:
+                        mismatch = any(
+                            value is not None and abs(float(order_target_weight) - float(value)) > 1e-9
+                            for key, value in compared_targets.items()
+                            if key != "formal_target_weight"
+                        )
+                    if not mismatch:
+                        continue
+                    target_contract_drift_examples.append(
+                        {
+                            "date": aggregated_order_dates.get((compare_date, symbol)) or compare_date,
+                            "decision_date": compare_date,
+                            "compare_date": compare_date,
+                            "symbols": [symbol],
+                            "order_target_weight": order_target_weight,
+                            "order_delta_target_weight": aggregated_delta_targets.get((compare_date, symbol)),
+                            **compared_targets,
+                        }
+                    )
+                    if len(target_contract_drift_examples) >= 5:
+                        break
+            deployment_metrics["target_contract_drift_detected"] = bool(target_contract_drift_examples)
+            deployment_metrics["target_contract_drift_day_count"] = len(
+                {str(item.get("date") or "").strip() for item in target_contract_drift_examples if str(item.get("date") or "").strip()}
+            )
+            if target_contract_drift_examples:
+                deployment_evidence["target_contract_drift_examples"] = target_contract_drift_examples
+        deployment_metrics["unfilled_order_count"] = max(int(order_count or 0) - int(trade_count or 0), 0)
+
+    requested_budget = _safe_float(research_view.get("requested_budget"))
+    applied_budget = _safe_float(research_view.get("applied_budget"))
+    cash_weight = _safe_float(research_view.get("cash_weight"))
+    defense_weight = _safe_float(research_view.get("defense_weight"))
+    equity_core_bucket = _safe_float(research_view.get("equity_core_bucket"))
+    defense_tilt_bucket = _safe_float(research_view.get("defense_tilt_bucket"))
+    cash_buffer_bucket = _safe_float(research_view.get("cash_buffer_bucket"))
+    etf_budget_roles = dict(
+        formal_view.get("etf_budget_roles")
+        or research_view.get("etf_budget_roles")
+        or summary_obj.get("etf_budget_roles")
+        or {}
+    )
+    etf_budget_roles_target = dict(etf_budget_roles.get("target") or {})
+    etf_budget_roles_actual = dict(etf_budget_roles.get("actual") or {})
+    etf_budget_roles_deviation = dict(etf_budget_roles.get("deviation") or {})
+    etf_budget_roles_contract_version = str(etf_budget_roles.get("contract_version") or "").strip()
+    etf_budget_roles_effective_state_5 = str(etf_budget_roles.get("effective_state_5") or "").strip()
+    target_defense_budget = _safe_float(etf_budget_roles_target.get("defense"))
+    target_core_beta_budget = _safe_float(etf_budget_roles_target.get("core_beta"))
+    target_alpha_budget = _safe_float(etf_budget_roles_target.get("alpha"))
+    actual_defense_budget = _safe_float(etf_budget_roles_actual.get("defense"))
+    actual_core_beta_budget = _safe_float(etf_budget_roles_actual.get("core_beta"))
+    actual_alpha_budget = _safe_float(etf_budget_roles_actual.get("alpha"))
+    defense_budget_gap = _safe_float(etf_budget_roles_deviation.get("defense_gap"))
+    core_beta_budget_gap = _safe_float(etf_budget_roles_deviation.get("core_beta_gap"))
+    alpha_budget_gap = _safe_float(etf_budget_roles_deviation.get("alpha_gap"))
+    deployment_metrics["avg_target_defense_budget"] = target_defense_budget
+    deployment_metrics["avg_target_core_beta_budget"] = target_core_beta_budget
+    deployment_metrics["avg_target_alpha_budget"] = target_alpha_budget
+    deployment_metrics["avg_actual_defense_budget"] = actual_defense_budget
+    deployment_metrics["avg_actual_core_beta_budget"] = actual_core_beta_budget
+    deployment_metrics["avg_actual_alpha_budget"] = actual_alpha_budget
+    deployment_metrics["avg_defense_budget_gap"] = defense_budget_gap
+    deployment_metrics["avg_core_beta_budget_gap"] = core_beta_budget_gap
+    deployment_metrics["avg_alpha_budget_gap"] = alpha_budget_gap
+    target_map = {
+        str(symbol).strip().upper(): _safe_float(value)
+        for symbol, value in dict(formal_view.get("targets") or {}).items()
+        if str(symbol).strip()
+    }
+    zero_deploy_owner: str | None = None
+    reduced_allocation_owner: str | None = None
+    if governor_hard_blocked or (requested_budget is not None and requested_budget <= 1e-12):
+        zero_deploy_owner = "governor_boundary"
+    elif requested_budget is not None and requested_budget > 1e-12 and not target_map:
+        zero_deploy_owner = "local_boundary_decision"
+    if requested_budget is not None and requested_budget > 1e-12 and local_boundary_state == "REDUCED_ALLOCATION":
+        reduced_allocation_owner = "local_boundary_decision"
+    elif governor_hard_blocked:
+        reduced_allocation_owner = "governor_boundary"
+    boundary_attribution = {
+        "zero_deploy_owner": zero_deploy_owner,
+        "reduced_allocation_owner": reduced_allocation_owner,
+        "governor_hard_blocked": governor_hard_blocked,
+        "governor_hard_block_reason_codes": list(governor_hard_block_reason_codes),
+        "local_boundary_state": local_boundary_state or None,
+        "local_boundary_reason_codes": list(local_boundary_reason_codes),
+    }
 
     standalone_entry_types = {
         "cn_etf_research_entry",
         "cn_etf_broad_based_standalone_mainline_entry",
+        "cn_etf_phase1_allocation_entry",
     }
     has_governor_boundary_split = bool(governor_boundary)
     has_local_policy_split = bool(local_policy_decision)
     deployment_metrics["has_governor_boundary_split"] = has_governor_boundary_split
     deployment_metrics["has_local_policy_split"] = has_local_policy_split
+    deployment_metrics["zero_deploy_owner"] = zero_deploy_owner
+    deployment_metrics["reduced_allocation_owner"] = reduced_allocation_owner
 
     if source_entry_type not in standalone_entry_types:
         status = "FAIL"
@@ -1099,6 +2187,12 @@ def evaluate_etf_beta_sleeve(
     ):
         status = "FAIL"
         reason = "Governed broad-based standalone mainline must use the standalone mainline source entry type."
+    elif _is_formal_stabilizer_role(strategy_role, local_policy_mode) and source_entry_type != "cn_etf_phase1_allocation_entry":
+        status = "FAIL"
+        reason = "Formal ETF stabilizer must use the formal cn_etf_phase1_allocation_entry source entry type."
+    elif _is_formal_stabilizer_role(strategy_role, local_policy_mode) and (not has_governor_boundary_split or not has_local_policy_split):
+        status = "FAIL"
+        reason = "Formal ETF stabilizer is missing the Governor boundary/local policy split."
     elif strategy_role == "governed_broad_based_standalone_mainline" and (not has_governor_boundary_split or not has_local_policy_split):
         status = "FAIL"
         reason = "Standalone broad-based ETF mainline is missing the Governor boundary/local policy split."
@@ -1108,24 +2202,28 @@ def evaluate_etf_beta_sleeve(
     elif (order_count or 0) <= 0 or (trade_count or 0) <= 0:
         status = "FAIL"
         reason = "ETF beta sleeve path is wired, but the smoke window still has zero orders or trades."
+    elif deployment_metrics.get("target_contract_drift_detected"):
+        status = "FAIL"
+        reason = "ETF beta sleeve target exposure contract drift detected across orders and audit artifacts."
     elif missing_selected_reasons or missing_out_of_scope_reasons:
         status = "WARN"
         reason = "ETF beta sleeve selection markers are present, but reason codes are incomplete."
-    elif not sleeve_budget_used:
+    elif not research_view:
         status = "WARN"
-        reason = "ETF beta sleeve Phase 1 summary is present, but governor budget usage is missing."
+        reason = "ETF beta sleeve formal summary is present, but ETF research view is missing."
     elif deployment_metrics.get("deployment_assessment") == "UNDERDEPLOYED":
         status = "WARN"
         reason = "ETF beta sleeve path is wired and traceable, but actual deployment still remains below stabilizer intent."
     else:
         status = "PASS"
-        reason = "ETF beta sleeve scope, governor budget usage, and deployment evidence are traceable."
+        reason = "ETF beta sleeve formal summary and research explanation are traceable."
 
     evidence = {
         "strategy_role": strategy_role or None,
         "governor_boundary_mode": governor_boundary_mode or None,
         "local_policy_mode": local_policy_mode or None,
         "controlled_accumulation_mode": controlled_accumulation_mode or None,
+        "boundary_policy_mode": boundary_policy_mode or None,
         "source_entry_type": source_entry_type,
         "source_preset_id": summary_obj.get("source_preset_id"),
         "source_batch_id": summary_obj.get("source_batch_id"),
@@ -1148,19 +2246,39 @@ def evaluate_etf_beta_sleeve(
         "core_slot_target_actual_exposure": summary_obj.get("core_slot_target_actual_exposure"),
         "growth_slot_target_actual_exposure": summary_obj.get("growth_slot_target_actual_exposure"),
         "formal_core_beta_symbols": list(summary_obj.get("formal_core_beta_symbols") or []),
+        "core_accumulator_symbols": list(summary_obj.get("core_accumulator_symbols") or []),
+        "tactical_satellite_symbols": list(summary_obj.get("tactical_satellite_symbols") or []),
         "limited_defense_candidates": list(summary_obj.get("limited_defense_candidates") or []),
+        "symbol_role_map": dict(summary_obj.get("symbol_role_map") or {}),
         "formal_alignment_reference": formal_alignment_reference,
         "formal_alignment_status": formal_alignment_status,
         "formal_mainline_compatible": formal_mainline_compatible,
         "formal_alignment_reason_codes": list(formal_alignment_reason_codes),
         "formal_alignment_evidence": formal_alignment_evidence,
+        "etf_budget_roles_contract_version": etf_budget_roles_contract_version,
+        "etf_budget_roles_effective_state_5": etf_budget_roles_effective_state_5,
+        "etf_budget_roles_target": etf_budget_roles_target,
+        "etf_budget_roles_actual": etf_budget_roles_actual,
+        "etf_budget_roles_deviation": etf_budget_roles_deviation,
         "eligible_etfs": eligible_etfs,
         "selected_etfs": selected_etfs,
         "selection_reason_codes": selection_reason_codes,
         "out_of_scope_etfs": out_of_scope_etfs,
         "out_of_scope_reason_codes": out_of_scope_reason_codes,
-        "coverage_summary": dict(summary_obj.get("coverage_summary") or {}),
-        "sleeve_budget_used": sleeve_budget_used,
+        "coverage_summary": dict(formal_view.get("coverage_summary") or summary_obj.get("coverage_summary") or {}),
+        "requested_budget": requested_budget,
+        "applied_budget": applied_budget,
+        "targets": target_map,
+        "strategic_floor_cap": research_view.get("strategic_floor_cap"),
+        "tactical_overlay_cap": research_view.get("tactical_overlay_cap"),
+        "limited_defense_cap": research_view.get("limited_defense_cap"),
+        "deployment_pace": research_view.get("deployment_pace"),
+        "hard_block_flags": list(research_view.get("hard_block_flags") or []),
+        "cash_weight": cash_weight,
+        "defense_weight": defense_weight,
+        "equity_core_bucket": equity_core_bucket,
+        "defense_tilt_bucket": defense_tilt_bucket,
+        "cash_buffer_bucket": cash_buffer_bucket,
         "vol_target": vol_target,
         "relative_strength_windows": {
             "fast": summary_obj.get("relative_strength_fast_window"),
@@ -1194,13 +2312,23 @@ def evaluate_etf_beta_sleeve(
         "fallback_symbol": summary_obj.get("fallback_symbol"),
         "target_selected_count_source": target_selected_count_source or None,
         "fallback_allowed_source": fallback_allowed_source or None,
+        "trans_up_contract_mode": trans_up_contract_mode or None,
+        "trans_up_single_seat_core_recovery": bool(trans_up_single_seat_core_recovery),
         "target_selected_count_by_state_5": dict(summary_obj.get("target_selected_count_by_state_5") or {}),
         "fallback_allowed_by_state_5": dict(summary_obj.get("fallback_allowed_by_state_5") or {}),
         "deployment_evidence": deployment_evidence,
         "governor_boundary": governor_boundary,
         "local_policy_decision": local_policy_decision,
+        "boundary_attribution": boundary_attribution,
         "fallback_allowed": fallback_allowed,
         "configured_under_deploy_reason_codes": configured_under_deploy_reason_codes,
+        "etf_budget_roles_contract_version": etf_budget_roles_contract_version or None,
+        "etf_budget_roles_effective_state_5": etf_budget_roles_effective_state_5 or None,
+        "etf_budget_roles_target": etf_budget_roles_target,
+        "etf_budget_roles_actual": etf_budget_roles_actual,
+        "etf_budget_roles_deviation": etf_budget_roles_deviation,
+        "formal_view": formal_view,
+        "research_view": research_view,
     }
     metrics = {
         "input_count": len(input_etfs),
@@ -1215,6 +2343,11 @@ def evaluate_etf_beta_sleeve(
         "formal_alignment_reason_count": len(formal_alignment_reason_codes),
         "order_count": order_count,
         "trade_count": trade_count,
+        "requested_budget": requested_budget,
+        "applied_budget": applied_budget,
+        "cash_weight": cash_weight,
+        "defense_weight": defense_weight,
+        "target_symbol_count": len(target_map),
         "vol_target_active": bool(vol_target.get("active", False)),
         "vol_target_scaled_symbol_count": len(dict(vol_target.get("scale_by_symbol") or {})),
         **deployment_metrics,
@@ -1235,14 +2368,19 @@ def evaluate_unified_runtime_completeness(
     if asset_role != "unified_multi_sleeve_combo" and execution_shell != "unified_combo_phase1":
         return None
 
-    combo_components = dict(run_meta_obj.get("combo_components") or {})
+    config_payload = _read_json(Path(results_dir).resolve() / "config.json")[0] if results_dir is not None else None
     sleeves = dict(run_meta_obj.get("sleeves") or {})
     combo_governed = dict(run_meta_obj.get("governed_snapshot") or {})
     combo_regime = dict((run_meta_obj.get("regime") or {}).get("latest_state") or {})
     combo_attribution = dict(run_meta_obj.get("attribution") or {})
+    combo_runtime = dict(run_meta_obj.get("combo_runtime") or {})
+    account_allocator_runtime = dict(run_meta_obj.get("account_allocator_runtime") or {})
     sleeve_budgets = dict(combo_governed.get("sleeve_budgets") or {})
-    stock_component = dict(combo_components.get("stock_component") or {})
-    etf_component = dict(combo_components.get("etf_component") or {})
+    dependencies = dict(run_meta_obj.get("dependencies") or {})
+    component_runs = dict(dependencies.get("component_runs") or {})
+    component_experiments = dict((config_payload or {}).get("component_experiments") or {})
+    stock_component = dict(component_runs.get("stock_alpha_core") or component_experiments.get("stock_alpha_core") or {})
+    etf_component = dict(component_runs.get("etf_beta") or component_experiments.get("etf_beta") or {})
     stock_sleeve = dict(sleeves.get("stock_alpha_core") or {})
     etf_sleeve = dict(sleeves.get("etf_beta") or {})
 
@@ -1268,6 +2406,15 @@ def evaluate_unified_runtime_completeness(
         key in attribution_summary for key in ("state_log_count", "budget_log_count", "sleeve_log_count")
     )
     has_daily_artifact = bool(str(refs.get("portfolio_daily") or "").strip())
+    has_account_allocator_runtime = bool(account_allocator_runtime.get("runtime_truth_source")) and bool(
+        account_allocator_runtime.get("budget_roles")
+    )
+    research_combo_only = bool(
+        combo_runtime.get("research_combo_only")
+        or combo_governed.get("research_combo_only")
+    )
+    combo_budget_semantics = str(combo_governed.get("budget_semantics") or "").strip()
+    combo_budget_owner = str(combo_governed.get("budget_owner") or "").strip()
 
     metrics = {
         "component_count": int(bool(stock_component.get("exp_id"))) + int(bool(etf_component.get("exp_id"))),
@@ -1275,23 +2422,81 @@ def evaluate_unified_runtime_completeness(
         "has_combo_regime": has_combo_regime,
         "has_combo_attribution": has_combo_attribution,
         "has_daily_artifact": has_daily_artifact,
+        "has_account_allocator_runtime": has_account_allocator_runtime,
+        "has_account_state_transition_policy": bool(account_allocator_runtime.get("state_transition_policy")),
+        "has_account_state_resolution": bool(account_allocator_runtime.get("state_resolution")),
+        "has_account_state_transition_runtime": bool(account_allocator_runtime.get("state_transition_runtime")),
+        "has_account_transition_action_handoff": bool(account_allocator_runtime.get("transition_action_handoff")),
+        "has_account_transition_execution": bool(account_allocator_runtime.get("transition_execution")),
+        "account_transition_execution_owner_is_shared_runtime": (
+            str(((account_allocator_runtime.get("transition_execution") or {}).get("owner")) or "").strip()
+            == "shared_account_execution_runtime"
+        ),
+        "has_account_transition_execution_reference": bool(
+            account_allocator_runtime.get("transition_execution_reference")
+        ),
+        "riskoff_left_side_accumulation_active": bool(
+            (account_allocator_runtime.get("riskoff_left_side_accumulation_budget") or {}).get("active")
+        ),
+        "riskoff_budget_execution_materialization_active": bool(
+            (account_allocator_runtime.get("riskoff_budget_execution_materialization") or {}).get("active")
+        ),
+        "riskoff_budget_execution_materialization_execution_activated": bool(
+            (account_allocator_runtime.get("riskoff_budget_execution_materialization") or {}).get("execution_activated")
+        ),
+        "riskoff_budget_execution_materialization_execution_rejected": bool(
+            (account_allocator_runtime.get("riskoff_budget_execution_materialization") or {}).get("execution_rejected")
+        ),
+        "research_combo_only": research_combo_only,
         "stock_component_present": bool(stock_component.get("exp_id")),
         "etf_component_present": bool(etf_component.get("exp_id")),
     }
     evidence = {
         "asset_role": asset_role,
         "execution_shell": execution_shell,
+        "combo_budget_owner": combo_budget_owner or None,
+        "combo_budget_semantics": combo_budget_semantics or None,
+        "runtime_truth_source": str(run_meta_obj.get("runtime_truth_source") or "").strip() or None,
+        "account_allocator_runtime_contract_version": str(account_allocator_runtime.get("contract_version") or "").strip() or None,
+        "account_allocator_budget_owner": str(account_allocator_runtime.get("budget_owner") or "").strip() or None,
+        "account_allocator_state_source": str(account_allocator_runtime.get("state_source") or "").strip() or None,
+        "account_allocator_effective_state_5": str(account_allocator_runtime.get("effective_state_5") or "").strip() or None,
+        "account_allocator_state_transition_policy": dict(account_allocator_runtime.get("state_transition_policy") or {}),
+        "account_allocator_state_resolution": dict(account_allocator_runtime.get("state_resolution") or {}),
+        "account_allocator_state_transition_runtime": dict(account_allocator_runtime.get("state_transition_runtime") or {}),
+        "account_allocator_transition_action_handoff": dict(account_allocator_runtime.get("transition_action_handoff") or {}),
+        "account_allocator_transition_execution": dict(account_allocator_runtime.get("transition_execution") or {}),
+        "account_allocator_transition_execution_reference": dict(
+            account_allocator_runtime.get("transition_execution_reference") or {}
+        ),
+        "account_allocator_budget_roles": dict(account_allocator_runtime.get("budget_roles") or {}),
+        "account_allocator_riskoff_left_side_accumulation_budget": dict(
+            account_allocator_runtime.get("riskoff_left_side_accumulation_budget") or {}
+        ),
+        "account_allocator_riskoff_budget_execution_materialization": dict(
+            account_allocator_runtime.get("riskoff_budget_execution_materialization") or {}
+        ),
+        "account_allocator_reference_combo": dict(account_allocator_runtime.get("reference_combo") or {}),
+        "research_combo_only": research_combo_only,
         "stock_component_exp_id": stock_component.get("exp_id"),
         "etf_component_exp_id": etf_component.get("exp_id"),
         "sleeve_budget_keys": list(sleeve_budgets.keys()),
         "refs": refs,
     }
-    if has_components and has_sleeve_summaries and has_combo_governed and has_combo_regime and has_combo_attribution and has_daily_artifact:
+    if (
+        has_components
+        and has_sleeve_summaries
+        and has_combo_governed
+        and has_combo_regime
+        and has_combo_attribution
+        and has_daily_artifact
+        and has_account_allocator_runtime
+    ):
         status = "PASS"
-        reason = "Unified runtime combo exposes combo-level and sleeve-level artifacts with complete audit traceability."
+        reason = "Unified runtime combo exposes account-allocator runtime truth plus combo-level and sleeve-level audit traceability."
     else:
         status = "FAIL"
-        reason = "Unified runtime combo is missing combo/sleeve completeness evidence."
+        reason = "Unified runtime combo is missing account-allocator runtime truth or combo/sleeve completeness evidence."
     return {"status": status, "reason": reason, "evidence": evidence, "metrics": metrics}
 
 
@@ -1465,6 +2670,29 @@ def evaluate_execution_realism(
         }
 
     merged = trades.merge(bars, on=["symbol", "date"], how="left", indicator=True, suffixes=("", "_bar"))
+    initial_missing_mask = merged["_merge"] != "both"
+    if initial_missing_mask.any() and bar_frame is not None:
+        try:
+            access = runtime_access or load_runtime_data_access(bt_root)
+            missing_symbols = sorted(set(merged.loc[initial_missing_mask, "symbol"].astype(str).tolist()))
+            extra_bars, extra_query_count = _load_etf_bar_supplement(
+                access=access,
+                symbols=missing_symbols,
+                start=trades["date"].min(),
+                end=trades["date"].max(),
+            )
+            if extra_query_count is not None:
+                runtime_query_count = int((runtime_query_count or 0) + extra_query_count)
+            if not extra_bars.empty:
+                combined_bars = pd.concat([bars, _normalize_bar_df(extra_bars)], ignore_index=True)
+                combined_bars = combined_bars.drop_duplicates(subset=["symbol", "date"], keep="first")
+                bars = combined_bars.sort_values(["symbol", "date"]).reset_index(drop=True)
+                merged = trades.merge(bars, on=["symbol", "date"], how="left", indicator=True, suffixes=("", "_bar"))
+        except Exception as exc:
+            if load_error:
+                load_error = f"{load_error}; etf_supplement={type(exc).__name__}: {exc}"
+            else:
+                load_error = f"etf_supplement={type(exc).__name__}: {exc}"
     merged["audit_price"] = _series_numeric(merged, "fill_price").fillna(_series_numeric(merged, "price"))
     missing_bar_mask = merged["_merge"] != "both"
     suspended_mask = (~missing_bar_mask) & _series_bool(merged, "is_suspended")
@@ -1709,6 +2937,56 @@ def evaluate_accounting_integrity(
     run_meta: Mapping[str, Any] | None = None,
     results_dir: Path | None = None,
 ) -> dict[str, Any]:
+    run_meta_obj = dict(run_meta or {})
+    data_meta = dict(run_meta_obj.get("data") or {})
+    stage_pipeline = dict(run_meta_obj.get("stage_pipeline") or {})
+    asset_role = str(data_meta.get("asset_role") or "").strip().lower()
+    execution_shell = str(stage_pipeline.get("execution_shell") or "").strip().lower()
+    if asset_role == "unified_multi_sleeve_combo" or execution_shell == "unified_combo_phase1":
+        component_gates: dict[str, dict[str, Any]] = {}
+        for sleeve_name, component in _load_combo_component_records(run_meta=run_meta_obj, results_dir=results_dir).items():
+            component_run_meta = component.get("run_meta")
+            component_results_dir = component.get("results_dir")
+            if not isinstance(component_run_meta, Mapping):
+                component_gates[sleeve_name] = {
+                    "status": "UNKNOWN",
+                    "reason": str(component.get("read_error") or "component run_meta unavailable"),
+                }
+                continue
+            component_gates[sleeve_name] = evaluate_accounting_integrity(
+                run_meta=component_run_meta,
+                results_dir=component_results_dir,
+            )
+        component_statuses = {
+            name: _normalize_status((gate or {}).get("status"))
+            for name, gate in component_gates.items()
+            if isinstance(gate, Mapping)
+        }
+        counts = Counter(component_statuses.values())
+        if component_statuses and all(status == "PASS" for status in component_statuses.values()):
+            status = "PASS"
+            reason = "Unified combo aggregates only sleeves with PASS accounting integrity."
+        elif any(status == "FAIL" for status in component_statuses.values()):
+            status = "FAIL"
+            reason = "Unified combo aggregates at least one sleeve with FAIL accounting integrity."
+        elif any(status == "WARN" for status in component_statuses.values()):
+            status = "WARN"
+            reason = "Unified combo aggregates at least one sleeve with WARN accounting integrity."
+        else:
+            status = "UNKNOWN"
+            reason = "Unified combo lacks sufficient sleeve accounting evidence."
+        return {
+            "status": status,
+            "reason": reason,
+            "evidence": {"component_statuses": component_statuses},
+            "metrics": {
+                "component_count": int(len(component_statuses)),
+                "component_pass_count": int(counts.get("PASS", 0)),
+                "component_warn_count": int(counts.get("WARN", 0)),
+                "component_fail_count": int(counts.get("FAIL", 0)),
+            },
+        }
+
     payload, source = _extract_accounting_integrity_audit(
         result=result,
         run_meta=run_meta,
@@ -1837,7 +3115,8 @@ def build_research_audit(
             run_meta=run_meta,
             results_dir=root,
         ),
-        "universe_lineage": evaluate_universe_lineage(run_meta=run_meta),
+        "universe_lineage": evaluate_universe_lineage(run_meta=run_meta, results_dir=root),
+        "price_adjustment_integrity": evaluate_price_adjustment_integrity(run_meta=run_meta, results_dir=root),
         "execution_realism": evaluate_execution_realism(
             results_dir=root,
             bt_root=bt_root,

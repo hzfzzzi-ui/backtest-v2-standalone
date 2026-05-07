@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.core.services import mobile_ops_service as mobile_ops
+from backend.core.services import transaction_lifecycle_service
 
 _CLAIMABLE_STATUS = "approved_pending"
 _ACTIVE_EXECUTION_STATUSES = {"claimed", "submitted", "partially_filled"}
@@ -228,6 +229,7 @@ def _apply_status_transition_locked(
         metadata=metadata,
     )
     _append_execution_event_locked(results_root, event_payload)
+    transaction_lifecycle_service.append_event(results_root, ticket_payload, event_payload)
     return ticket_payload
 
 
@@ -267,11 +269,17 @@ def list_execution_events(results_root: Path, ticket_id: str) -> list[dict[str, 
     normalized = str(ticket_id or "").strip()
     if not normalized:
         return []
+    events = transaction_lifecycle_service.list_events(results_root, normalized)
+    if events:
+        return events
     return _read_execution_events(_execution_events_path(results_root, normalized))
 
 
 def execution_ticket_summary(results_root: Path, ticket: dict[str, Any]) -> dict[str, Any]:
-    summary = mobile_ops.ticket_summary(ticket)
+    if isinstance(ticket.get("approval"), dict) or isinstance(ticket.get("signal_snapshot"), dict) or isinstance(ticket.get("execution"), dict):
+        summary = mobile_ops.ticket_summary(ticket)
+    else:
+        summary = dict(ticket)
     events = list_execution_events(results_root, str(summary.get("ticket_id") or ""))
     summary["recent_events"] = events[-5:]
     return summary
@@ -279,20 +287,21 @@ def execution_ticket_summary(results_root: Path, ticket: dict[str, Any]) -> dict
 
 def list_executable_tickets(results_root: Path, *, limit: int = 20, now_ts: int | None = None) -> list[dict[str, Any]]:
     with mobile_ops._MOBILE_OPS_LOCK:
-        tickets = [
+        _ = [
             _maybe_timeout_execution_ticket_locked(results_root, item, now_ts=now_ts)
             for item in mobile_ops._load_all_tickets_locked(results_root, now_ts=now_ts)
-            if str(item.get("status") or "").strip().lower() == _CLAIMABLE_STATUS
         ]
+        tickets = transaction_lifecycle_service.list_summaries(results_root, status=_CLAIMABLE_STATUS)
     return [execution_ticket_summary(results_root, item) for item in tickets[: max(1, int(limit))]]
 
 
 def list_execution_tickets(results_root: Path, *, limit: int = 50, now_ts: int | None = None) -> list[dict[str, Any]]:
     with mobile_ops._MOBILE_OPS_LOCK:
-        tickets = [
+        _ = [
             _maybe_timeout_execution_ticket_locked(results_root, item, now_ts=now_ts)
             for item in mobile_ops._load_all_tickets_locked(results_root, now_ts=now_ts)
         ]
+        tickets = transaction_lifecycle_service.list_summaries(results_root)
     summaries = [execution_ticket_summary(results_root, item) for item in tickets]
     summaries.sort(
         key=lambda item: (

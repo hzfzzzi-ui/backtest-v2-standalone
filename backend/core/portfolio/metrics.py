@@ -88,46 +88,38 @@ def compute_backtest_metrics(
         cc = pd.to_numeric(daily_df["candidates_count"], errors="coerce").fillna(0.0)
         bs = pd.to_numeric(daily_df["buy_slots_before_buy"], errors="coerce").fillna(0.0)
         rank_trigger_days = int((cc > bs).sum())
-    mf_rank_trigger_days = 0
+    def _num_series_any(*names: str) -> pd.Series:
+        for name in names:
+            if name in daily_df.columns:
+                return pd.to_numeric(daily_df[name], errors="coerce").fillna(0.0)
+        return pd.Series(0.0, index=daily_df.index, dtype=float)
+
+    mtr = _num_series_any("final_score_rank_triggered", "mf_rank_triggered")
+    mfc = _num_series_any("final_score_candidates_when_triggered", "mf_candidates_when_triggered")
+    mra = _num_series_any("final_score_rank_applied", "mf_rank_applied")
+    mtk = _num_series_any("final_score_topk_reject_count", "mf_topk_reject_count")
+    mfc_sel = _num_series_any("final_score_concentrated_selected_count", "mf_concentrated_selected_count")
+    mg = _num_series_any("final_score_rank_gate_on", "mf_gate_on")
+    mf_rank_trigger_days = int((mtr > 0).sum())
     mf_avg_candidates_when_triggered = 0.0
-    if "mf_rank_triggered" in daily_df.columns:
-        mtr = pd.to_numeric(daily_df["mf_rank_triggered"], errors="coerce").fillna(0.0)
-        mf_rank_trigger_days = int((mtr > 0).sum())
-        if "mf_candidates_when_triggered" in daily_df.columns:
-            mfc = pd.to_numeric(daily_df["mf_candidates_when_triggered"], errors="coerce").fillna(0.0)
-            picked = mfc[mtr > 0]
-            if len(picked) > 0:
-                mf_avg_candidates_when_triggered = float(picked.mean())
-    mf_rank_applied_days = 0
-    mf_rank_applied_rate = 0.0
-    if "mf_rank_applied" in daily_df.columns:
-        mra = pd.to_numeric(daily_df["mf_rank_applied"], errors="coerce").fillna(0.0)
-        mf_rank_applied_days = int((mra > 0).sum())
-        mf_rank_applied_rate = float((mra > 0).mean()) if len(mra) > 0 else 0.0
-    mf_topk_reject_count = int(
-        pd.to_numeric(daily_df.get("mf_topk_reject_count"), errors="coerce").fillna(0.0).sum()
-    ) if "mf_topk_reject_count" in daily_df.columns else 0
-    mf_concentrated_buy_rate = 0.0
-    if "mf_concentrated_selected_count" in daily_df.columns and "selected_count" in daily_df.columns:
-        mfc_sel = float(pd.to_numeric(daily_df["mf_concentrated_selected_count"], errors="coerce").fillna(0.0).sum())
-        msel = float(pd.to_numeric(daily_df["selected_count"], errors="coerce").fillna(0.0).sum())
-        mf_concentrated_buy_rate = (mfc_sel / msel) if msel > 0 else 0.0
-    mf_gate_on_days = 0
-    mf_gate_on_rate = 0.0
-    if "mf_gate_on" in daily_df.columns:
-        mg = pd.to_numeric(daily_df["mf_gate_on"], errors="coerce").fillna(0.0)
-        mf_gate_on_days = int((mg > 0).sum())
-        mf_gate_on_rate = float((mg > 0).mean()) if len(mg) > 0 else 0.0
+    picked = mfc[mtr > 0]
+    if len(picked) > 0:
+        mf_avg_candidates_when_triggered = float(picked.mean())
+    mf_rank_applied_days = int((mra > 0).sum())
+    mf_rank_applied_rate = float((mra > 0).mean()) if len(mra) > 0 else 0.0
+    mf_topk_reject_count = int(mtk.sum())
+    msel = float(pd.to_numeric(daily_df["selected_count"], errors="coerce").fillna(0.0).sum()) if "selected_count" in daily_df.columns else 0.0
+    mf_concentrated_buy_rate = (float(mfc_sel.sum()) / msel) if msel > 0 else 0.0
+    mf_gate_on_days = int((mg > 0).sum())
+    mf_gate_on_rate = float((mg > 0).mean()) if len(mg) > 0 else 0.0
     strong_risk_on_days = 0
     strong_risk_on_rate = 0.0
     if "strong_risk_on" in daily_df.columns:
         sro = pd.to_numeric(daily_df["strong_risk_on"], errors="coerce").fillna(0.0)
         strong_risk_on_days = int((sro > 0).sum())
         strong_risk_on_rate = float((sro > 0).mean()) if len(sro) > 0 else 0.0
-    mf_rank_suppressed_by_strong_gate_days = 0
-    if "mf_rank_suppressed_by_strong_gate" in daily_df.columns:
-        mssg = pd.to_numeric(daily_df["mf_rank_suppressed_by_strong_gate"], errors="coerce").fillna(0.0)
-        mf_rank_suppressed_by_strong_gate_days = int((mssg > 0).sum())
+    mssg = _num_series_any("final_score_rank_suppressed_by_strong_gate", "mf_rank_suppressed_by_strong_gate")
+    mf_rank_suppressed_by_strong_gate_days = int((mssg > 0).sum())
     trend_slope_block_count = int(pd.to_numeric(daily_df.get("trend_slope_block_count"), errors="coerce").fillna(0.0).sum()) if "trend_slope_block_count" in daily_df.columns else 0
     trend_continuity_block_count = int(pd.to_numeric(daily_df.get("trend_continuity_block_count"), errors="coerce").fillna(0.0).sum()) if "trend_continuity_block_count" in daily_df.columns else 0
     avg_trend_on_rate = float(pd.to_numeric(daily_df.get("base_trend_on_rate"), errors="coerce").fillna(0.0).mean()) if "base_trend_on_rate" in daily_df.columns else 0.0
@@ -189,6 +181,16 @@ def compute_backtest_metrics(
         "days_held_median": float(days_held_median),
         "rank_trigger_days": int(rank_trigger_days),
         "rank_trigger_rate": (float(rank_trigger_days) / float(trading_days)) if trading_days > 0 else 0.0,
+        "final_score_rank_trigger_days": int(mf_rank_trigger_days),
+        "final_score_rank_trigger_rate": (float(mf_rank_trigger_days) / float(trading_days)) if trading_days > 0 else 0.0,
+        "final_score_rank_applied_days": int(mf_rank_applied_days),
+        "final_score_rank_applied_rate": float(mf_rank_applied_rate),
+        "final_score_avg_candidates_when_triggered": float(mf_avg_candidates_when_triggered),
+        "final_score_topk_reject_count": int(mf_topk_reject_count),
+        "final_score_concentrated_buy_rate": float(mf_concentrated_buy_rate),
+        "final_score_rank_gate_on_days": int(mf_gate_on_days),
+        "final_score_rank_gate_on_rate": float(mf_gate_on_rate),
+        "final_score_rank_suppressed_by_strong_gate_days": int(mf_rank_suppressed_by_strong_gate_days),
         "mf_rank_trigger_days": int(mf_rank_trigger_days),
         "mf_rank_trigger_rate": (float(mf_rank_trigger_days) / float(trading_days)) if trading_days > 0 else 0.0,
         "mf_rank_applied_days": int(mf_rank_applied_days),

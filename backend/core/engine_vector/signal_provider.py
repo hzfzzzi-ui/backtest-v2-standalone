@@ -14,6 +14,7 @@ import pandas as pd
 from backend.core.config.models import ExitConfig
 from backend.core.core.models import Signal
 from backend.core.core.types import Side
+from backend.core.engine_vector.holding_exit_fragility import resolve_holding_exit_fragility_snapshot
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +120,7 @@ class DaySignals:
     overlay_score_map: dict[str, float] = field(default_factory=dict)
     overlay_gate_on_today: bool = False
     overlay_mode: str = "off"
+    overlay_band_limit: int = 0
     overlay_observation_date: date | None = None
     overlay_score_source: str = ""
     strong_risk_on: bool = False
@@ -210,7 +212,8 @@ def evaluate_engine_exits(
     atr_stop_k: float = 2.0,
     check_ma20_exit: Callable[[str], bool] | None = None,
     check_low10_exit: Callable[[str], bool] | None = None,
-) -> tuple[list[Signal], set[str], ExitCounts]:
+    asset_context: Mapping[str, Any] | None = None,
+) -> tuple[list[Signal], set[str], ExitCounts, dict[str, Any]]:
     """评估所有持仓的引擎级退出规则。
 
     按优先级：RISK_OFF > ATR_STOP > FIXED_STOP > TAKE_PROFIT > ATR_TRAIL > MA20_EXIT > LOW10_EXIT > TIME_EXIT。
@@ -252,6 +255,28 @@ def evaluate_engine_exits(
 
     partial_mode_norm = str(risk_off_exit_partial_mode or "all_states").strip().lower()
     partial_state = risk_off_partial_state if isinstance(risk_off_partial_state, dict) else {}
+    fragility_snapshot = resolve_holding_exit_fragility_snapshot(asset_context, day=day)
+    fragility_diag: dict[str, Any] = {
+        "holding_exit_fragility_enabled": bool(fragility_snapshot.enabled),
+        "holding_exit_fragility_valid": bool(fragility_snapshot.valid),
+        "holding_exit_fragility_gate_on": bool(fragility_snapshot.gate_on),
+        "holding_exit_fragility_factor_id": str(fragility_snapshot.factor_id or ""),
+        "holding_exit_fragility_action": str(fragility_snapshot.action or ""),
+        "holding_exit_fragility_top_pct": float(fragility_snapshot.risk_bucket_top_pct or 0.0),
+        "holding_exit_fragility_observation_date": (
+            fragility_snapshot.observation_date.isoformat()
+            if isinstance(fragility_snapshot.observation_date, date)
+            else ""
+        ),
+        "holding_exit_fragility_score_source": str(fragility_snapshot.score_source or ""),
+        "holding_exit_fragility_invalid_reason": str(fragility_snapshot.gate_reason or "") if not fragility_snapshot.valid else "",
+        "holding_exit_fragility_evaluated_positions": 0,
+        "holding_exit_fragility_matched_positions": 0,
+        "holding_exit_fragility_high_risk_positions": 0,
+        "holding_exit_fragility_watch_count": 0,
+        "holding_exit_fragility_trim_candidate_count": 0,
+        "holding_exit_fragility_exit_candidate_count": 0,
+    }
 
     for sym, qty in list(positions.items()):
         if int(qty) <= 0:
@@ -325,6 +350,7 @@ def evaluate_engine_exits(
                     trend_exit_stage = "pre_profit"
 
         reason = ""
+        fragility_meta: dict[str, Any] = {}
         risk_off_mode = str(risk_off_exit_mode or "risk_on_off").strip().lower()
         market_state_norm = str(market_state or "").strip().upper()
         risk_off_triggered = False
@@ -347,7 +373,9 @@ def evaluate_engine_exits(
                 risk_off_triggered = not risk_on
         if risk_off_triggered:
             reason = "RISK_OFF_EXIT"
-        elif (
+        if (
+            not reason
+            and
             enable_pre_profit_breakout_failure_exit
             and trailing_activate_profit_pct > 0.0
             and pnl_pct < trailing_activate_profit_pct
@@ -358,19 +386,19 @@ def evaluate_engine_exits(
             and cclose < breakout_failure_floor
         ):
             reason = "PRE_PROFIT_BREAKOUT_FAILURE_EXIT"
-        elif exit_cfg.enable_atr_stop and atr_v is not None and cclose <= float(avg_cost - atr_stop_k * atr_v):
+        elif not reason and exit_cfg.enable_atr_stop and atr_v is not None and cclose <= float(avg_cost - atr_stop_k * atr_v):
             reason = "ATR_STOP_LOSS"
             counts.atr_stop += 1
-        elif exit_cfg.enable_fixed_stop_loss and avg_cost > 0 and cclose <= avg_cost * (1.0 - exit_cfg.fixed_stop_loss_pct):
+        elif not reason and exit_cfg.enable_fixed_stop_loss and avg_cost > 0 and cclose <= avg_cost * (1.0 - exit_cfg.fixed_stop_loss_pct):
             reason = "FIXED_STOP_LOSS"
             counts.fixed_stop_loss += 1
-        elif exit_cfg.enable_take_profit and avg_cost > 0 and (
+        elif not reason and exit_cfg.enable_take_profit and avg_cost > 0 and (
             (exit_cfg.take_profit_mode == "pct" and cclose >= avg_cost * (1.0 + exit_cfg.take_profit_pct))
             or (exit_cfg.take_profit_mode == "atr" and atr_v is not None and cclose >= avg_cost + exit_cfg.take_profit_atr_k * atr_v)
         ):
             reason = "TAKE_PROFIT"
             counts.take_profit += 1
-        elif (
+        elif not reason and (
             effective_enable_atr_trail
             and atr_v is not None
             and (effective_trailing_activate_profit_pct <= 0.0 or pnl_pct >= effective_trailing_activate_profit_pct)
@@ -378,14 +406,58 @@ def evaluate_engine_exits(
         ):
             reason = "ATR_TRAIL_EXIT"
             counts.atr_trail += 1
-        elif check_ma20_exit is not None and effective_enable_ma20_exit and check_ma20_exit(sym):
+        elif not reason and check_ma20_exit is not None and effective_enable_ma20_exit and check_ma20_exit(sym):
             reason = "TREND_EXIT_MA20"
             counts.ma20_exit += 1
-        elif check_low10_exit is not None and effective_enable_low10_exit and check_low10_exit(sym):
+        elif not reason and check_low10_exit is not None and effective_enable_low10_exit and check_low10_exit(sym):
             reason = "TREND_EXIT_LOW10"
             counts.low10_exit += 1
-        elif max_hold_days > 0 and sym in entry_day and (day - entry_day[sym]).days >= max_hold_days:
+        elif not reason and max_hold_days > 0 and sym in entry_day and (day - entry_day[sym]).days >= max_hold_days:
             reason = "TIME_EXIT"
+
+        if fragility_snapshot.enabled and fragility_snapshot.valid:
+            fragility_diag["holding_exit_fragility_evaluated_positions"] = int(
+                fragility_diag.get("holding_exit_fragility_evaluated_positions", 0) or 0
+            ) + 1
+            fragility_score = fragility_snapshot.score_map.get(str(sym).lower()) if fragility_snapshot.gate_on else None
+            if fragility_score is not None:
+                fragility_diag["holding_exit_fragility_matched_positions"] = int(
+                    fragility_diag.get("holding_exit_fragility_matched_positions", 0) or 0
+                ) + 1
+                high_risk = bool(float(fragility_score) >= float(fragility_snapshot.risk_threshold))
+                fragility_meta = {
+                    "fragility_hook_hit": True,
+                    "fragility_factor_id": str(fragility_snapshot.factor_id or ""),
+                    "fragility_score": float(fragility_score),
+                    "fragility_top_pct": float(fragility_snapshot.risk_bucket_top_pct or 0.0),
+                    "fragility_high_risk": bool(high_risk),
+                    "fragility_action_candidate": str(fragility_snapshot.action or ""),
+                    "fragility_score_source": str(fragility_snapshot.score_source or ""),
+                    "fragility_observation_date": (
+                        fragility_snapshot.observation_date.isoformat()
+                        if isinstance(fragility_snapshot.observation_date, date)
+                        else ""
+                    ),
+                }
+                if high_risk:
+                    fragility_diag["holding_exit_fragility_high_risk_positions"] = int(
+                        fragility_diag.get("holding_exit_fragility_high_risk_positions", 0) or 0
+                    ) + 1
+                    action_candidate = str(fragility_snapshot.action or "")
+                    if action_candidate == "watch":
+                        fragility_diag["holding_exit_fragility_watch_count"] = int(
+                            fragility_diag.get("holding_exit_fragility_watch_count", 0) or 0
+                        ) + 1
+                    elif action_candidate == "trim_candidate":
+                        fragility_diag["holding_exit_fragility_trim_candidate_count"] = int(
+                            fragility_diag.get("holding_exit_fragility_trim_candidate_count", 0) or 0
+                        ) + 1
+                    elif action_candidate == "exit_candidate":
+                        fragility_diag["holding_exit_fragility_exit_candidate_count"] = int(
+                            fragility_diag.get("holding_exit_fragility_exit_candidate_count", 0) or 0
+                        ) + 1
+                        if not reason:
+                            reason = "FRAGILITY_EXIT_CANDIDATE"
 
         if reason:
             exit_qty = int(qty)
@@ -394,6 +466,11 @@ def evaluate_engine_exits(
                 "atr_last": atr_v,
                 "avg_cost": avg_cost,
                 "pnl_pct": pnl_pct,
+                "entry_date": (
+                    entry_day.get(sym).isoformat()
+                    if isinstance(entry_day.get(sym), date)
+                    else ""
+                ),
                 "entry_breakout_floor": breakout_floor if breakout_floor > 0.0 else None,
                 "effective_breakout_failure_floor": breakout_failure_floor if breakout_floor > 0.0 else None,
                 "bars_since_entry": int(bars_since_entry) if bars_since_entry is not None else None,
@@ -407,6 +484,8 @@ def evaluate_engine_exits(
                 "effective_atr_trail_k": effective_atr_trail_k,
                 "trend_exit_stage": trend_exit_stage,
             }
+            if fragility_meta:
+                meta.update(fragility_meta)
             if reason == "RISK_OFF_EXIT":
                 allow_partial = True
                 partial_state_seen = bool(partial_state.get(sym, False))
@@ -437,4 +516,4 @@ def evaluate_engine_exits(
                 meta=meta,
             ))
 
-    return exits, exit_syms, counts
+    return exits, exit_syms, counts, fragility_diag

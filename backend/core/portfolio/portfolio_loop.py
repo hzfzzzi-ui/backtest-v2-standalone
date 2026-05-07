@@ -24,9 +24,8 @@ from backend.core.config.models import (
 )
 from backend.core.core.models import Position, Signal
 from backend.core.core.types import Side
+from backend.core.portfolio.metrics import compute_backtest_metrics
 from backend.core.portfolio.portfolio_runtime import (
-    _compute_metrics,
-    _estimate_buy_slots_after_sell,
     build_backtest_price_indices,
     build_rebalance_orders,
     compute_nav_snapshot,
@@ -35,6 +34,50 @@ from backend.core.portfolio.portfolio_runtime import (
 from backend.core.portfolio.price_index import build_backtest_hfq_indices
 from backend.core.portfolio.types import PortfolioBacktestResult, PortfolioOrder
 from backend.core.strategies.base import Strategy
+
+
+def _estimate_buy_slots_after_sell(
+    *,
+    positions: dict[str, int],
+    sell_signals: list[Signal],
+    max_positions: int,
+) -> int:
+    after = {str(k): int(v) for k, v in positions.items() if int(v) > 0}
+    for sig in sell_signals:
+        sym = str(sig.symbol).lower()
+        held = int(after.get(sym, 0))
+        if held <= 0:
+            continue
+        qty = held if int(sig.qty) <= 0 else min(held, int(sig.qty))
+        remain = held - qty
+        if remain > 0:
+            after[sym] = remain
+        else:
+            after.pop(sym, None)
+    return max(0, int(max_positions) - len(after))
+
+
+def _compute_metrics(
+    daily_df: pd.DataFrame,
+    trades_df: pd.DataFrame,
+    *,
+    max_positions: int,
+    blocked_by_trend_count: int = 0,
+    total_buy_signals: int = 0,
+    candidates_df: pd.DataFrame | None = None,
+    enable_strength_rank: bool = False,
+    strength_ma: int = 120,
+) -> dict[str, Any]:
+    return compute_backtest_metrics(
+        daily_df,
+        trades_df,
+        max_positions=max_positions,
+        blocked_by_trend_count=blocked_by_trend_count,
+        total_buy_signals=total_buy_signals,
+        candidates_df=candidates_df,
+        enable_strength_rank=enable_strength_rank,
+        strength_ma=strength_ma,
+    )
 
 
 def run_portfolio_backtest(
@@ -436,6 +479,12 @@ def run_portfolio_backtest(
             mf_concentrate_scale=float(mf_concentrate_scale),
             mf_gate_on_today=bool(mf_gate_on_today),
             mf_score_map={},
+            overlay_mode=str(getattr(day_signals, "overlay_mode", "off") or "off"),
+            overlay_gate_on_today=bool(getattr(day_signals, "overlay_gate_on_today", False)),
+            overlay_score_map=dict(getattr(day_signals, "overlay_score_map", {}) or {}),
+            overlay_band_limit=int(getattr(day_signals, "overlay_band_limit", 0) or 0),
+            overlay_observation_date=getattr(day_signals, "overlay_observation_date", None),
+            overlay_score_source=str(getattr(day_signals, "overlay_score_source", "") or ""),
             decision_date=day,
             candidate_audit=day_candidate_rows,
             debug_plan=debug_plan,
@@ -553,12 +602,25 @@ def run_portfolio_backtest(
             daily_rows[-1]["mf_topk_reject_count"] = int((debug_plan or {}).get("mf_topk_reject_count", 0) or 0)
             daily_rows[-1]["mf_concentrated_selected_count"] = int((debug_plan or {}).get("mf_concentrated_selected_count", 0) or 0)
             daily_rows[-1]["mf_gate_on"] = 1 if bool((debug_plan or {}).get("mf_gate_on", False)) else 0
+            daily_rows[-1]["final_score_rank_triggered"] = 1 if bool((debug_plan or {}).get("final_score_rank_triggered", (debug_plan or {}).get("mf_rank_triggered", False))) else 0
+            daily_rows[-1]["final_score_rank_applied"] = 1 if bool((debug_plan or {}).get("final_score_rank_applied", (debug_plan or {}).get("mf_rank_applied", False))) else 0
+            daily_rows[-1]["final_score_candidates_when_triggered"] = int((debug_plan or {}).get("final_score_candidates_when_triggered", (debug_plan or {}).get("mf_candidates_when_triggered", 0)) or 0)
+            daily_rows[-1]["final_score_topk_reject_count"] = int((debug_plan or {}).get("final_score_topk_reject_count", (debug_plan or {}).get("mf_topk_reject_count", 0)) or 0)
+            daily_rows[-1]["final_score_concentrated_selected_count"] = int((debug_plan or {}).get("final_score_concentrated_selected_count", (debug_plan or {}).get("mf_concentrated_selected_count", 0)) or 0)
+            daily_rows[-1]["final_score_rank_gate_on"] = 1 if bool((debug_plan or {}).get("final_score_rank_gate_on", (debug_plan or {}).get("mf_gate_on", False))) else 0
             daily_rows[-1]["strong_risk_on"] = 1 if bool(strong_risk_on_today) else 0
             cands_now = int((debug_plan or {}).get("buy_candidates_count", 0) or 0)
             slots_now = int((debug_plan or {}).get("buy_slots", 0) or 0)
             daily_rows[-1]["mf_rank_suppressed_by_strong_gate"] = (
                 1
                 if bool(enable_multifactor_rank) and (not bool(mf_gate_on_today)) and (cands_now > slots_now)
+                else 0
+            )
+            daily_rows[-1]["final_score_rank_suppressed_by_strong_gate"] = (
+                1
+                if bool(enable_multifactor_rank)
+                and (not bool((debug_plan or {}).get("final_score_rank_gate_on", (debug_plan or {}).get("mf_gate_on", False))))
+                and (cands_now > slots_now)
                 else 0
             )
         if orders:

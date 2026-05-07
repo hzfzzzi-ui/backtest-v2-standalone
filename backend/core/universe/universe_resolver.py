@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from backend.core.config.asset_profiles import resolve_asset_profile
 from backend.core.config.models import DBConfig, DBRuntimeConfig
@@ -27,6 +27,9 @@ try:
     import psycopg
 except ImportError:
     psycopg = None
+
+if TYPE_CHECKING:  # pragma: no cover
+    from backend.core.data.market_data_access import MarketDataAccess
 
 
 def _query_pit_symbols(
@@ -62,8 +65,19 @@ def _resolve_all_a(
     db: DBConfig,
     runtime: DBRuntimeConfig,
     universe_limit: int | None = None,
+    market_data_access: MarketDataAccess | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """ALL_A 模式: 返回截至 as_of 全部活跃 CN_A 股票。"""
+    if market_data_access is not None:
+        symbols, meta = market_data_access.load_active_cn_a_symbols(
+            as_of_date=as_of,
+            universe_limit=universe_limit,
+        )
+        return symbols, {
+            **meta,
+            "universe_mode": "ALL_A",
+            "symbols_source": str(meta.get("symbols_source") or ALL_A_SYMBOLS_SOURCE),
+        }
     symbols, meta = load_constituents_from_db(db, runtime, as_of, universe_limit)
     return symbols, {
         **meta,
@@ -77,17 +91,33 @@ def _resolve_hs300_zz500(
     db: DBConfig,
     runtime: DBRuntimeConfig,
     universe_limit: int | None = None,
+    market_data_access: MarketDataAccess | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """HS300_ZZ500 模式: 从 pit_index_constituents 查询中证800成分。"""
-    sql = """
-        SELECT DISTINCT symbol
-        FROM public.pit_index_constituents
-        WHERE index_code = '000906.SH'
-          AND start_date <= %s
-          AND (end_date IS NULL OR end_date > %s)
-        ORDER BY symbol
-    """
-    symbols = _query_pit_symbols(db, runtime, sql, (as_of, as_of))
+    if market_data_access is not None:
+        result = market_data_access.load_pit_constituents_snapshot(
+            index_code="000906.SH",
+            as_of_date=as_of,
+        )
+        symbols = sorted(
+            {
+                normalize_stock_symbol(str(value))
+                for value in result.frame.get("symbol", pd.Series(dtype=str)).tolist()
+                if str(value).strip()
+            }
+        )
+        canonical_objects = list(result.audit.canonical_objects)
+    else:
+        sql = """
+            SELECT DISTINCT symbol
+            FROM public.pit_index_constituents
+            WHERE index_code = '000906.SH'
+              AND start_date <= %s
+              AND (end_date IS NULL OR end_date > %s)
+            ORDER BY symbol
+        """
+        symbols = _query_pit_symbols(db, runtime, sql, (as_of, as_of))
+        canonical_objects = ["pit_index_constituents"]
 
     if not symbols:
         raise UniverseLoadError(
@@ -106,9 +136,10 @@ def _resolve_hs300_zz500(
         "symbols_source": INDEX_CONSTITUENTS_SYMBOLS_SOURCE,
         "raw_count": raw_count,
         "constituents_load_status": "OK",
-        "load_table": "pit_index_constituents",
+        "load_table": "+".join(canonical_objects),
         "index_code": "000906.SH",
         "as_of": str(as_of),
+        "canonical_objects": canonical_objects,
     }
 
 
@@ -117,17 +148,33 @@ def _resolve_csi1000(
     db: DBConfig,
     runtime: DBRuntimeConfig,
     universe_limit: int | None = None,
+    market_data_access: MarketDataAccess | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """CSI1000 mode: query CSI1000 constituents from pit_index_constituents."""
-    sql = """
-        SELECT DISTINCT symbol
-        FROM public.pit_index_constituents
-        WHERE index_code = '000852.SH'
-          AND start_date <= %s
-          AND (end_date IS NULL OR end_date > %s)
-        ORDER BY symbol
-    """
-    symbols = _query_pit_symbols(db, runtime, sql, (as_of, as_of))
+    if market_data_access is not None:
+        result = market_data_access.load_pit_constituents_snapshot(
+            index_code="000852.SH",
+            as_of_date=as_of,
+        )
+        symbols = sorted(
+            {
+                normalize_stock_symbol(str(value))
+                for value in result.frame.get("symbol", pd.Series(dtype=str)).tolist()
+                if str(value).strip()
+            }
+        )
+        canonical_objects = list(result.audit.canonical_objects)
+    else:
+        sql = """
+            SELECT DISTINCT symbol
+            FROM public.pit_index_constituents
+            WHERE index_code = '000852.SH'
+              AND start_date <= %s
+              AND (end_date IS NULL OR end_date > %s)
+            ORDER BY symbol
+        """
+        symbols = _query_pit_symbols(db, runtime, sql, (as_of, as_of))
+        canonical_objects = ["pit_index_constituents"]
 
     if not symbols:
         raise UniverseLoadError(
@@ -145,9 +192,10 @@ def _resolve_csi1000(
         "symbols_source": INDEX_CONSTITUENTS_SYMBOLS_SOURCE,
         "raw_count": raw_count,
         "constituents_load_status": "OK",
-        "load_table": "pit_index_constituents",
+        "load_table": "+".join(canonical_objects),
         "index_code": "000852.SH",
         "as_of": str(as_of),
+        "canonical_objects": canonical_objects,
     }
 
 
@@ -157,6 +205,7 @@ def _resolve_industry(
     runtime: DBRuntimeConfig,
     industries: list[str],
     universe_limit: int | None = None,
+    market_data_access: MarketDataAccess | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """INDUSTRY 模式: 从 pit_industry_history 查询所选行业的股票。"""
     if not industries:
@@ -166,17 +215,32 @@ def _resolve_industry(
             meta={"universe_mode": "INDUSTRY", "raw_count": 0},
         )
 
-    placeholders = ",".join(["%s"] * len(industries))
-    sql = f"""
-        SELECT DISTINCT ts_code
-        FROM public.pit_industry_history
-        WHERE industry_l1 IN ({placeholders})
-          AND start_date <= %s
-          AND (end_date IS NULL OR end_date > %s)
-        ORDER BY ts_code
-    """
-    params = tuple(industries) + (as_of, as_of)
-    symbols = _query_pit_symbols(db, runtime, sql, params)
+    if market_data_access is not None:
+        result = market_data_access.load_pit_industry_snapshot(
+            as_of_date=as_of,
+            industries=list(industries),
+        )
+        symbols = sorted(
+            {
+                normalize_stock_symbol(str(value))
+                for value in result.frame.get("symbol", pd.Series(dtype=str)).tolist()
+                if str(value).strip()
+            }
+        )
+        canonical_objects = list(result.audit.canonical_objects)
+    else:
+        placeholders = ",".join(["%s"] * len(industries))
+        sql = f"""
+            SELECT DISTINCT ts_code
+            FROM public.pit_industry_history
+            WHERE industry_l1 IN ({placeholders})
+              AND start_date <= %s
+              AND (end_date IS NULL OR end_date > %s)
+            ORDER BY ts_code
+        """
+        params = tuple(industries) + (as_of, as_of)
+        symbols = _query_pit_symbols(db, runtime, sql, params)
+        canonical_objects = ["pit_industry_history"]
 
     if not symbols:
         raise UniverseLoadError(
@@ -195,9 +259,10 @@ def _resolve_industry(
         "symbols_source": INDUSTRY_HISTORY_SYMBOLS_SOURCE,
         "raw_count": raw_count,
         "constituents_load_status": "OK",
-        "load_table": "pit_industry_history",
+        "load_table": "+".join(canonical_objects),
         "industries": industries,
         "as_of": str(as_of),
+        "canonical_objects": canonical_objects,
     }
 
 
@@ -277,6 +342,7 @@ def resolve_universe_by_mode(
     industries: list[str] | None = None,
     symbols: list[str] | None = None,
     universe_limit: int | None = None,
+    market_data_access: MarketDataAccess | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """根据 universe_mode 解析出 PIT-safe 的 symbols 列表。
 
@@ -319,19 +385,26 @@ def resolve_universe_by_mode(
         )
 
     if mode_upper == "ALL_A":
-        resolved_symbols, meta = _resolve_all_a(as_of, db, runtime, universe_limit)
+        resolved_symbols, meta = _resolve_all_a(as_of, db, runtime, universe_limit, market_data_access)
         meta.update(common_meta)
         return resolved_symbols, meta
     elif mode_upper == "HS300_ZZ500":
-        resolved_symbols, meta = _resolve_hs300_zz500(as_of, db, runtime, universe_limit)
+        resolved_symbols, meta = _resolve_hs300_zz500(as_of, db, runtime, universe_limit, market_data_access)
         meta.update(common_meta)
         return resolved_symbols, meta
     elif mode_upper == "CSI1000":
-        resolved_symbols, meta = _resolve_csi1000(as_of, db, runtime, universe_limit)
+        resolved_symbols, meta = _resolve_csi1000(as_of, db, runtime, universe_limit, market_data_access)
         meta.update(common_meta)
         return resolved_symbols, meta
     elif mode_upper == "INDUSTRY":
-        resolved_symbols, meta = _resolve_industry(as_of, db, runtime, industries or [], universe_limit)
+        resolved_symbols, meta = _resolve_industry(
+            as_of,
+            db,
+            runtime,
+            industries or [],
+            universe_limit,
+            market_data_access,
+        )
         meta.update(common_meta)
         return resolved_symbols, meta
     elif mode_upper == "CUSTOM":

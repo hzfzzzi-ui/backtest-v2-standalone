@@ -7,7 +7,7 @@ from typing import Any
 
 import pandas as pd
 
-from backend.core.tools.runtime_data_access import RuntimeDataAccess
+from backend.core.data import MarketDataAccess
 
 
 def now_iso() -> str:
@@ -60,9 +60,18 @@ def source_entry(*, name: str, source_type: str, effective_as_of: date | str | N
     }
 
 
-def history_start_from_calendar(access: RuntimeDataAccess, effective_trade_date: date, lookback_days: int) -> date:
+def history_start_from_calendar(
+    market_data_access: MarketDataAccess,
+    effective_trade_date: date,
+    lookback_days: int,
+) -> date:
     start_guess = effective_trade_date - timedelta(days=max(int(lookback_days) * 3, 30))
-    calendar = access.provider.load_trading_calendar_cn(start_guess, effective_trade_date)
+    calendar = market_data_access.load_trading_calendar_index(
+        start=start_guess,
+        end=effective_trade_date,
+        asset_scope="cn_a_equity",
+        market="CN_A",
+    )
     if len(calendar) == 0:
         return effective_trade_date
     idx = max(0, len(calendar) - int(lookback_days))

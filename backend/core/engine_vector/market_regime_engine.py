@@ -72,14 +72,12 @@ _STATE_NAMES = ("BULL", "TRANS_DOWN", "TRANS_UP", "BEAR")
 _DEFAULT_BUDGET_BY_STATE = {
     "BULL": 1.0,
     "TRANS_UP": 0.8,
-    "LIGHT": 0.5,
     "TRANS_DOWN": 0.25,
     "RISK_OFF": 0.0,
 }
 _DEFAULT_DEFENSE_BIAS_BY_STATE = {
     "BULL": 0.0,
     "TRANS_UP": 0.15,
-    "LIGHT": 0.35,
     "TRANS_DOWN": 0.7,
     "RISK_OFF": 1.0,
 }
@@ -94,7 +92,7 @@ def _canonical_state_for_day(*, state_code: int, trade_mode_code: int) -> str:
     if trade_mode_name == "NO_TRADE":
         return "RISK_OFF"
     if trade_mode_name == "TREND_LIGHT" and state_5 not in {"TRANS_UP", "TRANS_DOWN"}:
-        return "LIGHT"
+        return "TRANS_UP"
     return state_5
 
 

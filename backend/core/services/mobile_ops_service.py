@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from backend.core.services import transaction_lifecycle_service
+
 _MOBILE_OPS_LOCK = threading.RLock()
 _PENDING_STATUS = "approved_pending"
 _FINAL_STATUSES = {"rejected", "revoked", "expired"}
@@ -94,6 +96,21 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         fh.write("\n")
+
+
+def _normalize_reason_codes(value: Any) -> list[str]:
+    if value in (None, "", [], (), {}):
+        return []
+    if isinstance(value, (list, tuple, set)):
+        items = value
+    else:
+        items = [value]
+    out: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if text and text not in out:
+            out.append(text)
+    return out
 
 
 def _mobile_ops_root(results_root: Path) -> Path:
@@ -193,49 +210,7 @@ def parse_confirm_token(token: str | None, *, now_ts: int | None = None) -> dict
 
 
 def ticket_summary(ticket: dict[str, Any]) -> dict[str, Any]:
-    approval = ticket.get("approval") if isinstance(ticket.get("approval"), dict) else {}
-    final_values = approval.get("final_values") if isinstance(approval.get("final_values"), dict) else {}
-    original_values = approval.get("original_values") if isinstance(approval.get("original_values"), dict) else {}
-    signal_snapshot = ticket.get("signal_snapshot") if isinstance(ticket.get("signal_snapshot"), dict) else {}
-    execution = ticket.get("execution") if isinstance(ticket.get("execution"), dict) else {}
-    return {
-        "ticket_id": str(ticket.get("ticket_id") or ""),
-        "suggestion_id": str(ticket.get("suggestion_id") or signal_snapshot.get("suggestion_id") or ""),
-        "status": str(ticket.get("status") or ""),
-        "updated_at": str(ticket.get("updated_at") or ticket.get("created_at") or ""),
-        "created_at": str(ticket.get("created_at") or ""),
-        "expires_at": str(ticket.get("expires_at") or ""),
-        "symbol": str(ticket.get("symbol") or signal_snapshot.get("symbol") or "").lower(),
-        "name": str(ticket.get("name") or signal_snapshot.get("name") or ""),
-        "action_type": str(ticket.get("action_type") or signal_snapshot.get("action_type") or ""),
-        "decision": str(approval.get("decision") or ""),
-        "manual_adjusted": bool(approval.get("manual_adjusted")),
-        "final_qty": final_values.get("qty"),
-        "final_target_weight": final_values.get("target_weight"),
-        "original_qty": original_values.get("qty"),
-        "original_target_weight": original_values.get("target_weight"),
-        "reject_reason": str(approval.get("reject_reason") or ""),
-        "revoke_reason": str(approval.get("revoke_reason") or ""),
-        "operator": str(approval.get("operator") or ""),
-        "exp_id": str(signal_snapshot.get("exp_id") or ""),
-        "signal_date": str(signal_snapshot.get("signal_date") or ""),
-        "source_mode": str(signal_snapshot.get("source_mode") or ""),
-        "snapshot_id": str(signal_snapshot.get("snapshot_id") or ""),
-        "reconcile_id": str(signal_snapshot.get("reconcile_id") or ""),
-        "as_of_date": str(signal_snapshot.get("as_of_date") or signal_snapshot.get("signal_date") or ""),
-        "executor_id": str(execution.get("executor_id") or ""),
-        "claimed_at": str(execution.get("claimed_at") or ""),
-        "submitted_at": str(execution.get("submitted_at") or ""),
-        "completed_at": str(execution.get("completed_at") or ""),
-        "last_event_at": str(execution.get("last_event_at") or ""),
-        "last_event_status": str(execution.get("last_event_status") or ""),
-        "filled_qty": execution.get("filled_qty"),
-        "remaining_qty": execution.get("remaining_qty"),
-        "avg_fill_price": execution.get("avg_fill_price"),
-        "event_count": int(execution.get("event_count") or 0),
-        "last_error_code": str(execution.get("last_error_code") or ""),
-        "last_error_message": str(execution.get("last_error_message") or ""),
-    }
+    return transaction_lifecycle_service.ticket_summary_from_ticket(ticket)
 
 
 def _load_all_tickets_locked(results_root: Path, *, now_ts: int | None = None) -> list[dict[str, Any]]:
@@ -260,6 +235,8 @@ def _maybe_expire_ticket_locked(results_root: Path, ticket: dict[str, Any], *, n
         return ticket
     ticket = dict(ticket)
     ticket["status"] = "expired"
+    ticket["lifecycle_status"] = "expired"
+    ticket["failure_reason_codes"] = list(dict.fromkeys(_normalize_reason_codes(ticket.get("failure_reason_codes")) + ["expired"]))
     ticket["updated_at"] = _now_iso(now_value)
     _atomic_write_json(Path(str(ticket.get("_path") or _approval_tickets_root(results_root) / f"{ticket.get('ticket_id')}.json")), {k: v for k, v in ticket.items() if not str(k).startswith("_")})
     _append_jsonl(
@@ -272,17 +249,19 @@ def _maybe_expire_ticket_locked(results_root: Path, ticket: dict[str, Any], *, n
             "at": ticket["updated_at"],
         },
     )
+    transaction_lifecycle_service.sync_ticket(results_root, ticket)
     return ticket
 
 
 def load_mobile_control_state(results_root: Path, *, now_ts: int | None = None) -> dict[str, Any]:
     with _MOBILE_OPS_LOCK:
-        tickets = _load_all_tickets_locked(results_root, now_ts=now_ts)
+        _load_all_tickets_locked(results_root, now_ts=now_ts)
+        tickets = transaction_lifecycle_service.list_summaries(results_root)
         latest_by_suggestion: dict[str, dict[str, Any]] = {}
         active_pending_by_suggestion: dict[str, dict[str, Any]] = {}
         pending_tickets: list[dict[str, Any]] = []
         for ticket in tickets:
-            summary = ticket_summary(ticket)
+            summary = ticket if isinstance(ticket, dict) else {}
             suggestion_id = str(summary.get("suggestion_id") or "")
             if suggestion_id and suggestion_id not in latest_by_suggestion:
                 latest_by_suggestion[suggestion_id] = summary
@@ -332,8 +311,7 @@ def list_approval_tickets(results_root: Path, *, status: str | None = None, now_
     if not wanted:
         tickets = list(snapshot["pending_tickets"])
     else:
-        with _MOBILE_OPS_LOCK:
-            tickets = [ticket_summary(item) for item in _load_all_tickets_locked(results_root, now_ts=now_ts) if str(item.get("status") or "").lower() == wanted]
+        tickets = transaction_lifecycle_service.list_summaries(results_root, status=wanted)
     tickets.sort(key=lambda item: (str(item.get("updated_at") or item.get("created_at") or ""), str(item.get("ticket_id") or "")), reverse=True)
     return tickets
 
@@ -402,6 +380,11 @@ def create_ticket_from_confirmed_action(
         if final_target_weight is not None and final_target_weight != original_target_weight:
             manual_adjusted = True
 
+        failure_reason_codes: list[str] = []
+        reject_reason = str(confirm_payload.get("reject_reason") or "").strip()
+        if reject_reason:
+            failure_reason_codes.append(reject_reason)
+
         if normalized_decision == "approve":
             if final_qty is None:
                 final_qty = original_qty
@@ -412,11 +395,16 @@ def create_ticket_from_confirmed_action(
         else:
             status = "rejected"
             expires_at = None
+            if not failure_reason_codes:
+                failure_reason_codes.append("rejected_by_operator")
 
         ticket_payload = {
             "ticket_id": f"mt_{hashlib.sha1(f'{suggestion_id}|{normalized_key}|{normalized_decision}'.encode('utf-8')).hexdigest()[:16]}",
             "suggestion_id": suggestion_id,
+            "source_intent_id": suggestion_id,
+            "account_id": str(card.get("account_id") or ""),
             "status": status,
+            "lifecycle_status": status,
             "created_at": now_iso,
             "updated_at": now_iso,
             "expires_at": expires_at,
@@ -424,12 +412,15 @@ def create_ticket_from_confirmed_action(
             "name": str(card.get("name") or ""),
             "action_type": str(card.get("action_type") or ""),
             "bucket": str(card.get("bucket") or ""),
+            "approval_source": operator,
+            "failure_reason_codes": failure_reason_codes,
             "signal_snapshot": {
                 "suggestion_id": suggestion_id,
                 "exp_id": str(card.get("exp_id") or ""),
                 "signal_date": str(card.get("signal_date") or ""),
                 "as_of_date": str(card.get("as_of_date") or card.get("signal_date") or ""),
                 "source_mode": str(card.get("source_mode") or ""),
+                "account_id": str(card.get("account_id") or ""),
                 "snapshot_id": str(card.get("snapshot_id") or ""),
                 "reconcile_id": str(card.get("reconcile_id") or ""),
                 "symbol": str(card.get("symbol") or "").lower(),
@@ -476,6 +467,7 @@ def create_ticket_from_confirmed_action(
                 "at": now_iso,
             },
         )
+        transaction_lifecycle_service.sync_ticket(results_root, ticket_payload)
         return ticket_payload, True
 
 
@@ -508,6 +500,11 @@ def revoke_ticket(
         approval["revoked_by"] = operator
         ticket = {k: v for k, v in ticket.items() if not str(k).startswith("_")}
         ticket["status"] = "revoked"
+        ticket["lifecycle_status"] = "revoked"
+        revoke_reason = str(reason or "").strip()
+        ticket["failure_reason_codes"] = list(
+            dict.fromkeys(_normalize_reason_codes(ticket.get("failure_reason_codes")) + ([revoke_reason] if revoke_reason else ["revoked"]))
+        )
         ticket["updated_at"] = now_iso
         ticket["approval"] = approval
         _atomic_write_json(ticket_path, ticket)
@@ -523,4 +520,5 @@ def revoke_ticket(
                 "at": now_iso,
             },
         )
+        transaction_lifecycle_service.sync_ticket(results_root, ticket)
         return ticket

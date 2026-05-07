@@ -57,6 +57,12 @@ STANDARD_DAILY_COLUMNS = [
     "mean_order_value_scale",
     "weak_trend_buy_rate",
     "strong_trend_buy_rate",
+    "final_score_rank_triggered",
+    "final_score_rank_applied",
+    "final_score_candidates_when_triggered",
+    "final_score_topk_reject_count",
+    "final_score_concentrated_selected_count",
+    "final_score_rank_gate_on",
     "mf_rank_triggered",
     "mf_rank_applied",
     "mf_candidates_when_triggered",
@@ -68,7 +74,23 @@ STANDARD_DAILY_COLUMNS = [
     "moneyflow_overlay_gate_on",
     "moneyflow_overlay_observation_date",
     "moneyflow_overlay_score_source",
+    "holding_exit_fragility_enabled",
+    "holding_exit_fragility_valid",
+    "holding_exit_fragility_gate_on",
+    "holding_exit_fragility_factor_id",
+    "holding_exit_fragility_action",
+    "holding_exit_fragility_top_pct",
+    "holding_exit_fragility_observation_date",
+    "holding_exit_fragility_score_source",
+    "holding_exit_fragility_invalid_reason",
+    "holding_exit_fragility_evaluated_positions",
+    "holding_exit_fragility_matched_positions",
+    "holding_exit_fragility_high_risk_positions",
+    "holding_exit_fragility_watch_count",
+    "holding_exit_fragility_trim_candidate_count",
+    "holding_exit_fragility_exit_candidate_count",
     "strong_risk_on",
+    "final_score_rank_suppressed_by_strong_gate",
     "mf_rank_suppressed_by_strong_gate",
     "same_symbol_conflict_count",
     "sleeve_budget_reject_count",
@@ -112,7 +134,9 @@ STANDARD_DAILY_COLUMNS = [
     "etf_actual_risk_exposure",
     "etf_actual_fallback_exposure",
     "etf_actual_other_exposure",
-    "etf_deployability_gap",
+    "etf_actual_core_exposure",
+    "etf_actual_satellite_exposure",
+    "etf_actual_defense_exposure",
     "governor_budget_json",
 ]
 STANDARD_TRADE_COLUMNS = [
@@ -137,6 +161,20 @@ STANDARD_TRADE_COLUMNS = [
     "entry_date",
     "meta_json",
 ]
+STANDARD_CASH_EVENT_COLUMNS = [
+    "date",
+    "symbol",
+    "event_id",
+    "cash_event_type",
+    "action",
+    "timing_mode",
+    "reason_code",
+    "amount",
+    "div_cash_per_share",
+    "ex_date",
+    "pay_date",
+]
+HOLDING_EXIT_FRAGILITY_AUDIT_FILENAME = "holding_exit_fragility_audit.csv"
 
 
 def _compute_st_buy_violations(trades: pd.DataFrame, st_history: pd.DataFrame) -> int:
@@ -420,6 +458,17 @@ def _project_trade_csv_schema(trades: pd.DataFrame) -> pd.DataFrame:
     return projected.loc[:, STANDARD_TRADE_COLUMNS]
 
 
+def _project_cash_event_csv_schema(cash_events: pd.DataFrame | None) -> pd.DataFrame:
+    if cash_events is None or cash_events.empty:
+        return pd.DataFrame(columns=STANDARD_CASH_EVENT_COLUMNS)
+    available = [column for column in STANDARD_CASH_EVENT_COLUMNS if column in cash_events.columns]
+    projected = cash_events.loc[:, available].copy()
+    for column in STANDARD_CASH_EVENT_COLUMNS:
+        if column not in projected.columns:
+            projected[column] = ""
+    return projected.loc[:, STANDARD_CASH_EVENT_COLUMNS]
+
+
 def _project_daily_csv_schema(daily: pd.DataFrame) -> pd.DataFrame:
     if daily is None or daily.empty:
         return pd.DataFrame(columns=STANDARD_DAILY_COLUMNS)
@@ -429,6 +478,65 @@ def _project_daily_csv_schema(daily: pd.DataFrame) -> pd.DataFrame:
         if column not in projected.columns:
             projected[column] = ""
     return projected.loc[:, STANDARD_DAILY_COLUMNS]
+
+
+def _build_holding_exit_fragility_audit(results_dir: Path, trades: pd.DataFrame) -> tuple[Path, pd.DataFrame]:
+    out = results_dir / HOLDING_EXIT_FRAGILITY_AUDIT_FILENAME
+    columns = [
+        "date",
+        "symbol",
+        "actual_exit_reason_code",
+        "triggered_rule",
+        "entry_date",
+        "bars_since_entry",
+        "pnl_pct",
+        "fragility_factor_id",
+        "fragility_score",
+        "fragility_top_pct",
+        "fragility_high_risk",
+        "fragility_action_candidate",
+        "fragility_score_source",
+        "fragility_observation_date",
+    ]
+    if trades is None or trades.empty or "meta_json" not in trades.columns:
+        empty_df = pd.DataFrame(columns=columns)
+        empty_df.to_csv(out, index=False)
+        return out, empty_df
+
+    records: list[dict[str, Any]] = []
+    for row in trades.itertuples(index=False):
+        if str(getattr(row, "side", "") or "").strip().upper() != "SELL":
+            continue
+        raw_meta = getattr(row, "meta_json", None)
+        if raw_meta is None or str(raw_meta).strip() == "":
+            continue
+        try:
+            meta = json.loads(str(raw_meta))
+        except Exception:
+            continue
+        if not bool(meta.get("fragility_hook_hit", False)):
+            continue
+        records.append(
+            {
+                "date": str(getattr(row, "date", "") or ""),
+                "symbol": str(getattr(row, "symbol", "") or "").lower(),
+                "actual_exit_reason_code": str(getattr(row, "reason_code", "") or ""),
+                "triggered_rule": str(meta.get("triggered_rule", "") or ""),
+                "entry_date": str(meta.get("entry_date", "") or ""),
+                "bars_since_entry": meta.get("bars_since_entry"),
+                "pnl_pct": meta.get("pnl_pct"),
+                "fragility_factor_id": str(meta.get("fragility_factor_id", "") or ""),
+                "fragility_score": meta.get("fragility_score"),
+                "fragility_top_pct": meta.get("fragility_top_pct"),
+                "fragility_high_risk": bool(meta.get("fragility_high_risk", False)),
+                "fragility_action_candidate": str(meta.get("fragility_action_candidate", "") or ""),
+                "fragility_score_source": str(meta.get("fragility_score_source", "") or ""),
+                "fragility_observation_date": str(meta.get("fragility_observation_date", "") or ""),
+            }
+        )
+    audit_df = pd.DataFrame(records, columns=columns)
+    audit_df.to_csv(out, index=False)
+    return out, audit_df
 
 
 def _inject_db_credentials_from_env(cfg: dict[str, Any]) -> None:
@@ -583,6 +691,7 @@ def run_experiment(
 
     daily_projected = _project_daily_csv_schema(bt_result.daily)
     trade_projected = _project_trade_csv_schema(bt_result.trades)
+    cash_event_projected = _project_cash_event_csv_schema(getattr(bt_result, "cash_events", None))
     warmup_analysis = _compute_effective_warmup_analysis(
         cfg_merged=cfg_merged,
         trading_days=bundle.trading_days,
@@ -592,7 +701,12 @@ def run_experiment(
     _emit_progress(progress_hook, 85, "写出回测产物")
     daily_projected.to_csv(results_dir / "portfolio_daily.csv", index=False)
     trade_projected.to_csv(results_dir / "portfolio_trades.csv", index=False)
+    cash_event_projected.to_csv(results_dir / "portfolio_cash_events.csv", index=False)
     bt_result.candidates.to_csv(results_dir / "portfolio_candidates.csv", index=False)
+    holding_exit_fragility_audit_path, holding_exit_fragility_audit_df = _build_holding_exit_fragility_audit(
+        results_dir,
+        trade_projected,
+    )
     st_buy_violation_count = _compute_st_buy_violations(bt_result.trades, bundle.st_history)
 
     m = dict(bt_result.metrics or {})
@@ -659,6 +773,8 @@ def run_experiment(
         "universe_meta": bundle.universe_meta,
         "price_adj_mode": bundle.price_adj_mode,
         "adj_factor_stats": bundle.adj_factor_stats,
+        "holding_exit_fragility_audit_path": str(holding_exit_fragility_audit_path),
+        "holding_exit_fragility_hit_count": int(len(holding_exit_fragility_audit_df.index)),
         "data_bundle": bundle.summary,
         "warmup_analysis": warmup_analysis,
         "candidate_ready_date": warmup_analysis.get("candidate_ready_date"),

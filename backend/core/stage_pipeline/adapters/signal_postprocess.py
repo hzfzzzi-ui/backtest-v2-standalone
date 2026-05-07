@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
 from datetime import date
 from typing import Any, Mapping
@@ -11,6 +12,89 @@ from backend.core.engine_vector.signal_provider import DaySignals
 
 def _normalize_symbol(value: Any) -> str:
     return str(value or "").strip().lower()
+
+
+def _is_etf_trans_up_redeploy_signal(signal: Any) -> bool:
+    reason_code = str(getattr(signal, "reason_code", "") or "").strip().upper()
+    meta = getattr(signal, "meta", None)
+    meta = meta if isinstance(meta, Mapping) else {}
+    execution_path = str(meta.get("execution_path", "") or "").strip().lower()
+    sleeve_id = str(meta.get("sleeve_id", "") or "").strip().lower()
+    alpha_id = str(meta.get("alpha_id", "") or "").strip().lower()
+    return (
+        reason_code == "ETF_BETA_TRANS_UP_REDEPLOY"
+        and execution_path == "trans_up_state_change_redeploy"
+        and (sleeve_id == "cn_etf_beta" or alpha_id == "cn_etf_beta")
+    )
+
+
+def _is_shared_risk_on_to_defensive_defense_establish_signal(signal: Any) -> bool:
+    reason_code = str(getattr(signal, "reason_code", "") or "").strip().upper()
+    meta = getattr(signal, "meta", None)
+    meta = meta if isinstance(meta, Mapping) else {}
+    execution_path = str(meta.get("execution_path", "") or "").strip().lower()
+    sleeve_id = str(meta.get("sleeve_id", "") or "").strip().lower()
+    alpha_id = str(meta.get("alpha_id", "") or "").strip().lower()
+    return (
+        reason_code == "ETF_BETA_SHARED_ACCOUNT_TRANSITION_RISK_ON_TO_DEFENSIVE_DEFENSE_ESTABLISH_ACTIVE"
+        and execution_path == "shared_risk_on_to_defensive_transition_defense_establish"
+        and (sleeve_id == "cn_etf_beta" or alpha_id == "cn_etf_beta")
+    )
+
+
+def _split_preserved_transition_signals(buy_signals: list[Any]) -> tuple[list[Any], list[Any]]:
+    preserved: list[Any] = []
+    ordinary: list[Any] = []
+    for signal in list(buy_signals or ()):
+        if _is_etf_trans_up_redeploy_signal(signal) or _is_shared_risk_on_to_defensive_defense_establish_signal(signal):
+            preserved.append(signal)
+        else:
+            ordinary.append(signal)
+    return preserved, ordinary
+
+
+def _apply_trans_up_recovery_entry_scale(signal: Any, *, scale: float) -> Any:
+    meta_raw = getattr(signal, "meta", None)
+    meta = dict(meta_raw) if isinstance(meta_raw, Mapping) else {}
+    base_scale = float(meta.get("order_value_scale", 1.0) or 1.0)
+    meta["order_value_scale"] = float(base_scale) * float(scale)
+    meta["trans_up_recovery_staged_deploy_active"] = True
+    meta["trans_up_recovery_entry_scale_when_benchmark_off"] = float(scale)
+    meta["entry_reason_code"] = "TRANS_UP_RECOVERY_STAGED_ENTRY"
+    try:
+        return replace(signal, meta=meta)
+    except Exception:
+        cloned = copy.copy(signal)
+        setattr(cloned, "meta", meta)
+        return cloned
+
+
+def _is_trans_up_recovery_staged_holding(runtime: Any, signal: Any) -> bool:
+    symbol = _normalize_symbol(getattr(signal, "symbol", ""))
+    if not symbol:
+        return False
+    held_qty = int(dict(getattr(runtime, "positions", {}) or {}).get(symbol, 0) or 0)
+    if held_qty <= 0:
+        return False
+    holding_source = dict(getattr(runtime, "holding_sources", {}).get(symbol) or {})
+    return str(holding_source.get("entry_reason_code", "") or "").strip().upper() == "TRANS_UP_RECOVERY_STAGED_ENTRY"
+
+
+def _apply_trans_up_recovery_confirmed_top_up(signal: Any, *, scale: float) -> Any:
+    meta_raw = getattr(signal, "meta", None)
+    meta = dict(meta_raw) if isinstance(meta_raw, Mapping) else {}
+    base_scale = float(meta.get("order_value_scale", 1.0) or 1.0)
+    meta["order_value_scale"] = float(base_scale) * float(scale)
+    meta["allow_existing_holding_top_up"] = True
+    meta["trans_up_recovery_confirmed_scale_up_active"] = True
+    meta["trans_up_recovery_confirmed_top_up_scale_when_benchmark_on"] = float(scale)
+    meta["entry_reason_code"] = "TRANS_UP_RECOVERY_CONFIRMED_TOP_UP"
+    try:
+        return replace(signal, meta=meta)
+    except Exception:
+        cloned = copy.copy(signal)
+        setattr(cloned, "meta", meta)
+        return cloned
 
 
 def _future_positions_after_sell(runtime: Any, *, day: date, sell_signals: list[Any]) -> dict[str, int]:
@@ -316,9 +400,83 @@ def postprocess_day_signals(
     market_state = str(controls.get("market_state", "") or "").strip().upper()
     trade_mode = str(controls.get("trade_mode", "") or "").strip().upper()
     global_risk_override_count = int(diagnostics.get("global_risk_override_count", 0) or 0)
+    allow_trans_up_recovery_entries = bool(
+        getattr(
+            getattr(runtime, "_market_filter_cfg", None),
+            "allow_trans_up_recovery_entries_when_benchmark_off",
+            False,
+        )
+    )
+    trans_up_recovery_entry_scale = float(
+        getattr(
+            getattr(runtime, "_market_filter_cfg", None),
+            "trans_up_recovery_entry_scale_when_benchmark_off",
+            1.0,
+        )
+        or 1.0
+    )
+    trans_up_recovery_confirmed_top_up_scale = float(
+        getattr(
+            getattr(runtime, "_market_filter_cfg", None),
+            "trans_up_recovery_confirmed_top_up_scale_when_benchmark_on",
+            0.0,
+        )
+        or 0.0
+    )
+    trans_up_recovery_gate_relaxed = False
+    trans_up_recovery_scaled_entry_count = 0
+    trans_up_recovery_confirmed_top_up_count = 0
     if runtime._br_enabled and not bool(controls["benchmark_regime_on"]):
-        global_risk_override_count += int(len(buy_signals))
-        buy_signals = []
+        allow_recovery_bypass = (
+            allow_trans_up_recovery_entries
+            and getattr(runtime, "route_id", "") == "provider_breakout_runtime"
+            and market_state == "TRANS_UP"
+            and trade_mode == "TREND_LIGHT"
+        )
+        if allow_recovery_bypass:
+            trans_up_recovery_gate_relaxed = True
+            if (trans_up_recovery_entry_scale < 1.0 or trans_up_recovery_confirmed_top_up_scale > 0.0) and buy_signals:
+                buy_signals = [
+                    _apply_trans_up_recovery_entry_scale(signal, scale=trans_up_recovery_entry_scale)
+                    for signal in buy_signals
+                ]
+                trans_up_recovery_scaled_entry_count = int(len(buy_signals))
+        else:
+            preserved_redeploy, ordinary_buy_signals = _split_preserved_transition_signals(buy_signals)
+            global_risk_override_count += int(len(ordinary_buy_signals))
+            buy_signals = preserved_redeploy
+    elif (
+        runtime._br_enabled
+        and bool(controls["benchmark_regime_on"])
+        and trans_up_recovery_confirmed_top_up_scale > 0.0
+        and market_state == "TRANS_UP"
+        and trade_mode == "TREND_LIGHT"
+        and buy_signals
+    ):
+        confirmed_buy_signals: list[Any] = []
+        for signal in buy_signals:
+            if _is_trans_up_recovery_staged_holding(runtime, signal):
+                confirmed_buy_signals.append(
+                    _apply_trans_up_recovery_confirmed_top_up(
+                        signal,
+                        scale=trans_up_recovery_confirmed_top_up_scale,
+                    )
+                )
+            else:
+                confirmed_buy_signals.append(signal)
+        buy_signals = confirmed_buy_signals
+        trans_up_recovery_confirmed_top_up_count = int(
+            sum(
+                1
+                for signal in buy_signals
+                if bool(
+                    dict(getattr(signal, "meta", {}) or {}).get(
+                        "trans_up_recovery_confirmed_scale_up_active",
+                        False,
+                    )
+                )
+            )
+        )
     state_blocks_entries = False
     if runtime._mf_enabled:
         if trade_mode:
@@ -326,12 +484,14 @@ def postprocess_day_signals(
         else:
             state_blocks_entries = int(runtime._mf_state_arr[day_index]) == 3
     if state_blocks_entries:
-        global_risk_override_count += int(len(buy_signals))
-        buy_signals = []
+        preserved_redeploy, ordinary_buy_signals = _split_preserved_transition_signals(buy_signals)
+        global_risk_override_count += int(len(ordinary_buy_signals))
+        buy_signals = preserved_redeploy
     freeze_trans_up_entries = bool(getattr(getattr(runtime, "_market_filter_cfg", None), "freeze_trans_up_entries", False))
     if freeze_trans_up_entries and market_state == "TRANS_UP":
-        global_risk_override_count += int(len(buy_signals))
-        buy_signals = []
+        preserved_redeploy, ordinary_buy_signals = _split_preserved_transition_signals(buy_signals)
+        global_risk_override_count += int(len(ordinary_buy_signals))
+        buy_signals = preserved_redeploy
     if risk_off_mode == "trans_down_freeze_bear_exit" and market_state == "TRANS_DOWN":
         global_risk_override_count += int(len(buy_signals))
         buy_signals = []
@@ -388,6 +548,15 @@ def postprocess_day_signals(
             exit_syms.update(_normalize_symbol(signal.symbol) for signal in trim_signals)
             global_risk_override_count += int(len(trim_signals))
     diagnostics["global_risk_override_count"] = int(global_risk_override_count)
+    diagnostics["trans_up_recovery_gate_relaxed"] = bool(trans_up_recovery_gate_relaxed)
+    diagnostics["trans_up_recovery_entry_scale_applied"] = float(
+        trans_up_recovery_entry_scale if trans_up_recovery_gate_relaxed else 1.0
+    )
+    diagnostics["trans_up_recovery_scaled_entry_count"] = int(trans_up_recovery_scaled_entry_count)
+    diagnostics["trans_up_recovery_confirmed_top_up_scale_when_benchmark_on"] = float(
+        trans_up_recovery_confirmed_top_up_scale
+    )
+    diagnostics["trans_up_recovery_confirmed_top_up_count"] = int(trans_up_recovery_confirmed_top_up_count)
     return replace(
         day_signals,
         sell_signals=sell_signals,

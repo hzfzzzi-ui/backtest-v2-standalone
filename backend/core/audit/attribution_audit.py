@@ -64,7 +64,9 @@ def _normalized_state_snapshot(row: Mapping[str, Any]) -> dict[str, Any]:
         "scope": manual_override.get("scope"),
         "actor": manual_override.get("actor"),
         "effective_window": manual_override.get("effective_window"),
-        "target_state_5": manual_override.get("target_state_5"),
+        "target_state_5": canonical_state_5(manual_override.get("target_state_5"))
+        if str(manual_override.get("target_state_5") or "").strip()
+        else None,
         "risk_budget_multiplier": _safe_float(manual_override.get("risk_budget_multiplier")),
         "defense_bias": _safe_float(manual_override.get("defense_bias")),
     }
@@ -201,6 +203,11 @@ def _build_sleeve_logs(run_meta: Mapping[str, Any] | None) -> tuple[list[dict[st
             entry["source_entry_type"] = etf_beta.get("source_entry_type")
             entry["formal_core_beta_symbols"] = list(etf_beta.get("formal_core_beta_symbols") or [])
             entry["limited_defense_candidates"] = list(etf_beta.get("limited_defense_candidates") or [])
+            entry["etf_budget_roles"] = dict(
+                etf_beta.get("etf_budget_roles")
+                or governed_snapshot.get("etf_budget_roles")
+                or {}
+            )
             out_of_scope_reason_codes = dict(etf_beta.get("out_of_scope_reason_codes") or {})
             entry["out_of_scope_reason_codes"] = out_of_scope_reason_codes
             for codes in list(entry["selection_reason_codes"].values()) + list(out_of_scope_reason_codes.values()):

@@ -309,6 +309,9 @@ class MarketFilterConfig(StrictModel):
     trans_up_multiplier: float | None = None
     bear_multiplier: float | None = None
     freeze_trans_up_entries: bool | None = None
+    allow_trans_up_recovery_entries_when_benchmark_off: bool | None = None
+    trans_up_recovery_entry_scale_when_benchmark_off: float | None = None
+    trans_up_recovery_confirmed_top_up_scale_when_benchmark_on: float | None = None
     ema_light_fast: int | None = None
     ema_light_slow: int | None = None
 
@@ -437,6 +440,15 @@ class GovernedAGovernorConfig(StrictModel):
     budget_source_of_truth: bool | None = None
 
 
+class WeakStateDefensePolicyConfig(StrictModel):
+    enabled: bool | None = None
+    policy_id: str | None = None
+    minimum_defense_seats_by_state_5: dict[str, int] | None = None
+    defense_candidate_symbols_by_state_5: dict[str, list[str]] | None = None
+    allow_core_beta_by_state_5: dict[str, bool] | None = None
+    target_weights_by_state_5: dict[str, dict[str, float]] | None = None
+
+
 class GovernedASleeveConfig(StrictModel):
     enabled: bool | None = None
     sleeve_id: str | None = None
@@ -444,6 +456,7 @@ class GovernedASleeveConfig(StrictModel):
     strategy_role: str | None = None
     governor_boundary_mode: str | None = None
     local_policy_mode: str | None = None
+    boundary_policy_mode: str | None = None
     legacy_anchor: str | None = None
     strategy_semantics: str | None = None
     research_rule_family: str | None = None
@@ -470,8 +483,19 @@ class GovernedASleeveConfig(StrictModel):
     phase1_excluded_capabilities: list[str] | None = None
     source_entry_type: str | None = None
     phase1_scope_mode: str | None = None
+    allocation_engine_mode: str | None = None
+    bucket_policy_profile: str | None = None
+    equity_core_bucket_by_state_5: dict[str, float] | None = None
+    defense_tilt_bucket_by_state_5: dict[str, float] | None = None
+    cash_buffer_bucket_by_state_5: dict[str, float] | None = None
+    equity_core_template_weights: dict[str, float] | None = None
+    equity_core_tilt_limits: dict[str, float] | None = None
+    defense_asset_weights: dict[str, float] | None = None
     core_beta_symbols: list[str] | None = None
+    core_accumulator_symbols: list[str] | None = None
+    tactical_satellite_symbols: list[str] | None = None
     limited_defense_candidates: list[str] | None = None
+    symbol_role_map: dict[str, str] | None = None
     absolute_filter_profile: str | None = None
     candidate_pool_profile: str | None = None
     selection_chain_profile: str | None = None
@@ -493,6 +517,9 @@ class GovernedASleeveConfig(StrictModel):
     fallback_allowed: bool | None = None
     target_selected_count_by_state_5: dict[str, int] | None = None
     fallback_allowed_by_state_5: dict[str, bool] | None = None
+    weak_state_defense_policy: WeakStateDefensePolicyConfig | None = None
+    shared_transition_execution: dict[str, Any] | None = None
+    bull_partial_overlay_pace_ratio: float | None = None
     vol_target_window: int | None = None
     vol_target_annualized_target: float | None = None
     vol_target_min_scale: float | None = None
@@ -561,6 +588,7 @@ class DataSourceSemanticConfig(StrictModel):
 
 class FrontendSemanticConfig(StrictModel):
     asset_scope: str | None = None
+    asset_context: dict[str, Any] | None = None
     governed_a_share: GovernedAShareConfig | None = None
     mode: str | None = None
     initial_capital: float | None = None
@@ -581,5 +609,6 @@ class FrontendSemanticConfig(StrictModel):
     data_source: DataSourceSemanticConfig | None = None
     regime_engine: RegimeEngineConfig | None = None
     exit_priority: list[str] | None = None
+    unified_runtime: dict[str, Any] | None = None
 
 

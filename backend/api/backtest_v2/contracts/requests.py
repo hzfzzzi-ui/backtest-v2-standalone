@@ -13,6 +13,8 @@ class PublicExperimentRunRequest(_StrictPublicModel):
     preset: str = "G1-G4"
     asset_scope: str | None = None
     config_json: dict[str, Any] | None = None
+    baseline_id: str | None = None
+    execution_contract_ref: dict[str, Any] | None = None
     fast_mode: bool | None = None
 
 

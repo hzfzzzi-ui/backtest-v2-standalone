@@ -21,6 +21,7 @@ services:
       PAMS_REPORTS_DIR: /app/outputs/report
       TUSHARE_TOKEN: ${TUSHARE_TOKEN:-}
       CN_DAILY_SYNC_ENABLED: ${CN_DAILY_SYNC_ENABLED:-true}
+      CN_ETF_DAILY_SYNC_ENABLED: ${CN_ETF_DAILY_SYNC_ENABLED:-true}
       CN_DAILY_SYNC_TIME: ${CN_DAILY_SYNC_TIME:-18:30}
       CN_DAILY_SYNC_TIMEZONE: ${CN_DAILY_SYNC_TIMEZONE:-Asia/Shanghai}
       CN_DAILY_SYNC_POLL_SECONDS: ${CN_DAILY_SYNC_POLL_SECONDS:-300}
@@ -66,6 +67,7 @@ services:
       PAMS_REPORTS_DIR: /app/outputs/report
       TUSHARE_TOKEN: ${TUSHARE_TOKEN:-}
       CN_DAILY_SYNC_ENABLED: ${CN_DAILY_SYNC_ENABLED:-true}
+      CN_ETF_DAILY_SYNC_ENABLED: ${CN_ETF_DAILY_SYNC_ENABLED:-true}
       CN_DAILY_SYNC_TIME: ${CN_DAILY_SYNC_TIME:-18:30}
       CN_DAILY_SYNC_TIMEZONE: ${CN_DAILY_SYNC_TIMEZONE:-Asia/Shanghai}
       CN_DAILY_SYNC_POLL_SECONDS: ${CN_DAILY_SYNC_POLL_SECONDS:-300}
@@ -83,6 +85,17 @@ services:
       - ./frontend:/app/frontend
       - ./backend:/app/backend
       - ./research:/app/research
+    networks:
+      - pams_default
+  pams-pg-host-proxy:
+    image: alpine/socat:latest
+    container_name: pams-pg-host-proxy
+    restart: unless-stopped
+    command:
+      - "TCP-LISTEN:5432,fork,reuseaddr"
+      - "TCP:pams-postgres:5432"
+    ports:
+      - "127.0.0.1:${PAMS_HOST_PG_PORT:-5432}:5432"
     networks:
       - pams_default
 

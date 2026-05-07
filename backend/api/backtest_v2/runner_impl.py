@@ -110,7 +110,12 @@ class BacktestV2ExperimentRequest(BaseModel):
     strength_top_k_mode: str | None = None
     enable_multifactor_rank: bool | None = None
     mf_topk: int | None = None
+    mf_concentrate_topn: int | None = None
+    mf_concentrate_scale: float | None = None
+    mf_rank_gate_mode: str | None = None
     momentum_top_pct: float | None = None
+    baseline_id: str | None = None
+    execution_contract_ref: dict[str, Any] | None = None
 
 
 def _public_run_rejected_fields(body: BacktestV2ExperimentRequest) -> list[str]:
@@ -141,6 +146,9 @@ def _public_run_rejected_fields(body: BacktestV2ExperimentRequest) -> list[str]:
         ("strength_top_k_mode", body.strength_top_k_mode is not None),
         ("enable_multifactor_rank", body.enable_multifactor_rank is not None),
         ("mf_topk", body.mf_topk is not None),
+        ("mf_concentrate_topn", body.mf_concentrate_topn is not None),
+        ("mf_concentrate_scale", body.mf_concentrate_scale is not None),
+        ("mf_rank_gate_mode", body.mf_rank_gate_mode is not None),
         ("momentum_top_pct", body.momentum_top_pct is not None),
     )
     for field, present in candidates:

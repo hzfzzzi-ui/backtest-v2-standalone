@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from backend.core.config.models import BenchmarkRegimeConfig, BreadthConfig, ExitConfig, MarketFilterConfig, RegimeEngineConfig, RiskBudgetConfig, SizingConfig
+from backend.core.config.etf_beta_contract import CN_ETF_BETA_FORMAL_BOUNDARY_POLICY_MODE
 from backend.core.engine_vector.breadth import compute_breadth_scores, compute_dynamic_maxpos
 from backend.core.engine_vector.route_registry import build_signal_provider_for_strategy
 from backend.core.engine_vector.signal_provider import SignalProvider
@@ -102,7 +103,18 @@ def initialize_route_controls(
         and len(getattr(provider, "_market_state", ())) == day_count
         and len(getattr(provider, "_trade_mode", ())) == day_count
     )
-    provider_runtime_regime_active = bool(formal_engine_active or legacy_overlay_active)
+    formal_etf_boundary_active = bool(
+        str(getattr(provider, "_etf_beta_strategy_role", "") or "").strip() in {"phase1_allocation_engine", "strategic_beta_stabilizer"}
+        and str(getattr(provider, "_etf_beta_boundary_policy_mode", "") or "").strip() == CN_ETF_BETA_FORMAL_BOUNDARY_POLICY_MODE
+        and bool(getattr(provider, "_formal_phase1_runtime_boundary_active", False))
+        and isinstance(getattr(provider, "_market_state", None), np.ndarray)
+        and isinstance(getattr(provider, "_trade_mode", None), np.ndarray)
+        and isinstance(getattr(provider, "_risk_budget_multiplier_arr", None), np.ndarray)
+        and len(getattr(provider, "_market_state", ())) == day_count
+        and len(getattr(provider, "_trade_mode", ())) == day_count
+        and len(getattr(provider, "_risk_budget_multiplier_arr", ())) == day_count
+    )
+    provider_runtime_regime_active = bool(formal_engine_active or legacy_overlay_active or formal_etf_boundary_active)
     mf_enabled = bool(provider_runtime_regime_active or (market_filter_cfg is not None and market_filter_cfg.enabled))
     if provider_runtime_regime_active:
         mf_state_arr = np.array(getattr(provider, "_market_state", np.zeros(day_count, dtype=np.int8)), dtype=np.int8)
@@ -271,4 +283,5 @@ def precompute_signal_provider(
         risk_budget_cfg=risk_budget_cfg,
         governed_a_share=dict(governed_a_share or {}),
         regime_filter_cfg=getattr(strategy, "regime_filter_cfg", None),
+        max_positions=int(max_positions),
     )

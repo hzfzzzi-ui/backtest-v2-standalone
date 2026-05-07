@@ -19,7 +19,6 @@ venv/
 
 # Node
 node_modules/
-package-lock.json
 
 # IDE
 .vscode/
@@ -34,6 +33,7 @@ Thumbs.db
 
 # Backtest outputs (runtime data, not source)
 outputs/
+output/
 
 # Docker volumes
 pgdata/
@@ -47,6 +47,7 @@ pgdata/
 .tmp_*
 .tmp-edge-profile/
 test-results/
+tmp/
 tmp-*
 tmp_*
 data_cache/

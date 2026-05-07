@@ -33,6 +33,28 @@ _EXECUTION_OVERRIDE_KEYS = (
 )
 
 
+def _derive_runtime_execution_overrides(runtime_config: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(runtime_config, dict):
+        return {}
+    strategy = runtime_config.get("strategy") if isinstance(runtime_config.get("strategy"), dict) else {}
+    params = strategy.get("params") if isinstance(strategy.get("params"), dict) else {}
+    overrides: dict[str, Any] = {}
+    ranking_mode = str(params.get("ranking_mode") or "").strip().lower()
+    if ranking_mode and ranking_mode not in {"none", "off", "disabled"}:
+        overrides["enable_multifactor_rank"] = True
+    elif bool(params.get("enable_residual_ranking")):
+        overrides["enable_multifactor_rank"] = True
+    if params.get("momentum_top_pct") is not None:
+        try:
+            overrides["momentum_top_pct"] = float(params.get("momentum_top_pct"))
+        except Exception:
+            pass
+    for key in ("enable_strength_rank", "strength_ma", "strength_top_k_mode", "mf_topk"):
+        if runtime_config.get(key) is not None:
+            overrides[key] = runtime_config.get(key)
+    return overrides
+
+
 @dataclass(slots=True)
 class FoundationExecutionRequest:
     compiled_plan: RuntimePlan | Mapping[str, Any]
@@ -47,7 +69,8 @@ def build_foundation_runtime_plan(
     overrides: dict[str, Any] | None = None,
 ) -> RuntimePlan:
     ov = dict(overrides or {})
-    execution_overrides = {key: ov[key] for key in _EXECUTION_OVERRIDE_KEYS if key in ov}
+    execution_overrides = _derive_runtime_execution_overrides(runtime_config)
+    execution_overrides.update({key: ov[key] for key in _EXECUTION_OVERRIDE_KEYS if key in ov})
     return RuntimePlan(
         runtime_config=dict(runtime_config or {}),
         execution_overrides=execution_overrides,
@@ -71,6 +94,11 @@ def run_foundation_execution_shell(request: FoundationExecutionRequest):
 
     runtime_execution = runtime_config.get("execution") if isinstance(runtime_config.get("execution"), dict) else {}
     runtime_sizing = runtime_config.get("sizing") if isinstance(runtime_config.get("sizing"), dict) else {}
+    explicit_base_order_value = (
+        float(runtime_sizing.get("order_value"))
+        if "order_value" in runtime_sizing and runtime_sizing.get("order_value") is not None
+        else 0.0
+    )
     adapter_result = run_stage_pipeline_bridge_backtest(
         StagePipelineBridgeRequest(
             data_bundle=request.data_bundle,
@@ -91,7 +119,14 @@ def run_foundation_execution_shell(request: FoundationExecutionRequest):
             cost_cfg=request.cfg_obj.costs,
             exit_cfg=request.cfg_obj.exit,
             sizing_cfg=request.cfg_obj.sizing,
-            base_order_value=float(runtime_sizing.get("order_value", request.cfg_obj.sizing.order_value)),
+            base_order_value=float(explicit_base_order_value),
+            dividend_cash_timing_mode=str(
+                runtime_execution.get(
+                    "dividend_cash_timing_mode",
+                    getattr(getattr(request.cfg_obj, "execution", None), "dividend_cash_timing_mode", "pay_date"),
+                )
+                or "pay_date"
+            ),
             risk_budget_cfg=request.cfg_obj.risk_budget,
             market_filter_cfg=request.cfg_obj.market_filter,
             benchmark_regime_cfg=request.cfg_obj.benchmark_regime,
@@ -121,4 +156,5 @@ def run_foundation_execution_shell(request: FoundationExecutionRequest):
         trades=base_result.trades,
         candidates=base_result.candidates,
         metrics=metrics,
+        cash_events=base_result.cash_events,
     )

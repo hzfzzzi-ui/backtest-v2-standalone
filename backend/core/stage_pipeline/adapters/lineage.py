@@ -270,8 +270,12 @@ def build_execution_lineage_audit(
     rows: list[dict[str, Any]] | None,
     *,
     ledger_ref: str | None = None,
+    planning_reject_reason_counts: Mapping[str, Any] | None = None,
+    fill_reject_reason_counts: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     ledger_rows = list(rows or ())
+    planning_reason_counts = {str(key): int(value or 0) for key, value in dict(planning_reject_reason_counts or {}).items()}
+    fill_reason_counts = {str(key): int(value or 0) for key, value in dict(fill_reject_reason_counts or {}).items()}
     summary = {
         "generated_count": int(len(ledger_rows)),
         "scheduled_count": int(len(ledger_rows)),
@@ -282,6 +286,14 @@ def build_execution_lineage_audit(
         "missing_fill_count": 0,
         "same_day_fill_count": 0,
         "open_count": 0,
+        "terminal_reason_counts": {},
+        "planning_reject_reason_counts": planning_reason_counts,
+        "fill_reject_reason_counts": fill_reason_counts,
+        "planning_cash_skip_count": int(
+            int(planning_reason_counts.get("SKIP_NO_CASH", 0) or 0)
+            + int(planning_reason_counts.get("SKIP_CASH_INSUFFICIENT", 0) or 0)
+        ),
+        "fill_insufficient_cash_count": int(fill_reason_counts.get("INSUFFICIENT_CASH", 0) or 0),
     }
     samples = {
         "same_day_fill": [],
@@ -300,6 +312,7 @@ def build_execution_lineage_audit(
 
     for row in ledger_rows:
         terminal_status = _normalized_text(row.get("terminal_status"))
+        terminal_reason = _text(row.get("terminal_reason"))
         signal_dt = _parse_date(row.get("signal_date"))
         fill_dt = _parse_date(row.get("fill_date"))
         if terminal_status == "filled":
@@ -320,6 +333,8 @@ def build_execution_lineage_audit(
                 )
         elif terminal_status == "expired":
             summary["expired_count"] += 1
+            if terminal_reason:
+                summary["terminal_reason_counts"][terminal_reason] = int(summary["terminal_reason_counts"].get(terminal_reason, 0)) + 1
             _append_sample(
                 samples["dropped_order"],
                 {
@@ -334,6 +349,8 @@ def build_execution_lineage_audit(
             )
         elif terminal_status == "rejected":
             summary["rejected_count"] += 1
+            if terminal_reason:
+                summary["terminal_reason_counts"][terminal_reason] = int(summary["terminal_reason_counts"].get(terminal_reason, 0)) + 1
             _append_sample(
                 samples["dropped_order"],
                 {
@@ -348,6 +365,8 @@ def build_execution_lineage_audit(
             )
         elif terminal_status == "canceled":
             summary["canceled_count"] += 1
+            if terminal_reason:
+                summary["terminal_reason_counts"][terminal_reason] = int(summary["terminal_reason_counts"].get(terminal_reason, 0)) + 1
             _append_sample(
                 samples["dropped_order"],
                 {
@@ -362,6 +381,8 @@ def build_execution_lineage_audit(
             )
         elif terminal_status == "missing_fill":
             summary["missing_fill_count"] += 1
+            if terminal_reason:
+                summary["terminal_reason_counts"][terminal_reason] = int(summary["terminal_reason_counts"].get(terminal_reason, 0)) + 1
             _append_sample(
                 samples["missing_fill"],
                 {

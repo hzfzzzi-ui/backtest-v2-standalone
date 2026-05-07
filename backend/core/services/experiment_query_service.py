@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import math
@@ -14,6 +14,20 @@ from backend.api.backtest_v2.contracts.surface import ExperimentLazySurfaceSecti
 from backend.api.backtest_v2.protocol import ARTIFACT_FILENAMES
 from backend.api.shared.json_utils import sanitize_json
 from backend.core.config.asset_profiles import build_asset_context
+from backend.core.services.experiment_surface_sections import (
+    SIMPLE_SURFACE_SECTIONS,
+    is_simple_surface_section_available,
+    load_simple_surface_section_data,
+    surface_config as _surface_config,
+    surface_daily as _surface_daily,
+    surface_nav as _surface_nav,
+    surface_reason_codes as _surface_reason_codes,
+    surface_run_meta as _surface_run_meta,
+    surface_stage_funnel as _surface_stage_funnel,
+    surface_stock_names as _surface_stock_names,
+    surface_symbol_stats as _surface_symbol_stats,
+    surface_trades as _surface_trades,
+)
 from backend.core.services import experiment_history_service
 from backend.core.tools import baseline_access
 from backend.core.tools.experiment_artifact_access import (
@@ -22,20 +36,7 @@ from backend.core.tools.experiment_artifact_access import (
     resolve_experiment_dir_by_id,
 )
 
-_ALLOWED_SURFACE_SECTIONS = {
-    "nav",
-    "drawdown",
-    "symbol_stats",
-    "stage_funnel",
-    "run_meta",
-    "config",
-    "trades",
-    "daily",
-    "reason_codes",
-    "cash_blocked_buys_recent",
-    "stock_names",
-    "combo_truth",
-}
+_ALLOWED_SURFACE_SECTIONS = set(SIMPLE_SURFACE_SECTIONS) | {"combo_truth"}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -346,103 +347,6 @@ def _surface_summary(exp_id: str, manifest: dict[str, Any], exp_dir: Path) -> Ex
     )
 
 
-def _surface_nav(exp_dir: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    nav_rel = manifest_artifact_rel(manifest, "nav") or "nav.csv"
-    frame = _read_csv(exp_dir / nav_rel)
-    if frame.empty or "date" not in frame.columns:
-        return []
-    nav_col = None
-    for candidate in ("nav", "strategy_nav", "equity", "portfolio_value"):
-        if candidate in frame.columns:
-            nav_col = candidate
-            break
-    if nav_col is None:
-        return []
-    rows: list[dict[str, Any]] = []
-    for row in frame[["date", nav_col]].itertuples(index=False):
-        try:
-            rows.append({"date": str(row[0])[:10], "nav": float(row[1])})
-        except Exception:
-            continue
-    return rows
-
-
-def _surface_drawdown(nav_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    peak = None
-    rows: list[dict[str, Any]] = []
-    for item in nav_rows:
-        try:
-            nav = float(item.get("nav"))
-        except Exception:
-            continue
-        peak = nav if peak is None else max(peak, nav)
-        rows.append({"date": str(item.get("date") or "")[:10], "drawdown": ((nav - peak) / peak) if peak else 0.0})
-    return rows
-
-
-def _surface_symbol_stats(exp_dir: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    rel = manifest_artifact_rel(manifest, "symbol_performance") or "symbol_performance.csv"
-    path = exp_dir / rel
-    if path.suffix.lower() == ".json":
-        payload = _read_json(path)
-        rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
-        return sanitize_json(rows)
-    frame = _read_csv(path)
-    if frame.empty:
-        return []
-    wanted = [name for name in ("symbol", "return_pct", "max_drawdown", "trades", "net_pnl") if name in frame.columns]
-    if not wanted:
-        return []
-    return sanitize_json(frame[wanted].to_dict(orient="records"))
-
-
-def _surface_stage_funnel(exp_dir: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    run_meta_rel = manifest_artifact_rel(manifest, "run_meta") or "run_meta.json"
-    run_meta = _read_json(exp_dir / run_meta_rel)
-    counters = run_meta.get("counters") if isinstance(run_meta.get("counters"), dict) else {}
-    funnel = counters.get("buy_stage_funnel") if isinstance(counters.get("buy_stage_funnel"), list) else []
-    return sanitize_json(funnel)
-
-
-def _surface_run_meta(exp_dir: Path, manifest: dict[str, Any]) -> dict[str, Any]:
-    rel = manifest_artifact_rel(manifest, "run_meta") or "run_meta.json"
-    return sanitize_json(_read_json(exp_dir / rel))
-
-
-def _surface_config(exp_dir: Path, manifest: dict[str, Any]) -> dict[str, Any]:
-    rel = manifest_artifact_rel(manifest, "config") or "config.json"
-    return sanitize_json(_read_json(exp_dir / rel))
-
-
-def _surface_trades(exp_dir: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    rel = manifest_artifact_rel(manifest, "trades") or "portfolio_trades.csv"
-    frame = _read_csv(exp_dir / rel)
-    return sanitize_json(frame.to_dict(orient="records")) if not frame.empty else []
-
-
-def _surface_daily(exp_dir: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    rel = manifest_artifact_rel(manifest, "daily") or "portfolio_daily.csv"
-    frame = _read_csv(exp_dir / rel)
-    return sanitize_json(frame.to_dict(orient="records")) if not frame.empty else []
-
-
-def _surface_reason_codes(exp_dir: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    rel = manifest_artifact_rel(manifest, "reason_codes") or "reason_codes.csv"
-    frame = _read_csv(exp_dir / rel)
-    return sanitize_json(frame.to_dict(orient="records")) if not frame.empty else []
-
-
-def _surface_cash_blocked_buys_recent(exp_dir: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    rel = manifest_artifact_rel(manifest, "cash_blocked_buys_recent") or ARTIFACT_FILENAMES["cash_blocked_buys_recent"]
-    frame = _read_csv(exp_dir / rel)
-    return sanitize_json(frame.to_dict(orient="records")) if not frame.empty else []
-
-
-def _surface_stock_names(exp_dir: Path, manifest: dict[str, Any]) -> dict[str, Any]:
-    rel = manifest_artifact_rel(manifest, "stock_names") or "stock_names.json"
-    return sanitize_json(_read_json(exp_dir / rel))
-
-
 def _format_pct_text(value: Any) -> str:
     num = _to_finite_float(value)
     return f"{num * 100:.2f}%" if num is not None else "-"
@@ -533,7 +437,109 @@ def _build_research_combo_display(
     etf_latest = dict(((etf_run_meta.get("regime") or {}).get("latest_state") or {}))
     stock_governor = dict(stock_run_meta.get("governed_snapshot") or {})
     etf_governor = dict(etf_run_meta.get("governed_snapshot") or {})
-    combo_mode = str(((combo_meta.get("research_combo") or {}).get("mode")) or "").strip()
+    combo_runtime = dict(combo_meta.get("combo_runtime") or {})
+    combo_mode = str(combo_runtime.get("mode") or "").strip()
+    if not combo_mode:
+        execution_contract = (
+            dict(combo_meta.get("execution_contract") or {})
+            if isinstance(combo_meta.get("execution_contract"), dict)
+            else {}
+        )
+        combo_policy = (
+            dict(execution_contract.get("combo_policy") or {})
+            if isinstance(execution_contract.get("combo_policy"), dict)
+            else {}
+        )
+        combo_mode = str(combo_policy.get("mode") or "").strip()
+    account_allocator_runtime = (
+        dict(combo_meta.get("account_allocator_runtime") or {})
+        if isinstance(combo_meta.get("account_allocator_runtime"), dict)
+        else {}
+    )
+    account_budget_roles = (
+        dict(account_allocator_runtime.get("budget_roles") or {})
+        if isinstance(account_allocator_runtime.get("budget_roles"), dict)
+        else {}
+    )
+    account_target = dict(account_budget_roles.get("target") or {})
+    account_actual = dict(account_budget_roles.get("actual") or {})
+    account_deviation = dict(account_budget_roles.get("deviation") or {})
+    account_state_source = str(account_allocator_runtime.get("state_source") or "").strip()
+    account_state_resolution = dict(account_allocator_runtime.get("state_resolution") or {})
+    account_state_transition_policy = dict(account_allocator_runtime.get("state_transition_policy") or {})
+    account_state_transition_runtime = dict(account_allocator_runtime.get("state_transition_runtime") or {})
+    account_transition_action_handoff = dict(account_allocator_runtime.get("transition_action_handoff") or {})
+    account_riskoff_left_side = dict(account_allocator_runtime.get("riskoff_left_side_accumulation_budget") or {})
+    account_riskoff_materialization = dict(
+        account_allocator_runtime.get("riskoff_budget_execution_materialization") or {}
+    )
+    etf_formal_view = (
+        dict(((etf_run_meta.get("etf_beta") or {}).get("formal_view") or {}))
+        if isinstance((etf_run_meta.get("etf_beta") or {}), dict)
+        else {}
+    )
+    account_transition_execution = dict(account_allocator_runtime.get("transition_execution") or {})
+    account_transition_execution_reference = dict(
+        account_allocator_runtime.get("transition_execution_reference") or {}
+    )
+    account_transition_kind = str(account_state_transition_runtime.get("transition_kind") or "").strip()
+    account_transition_from = str(account_state_transition_runtime.get("previous_state_5") or "").strip()
+    account_transition_to = str(account_state_transition_runtime.get("effective_state_5") or "").strip()
+    account_transition_carry = str(((account_state_transition_runtime.get("carry_rules") or {}).get("mode")) or "").strip()
+    account_transition_derisk = str(((account_state_transition_runtime.get("de_risk_rules") or {}).get("mode")) or "").strip()
+    account_transition_cash = str(((account_state_transition_runtime.get("cash_release_rules") or {}).get("mode")) or "").strip()
+    account_transition_handoff = str(((account_state_transition_runtime.get("budget_handoff_rules") or {}).get("mode")) or "").strip()
+    account_riskoff_left_side_active = bool(account_riskoff_left_side.get("active"))
+    account_riskoff_materialization_active = bool(account_riskoff_materialization.get("active"))
+    left_side_defense_assets = ", ".join(
+        [str(symbol).strip() for symbol in (account_riskoff_left_side.get("defense_assets") or []) if str(symbol).strip()]
+    )
+    left_side_core_assets = ", ".join(
+        [str(symbol).strip() for symbol in (account_riskoff_left_side.get("core_beta_assets") or []) if str(symbol).strip()]
+    )
+    left_side_budget_text = account_riskoff_left_side_active and _join_non_empty([
+        "RISK_OFF 左侧累积",
+        left_side_defense_assets and f"债 {left_side_defense_assets}" or "",
+        left_side_core_assets and f"核心宽基 {left_side_core_assets}" or "",
+        account_riskoff_left_side.get("core_beta_weight") is not None
+        and f"core {_format_pct_text(account_riskoff_left_side.get('core_beta_weight'))}" or "",
+    ]) or ""
+    materialization_budget_text = account_riskoff_materialization_active and _join_non_empty([
+        "RISK_OFF 执行落地",
+        str(account_riskoff_materialization.get("execution_activated") or "").strip().lower() == "true"
+        and "已激活" or "",
+        str(account_riskoff_materialization.get("execution_rejected") or "").strip().lower() == "true"
+        and f"拒绝 {account_riskoff_materialization.get('reject_reason')}" or "",
+        account_riskoff_materialization.get("release_destination")
+        and f"destination {account_riskoff_materialization.get('release_destination')}" or "",
+    ]) or ""
+    transition_runtime_text = bool(account_allocator_runtime) and _join_non_empty([
+        account_transition_kind and f"transition {account_transition_kind}" or "",
+        account_transition_from and account_transition_to and f"{account_transition_from} -> {account_transition_to}" or "",
+        account_transition_carry and f"carry {account_transition_carry}" or "",
+        account_transition_derisk and f"de-risk {account_transition_derisk}" or "",
+        account_transition_cash and f"cash {account_transition_cash}" or "",
+        account_transition_handoff and f"handoff {account_transition_handoff}" or "",
+    ]) or ""
+    transition_action_handoff_text = bool(account_transition_action_handoff) and _join_non_empty([
+        str(account_transition_action_handoff.get("transition_kind") or "").strip()
+        and f"handoff {account_transition_action_handoff.get('transition_kind')}" or "",
+        str(account_transition_action_handoff.get("consumption_mode") or "").strip()
+        and f"mode {account_transition_action_handoff.get('consumption_mode')}" or "",
+        bool(account_transition_action_handoff.get("implemented_for_execution"))
+        and "implemented" or "reference_only",
+    ]) or ""
+    transition_execution_text = bool(account_transition_execution) and _join_non_empty([
+        str(account_transition_execution.get("owner") or "").strip()
+        and f"owner {account_transition_execution.get('owner')}" or "",
+        str(account_transition_execution.get("status") or "").strip()
+        and f"status {account_transition_execution.get('status')}" or "",
+        str(account_transition_execution.get("reason_code") or "").strip()
+        and f"reason {account_transition_execution.get('reason_code')}" or "",
+        str(account_transition_execution.get("reject_reason") or "").strip()
+        and f"reject {account_transition_execution.get('reject_reason')}" or "",
+    ]) or ""
+    account_effective_state = str(account_allocator_runtime.get("effective_state_5") or "").strip()
     regime_summary = {
         "available": bool(
             stock_latest.get("base_state")
@@ -541,24 +547,25 @@ def _build_research_combo_display(
             or etf_latest.get("base_state")
             or etf_latest.get("effective_state")
         ),
-        "base_state": str(stock_latest.get("base_state") or "").strip() and f"个股 {stock_latest.get('base_state')}" or "-",
+        "base_state": str(stock_latest.get("base_state") or "").strip() and f"stock {stock_latest.get('base_state')}" or "-",
         "effective_state": str(etf_latest.get("effective_state") or "").strip() and f"ETF {etf_latest.get('effective_state')}" or "-",
         "coarse_state": _join_non_empty([
-            str(stock_latest.get("effective_coarse_state") or "").strip() and f"个股 {stock_latest.get('effective_coarse_state')}" or "",
+            str(stock_latest.get("effective_coarse_state") or "").strip() and f"stock {stock_latest.get('effective_coarse_state')}" or "",
             str(etf_latest.get("effective_coarse_state") or "").strip() and f"ETF {etf_latest.get('effective_coarse_state')}" or "",
         ]),
         "risk_budget_multiplier_text": _join_non_empty([
-            stock_governor.get("total_risk_budget") is not None and f"个股 {_format_pct_text(stock_governor.get('total_risk_budget'))}" or "",
+            stock_governor.get("total_risk_budget") is not None and f"stock {_format_pct_text(stock_governor.get('total_risk_budget'))}" or "",
             etf_governor.get("total_risk_budget") is not None and f"ETF {_format_pct_text(etf_governor.get('total_risk_budget'))}" or "",
         ]),
         "reason_text": _join_non_empty([
-            str(stock_latest.get("effective_state") or "").strip() and f"个股 {stock_latest.get('effective_state')}" or "",
+            str(stock_latest.get("effective_state") or "").strip() and f"stock {stock_latest.get('effective_state')}" or "",
             str(etf_latest.get("effective_state") or "").strip() and f"ETF {etf_latest.get('effective_state')}" or "",
-            combo_mode and f"模式 {combo_mode}" or "",
+            account_effective_state and f"allocator {account_effective_state}" or "",
+            account_state_source and f"source {account_state_source}" or "",
         ]),
         "manual_override_text": (
             _join_non_empty([
-                stock_latest.get("manual_override", {}).get("active") and f"个股 {_summarize_manual_override(stock_latest.get('manual_override'))}" or "",
+                stock_latest.get("manual_override", {}).get("active") and f"stock {_summarize_manual_override(stock_latest.get('manual_override'))}" or "",
                 etf_latest.get("manual_override", {}).get("active") and f"ETF {_summarize_manual_override(etf_latest.get('manual_override'))}" or "",
             ])
             if bool((stock_latest.get("manual_override") or {}).get("active")) or bool((etf_latest.get("manual_override") or {}).get("active"))
@@ -571,15 +578,44 @@ def _build_research_combo_display(
             or etf_governor.get("total_risk_budget") is not None
             or stock_governor.get("budget_consumer_sleeve_id")
             or etf_governor.get("budget_consumer_sleeve_id")
+            or bool(account_allocator_runtime)
         ),
-        "total_risk_budget_text": _join_non_empty([
-            stock_governor.get("total_risk_budget") is not None and f"个股 {_format_pct_text(stock_governor.get('total_risk_budget'))}" or "",
+        "total_risk_budget_text": bool(account_allocator_runtime) and _join_non_empty([
+            account_target and (
+                f"target defense {_format_pct_text(account_target.get('defense'))}, "
+                f"core {_format_pct_text(account_target.get('core_beta'))}, "
+                f"alpha {_format_pct_text(account_target.get('alpha'))}"
+            ) or "",
+            account_actual and (
+                f"actual defense {_format_pct_text(account_actual.get('defense'))}, "
+                f"core {_format_pct_text(account_actual.get('core_beta'))}, "
+                f"alpha {_format_pct_text(account_actual.get('alpha'))}"
+            ) or "",
+        ]) or _join_non_empty([
+            stock_governor.get("total_risk_budget") is not None and f"stock {_format_pct_text(stock_governor.get('total_risk_budget'))}" or "",
             etf_governor.get("total_risk_budget") is not None and f"ETF {_format_pct_text(etf_governor.get('total_risk_budget'))}" or "",
         ]),
-        "total_exposure_cap_text": combo_mode and f"研究组合 {combo_mode}" or "研究组合 50/50",
-        "budget_consumer_text": "cn_stock_trend_alpha_core + cn_etf_beta",
-        "budget_reason_text": _join_non_empty([
-            (stock_governor.get("budget_reason_codes") or []) and f"个股 {_summarize_reason_codes(stock_governor.get('budget_reason_codes'))}" or "",
+        "total_exposure_cap_text": bool(account_allocator_runtime)
+        and _join_non_empty([
+            "账户层主叙事",
+            account_effective_state and f"state {account_effective_state}" or "",
+            account_transition_kind and f"transition {account_transition_kind}" or "",
+            str(account_allocator_runtime.get("runtime_truth_source") or "").strip(),
+        ])
+        or combo_mode and f"研究组合 {combo_mode}" or "研究组合 50/50",
+        "budget_consumer_text": bool(account_allocator_runtime) and "defense + core_beta + alpha" or "cn_stock_trend_alpha_core + cn_etf_beta",
+        "budget_reason_text": bool(account_allocator_runtime) and _join_non_empty([
+            (account_budget_roles.get("reason_codes") or []) and _summarize_reason_codes(account_budget_roles.get("reason_codes")) or "",
+            account_deviation and (
+                f"gap defense {_format_pct_text(account_deviation.get('defense_gap'))}, "
+                f"core {_format_pct_text(account_deviation.get('core_beta_gap'))}, "
+                f"alpha {_format_pct_text(account_deviation.get('alpha_gap'))}"
+            ) or "",
+            transition_action_handoff_text,
+            transition_execution_text,
+            transition_runtime_text,
+        ]) or _join_non_empty([
+            (stock_governor.get("budget_reason_codes") or []) and f"stock {_summarize_reason_codes(stock_governor.get('budget_reason_codes'))}" or "",
             (etf_governor.get("budget_reason_codes") or []) and f"ETF {_summarize_reason_codes(etf_governor.get('budget_reason_codes'))}" or "",
         ]),
     }
@@ -588,6 +624,27 @@ def _build_research_combo_display(
             "contract_version": "research_combo_truth_display@1",
             "regime": regime_summary,
             "governor": governor_summary,
+            "account_allocator": bool(account_allocator_runtime) and {
+                "available": True,
+                "runtime_truth_source": str(account_allocator_runtime.get("runtime_truth_source") or "account_allocator"),
+                "budget_owner": str(account_allocator_runtime.get("budget_owner") or "account_allocator"),
+                "effective_state_5": account_effective_state or None,
+                "state_source": account_state_source or None,
+                "state_resolution": account_state_resolution or None,
+                "state_transition_policy": account_state_transition_policy or None,
+                "state_transition_runtime": account_state_transition_runtime or None,
+                "transition_action_handoff": account_transition_action_handoff or None,
+                "transition_execution": account_transition_execution or None,
+                "target": account_target,
+                "actual": account_actual,
+                "deviation": account_deviation,
+                "riskoff_left_side_accumulation_budget": account_riskoff_left_side or None,
+                "riskoff_budget_execution_materialization": account_riskoff_materialization or None,
+                "diagnostics_reference": {
+                    "transition_execution_reference": account_transition_execution_reference or None,
+                    "reference_combo": dict(account_allocator_runtime.get("reference_combo") or {}),
+                },
+            } or {"available": False},
         }
     )
 
@@ -601,9 +658,23 @@ def _surface_combo_truth(exp_dir: Path, manifest: dict[str, Any]) -> dict[str, A
         "unified_combo_phase1",
     }:
         return None
-    combo_components = dict(run_meta.get("combo_components") or {})
-    stock_exp_id = str(((combo_components.get("stock_component") or {}).get("exp_id")) or "").strip()
-    etf_exp_id = str(((combo_components.get("etf_component") or {}).get("exp_id")) or "").strip()
+    config_payload = _surface_config(exp_dir, manifest)
+    dependencies = dict((run_meta.get("dependencies") or {})) if isinstance(run_meta, dict) else {}
+    component_runs = dict(dependencies.get("component_runs") or {})
+    component_experiments = dict(config_payload.get("component_experiments") or {}) if isinstance(config_payload, dict) else {}
+    sleeves = dict((run_meta.get("sleeves") or {})) if isinstance(run_meta, dict) else {}
+    stock_exp_id = str(
+        ((component_runs.get("stock_alpha_core") or {}).get("exp_id"))
+        or ((sleeves.get("stock_alpha_core") or {}).get("exp_id"))
+        or ((component_experiments.get("stock_alpha_core") or {}).get("exp_id"))
+        or ""
+    ).strip()
+    etf_exp_id = str(
+        ((component_runs.get("etf_beta") or {}).get("exp_id"))
+        or ((sleeves.get("etf_beta") or {}).get("exp_id"))
+        or ((component_experiments.get("etf_beta") or {}).get("exp_id"))
+        or ""
+    ).strip()
     stock_snapshot = _surface_component_snapshot(stock_exp_id) if stock_exp_id else None
     etf_snapshot = _surface_component_snapshot(etf_exp_id) if etf_exp_id else None
     return sanitize_json(
@@ -627,38 +698,15 @@ def _surface_combo_truth(exp_dir: Path, manifest: dict[str, Any]) -> dict[str, A
 
 
 def _surface_section_data(exp_dir: Path, manifest: dict[str, Any], section: str) -> Any:
-    if section == "nav":
-        return _surface_nav(exp_dir, manifest)
-    if section == "drawdown":
-        return _surface_drawdown(_surface_nav(exp_dir, manifest))
-    if section == "symbol_stats":
-        return _surface_symbol_stats(exp_dir, manifest)
-    if section == "stage_funnel":
-        return _surface_stage_funnel(exp_dir, manifest)
-    if section == "run_meta":
-        return _surface_run_meta(exp_dir, manifest)
-    if section == "config":
-        return _surface_config(exp_dir, manifest)
-    if section == "trades":
-        return _surface_trades(exp_dir, manifest)
-    if section == "daily":
-        return _surface_daily(exp_dir, manifest)
-    if section == "reason_codes":
-        return _surface_reason_codes(exp_dir, manifest)
-    if section == "cash_blocked_buys_recent":
-        return _surface_cash_blocked_buys_recent(exp_dir, manifest)
-    if section == "stock_names":
-        return _surface_stock_names(exp_dir, manifest)
     if section == "combo_truth":
         return _surface_combo_truth(exp_dir, manifest)
-    return None
+    return load_simple_surface_section_data(exp_dir, manifest, section)
 
 
 def _surface_section_available(exp_dir: Path, manifest: dict[str, Any], section: str) -> bool:
-    if section == "cash_blocked_buys_recent":
-        rel = manifest_artifact_rel(manifest, "cash_blocked_buys_recent") or ARTIFACT_FILENAMES["cash_blocked_buys_recent"]
-        return (exp_dir / rel).exists()
-    data = _surface_section_data(exp_dir, manifest, section)
+    data = _surface_combo_truth(exp_dir, manifest) if section == "combo_truth" else None
+    if section != "combo_truth":
+        return is_simple_surface_section_available(exp_dir, manifest, section)
     if isinstance(data, dict):
         return bool(data)
     if isinstance(data, list):
@@ -802,3 +850,4 @@ def build_mobile_experiment_summary(exp_id: str) -> dict[str, Any]:
         signal_date=perf.get("effective_signal_start_date"),
     )
     return sanitize_json(payload.model_dump())
+

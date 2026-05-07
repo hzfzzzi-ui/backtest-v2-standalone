@@ -39,13 +39,28 @@ _WARMUP_TIMEOUT_MS = 600_000
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
+def _cache_tmp_candidates() -> list[Path]:
+    candidates = [_CACHE_TMP]
+    candidates.extend(sorted(_CACHE_PATH.parent.glob(f"{_CACHE_PATH.name}.*.tmp")))
+    return candidates
+
+
+def _next_cache_tmp_path() -> Path:
+    return _CACHE_PATH.with_name(f"{_CACHE_PATH.name}.{os.getpid()}.{time.time_ns()}.tmp")
+
+
 def clear_ohlcv_cache_files() -> list[str]:
     removed: list[str] = []
-    for path in (_CACHE_PATH, _CACHE_TMP, _META_PATH):
+    seen: set[str] = set()
+    for path in [_CACHE_PATH, *_cache_tmp_candidates(), _META_PATH]:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
         try:
             if path.exists():
                 path.unlink()
-                removed.append(str(path))
+                removed.append(key)
         except FileNotFoundError:
             continue
     return removed
@@ -171,6 +186,14 @@ class CachedDataProvider(DataProvider):
     def load_cn_etf_coverage(self, symbols: list[str] | None = None) -> pd.DataFrame:
         return self._inner.load_cn_etf_coverage(symbols)
 
+    def load_cn_etf_dividend_events(
+        self,
+        symbols: list[str] | None,
+        start: date,
+        end: date,
+    ) -> pd.DataFrame:
+        return self._inner.load_cn_etf_dividend_events(symbols, start, end)
+
     @property
     def query_audit(self) -> list[dict]:
         return self._inner.query_audit
@@ -178,6 +201,7 @@ class CachedDataProvider(DataProvider):
     def _warmup_full_table(self) -> None:
         logger.info("OHLCV cache MISS: rebuilding parquet cache from PostgreSQL")
         t0 = time.perf_counter()
+        cache_tmp_path = _next_cache_tmp_path()
 
         src = self._inner._source
         resolved_table = src.resolved_stocks_table()
@@ -246,7 +270,7 @@ class CachedDataProvider(DataProvider):
                         arrow_table = pa.Table.from_pandas(chunk_out, preserve_index=False)
                         if writer is None:
                             writer = pq.ParquetWriter(
-                                str(_CACHE_TMP),
+                                str(cache_tmp_path),
                                 arrow_table.schema,
                                 compression="snappy",
                             )
@@ -260,10 +284,10 @@ class CachedDataProvider(DataProvider):
                 return
 
             writer.close()
-            os.replace(str(_CACHE_TMP), str(_CACHE_PATH))
+            os.replace(str(cache_tmp_path), str(_CACHE_PATH))
             self._write_cache_meta()
         except Exception:
-            _CACHE_TMP.unlink(missing_ok=True)
+            cache_tmp_path.unlink(missing_ok=True)
             logger.warning("OHLCV cache rebuild failed", exc_info=True)
             raise
 

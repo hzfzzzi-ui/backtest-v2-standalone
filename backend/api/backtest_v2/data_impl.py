@@ -28,6 +28,7 @@ from backend.api.shared.paths import (
     results_root as _results_root,
     execution_root as _execution_root,
 )
+from backend.core.data import build_market_data_access
 from backend.core.tools.experiment_artifact_access import (
     experiment_surface_flags,
     load_manifest as load_experiment_manifest,
@@ -440,6 +441,7 @@ def get_symbol_series(
         raise HTTPException(status_code=422, detail=f"invalid symbol: {exc}")
 
     access = load_runtime_data_access(_bt_root())
+    market_data_access = build_market_data_access(access)
 
     try:
         df = load_symbol_series_frame(symbol=norm_symbol, start=start_d, end=end_d, access=access)
@@ -464,7 +466,12 @@ def get_symbol_series(
     sdf["date"] = pd.to_datetime(sdf["date"]).dt.normalize()
     original_dates = set(sdf["date"].tolist())
     try:
-        cal = access.provider.load_trading_calendar_cn(start_d, end_d)
+        cal = market_data_access.load_trading_calendar_index(
+            start=start_d,
+            end=end_d,
+            asset_scope="cn_a_equity",
+            market="CN_A",
+        )
     except Exception:
         cal = pd.DatetimeIndex([])
     if len(cal) > 0:

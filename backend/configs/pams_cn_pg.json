@@ -15,8 +15,12 @@
     "start": "2021-01-01",
     "end": "2026-02-01"
   },
+  "market_data_contract": "canonical_market",
   "data_source": {
-    "stocks_table": "pams_ohlcv_daily",
+    "stocks_table": "pams_ohlcv_daily_v2",
+    "v2_canonical_stocks_table": "pams_ohlcv_daily_v2",
+    "v2_runtime_stocks_table": "pams_ohlcv_daily_v2_runtime",
+    "v2_schema_mapping_table": "pams_ohlcv_daily_v2",
     "index_table": "pit_index_daily",
     "prefer_index_table": true,
     "allow_cn_index_in_stocks_table": false,
@@ -24,6 +28,26 @@
     "cn_index_filter_value": "CN_INDEX"
   },
   "schema_mapping": {
+    "pams_ohlcv_daily_v2": {
+      "date": "trade_date",
+      "symbol": "symbol",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "turnover",
+      "limit_up": "limit_up",
+      "limit_down": "limit_down",
+      "is_suspended": "is_suspended",
+      "adj_factor": "adj_factor",
+      "turnover_rate": "turnover_rate",
+      "turnover_rate_f": "turnover_rate_f",
+      "volume_ratio": "volume_ratio",
+      "float_share": "float_share",
+      "free_share": "free_share",
+      "circ_mv": "circ_mv"
+    },
     "pams_ohlcv_daily": {
       "date": "trade_date",
       "symbol": "symbol",
@@ -63,6 +87,7 @@
       "close": "close",
       "volume": "volume",
       "amount": "amount",
+      "adj_factor": "adj_factor",
       "turnover": "turnover"
     }
   },

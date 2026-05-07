@@ -75,7 +75,6 @@ def is_mobile_protected_path(path: str | None) -> bool:
     if normalized in {
         "/assets/css/mobile-dashboard.css",
         "/assets/js/mobile-dashboard.js",
-        "/assets/js/pages/mobile-dashboard-page.js",
         "/assets/js/state/mobile-state.js",
         "/assets/icons/trading-assistant.svg",
         "/assets/icons/trading-assistant-180.png",

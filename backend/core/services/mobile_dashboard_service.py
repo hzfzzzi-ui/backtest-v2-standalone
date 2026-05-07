@@ -800,6 +800,7 @@ def _build_reconcile_approval_cards(
     snapshot_id = str(reconcile_surface.get("snapshot_id") or "")
     reconcile_id = str(reconcile_surface.get("reconcile_id") or "")
     source_mode = str(reconcile_surface.get("source_mode") or "")
+    account_id = str(reconcile_surface.get("account_id") or holding_sync.get("account_id") or "")
     cards: list[dict[str, Any]] = []
     order_rank = {"buy": 0, "sell": 1, "hold": 2}
     for item in list(reconcile_surface.get("action_sheet") or []):
@@ -845,6 +846,7 @@ def _build_reconcile_approval_cards(
                 "signal_date": signal_date,
                 "as_of_date": as_of_date,
                 "source_mode": source_mode,
+                "account_id": account_id,
                 "snapshot_id": snapshot_id,
                 "reconcile_id": reconcile_id,
                 "symbol": symbol,

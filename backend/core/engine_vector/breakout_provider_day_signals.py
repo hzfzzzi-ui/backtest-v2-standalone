@@ -143,7 +143,7 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
             return False
         return adj_c < low10_v
 
-    sell_sigs, exit_syms, exit_counts = evaluate_engine_exits(
+    sell_sigs, exit_syms, exit_counts, fragility_diagnostics = evaluate_engine_exits(
         positions=positions,
         day=day,
         close_idx=close_idx,
@@ -167,6 +167,7 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
         atr_stop_k=provider._atr_stop_k,
         check_ma20_exit=_check_ma20,
         check_low10_exit=_check_low10,
+        asset_context=getattr(ctx, "asset_context", {}),
     )
     sell_sigs.extend(
         provider._evaluate_profit_decay_exits(
@@ -366,6 +367,8 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
             reason=reason,
             reason_code=reason_code,
             meta={
+                "owner_system": "cn_stock_trend_alpha_core",
+                "formal_reason_codes": [str(reason_code or reason or "BUY")],
                 "close": close_val,
                 "slow_ma": slow_ma_val,
                 "atr_last": atr_val,
@@ -531,6 +534,7 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
         overlay_score_map=overlay_score_map,
         overlay_gate_on_today=bool(overlay_snapshot.gate_on),
         overlay_mode=str(overlay_snapshot.mode or "off"),
+        overlay_band_limit=int(getattr(overlay_snapshot, "band_limit", 0) or 0),
         overlay_observation_date=overlay_snapshot.observation_date,
         overlay_score_source=str(overlay_snapshot.score_source or ""),
         strong_risk_on=bool(provider._strong_risk_on[i]) if provider._strong_risk_on.size else False,
@@ -561,6 +565,7 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
             "moneyflow_overlay_enabled": bool(overlay_snapshot.enabled),
             "moneyflow_overlay_gate_on": bool(overlay_snapshot.gate_on),
             "moneyflow_overlay_mode": str(overlay_snapshot.mode or "off"),
+            "moneyflow_overlay_band_limit": int(getattr(overlay_snapshot, "band_limit", 0) or 0),
             "moneyflow_overlay_observation_date": (
                 overlay_snapshot.observation_date.isoformat()
                 if isinstance(overlay_snapshot.observation_date, date)
@@ -569,5 +574,6 @@ def build_breakout_day_signals(provider: Any, day: date, day_idx: int, ctx: DayC
             "moneyflow_overlay_gate_status": str(overlay_snapshot.gate_status or ""),
             "moneyflow_overlay_gate_reason": str(overlay_snapshot.gate_reason or ""),
             "moneyflow_overlay_score_source": str(overlay_snapshot.score_source or ""),
+            **dict(fragility_diagnostics or {}),
         },
     )

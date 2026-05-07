@@ -6,6 +6,10 @@ from typing import Any
 import numpy as np
 
 from backend.core.config.cn_a_governed_mainline import build_governor_budget_snapshot
+from backend.core.services.account_budget_runtime import (
+    build_account_transition_action_handoff,
+    resolve_stock_etf_budget_for_state,
+)
 
 
 _BULLISH_STATE_NAMES = {"BULL", "BULL_MAIN"}
@@ -68,6 +72,7 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
     risk_budget_multiplier = None
     base_state_5 = ""
     effective_state_5 = ""
+    previous_effective_state_5 = ""
     coarse_state = ""
     effective_coarse_state = ""
     reason_codes: list[str] = []
@@ -77,6 +82,9 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
     state_stability_metrics: dict[str, Any] = {}
     defense_bias = None
     weekly_observation_flag = False
+    breadth_cap_active = False
+    sleeve_slot_cap_active = False
+    sleeve_slot_cap_source = ""
     if runtime.route_id == "provider_breakout_runtime":
         dynamic_base_positions = int(runtime.request.max_positions)
         if runtime._portfolio_mode == "equal_8":
@@ -147,6 +155,8 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
                 base_state_5 = str(base_state_arr[day_index] or "")
             if isinstance(effective_state_arr, np.ndarray) and day_index < len(effective_state_arr):
                 effective_state_5 = str(effective_state_arr[day_index] or "")
+                if day_index > 0 and day_index - 1 < len(effective_state_arr):
+                    previous_effective_state_5 = str(effective_state_arr[day_index - 1] or "")
             if isinstance(coarse_state_arr, np.ndarray) and day_index < len(coarse_state_arr):
                 coarse_state = str(coarse_state_arr[day_index] or "")
             if isinstance(effective_coarse_state_arr, np.ndarray) and day_index < len(effective_coarse_state_arr):
@@ -198,13 +208,27 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
                 breadth_max_positions = int(runtime._breadth_maxpos_arr[day_index])
                 breadth_score = float(runtime._breadth_score_arr[day_index])
                 effective_max_positions = min(int(effective_max_positions), max(0, int(breadth_max_positions)))
+                breadth_cap_active = int(breadth_max_positions) < int(getattr(runtime.request, "max_positions", breadth_max_positions))
             except Exception:
                 breadth_max_positions = int(effective_max_positions)
         etf_slot_cap_arr = getattr(runtime.provider, "_etf_beta_slot_cap_arr", None)
+        etf_runtime_reason_codes_arr = getattr(runtime.provider, "_etf_beta_runtime_reason_codes_arr", None)
         if asset_scope == "cn_etf" and isinstance(etf_slot_cap_arr, np.ndarray) and day_index < len(etf_slot_cap_arr):
             etf_slot_cap = max(0, int(etf_slot_cap_arr[day_index]))
-            effective_max_positions = min(int(effective_max_positions), int(etf_slot_cap))
-            breadth_max_positions = min(int(breadth_max_positions), int(etf_slot_cap))
+            etf_slot_cap_source_arr = getattr(runtime.provider, "_etf_beta_target_selected_count_source_arr", None)
+            if isinstance(etf_slot_cap_source_arr, np.ndarray) and day_index < len(etf_slot_cap_source_arr):
+                sleeve_slot_cap_source = str(etf_slot_cap_source_arr[day_index] or "").strip()
+            weak_state_defense_seat_floor_active = False
+            if isinstance(etf_runtime_reason_codes_arr, np.ndarray) and day_index < len(etf_runtime_reason_codes_arr):
+                weak_state_defense_seat_floor_active = any(
+                    str(code).strip() == "ETF_BETA_WEAK_STATE_DEFENSE_SEAT_FLOOR_ACTIVE"
+                    for code in list(etf_runtime_reason_codes_arr[day_index] or ())
+                )
+            if weak_state_defense_seat_floor_active and int(etf_slot_cap) > 0:
+                effective_max_positions = max(int(effective_max_positions), int(etf_slot_cap))
+            else:
+                effective_max_positions = min(int(effective_max_positions), int(etf_slot_cap))
+            sleeve_slot_cap_active = int(etf_slot_cap) < int(getattr(runtime.request, "max_positions", etf_slot_cap))
         risk_on_today = bool(getattr(runtime.provider, "_risk_on", np.ones(len(runtime.request.data_bundle.trading_days), dtype=bool))[day_index])
     else:
         if runtime._dd_enabled and abs(drawdown) >= runtime._dd_reduce_pct:
@@ -259,8 +283,51 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
         defense_bias=defense_bias,
         manual_override=manual_override,
         breadth_max_positions=breadth_max_positions,
+        breadth_cap_active=breadth_cap_active,
+        sleeve_slot_cap_active=sleeve_slot_cap_active,
+        sleeve_slot_cap_source=sleeve_slot_cap_source,
         positions_after_sell=sum(1 for qty in getattr(runtime, "positions", {}).values() if int(qty) > 0),
     )
+    if asset_scope == "cn_etf":
+        current_effective_state = str(effective_state_5 or market_state_5 or "").strip().upper()
+        previous_state = str(previous_effective_state_5 or "").strip().upper()
+        etf_budget_roles = dict(resolve_stock_etf_budget_for_state(current_effective_state).get("budget_roles") or {})
+        governor_budget = dict(governor_budget)
+        governor_budget["state_edge_cash_release"] = {
+            "contract_version": "account_state_edge_cash_release_contract@1",
+            "enabled": bool(previous_state in {"BULL", "TRANS_UP"} and current_effective_state in {"TRANS_DOWN", "RISK_OFF"}),
+            "previous_effective_state_5": previous_state or None,
+            "effective_state_5": current_effective_state or None,
+            "release_destination_by_state": {
+                "TRANS_DOWN": "defense",
+                "RISK_OFF": "accumulation",
+            },
+            "bounded_partial_release_ratio_cap": 0.02,
+        }
+        governor_budget["riskoff_account_budget_execution_materialization"] = {
+            "contract_version": "riskoff_account_budget_execution_materialization_contract@1",
+            "enabled": bool(current_effective_state == "RISK_OFF"),
+            "effective_state_5": current_effective_state or None,
+            "bounded_partial_release_ratio_cap": 0.02,
+            "materialization_mode": "bounded_partial_de_risk_release",
+            "materialization_order": ["defense", "core_beta"],
+            "release_destination_order": ["defense", "core_beta"],
+            "execution_path": "riskoff_account_budget_materialization",
+        }
+        governor_budget["account_transition_action_handoff"] = build_account_transition_action_handoff(
+            previous_state_5=previous_state,
+            effective_state_5=current_effective_state,
+        )
+        governor_budget["etf_budget_roles"] = {
+            "contract_version": "etf_defense_core_beta_budgets@1",
+            "enabled": True,
+            "effective_state_5": current_effective_state or None,
+            "target": etf_budget_roles,
+            "target_weights": {
+                "cn_stock_trend_alpha_core": round(float(etf_budget_roles.get("alpha") or 0.0), 6),
+                "cn_etf_beta": round(float(etf_budget_roles.get("defense") or 0.0) + float(etf_budget_roles.get("core_beta") or 0.0), 6),
+            },
+        }
     return {
         "effective_max_positions": int(effective_max_positions),
         "dd_state": dd_state,
@@ -270,6 +337,7 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
         "risk_on_today": bool(risk_on_today),
         "breadth_score": float(breadth_score) if breadth_score == breadth_score else None,
         "breadth_max_positions": int(breadth_max_positions),
+        "breadth_cap_active": bool(breadth_cap_active),
         "regime_engine": regime_engine,
         "regime_confidence": regime_confidence,
         "regime_duration_bars": regime_duration_bars,
@@ -280,6 +348,8 @@ def compute_day_controls(runtime: Any, day_index: int, day: date, drawdown: floa
         "market_state_smoothed": market_state_smoothed,
         "market_state_score": market_state_score,
         "risk_budget_multiplier": risk_budget_multiplier,
+        "sleeve_slot_cap_active": bool(sleeve_slot_cap_active),
+        "sleeve_slot_cap_source": sleeve_slot_cap_source,
         "base_state_5": base_state_5 or market_state_5,
         "effective_state_5": effective_state_5 or market_state_5,
         "coarse_state": coarse_state,

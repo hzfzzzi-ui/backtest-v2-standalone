@@ -48,8 +48,8 @@ _CANONICAL_STATE_5_ALIASES = {
     "BULL_MAIN": "BULL",
     "TRANS_UP": "TRANS_UP",
     "TURN_STRONG": "TRANS_UP",
-    "LIGHT": "LIGHT",
-    "LIGHT_TREND": "LIGHT",
+    "LIGHT": "TRANS_UP",
+    "LIGHT_TREND": "TRANS_UP",
     "TRANS_DOWN": "TRANS_DOWN",
     "TURN_WEAK": "TRANS_DOWN",
     "RISK_OFF": "RISK_OFF",
@@ -84,7 +84,7 @@ def canonical_state_5(value: Any, *, trade_mode: Any | None = None) -> str:
         return _CANONICAL_STATE_5_ALIASES[text]
     trade_mode_text = _normalize_text(trade_mode).upper()
     if trade_mode_text == "TREND_LIGHT":
-        return "LIGHT"
+        return "TRANS_UP"
     if trade_mode_text == "NO_TRADE":
         return "RISK_OFF"
     return text
@@ -94,8 +94,6 @@ def coarse_state_from_state_5(value: Any) -> str:
     state = canonical_state_5(value)
     if state in {"BULL", "TRANS_UP"}:
         return "RISK_ON"
-    if state == "LIGHT":
-        return "NEUTRAL"
     if state in {"TRANS_DOWN", "RISK_OFF"}:
         return "RISK_OFF"
     return ""
@@ -253,6 +251,9 @@ def _budget_reason_codes(
     cooldown_state: str,
     regime_transition_reason: str,
     breadth_max_positions: int | None,
+    breadth_cap_active: bool,
+    sleeve_slot_cap_active: bool,
+    sleeve_slot_cap_reason_code: str,
     sleeve_budget_reject_count: int,
     manual_override_active: bool,
 ) -> list[str]:
@@ -267,8 +268,10 @@ def _budget_reason_codes(
         reasons.append("TOTAL_RISK_BUDGET_REDUCED")
     if total_exposure_cap is not None and total_exposure_cap < 0.999:
         reasons.append("TOTAL_EXPOSURE_CAP_REDUCED")
-    if breadth_max_positions is not None and breadth_max_positions < hard_max_positions:
+    if bool(breadth_cap_active) and breadth_max_positions is not None and breadth_max_positions < hard_max_positions:
         reasons.append("BREADTH_CAP_ACTIVE")
+    if bool(sleeve_slot_cap_active) and _normalize_text(sleeve_slot_cap_reason_code):
+        reasons.append(_normalize_text(sleeve_slot_cap_reason_code))
     if effective_max_positions <= 0:
         reasons.append("NO_DEPLOYABLE_SLOTS")
     if regime_transition_reason:
@@ -297,6 +300,9 @@ def build_governor_budget_snapshot(
     defense_bias: Any = None,
     manual_override: Any = None,
     breadth_max_positions: Any = None,
+    breadth_cap_active: Any = None,
+    sleeve_slot_cap_active: Any = None,
+    sleeve_slot_cap_source: Any = None,
     positions_after_sell: Any = None,
     sleeve_budget_mode: Any = None,
     raw_sleeve_slot_caps: dict[str, Any] | None = None,
@@ -306,6 +312,10 @@ def build_governor_budget_snapshot(
     raw_sleeve_selected_counts: dict[str, Any] | None = None,
     sleeve_budget_reject_count: Any = None,
     target_exposure: Any = None,
+    strategic_floor_cap: Any = None,
+    tactical_overlay_cap: Any = None,
+    deployment_pace: Any = None,
+    hard_block_flags: Any = None,
     min_deployable_exposure: Any = None,
     target_exposure_source: Any = None,
     min_deployable_exposure_source: Any = None,
@@ -320,6 +330,18 @@ def build_governor_budget_snapshot(
     hard_positions = max(1, _safe_int(hard_max_positions, default=1))
     effective_positions = max(0, _safe_int(effective_max_positions))
     breadth_cap = _safe_int(breadth_max_positions) if breadth_max_positions is not None else None
+    breadth_cap_active_value = bool(breadth_cap_active) if breadth_cap_active is not None else bool(
+        breadth_cap is not None and breadth_cap < hard_positions
+    )
+    sleeve_slot_cap_active_value = bool(sleeve_slot_cap_active) if sleeve_slot_cap_active is not None else False
+    sleeve_slot_cap_source_text = _normalize_text(sleeve_slot_cap_source) or None
+    sleeve_slot_cap_reason_code = (
+        "ETF_BETA_SLOT_CAP_ACTIVE"
+        if sleeve_slot_cap_active_value and _normalize_text(asset_scope).lower() == "cn_etf"
+        else "SLEEVE_SLOT_CAP_ACTIVE"
+        if sleeve_slot_cap_active_value
+        else ""
+    )
     drawdown_value = _safe_float(drawdown)
     risk_budget_value = _safe_float(risk_budget_multiplier)
     total_exposure_cap = min(float(effective_positions) / float(hard_positions), 1.0) if hard_positions > 0 else None
@@ -373,6 +395,10 @@ def build_governor_budget_snapshot(
     target_exposure_value = _safe_float(target_exposure)
     if target_exposure_value is None and _normalize_text(asset_scope).lower() == "cn_etf":
         target_exposure_value = total_exposure_cap
+    strategic_floor_cap_value = _safe_float(strategic_floor_cap)
+    tactical_overlay_cap_value = _safe_float(tactical_overlay_cap)
+    deployment_pace_value = _safe_float(deployment_pace)
+    hard_block_flag_list = _normalize_reason_list(hard_block_flags)
     min_deployable_exposure_value = _safe_float(min_deployable_exposure)
     if min_deployable_exposure_value is None and target_exposure_value is not None and _normalize_text(asset_scope).lower() == "cn_etf":
         deploy_divisor = max(1, int(slot_cap_value or 1))
@@ -402,16 +428,6 @@ def build_governor_budget_snapshot(
         "total_risk_budget": total_risk_budget,
         "total_exposure_cap": total_exposure_cap,
         "target_exposure": target_exposure_value,
-        "min_deployable_exposure": min_deployable_exposure_value,
-        "target_exposure_source": target_exposure_source_text,
-        "min_deployable_exposure_source": min_deployable_exposure_source_text,
-        "fallback_allowed": fallback_allowed_value,
-        "under_deploy_reason_codes": under_deploy_reason_code_list,
-        "actual_exposure": actual_exposure_value,
-        "actual_risk_exposure": actual_risk_exposure_value,
-        "actual_fallback_exposure": actual_fallback_exposure_value,
-        "actual_other_exposure": actual_other_exposure_value,
-        "deployability_gap": deployability_gap_value,
         "hard_max_positions": hard_positions,
         "effective_max_positions": effective_positions,
         "drawdown": drawdown_value,
@@ -421,6 +437,9 @@ def build_governor_budget_snapshot(
         "defense_floor": defense_bias_value if defense_bias_value is not None else 0.0,
         "defense_floor_state": "INACTIVE",
         "defense_bias": defense_bias_value,
+        "breadth_cap_active": breadth_cap_active_value,
+        "sleeve_slot_cap_active": sleeve_slot_cap_active_value,
+        "sleeve_slot_cap_source": sleeve_slot_cap_source_text,
         "manual_override": {
             "active": manual_override_active,
             "reason": _normalize_text(manual_override_payload.get("reason")) or None,
@@ -433,8 +452,6 @@ def build_governor_budget_snapshot(
             if _normalize_text(manual_override_payload.get("target_state_5"))
             else None,
         },
-        "phase1_boundary_excludes": _phase1_excluded_capabilities_for_sleeve(default_sleeve_id),
-        "local_budget_controls": _local_budget_controls_for_sleeve(default_sleeve_id),
         "sleeve_budget_mode": sleeve_budget_mode_text,
         "sleeve_budget_reject_count": reject_count,
         "budget_reason_codes": _budget_reason_codes(
@@ -447,6 +464,9 @@ def build_governor_budget_snapshot(
             cooldown_state=cooldown_state,
             regime_transition_reason=regime_reason_text,
             breadth_max_positions=breadth_cap,
+            breadth_cap_active=breadth_cap_active_value,
+            sleeve_slot_cap_active=sleeve_slot_cap_active_value,
+            sleeve_slot_cap_reason_code=sleeve_slot_cap_reason_code,
             sleeve_budget_reject_count=reject_count,
             manual_override_active=manual_override_active,
         ),
@@ -461,20 +481,8 @@ def build_governor_budget_snapshot(
                 "selected_count": selected_count_value,
                 "budget_share": 1.0,
                 "target_exposure": target_exposure_value,
-                "min_deployable_exposure": min_deployable_exposure_value,
-                "target_exposure_source": target_exposure_source_text,
-                "min_deployable_exposure_source": min_deployable_exposure_source_text,
-                "fallback_allowed": fallback_allowed_value,
-                "under_deploy_reason_codes": under_deploy_reason_code_list,
-                "actual_exposure": actual_exposure_value,
-                "actual_risk_exposure": actual_risk_exposure_value,
-                "actual_fallback_exposure": actual_fallback_exposure_value,
-                "actual_other_exposure": actual_other_exposure_value,
-                "deployability_gap": deployability_gap_value,
                 "target_selected_count": slot_cap_value if _normalize_text(asset_scope).lower() == "cn_etf" else None,
                 "raw_sleeve_ids": raw_sleeve_ids,
-                "phase1_boundary_excludes": _phase1_excluded_capabilities_for_sleeve(default_sleeve_id),
-                "local_budget_controls": _local_budget_controls_for_sleeve(default_sleeve_id),
             }
         },
         "raw_sleeve_budget": {
@@ -524,6 +532,9 @@ def merge_governor_budget_snapshot(
             if base.get("total_exposure_cap") is not None and base.get("hard_max_positions") is not None
             else None,
         ),
+        breadth_cap_active=kwargs.get("breadth_cap_active", base.get("breadth_cap_active")),
+        sleeve_slot_cap_active=kwargs.get("sleeve_slot_cap_active", base.get("sleeve_slot_cap_active")),
+        sleeve_slot_cap_source=kwargs.get("sleeve_slot_cap_source", base.get("sleeve_slot_cap_source")),
         positions_after_sell=kwargs.get(
             "positions_after_sell",
             next(
@@ -558,6 +569,10 @@ def merge_governor_budget_snapshot(
         ),
         sleeve_budget_reject_count=kwargs.get("sleeve_budget_reject_count", base.get("sleeve_budget_reject_count")),
         target_exposure=kwargs.get("target_exposure", base.get("target_exposure")),
+        strategic_floor_cap=kwargs.get("strategic_floor_cap", base.get("strategic_floor_cap")),
+        tactical_overlay_cap=kwargs.get("tactical_overlay_cap", base.get("tactical_overlay_cap")),
+        deployment_pace=kwargs.get("deployment_pace", base.get("deployment_pace")),
+        hard_block_flags=kwargs.get("hard_block_flags", list(base.get("hard_block_flags") or ())),
         min_deployable_exposure=kwargs.get("min_deployable_exposure", base.get("min_deployable_exposure")),
         target_exposure_source=kwargs.get("target_exposure_source", base.get("target_exposure_source")),
         min_deployable_exposure_source=kwargs.get("min_deployable_exposure_source", base.get("min_deployable_exposure_source")),
@@ -585,7 +600,7 @@ def _default_contract(asset_scope: str) -> dict[str, Any] | None:
             "enabled": True,
             "owner": "market_regime_engine",
             "primary_state_model": "five_state",
-            "coarse_state_model": "derived_three_state",
+            "coarse_state_model": "derived_two_state",
             "subscore_contract": ["technical", "sentiment", "macro_global"],
             "manual_override": {
                 "active": False,

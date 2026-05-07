@@ -26,4 +26,4 @@ class PortfolioBacktestResult:
     trades: pd.DataFrame
     candidates: pd.DataFrame
     metrics: dict[str, Any]
-
+    cash_events: pd.DataFrame | None = None

@@ -6,6 +6,7 @@ from datetime import date
 def compute_nav_snapshot(
     *,
     cash: float,
+    dividend_receivable: float = 0.0,
     positions: dict[str, int],
     close_idx: dict[tuple[date, str], float],
     day: date,
@@ -30,5 +31,5 @@ def compute_nav_snapshot(
             v = raw_close * qty
         market_value += v
         pos_values.append((sym, v))
-    nav = float(cash) + float(market_value)
+    nav = float(cash) + float(dividend_receivable) + float(market_value)
     return nav, market_value, pos_values

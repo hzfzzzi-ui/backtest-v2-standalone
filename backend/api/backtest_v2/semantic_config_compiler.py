@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, create_model
 
 from backend.api.shared.json_utils import hash_json as _hash_json, sanitize_json
 from backend.api.backtest_v2.semantic_config_schema import (
@@ -16,6 +16,22 @@ from backend.api.backtest_v2.semantic_config_schema import (
 )
 from backend.core.config.asset_profiles import UnsupportedAssetScopeError, canonical_asset_scope
 from backend.core.config.cn_a_governed_mainline import build_governed_a_share_contract
+from backend.core.engine_vector.factor_insertion_contracts import validate_asset_context_factor_insertion_contracts
+
+
+_FrontendSemanticConfigModel = FrontendSemanticConfig
+_FRONTEND_SEMANTIC_COMPAT_FIELDS: dict[str, tuple[type | None, Any]] = {}
+if "unified_runtime" not in FrontendSemanticConfig.model_fields:
+    _FRONTEND_SEMANTIC_COMPAT_FIELDS["unified_runtime"] = (dict[str, Any] | None, None)
+if "asset_context" not in FrontendSemanticConfig.model_fields:
+    _FRONTEND_SEMANTIC_COMPAT_FIELDS["asset_context"] = (dict[str, Any] | None, None)
+if _FRONTEND_SEMANTIC_COMPAT_FIELDS:
+    _FrontendSemanticConfigModel = create_model(
+        "FrontendSemanticConfig_CompatUnifiedRuntime",
+        __base__=FrontendSemanticConfig,
+        **_FRONTEND_SEMANTIC_COMPAT_FIELDS,
+    )
+
 
 def _build_error(path: str, message: str) -> dict[str, str]:
     return {"path": path, "message": message}
@@ -42,6 +58,7 @@ def _validate_semantic_logic(raw: dict[str, Any]) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []
     signal_generation = raw.get("signal_generation") if isinstance(raw.get("signal_generation"), dict) else {}
     signal_composition = raw.get("signal_composition") if isinstance(raw.get("signal_composition"), dict) else {}
+    asset_context = raw.get("asset_context") if isinstance(raw.get("asset_context"), dict) else {}
     ranking = signal_generation.get("ranking") if isinstance(signal_generation.get("ranking"), dict) else {}
     exit_rules = raw.get("exit_rules") if isinstance(raw.get("exit_rules"), dict) else {}
     risk_off_exit = exit_rules.get("risk_off_exit") if isinstance(exit_rules.get("risk_off_exit"), dict) else {}
@@ -755,12 +772,14 @@ def _validate_semantic_logic(raw: dict[str, Any]) -> list[dict[str, str]]:
             if module_name not in seen_names:
                 errors.append(_build_error(path, f"module not declared in signal_generation.modules: {module_name}"))
 
+    errors.extend(validate_asset_context_factor_insertion_contracts(asset_context))
     return errors
 
 
 def validate_semantic_config_json(raw: dict[str, Any]) -> dict[str, Any]:
+    raw_payload = sanitize_json(dict(raw or {}))
     try:
-        model = FrontendSemanticConfig.model_validate(raw)
+        model = _FrontendSemanticConfigModel.model_validate(raw_payload)
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"invalid config_json: {exc}") from exc
     normalized = jsonable_dict(model)

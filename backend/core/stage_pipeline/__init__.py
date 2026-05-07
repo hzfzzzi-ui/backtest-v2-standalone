@@ -1,6 +1,19 @@
 from .collector import STAGE_SUMMARY_SCHEMA_VERSION, StagePipelineCollector
 from .context import DataBundleView, DayContext, PortfolioState
-from .contracts import AccountingSnapshot, ExecutionIntent, RuntimePlan, StageInputs, StageOutputs
+from .contracts import (
+    AccountingSnapshot,
+    ActionIntentAction,
+    ActionIntentContract,
+    ExecutionAuditContract,
+    ExecutionAuditRecord,
+    RiskOverrideContract,
+    SubsystemBudgetContract,
+    RuntimePlan,
+    StageInputs,
+    StageOutputs,
+    TargetBookContract,
+    TargetBookItem,
+)
 from .registry import ALLOWED_BUILTIN_MODULE_KINDS, register_builtin_module, registered_builtin_modules, reset_builtin_module_registry
 from .resolver import resolve_builtin_modules
 from .shell import (
@@ -18,8 +31,15 @@ __all__ = [
     "DayContext",
     "PortfolioState",
     "RuntimePlan",
-    "ExecutionIntent",
+    "ActionIntentAction",
+    "ActionIntentContract",
+    "SubsystemBudgetContract",
+    "RiskOverrideContract",
+    "ExecutionAuditRecord",
+    "ExecutionAuditContract",
     "AccountingSnapshot",
+    "TargetBookContract",
+    "TargetBookItem",
     "StageDayResult",
     "StageInputs",
     "StageOutputs",

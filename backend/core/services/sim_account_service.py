@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from backend.core.data.mapping import normalize_stock_symbol
+from backend.core.services import ops_domain_pg
+from backend.core.services import sim_account_domain_service as sim_account_domain
 from backend.core.services.mobile_ops_service import list_approval_tickets
 
 _ACCOUNT_ID_RE = re.compile(r"[^a-z0-9_-]+")
@@ -334,6 +336,8 @@ def normalize_holdings_snapshot(
     positions = _normalize_positions(payload.get("positions"))
     snapshot = {
         "schema_version": _SNAPSHOT_SCHEMA_VERSION,
+        "object_type": "holdings_snapshot",
+        "object_scope": "account_ops",
         "account_id": account_id,
         "trade_date": trade_date,
         "synced_at": synced_at,
@@ -349,7 +353,19 @@ def normalize_holdings_snapshot(
 
 def load_latest_holdings_snapshot(results_root: Path, account_id: str | None = None) -> dict[str, Any] | None:
     normalized_account_id = _normalize_account_id(str(account_id or default_sim_account_id()))
+    try:
+        payload = ops_domain_pg.get_latest_holdings_snapshot(results_root, normalized_account_id)
+    except ops_domain_pg.OpsDomainDbUnavailable:
+        payload = None
+    if payload:
+        _atomic_write_json(_latest_snapshot_path(results_root, normalized_account_id), payload)
+        return payload
     payload = _read_json(_latest_snapshot_path(results_root, normalized_account_id))
+    if payload:
+        try:
+            ops_domain_pg.upsert_holdings_snapshot(results_root, payload)
+        except ops_domain_pg.OpsDomainDbUnavailable:
+            pass
     return payload or None
 
 
@@ -375,6 +391,19 @@ def store_holdings_snapshot(
             normalized_account_id = _normalize_account_id(account_candidate)
         except ValueError:
             normalized_account_id = fallback_account_id
+        sim_account_domain.ensure_account_profile(results_root, normalized_account_id, now_ts=now_ts)
+        sim_account_domain.write_sync_log_entry(
+            results_root,
+            account_id=normalized_account_id,
+            entry={
+                "event_type": "snapshot_sync_failed",
+                "status": "failed",
+                "source_type": str(_pick_value(payload, ("source_type", "source", "鏉ユ簮"), default="manual_import") or "manual_import"),
+                "message": str(exc),
+                "created_at": _now_iso(now_ts),
+            },
+            now_ts=now_ts,
+        )
         _append_jsonl(
             _audit_log_path(results_root, normalized_account_id),
             {
@@ -387,12 +416,17 @@ def store_holdings_snapshot(
         raise
 
     account_id = str(snapshot["account_id"])
+    sim_account_domain.ensure_account_profile(results_root, account_id, now_ts=now_ts)
     previous_snapshot = load_latest_holdings_snapshot(results_root, account_id)
     pending_summary = _pending_ticket_summary(results_root)
     snapshot["drift_summary"] = _build_drift_summary(previous_snapshot, snapshot, pending_summary=pending_summary)
 
     history_path = _holdings_history_root(results_root, account_id) / f"{snapshot['snapshot_id']}.json"
     latest_path = _latest_snapshot_path(results_root, account_id)
+    try:
+        ops_domain_pg.upsert_holdings_snapshot(results_root, snapshot)
+    except ops_domain_pg.OpsDomainDbUnavailable:
+        pass
     _atomic_write_json(history_path, snapshot)
     _atomic_write_json(latest_path, snapshot)
     _append_jsonl(
@@ -408,6 +442,20 @@ def store_holdings_snapshot(
             "pending_ticket_count": snapshot["drift_summary"]["pending_ticket_count"],
             "at": snapshot["synced_at"],
         },
+    )
+    sim_account_domain.write_sync_log_entry(
+        results_root,
+        account_id=account_id,
+        entry={
+            "event_type": "snapshot_synced",
+            "status": "success",
+            "snapshot_id": snapshot["snapshot_id"],
+            "trade_date": snapshot["trade_date"],
+            "source_type": snapshot["source_type"],
+            "message": "holdings snapshot synchronized",
+            "created_at": snapshot["synced_at"],
+        },
+        now_ts=now_ts,
     )
     return snapshot
 
