@@ -24,7 +24,9 @@ export function useResultsWorkbenchBridge() {
   const snapshot = shallowRef(emptySnapshot());
   let unsubscribe = null;
 
-  const bridge = window.resultsWorkbenchBridge || null;
+  const bridge = typeof window.getDesktopResultsWorkbenchBridge === 'function'
+    ? window.getDesktopResultsWorkbenchBridge()
+    : (window.resultsWorkbenchBridge || null);
 
   onMounted(() => {
     if (!bridge || typeof bridge.subscribe !== 'function') return;

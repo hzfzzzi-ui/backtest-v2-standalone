@@ -1,5 +1,5 @@
-/* ── charts.js ── Chart rendering (SVG fallback + LightweightCharts) ── */
-/* Globals used: state, byId, esc, num, setHtmlById (from backtest_v2.js) */
+﻿/* 鈹€鈹€ charts.js 鈹€鈹€ Chart rendering (SVG fallback + LightweightCharts) 鈹€鈹€ */
+/* Globals used: state, byId, esc, num, setHtmlById (from desktop-shell/runtime-surface.js) */
 
 function filterSeriesByRange(points, range) {
   const arr = Array.isArray(points) ? points : [];
@@ -8,7 +8,7 @@ function filterSeriesByRange(points, range) {
   return arr.slice(Math.max(0, arr.length - n));
 }
 
-// 将日线 OHLC 聚合为周线/月线/年线
+// 灏嗘棩绾?OHLC 鑱氬悎涓哄懆绾?鏈堢嚎/骞寸嚎
 function aggregateOhlc(dailyOhlc, period) {
   if (!dailyOhlc?.length || !period || period === 'D') return dailyOhlc;
   const buckets = new Map();
@@ -16,7 +16,7 @@ function aggregateOhlc(dailyOhlc, period) {
     const d = bar.time; // 'YYYY-MM-DD'
     let key;
     if (period === 'W') {
-      // 按周聚合：算出周一的日期作为 key
+      // 鎸夊懆鑱氬悎锛氱畻鍑哄懆涓€鐨勬棩鏈熶綔涓?key
       const dt = new Date(d + 'T00:00:00');
       const day = dt.getDay();
       const mon = new Date(dt);
@@ -35,13 +35,13 @@ function aggregateOhlc(dailyOhlc, period) {
       const b = buckets.get(key);
       if (bar.high > b.high) b.high = bar.high;
       if (bar.low < b.low) b.low = bar.low;
-      b.close = bar.close; // 最后一天的 close
+      b.close = bar.close; // 鏈€鍚庝竴澶╃殑 close
     }
   }
   return [...buckets.values()];
 }
 
-// 将日线 NAV 聚合为周线/月线/年线（取每个周期最后一个值）
+// Aggregate daily NAV into weekly / monthly / yearly rows using the last value in each period.
 function aggregateNav(dailyNav, period) {
   if (!dailyNav?.length || !period || period === 'D') return dailyNav;
   const buckets = new Map();
@@ -61,12 +61,12 @@ function aggregateNav(dailyNav, period) {
     } else {
       return dailyNav;
     }
-    buckets.set(key, { date: key, value: pt.value }); // 覆盖为最后一天的值
+    buckets.set(key, { date: key, value: pt.value });
   }
   return [...buckets.values()];
 }
 
-// 回撤序列周期聚合：取周期内最小值（最大回撤深度），而非末日值
+// Aggregate drawdown by period using the minimum value in each period.
 function aggregateDrawdown(dailyDd, period) {
   if (!dailyDd?.length || !period || period === 'D') return dailyDd;
   const buckets = new Map();
@@ -94,8 +94,7 @@ function aggregateDrawdown(dailyDd, period) {
   return [...buckets.values()];
 }
 
-// ── MarketStateOverlay — LWC v4 Series Primitive for market state color bands ──
-// A 股惯例: 红=涨/牛, 绿=跌/熊
+// MarketStateOverlay: LWC v4 series primitive for market-state background bands.
 const MARKET_STATE_COLORS = {
   BULL:        'rgba(220, 38, 38, 0.08)',
   BULL_MAIN:   'rgba(220, 38, 38, 0.08)',
@@ -194,10 +193,10 @@ class MarketStateOverlay {
   paneViews() { return [this._paneView]; }
 }
 
-// lightweight-charts 实例管理
-let _lwChartNav = null;  // 收益图
-let _lwChartDd = null;   // 回撤图
-let _syncLock = false;   // 防止时间轴同步递归
+// lightweight-charts instance state
+let _lwChartNav = null;
+let _lwChartDd = null;
+let _syncLock = false;
 
 let _lwNavState = null;
 
@@ -405,8 +404,8 @@ function resetNavChartSeries(state, LWC, shape) {
 }
 
 function renderLoadingSkeleton() {
-  setHtmlById('wbGroupLoadStatus', '<span class="wb-mini">加载组产物中...</span>');
-  // 清理 lightweight-charts 实例后再替换 innerHTML
+  setHtmlById('wbGroupLoadStatus', '<span class="wb-mini">鍔犺浇缁勪骇鐗╀腑...</span>');
+  // 娓呯悊 lightweight-charts 瀹炰緥鍚庡啀鏇挎崲 innerHTML
   destroyNavChartState();
   if (_lwChartDd) { _lwChartDd.remove(); _lwChartDd = null; }
   setHtmlById('wbNavChart', '<div class="wb-skeleton" style="height:100%"></div>');
@@ -514,20 +513,20 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
     : [];
 
 
-  // 无任何数据时显示空状态
+  // Empty-state rendering.
   if (!hasNav && !hasBench) {
     if (_lwChartNav) { _lwChartNav.remove(); _lwChartNav = null; }
-    container.innerHTML = '<div class="wb-empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>运行实验后显示净值曲线</span></div>';
+    container.innerHTML = '<div class="wb-empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>杩愯瀹為獙鍚庢樉绀哄噣鍊兼洸绾?/span></div>';
     return;
   }
 
-  // 清理旧实例
+  // Reset previous chart instance.
   if (_lwChartNav) { _lwChartNav.remove(); _lwChartNav = null; }
   container.innerHTML = '';
 
   const LWC = window.LightweightCharts;
   if (!LWC) {
-    container.innerHTML = '<div class="wb-empty"><span>lightweight-charts 加载失败</span></div>';
+    container.innerHTML = '<div class="wb-empty"><span>lightweight-charts 鍔犺浇澶辫触</span></div>';
     return;
   }
 
@@ -561,19 +560,18 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
     timeScale: {
       borderColor: '#334155',
       timeVisible: false,
-      barSpacing: 6,       // 默认蜡烛间距（像素），参考东方财富/同花顺
-      minBarSpacing: 2,    // 缩放下限
-      rightOffset: 5,      // 右侧留白
+      barSpacing: 6,       // 榛樿铚＄儧闂磋窛锛堝儚绱狅級锛屽弬鑰冧笢鏂硅储瀵?鍚岃姳椤?      minBarSpacing: 2,    // 缂╂斁涓嬮檺
+      rightOffset: 5,      // 鍙充晶鐣欑櫧
     },
   });
   _lwChartNav = chart;
   let symbolBadgeUpdater = null;
   let refreshVisiblePriceScales = () => {};
 
-  // Benchmark 蜡烛图（兼容 v4.0+ 和 v4.2+ API）
+  // Benchmark series, compatible with multiple LWC APIs.
   if (showBenchmark && hasBench) {
     if (useUnifiedRightScale) {
-      // 组合模式下保留基准蜡烛图，但先归一化到与 NAV 相同的右轴比例尺。
+      // In portfolio mode normalize benchmark candles onto the right scale.
       const candleSeries = typeof chart.addCandlestickSeries === 'function'
         ? chart.addCandlestickSeries({
             upColor: '#26a69a',
@@ -637,9 +635,9 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
     }
   }
 
-  // Strategy NAV 折线（归一化后与 Benchmark 同量级）
+  // Strategy NAV 鎶樼嚎锛堝綊涓€鍖栧悗涓?Benchmark 鍚岄噺绾э級
   if (hasNav) {
-    // NAV 可能是原始组合价值（如 100000），需要归一化为从 1.0 开始
+    // Portfolio NAV is normalized to start near 1.0 in non-symbol mode.
     const firstVal = navSeries[0]?.value || 1;
     const lineData = navSeries.map((p) => ({
       time: p.date,
@@ -670,7 +668,7 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
         })()
       : null;
 
-    // 停牌区间分段：个股模式下用灰色停牌段 + 橙色正常段
+    // Symbol mode splits suspended ranges into a secondary grey series.
     const suspRanges = Array.isArray(opts.suspensionRanges) ? opts.suspensionRanges : [];
     const hasSuspension = mode === 'symbol' && suspRanges.length > 0;
 
@@ -680,14 +678,14 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
 
     let primaryLine;
     if (hasSuspension) {
-      // 构建停牌日期集合
+      // 鏋勫缓鍋滅墝鏃ユ湡闆嗗悎
       const suspSet = new Set();
       for (const r of suspRanges) {
         for (const p of lineData) {
           if (p.time >= r.start && p.time <= r.end) suspSet.add(p.time);
         }
       }
-      // 正常段（橙色）：停牌点设为 NaN 断开，但保留边界点使线段连接
+      // 姝ｅ父娈碉紙姗欒壊锛夛細鍋滅墝鐐硅涓?NaN 鏂紑锛屼絾淇濈暀杈圭晫鐐逛娇绾挎杩炴帴
       const normalData = [];
       const suspData = [];
       for (let i = 0; i < lineData.length; i++) {
@@ -697,16 +695,16 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
         const nextSusp = i < lineData.length - 1 && suspSet.has(lineData[i + 1].time);
         if (isSusp) {
           suspData.push(p);
-          // 停牌段首尾加到正常段做连接点
+          // 鍋滅墝娈甸灏惧姞鍒版甯告鍋氳繛鎺ョ偣
           if (!prevSusp || !nextSusp) normalData.push(p);
         } else {
           normalData.push(p);
-          // 正常段首尾加到停牌段做连接点
+          // 姝ｅ父娈甸灏惧姞鍒板仠鐗屾鍋氳繛鎺ョ偣
           if (nextSusp) suspData.push(p);
           if (prevSusp) suspData.push(p);
         }
       }
-      // 去重并排序
+      // Deduplicate by time while preserving final value for each bar.
       const dedup = (arr) => {
         const m = new Map();
         for (const p of arr) m.set(p.time, p);
@@ -724,7 +722,7 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
       primaryLine.setData(dedup(normalData));
       if (mode === 'symbol') {
         const lastValue = Number(lineData[lineData.length - 1]?.value);
-        symbolBadgeUpdater = () => renderChartValueBadge(container, primaryLine, lastValue, `个股净值 ${num(lastValue, 2)}x`);
+        symbolBadgeUpdater = () => renderChartValueBadge(container, primaryLine, lastValue, `涓偂鍑€鍊?${num(lastValue, 2)}x`);
       }
     } else {
       primaryLine = _addLine(mode === 'symbol' ? '#f59e0b' : '#58a6ff');
@@ -734,7 +732,7 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
       primaryLine.setData(lineData);
       if (mode === 'symbol') {
         const lastValue = Number(lineData[lineData.length - 1]?.value);
-        symbolBadgeUpdater = () => renderChartValueBadge(container, primaryLine, lastValue, `个股净值 ${num(lastValue, 2)}x`);
+        symbolBadgeUpdater = () => renderChartValueBadge(container, primaryLine, lastValue, `涓偂鍑€鍊?${num(lastValue, 2)}x`);
       }
     }
 
@@ -749,7 +747,7 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
         // marker rendering is optional
       }
     }
-    // MarketStateOverlay — 挂载到主折线系列
+    // MarketStateOverlay 鈥?鎸傝浇鍒颁富鎶樼嚎绯诲垪
     const marketStates = Array.isArray(opts.marketStates) ? opts.marketStates : [];
     if (marketStates.length) {
       try {
@@ -764,17 +762,17 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
       const lastValue = Number(lineData[lineData.length - 1]?.value);
       const lastClose = Number(opts?.symbolLastClose);
       const label = Number.isFinite(lastClose)
-        ? `个股收盘价 ${num(lastClose, 2)}`
-        : `个股净值 ${num(lastValue, 2)}x`;
+        ? `涓偂鏀剁洏浠?${num(lastClose, 2)}`
+        : `涓偂鍑€鍊?${num(lastValue, 2)}x`;
       symbolBadgeUpdater = () => renderChartValueBadge(container, primaryLine, lastValue, label);
     }
     if (typeof symbolBadgeUpdater === 'function') requestAnimationFrame(symbolBadgeUpdater);
   }
 
-  // 数据量大时只显示最近一段，保证蜡烛清晰可见；数据少时全部显示
+  // Large series default to the most recent visible window.
   const totalBars = Math.max(benchOhlc?.length || 0, navSeries?.length || 0);
   const chartWidth = container.clientWidth || 600;
-  const maxVisibleBars = Math.floor(chartWidth / 6); // 6px 间距
+  const maxVisibleBars = Math.floor(chartWidth / 6); // 6px 闂磋窛
   if (totalBars > maxVisibleBars) {
     chart.timeScale().scrollToPosition(5, false);
   } else {
@@ -807,7 +805,7 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
     });
   }
 
-  // 响应容器大小变化
+  // 鍝嶅簲瀹瑰櫒澶у皬鍙樺寲
   const ro = new ResizeObserver(() => {
     if (_lwChartNav === chart) {
       chart.applyOptions({ width: container.clientWidth, height: container.clientHeight || 420 });
@@ -817,7 +815,7 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
   ro.observe(container);
 }
 
-// 回撤图 — LightweightCharts AreaSeries 渲染
+// 鍥炴挙鍥?鈥?LightweightCharts AreaSeries 娓叉煋
 function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts = {}) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -848,14 +846,14 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
 
   if (!hasNav && !hasBench) {
     destroyNavChartState();
-    container.innerHTML = '<div class="wb-empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>杩愯瀹為獙鍚庢樉绀哄噣鍊兼洸绾?/span></div>';
+    container.innerHTML = '<div class="wb-empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>鏉╂劘顢戠€圭偤鐛欓崥搴㈡▔缁€鍝勫櫍閸婂吋娲哥痪?/span></div>';
     return;
   }
 
   const LWC = window.LightweightCharts;
   if (!LWC) {
     destroyNavChartState();
-    container.innerHTML = '<div class="wb-empty"><span>lightweight-charts 鍔犺浇澶辫触</span></div>';
+    container.innerHTML = '<div class="wb-empty"><span>lightweight-charts 閸旂姾娴囨径杈Е</span></div>';
     return;
   }
 
@@ -986,8 +984,8 @@ function renderNavChartLW(containerId, benchOhlc, navSeries, showBenchmark, opts
       const lastValue = Number(lineData[lineData.length - 1]?.value);
       const lastClose = Number(opts?.symbolLastClose);
       const label = Number.isFinite(lastClose)
-        ? `涓偂鏀剁洏浠?${num(lastClose, 2)}`
-        : `涓偂鍑€鍊?${num(lastValue, 2)}x`;
+        ? `娑擃亣鍋傞弨鍓佹磸娴?${num(lastClose, 2)}`
+        : `娑擃亣鍋傞崙鈧崐?${num(lastValue, 2)}x`;
       navState.symbolBadgeUpdater = () => renderChartValueBadge(container, navState.primarySeries, lastValue, label);
     }
   }
@@ -1027,7 +1025,7 @@ function renderDdChartLW(containerId, ddSeries, benchDdSeries, showBenchmark, op
 
   if (!hasDd && !hasBenchDd) {
     if (_lwChartDd) { _lwChartDd.remove(); _lwChartDd = null; }
-    container.innerHTML = '<div class="wb-empty"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span>回撤曲线</span></div>';
+    container.innerHTML = '<div class="wb-empty"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span>鍥炴挙鏇茬嚎</span></div>';
     return;
   }
 
@@ -1036,7 +1034,7 @@ function renderDdChartLW(containerId, ddSeries, benchDdSeries, showBenchmark, op
 
   const LWC = window.LightweightCharts;
   if (!LWC) {
-    container.innerHTML = '<div class="wb-empty"><span>lightweight-charts 加载失败</span></div>';
+    container.innerHTML = '<div class="wb-empty"><span>lightweight-charts 鍔犺浇澶辫触</span></div>';
     return;
   }
 
@@ -1069,7 +1067,7 @@ function renderDdChartLW(containerId, ddSeries, benchDdSeries, showBenchmark, op
   });
   _lwChartDd = chart;
 
-  // 策略回撤 — BaselineSeries 以 0 为基线，向下填充红色
+  // 绛栫暐鍥炴挙 鈥?BaselineSeries 浠?0 涓哄熀绾匡紝鍚戜笅濉厖绾㈣壊
   if (hasDd) {
     const baseOpts = {
       baseValue: { type: 'price', price: 0 },
@@ -1087,7 +1085,7 @@ function renderDdChartLW(containerId, ddSeries, benchDdSeries, showBenchmark, op
       ? chart.addBaselineSeries(baseOpts)
       : chart.addSeries(LWC.BaselineSeries, baseOpts);
     baselineSeries.setData(ddSeries.map((p) => ({ time: p.date, value: p.value })));
-    // MarketStateOverlay — 挂载到回撤 BaselineSeries
+    // MarketStateOverlay 鈥?鎸傝浇鍒板洖鎾?BaselineSeries
     const marketStates = Array.isArray(opts.marketStates) ? opts.marketStates : [];
     if (marketStates.length) {
       try {
@@ -1100,7 +1098,7 @@ function renderDdChartLW(containerId, ddSeries, benchDdSeries, showBenchmark, op
     }
   }
 
-  // 基准回撤 — 橙色线
+  // Benchmark drawdown line.
   if (showBenchmark && hasBenchDd) {
     const lineOpts = { color: '#f97316', lineWidth: 1, priceLineVisible: false, crosshairMarkerVisible: false };
     const benchLine = typeof chart.addLineSeries === 'function'
@@ -1111,7 +1109,7 @@ function renderDdChartLW(containerId, ddSeries, benchDdSeries, showBenchmark, op
 
   chart.timeScale().fitContent();
 
-  // 响应容器大小变化
+  // 鍝嶅簲瀹瑰櫒澶у皬鍙樺寲
   const ro = new ResizeObserver(() => {
     if (_lwChartDd === chart) {
       chart.applyOptions({ width: container.clientWidth, height: container.clientHeight || 160 });
@@ -1119,15 +1117,15 @@ function renderDdChartLW(containerId, ddSeries, benchDdSeries, showBenchmark, op
   });
   ro.observe(container);
 
-  // --- 时间轴同步 + crosshair 联动 ---
+  // --- 鏃堕棿杞村悓姝?+ crosshair 鑱斿姩 ---
   setupChartSync();
 }
 
-// 双图时间轴同步 + crosshair 联动
+// 鍙屽浘鏃堕棿杞村悓姝?+ crosshair 鑱斿姩
 function setupChartSync() {
   if (!_lwChartNav || !_lwChartDd) return;
 
-  // 时间轴缩放/平移同步
+  // 鏃堕棿杞寸缉鏀?骞崇Щ鍚屾
   _lwChartNav.timeScale().subscribeVisibleLogicalRangeChange((range) => {
     if (_syncLock || !range) return;
     _syncLock = true;
@@ -1141,14 +1139,13 @@ function setupChartSync() {
     _syncLock = false;
   });
 
-  // crosshair 联动
+  // crosshair 鑱斿姩
   _lwChartNav.subscribeCrosshairMove((param) => {
     if (!param || !param.time) {
       _lwChartDd.clearCrosshairPosition();
       return;
     }
-    // 用 setCrosshairPosition 同步到回撤图（需要 price + time）
-    // 传 NaN 作为 price 让 LWC 自动定位到数据点
+    // 鐢?setCrosshairPosition 鍚屾鍒板洖鎾ゅ浘锛堥渶瑕?price + time锛?    // 浼?NaN 浣滀负 price 璁?LWC 鑷姩瀹氫綅鍒版暟鎹偣
     try { _lwChartDd.setCrosshairPosition(NaN, param.time, _lwChartDd.getSeries?.() || undefined); } catch (_) {}
   });
   _lwChartDd.subscribeCrosshairMove((param) => {
@@ -1159,3 +1156,984 @@ function setupChartSync() {
     try { _lwChartNav.setCrosshairPosition(NaN, param.time, _lwChartNav.getSeries?.() || undefined); } catch (_) {}
   });
 }
+
+
+/* merged legacy results-chart-nav-override.js into charts.js on 2026-04-26 */
+(function setupResultsNavChartOverride() {
+  const PORTFOLIO_VISIBLE_BARS = 60;
+
+  function buildFixedPriceRangeProvider(minValue, maxValue) {
+    if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || maxValue <= minValue) return null;
+    return () => ({
+      priceRange: {
+        minValue,
+        maxValue,
+      },
+    });
+  }
+
+  function deriveExpandedBenchRange(benchWindow) {
+    const rows = Array.isArray(benchWindow) ? benchWindow : [];
+    const lows = rows
+      .map((row) => (Number.isFinite(Number(row?.low)) ? Number(row.low) : Number(row?.close)))
+      .filter((value) => Number.isFinite(value));
+    const highs = rows
+      .map((row) => (Number.isFinite(Number(row?.high)) ? Number(row.high) : Number(row?.close)))
+      .filter((value) => Number.isFinite(value));
+    if (!lows.length || !highs.length) return null;
+    const rawMin = Math.min(...lows);
+    const rawMax = Math.max(...highs);
+    const rawSpan = Math.max(rawMax - rawMin, Math.max(Math.abs(rawMax), 1) * 0.02, 1e-6);
+    const expandedSpan = rawSpan / 0.9;
+    const mid = (rawMax + rawMin) / 2;
+    return {
+      min: mid - (expandedSpan / 2),
+      max: mid + (expandedSpan / 2),
+    };
+  }
+
+  function sliceRowsByVisibleRange(rows, chart) {
+    const arr = Array.isArray(rows) ? rows : [];
+    if (!arr.length) return [];
+    const logicalRange = chart?.timeScale?.()?.getVisibleLogicalRange?.();
+    if (!logicalRange || !Number.isFinite(logicalRange.from) || !Number.isFinite(logicalRange.to)) {
+      return arr.slice(-Math.min(PORTFOLIO_VISIBLE_BARS, arr.length));
+    }
+    const from = Math.max(0, Math.floor(logicalRange.from));
+    const to = Math.min(arr.length - 1, Math.ceil(logicalRange.to));
+    if (to < from) return arr.slice(-Math.min(PORTFOLIO_VISIBLE_BARS, arr.length));
+    return arr.slice(from, to + 1);
+  }
+
+  function derivePortfolioOverlayConfig(benchOhlc, navLineData, chart) {
+    const benchRows = Array.isArray(benchOhlc) ? benchOhlc : [];
+    const navRows = Array.isArray(navLineData) ? navLineData : [];
+    if (!benchRows.length || !navRows.length) return null;
+    const benchWindow = sliceRowsByVisibleRange(benchRows, chart);
+    const navWindow = sliceRowsByVisibleRange(navRows, chart);
+    const windowBars = Math.max(1, Math.max(benchWindow.length, navWindow.length));
+    const leftRange = deriveExpandedBenchRange(benchWindow);
+    const benchLast = Number(benchWindow[benchWindow.length - 1]?.close);
+    const navLast = Number(navWindow[navWindow.length - 1]?.value);
+    if (!leftRange || !Number.isFinite(benchLast) || benchLast <= 0 || !Number.isFinite(navLast) || navLast <= 0) {
+      return { leftRange, rightRange: null, scaleFactor: null, windowBars };
+    }
+    const scaleFactor = benchLast / navLast;
+    if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) {
+      return { leftRange, rightRange: null, scaleFactor: null, windowBars };
+    }
+    return {
+      leftRange,
+      rightRange: {
+        min: leftRange.min / scaleFactor,
+        max: leftRange.max / scaleFactor,
+      },
+      scaleFactor,
+      windowBars,
+    };
+  }
+
+  function ensurePortfolioBenchmarkCandles(navState, chart, LWC) {
+    if (navState._portfolioBenchmarkKind === 'candlestick-left' && navState.benchmarkSeries) return;
+    if (navState.benchmarkSeries && typeof chart.removeSeries === 'function') {
+      try { chart.removeSeries(navState.benchmarkSeries); } catch (_) {}
+    }
+    navState.benchmarkSeries = typeof chart.addCandlestickSeries === 'function'
+      ? chart.addCandlestickSeries({
+          upColor: '#ef4444',
+          downColor: '#22c55e',
+          borderDownColor: '#22c55e',
+          borderUpColor: '#ef4444',
+          wickDownColor: '#22c55e',
+          wickUpColor: '#ef4444',
+          priceScaleId: 'left',
+          priceLineVisible: false,
+          lastValueVisible: true,
+        })
+      : chart.addSeries(LWC.CandlestickSeries, {
+          upColor: '#ef4444',
+          downColor: '#22c55e',
+          borderDownColor: '#22c55e',
+          borderUpColor: '#ef4444',
+          wickDownColor: '#22c55e',
+          wickUpColor: '#ef4444',
+          priceScaleId: 'left',
+          priceLineVisible: false,
+          lastValueVisible: true,
+        });
+    navState._portfolioBenchmarkKind = 'candlestick-left';
+  }
+
+  function applyMarkers(series, markers) {
+    const LWC = window.LightweightCharts;
+    if (!series || !Array.isArray(markers) || !markers.length) return;
+    if (typeof series.setMarkers === 'function') {
+      try { series.setMarkers(markers); } catch (_) {}
+      return;
+    }
+    if (typeof LWC?.createSeriesMarkers === 'function') {
+      try { LWC.createSeriesMarkers(series, markers); } catch (_) {}
+    }
+  }
+
+  function renderPortfolioChart(navState, container, chart, benchOhlc, navSeries, showBenchmark, opts) {
+    const hasBench = Array.isArray(benchOhlc) && benchOhlc.length > 0;
+    const lineData = (Array.isArray(navSeries) ? navSeries : [])
+      .map((point) => ({ time: point.date, value: Number(point.value) }))
+      .filter((point) => Number.isFinite(point.value));
+    const dynamicOverlayConfig = () => derivePortfolioOverlayConfig(benchOhlc, lineData, chart);
+    const leftRangeProvider = showBenchmark
+      ? (() => {
+          const overlay = dynamicOverlayConfig();
+          return overlay?.leftRange
+            ? { priceRange: { minValue: overlay.leftRange.min, maxValue: overlay.leftRange.max } }
+            : null;
+        })
+      : null;
+    const rightRangeProvider = showBenchmark
+      ? (() => {
+          const overlay = dynamicOverlayConfig();
+          return overlay?.rightRange
+            ? { priceRange: { minValue: overlay.rightRange.min, maxValue: overlay.rightRange.max } }
+            : null;
+        })
+      : null;
+
+    try {
+      chart.applyOptions({
+        leftPriceScale: {
+          visible: !!showBenchmark && hasBench,
+          borderColor: '#334155',
+          autoScale: true,
+        },
+        rightPriceScale: {
+          visible: true,
+          borderColor: '#334155',
+          autoScale: true,
+        },
+      });
+    } catch (_) {}
+
+    if (navState.benchmarkSeries) {
+      ensurePortfolioBenchmarkCandles(navState, chart, window.LightweightCharts);
+    } else if (showBenchmark && hasBench) {
+      ensurePortfolioBenchmarkCandles(navState, chart, window.LightweightCharts);
+    }
+
+    if (navState.benchmarkSeries) {
+      try {
+        navState.benchmarkSeries.applyOptions({
+          priceScaleId: 'left',
+          priceLineVisible: false,
+          lastValueVisible: true,
+          priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+          autoscaleInfoProvider: leftRangeProvider || undefined,
+        });
+      } catch (_) {}
+      navState.benchmarkSeries.setData(Array.isArray(benchOhlc) ? benchOhlc : []);
+    }
+
+    if (navState.primarySeries) {
+      try {
+        navState.primarySeries.applyOptions({
+          priceScaleId: 'right',
+          color: '#f59e0b',
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          crosshairMarkerVisible: true,
+          priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+          autoscaleInfoProvider: rightRangeProvider || undefined,
+        });
+      } catch (_) {}
+      navState.primarySeries.setData(lineData);
+      applyMarkers(navState.primarySeries, []);
+
+      if (navState.marketOverlay) {
+        navState.marketOverlay.setData(Array.isArray(opts.marketStates) ? opts.marketStates : []);
+      }
+
+      if (lineData.length) {
+        const lastValue = Number(lineData[lineData.length - 1]?.value);
+        navState.symbolBadgeUpdater = () => renderChartValueBadge(
+          container,
+          navState.primarySeries,
+          lastValue,
+          `NAV ${num(lastValue, 2)}`,
+        );
+      }
+    }
+
+    const totalBars = Math.max(Array.isArray(benchOhlc) ? benchOhlc.length : 0, lineData.length);
+    const visibleBars = Math.max(1, Math.min(PORTFOLIO_VISIBLE_BARS, totalBars || 1));
+    const visibleKey = [
+      totalBars,
+      benchOhlc[0]?.time || '',
+      benchOhlc[benchOhlc.length - 1]?.time || '',
+      lineData[0]?.time || '',
+      lineData[lineData.length - 1]?.time || '',
+      showBenchmark ? 'bench' : 'no-bench',
+      `portfolio:${visibleBars}`,
+    ].join('|');
+
+    if (navState.visibleKey !== visibleKey) {
+      if (totalBars > 0 && typeof chart.timeScale()?.setVisibleLogicalRange === 'function') {
+        chart.timeScale().setVisibleLogicalRange({
+          from: Math.max(0, totalBars - visibleBars) - 0.5,
+          to: totalBars - 1 + 2.5,
+        });
+      } else {
+        chart.timeScale().fitContent();
+      }
+      navState.visibleKey = visibleKey;
+    }
+  }
+
+  function renderSymbolChart(navState, container, chart, benchOhlc, navSeries, showBenchmark, opts) {
+    const LWC = window.LightweightCharts;
+    const hasBench = Array.isArray(benchOhlc) && benchOhlc.length > 0;
+    const benchFirstClose = Number(benchOhlc[0]?.close) || 1;
+    const benchmarkLineData = hasBench
+      ? benchOhlc.map((point) => ({ time: point.time, value: Number(point.close) / benchFirstClose }))
+      : [];
+    const lineData = (Array.isArray(navSeries) ? navSeries : [])
+      .map((point) => ({ time: point.date, value: Number(point.value) }))
+      .filter((point) => Number.isFinite(point.value));
+    const suspensionRanges = Array.isArray(opts.suspensionRanges) ? opts.suspensionRanges : [];
+    const hasSuspension = suspensionRanges.length > 0 && !!navState.suspensionSeries;
+
+    try {
+      chart.applyOptions({
+        leftPriceScale: {
+          visible: !!showBenchmark && hasBench,
+          borderColor: '#334155',
+          autoScale: true,
+        },
+        rightPriceScale: {
+          visible: true,
+          borderColor: '#334155',
+          autoScale: true,
+        },
+      });
+    } catch (_) {}
+
+    if (navState.benchmarkSeries) {
+      try {
+        navState.benchmarkSeries.applyOptions({
+          priceScaleId: 'left',
+          color: '#58a6ff',
+          lineWidth: 2,
+          crosshairMarkerVisible: false,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+        });
+      } catch (_) {}
+      navState.benchmarkSeries.setData(benchmarkLineData);
+    }
+
+    if (navState.primarySeries) {
+      try {
+        navState.primarySeries.applyOptions({
+          priceScaleId: 'right',
+          color: '#f59e0b',
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: !hasSuspension,
+          crosshairMarkerVisible: !hasSuspension,
+          priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+        });
+        navState.suspensionSeries?.applyOptions({
+          priceScaleId: 'right',
+          color: '#999',
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+        });
+      } catch (_) {}
+
+      if (hasSuspension) {
+        const suspSet = new Set();
+        for (const range of suspensionRanges) {
+          for (const point of lineData) {
+            if (point.time >= range.start && point.time <= range.end) suspSet.add(point.time);
+          }
+        }
+        const normalData = [];
+        const suspensionData = [];
+        for (let i = 0; i < lineData.length; i += 1) {
+          const point = lineData[i];
+          const isSusp = suspSet.has(point.time);
+          const prevSusp = i > 0 && suspSet.has(lineData[i - 1].time);
+          const nextSusp = i < lineData.length - 1 && suspSet.has(lineData[i + 1].time);
+          if (isSusp) {
+            suspensionData.push(point);
+            if (!prevSusp || !nextSusp) normalData.push(point);
+          } else {
+            normalData.push(point);
+            if (prevSusp || nextSusp) suspensionData.push(point);
+          }
+        }
+        const dedup = (rows) => {
+          const byTime = new Map();
+          for (const point of rows) byTime.set(point.time, point);
+          return Array.from(byTime.values()).sort((left, right) => (left.time < right.time ? -1 : 1));
+        };
+        navState.suspensionSeries.setData(dedup(suspensionData));
+        navState.primarySeries.setData(dedup(normalData));
+      } else {
+        navState.primarySeries.setData(lineData);
+      }
+
+      applyMarkers(navState.primarySeries, Array.isArray(opts.markers) ? opts.markers : []);
+      if (navState.marketOverlay) {
+        navState.marketOverlay.setData([]);
+      }
+
+      if (lineData.length) {
+        const lastValue = Number(lineData[lineData.length - 1]?.value);
+        const lastClose = Number(opts?.symbolLastClose);
+        const label = Number.isFinite(lastClose)
+          ? `涓偂鏀剁洏浠?${num(lastClose, 2)}`
+          : `涓偂鍑€鍊?${num(lastValue, 2)}x`;
+        navState.symbolBadgeUpdater = () => renderChartValueBadge(container, navState.primarySeries, lastValue, label);
+      }
+    }
+
+    const totalBars = Math.max(benchmarkLineData.length, lineData.length);
+    const maxVisibleBars = Math.floor((container.clientWidth || 600) / 6);
+    const visibleKey = [
+      totalBars,
+      benchmarkLineData[0]?.time || '',
+      benchmarkLineData[benchmarkLineData.length - 1]?.time || '',
+      lineData[0]?.time || '',
+      lineData[lineData.length - 1]?.time || '',
+      showBenchmark ? 'bench' : 'no-bench',
+      'symbol:auto',
+    ].join('|');
+    if (navState.visibleKey !== visibleKey) {
+      if (totalBars > maxVisibleBars) chart.timeScale().scrollToPosition(5, false);
+      else chart.timeScale().fitContent();
+      navState.visibleKey = visibleKey;
+    }
+  }
+
+  const renderNavChartLWOverride = function renderNavChartLWOverride(containerId, benchOhlc, navSeries, showBenchmark, opts = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    clearChartValueBadge(container);
+
+    const hasNav = Array.isArray(navSeries) && navSeries.length > 0;
+    const hasBench = Array.isArray(benchOhlc) && benchOhlc.length > 0;
+    const mode = String(opts.mode || 'portfolio');
+    const isPortfolioMode = mode === 'portfolio';
+    const hasSuspension = mode === 'symbol' && Array.isArray(opts.suspensionRanges) && opts.suspensionRanges.length > 0;
+
+    if (!hasNav && !hasBench) {
+      destroyNavChartState();
+      container.innerHTML = '<div class="wb-empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>杩愯瀹為獙鍚庯紝杩欓噷鏄剧ず鍑€鍊间笌鍙傝€冩寚鏁拌蛋鍔裤€?/span></div>';
+      return;
+    }
+
+    const LWC = window.LightweightCharts;
+    if (!LWC) {
+      destroyNavChartState();
+      container.innerHTML = '<div class="wb-empty"><span>lightweight-charts 鍔犺浇澶辫触</span></div>';
+      return;
+    }
+
+    const shape = {
+      key: [
+        mode,
+        hasNav ? 'nav' : 'no-nav',
+        showBenchmark && hasBench ? 'bench-line-left' : 'bench-none',
+        hasSuspension ? 'susp' : 'plain',
+      ].join('|'),
+      mode,
+      hasNav,
+      hasSuspension,
+      benchmarkKind: showBenchmark && hasBench ? 'line-left' : 'none',
+    };
+
+    let navState = _lwNavState;
+    if (!navState || navState.container !== container) {
+      destroyNavChartState();
+      navState = createNavChartState(container, LWC);
+    }
+    if (!navState) return;
+    if (navState.shapeKey !== shape.key) {
+      navState = resetNavChartSeries(navState, LWC, shape);
+    }
+    if (!navState?.chart) return;
+
+    const chart = navState.chart;
+    navState.showLeftBenchmarkScale = !!showBenchmark && hasBench;
+    navState.symbolBadgeUpdater = null;
+
+    if (isPortfolioMode) {
+      renderPortfolioChart(navState, container, chart, benchOhlc, navSeries, showBenchmark, opts);
+    } else {
+      renderSymbolChart(navState, container, chart, benchOhlc, navSeries, showBenchmark, opts);
+    }
+
+    if (typeof navState.symbolBadgeUpdater === 'function') {
+      requestAnimationFrame(navState.symbolBadgeUpdater);
+    }
+  };
+
+  window.renderNavChartLW = renderNavChartLWOverride;
+  try { renderNavChartLW = renderNavChartLWOverride; } catch (_) {}
+})();
+
+(function setupPortfolioDualChartOverride() {
+  const PORTFOLIO_VISIBLE_BARS = 60;
+  let dualState = null;
+
+  function destroyChart(chart) {
+    if (!chart) return;
+    try { chart.remove(); } catch (_) {}
+  }
+
+  function disconnectObserver(observer) {
+    if (!observer) return;
+    try { observer.disconnect(); } catch (_) {}
+  }
+
+  function unsubscribeLogical(chart, handler) {
+    if (!chart || !handler) return;
+    const timeScale = typeof chart.timeScale === 'function' ? chart.timeScale() : null;
+    if (!timeScale || typeof timeScale.unsubscribeVisibleLogicalRangeChange !== 'function') return;
+    try { timeScale.unsubscribeVisibleLogicalRangeChange(handler); } catch (_) {}
+  }
+
+  function logicalRangeEqual(left, right) {
+    if (!left || !right) return false;
+    const fromEqual = Math.abs(Number(left.from) - Number(right.from)) < 1e-3;
+    const toEqual = Math.abs(Number(left.to) - Number(right.to)) < 1e-3;
+    return fromEqual && toEqual;
+  }
+
+  function destroyPortfolioDualChartLW() {
+    if (!dualState) return;
+    unsubscribeLogical(dualState.topChart, dualState.topLogicalHandler);
+    unsubscribeLogical(dualState.bottomChart, dualState.bottomLogicalHandler);
+    disconnectObserver(dualState.topResizeObserver);
+    disconnectObserver(dualState.bottomResizeObserver);
+    destroyChart(dualState.topChart);
+    destroyChart(dualState.bottomChart);
+    if (dualState.topContainer) clearChartValueBadge(dualState.topContainer);
+    if (dualState.bottomContainer) clearChartValueBadge(dualState.bottomContainer);
+    dualState = null;
+  }
+
+  function createBaseChart(
+    container,
+    LWC,
+    { leftScaleVisible = false, rightScaleVisible = true, showTimeScale = true, interactive = true } = {},
+  ) {
+    container.innerHTML = '';
+    return LWC.createChart(container, {
+      width: container.clientWidth,
+      height: container.clientHeight || 260,
+      layout: {
+        background: { type: LWC.ColorType ? LWC.ColorType.Solid : 'solid', color: 'transparent' },
+        textColor: '#94a3b8',
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: 'rgba(51,65,85,0.4)' },
+        horzLines: { color: 'rgba(51,65,85,0.4)' },
+      },
+      crosshair: { mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 0 },
+      leftPriceScale: { visible: leftScaleVisible, borderColor: '#334155', autoScale: true },
+      rightPriceScale: { visible: rightScaleVisible, borderColor: '#334155', autoScale: true },
+      handleScale: {
+        mouseWheel: interactive,
+        pinch: interactive,
+        axisPressedMouseMove: {
+          time: interactive,
+          price: interactive,
+        },
+        axisDoubleClickReset: {
+          time: interactive,
+          price: interactive,
+        },
+      },
+      handleScroll: {
+        mouseWheel: interactive,
+        pressedMouseMove: interactive,
+        horzTouchDrag: interactive,
+        vertTouchDrag: false,
+      },
+      timeScale: {
+        borderColor: '#334155',
+        timeVisible: false,
+        secondsVisible: false,
+        barSpacing: 6,
+        minBarSpacing: 2,
+        rightOffset: 5,
+        visible: showTimeScale,
+        lockVisibleTimeRangeOnResize: true,
+        rightBarStaysOnScroll: true,
+      },
+    });
+  }
+
+  function addLineSeriesCompat(chart, LWC, options) {
+    return typeof chart.addLineSeries === 'function'
+      ? chart.addLineSeries(options)
+      : chart.addSeries(LWC.LineSeries, options);
+  }
+
+  function addCandlestickSeriesCompat(chart, LWC, options) {
+    return typeof chart.addCandlestickSeries === 'function'
+      ? chart.addCandlestickSeries(options)
+      : chart.addSeries(LWC.CandlestickSeries, options);
+  }
+
+  function addHistogramSeriesCompat(chart, LWC, options) {
+    return typeof chart.addHistogramSeries === 'function'
+      ? chart.addHistogramSeries(options)
+      : chart.addSeries(LWC.HistogramSeries, options);
+  }
+
+  function buildMarketMaskData(rows) {
+    const input = Array.isArray(rows) ? rows : [];
+    const colorMap = typeof MARKET_STATE_COLORS === 'object' && MARKET_STATE_COLORS ? MARKET_STATE_COLORS : {};
+    return input
+      .map((row) => {
+        const time = String(row?.time || '').trim();
+        const mode = String(row?.mode || '').trim().toUpperCase();
+        const color = colorMap[mode] || null;
+        if (!time || !color) return null;
+        return { time, value: 1, color };
+      })
+      .filter(Boolean);
+  }
+
+  function ensureMarketMaskLayer(container, key) {
+    if (!container) return null;
+    if (!container.style.position) container.style.position = 'relative';
+    let layer = container.querySelector(`.wb-market-mask-layer[data-mask-key="${key}"]`);
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.className = 'wb-market-mask-layer';
+      layer.dataset.maskKey = key;
+      layer.style.position = 'absolute';
+      layer.style.left = '0';
+      layer.style.right = '0';
+      layer.style.top = '0';
+      layer.style.bottom = '0';
+      layer.style.pointerEvents = 'none';
+      layer.style.zIndex = '1';
+      layer.style.overflow = 'hidden';
+      container.appendChild(layer);
+    }
+    return layer;
+  }
+
+  function clearMarketMaskLayer(container, key) {
+    const layer = container?.querySelector?.(`.wb-market-mask-layer[data-mask-key="${key}"]`);
+    if (layer) layer.innerHTML = '';
+  }
+
+  function estimateBarWidth(chart, rows) {
+    const timeScale = chart?.timeScale?.();
+    if (!timeScale || typeof timeScale.timeToCoordinate !== 'function') return 6;
+    const coords = (Array.isArray(rows) ? rows : [])
+      .map((row) => timeScale.timeToCoordinate(row.time))
+      .filter((value) => Number.isFinite(value));
+    if (coords.length < 2) return 6;
+    let total = 0;
+    let count = 0;
+    for (let i = 1; i < coords.length; i += 1) {
+      const diff = Math.abs(coords[i] - coords[i - 1]);
+      if (diff > 0) {
+        total += diff;
+        count += 1;
+      }
+    }
+    return count > 0 ? Math.max(2, total / count) : 6;
+  }
+
+  function renderMarketMaskLayer(container, chart, rows, key) {
+    const layer = ensureMarketMaskLayer(container, key);
+    if (!layer) return;
+    const input = Array.isArray(rows) ? rows : [];
+    const timeScale = chart?.timeScale?.();
+    if (!input.length || !timeScale || typeof timeScale.timeToCoordinate !== 'function') {
+      layer.innerHTML = '';
+      return;
+    }
+    const barWidth = estimateBarWidth(chart, input);
+    const bands = [];
+    let i = 0;
+    while (i < input.length) {
+      const current = input[i];
+      const mode = String(current?.mode || '').trim().toUpperCase();
+      const color = (typeof MARKET_STATE_COLORS === 'object' && MARKET_STATE_COLORS ? MARKET_STATE_COLORS[mode] : null) || null;
+      let j = i + 1;
+      while (j < input.length && String(input[j]?.mode || '').trim().toUpperCase() === mode) j += 1;
+      if (color) {
+        const x1 = timeScale.timeToCoordinate(current.time);
+        const x2 = timeScale.timeToCoordinate(input[j - 1].time);
+        if (Number.isFinite(x1) && Number.isFinite(x2)) {
+          const left = Math.round(Math.min(x1, x2) - (barWidth / 2));
+          const width = Math.max(1, Math.round(Math.abs(x2 - x1) + barWidth));
+          bands.push({ left, width, color });
+        }
+      }
+      i = j;
+    }
+    layer.innerHTML = bands.map((band) => (
+      `<div style="position:absolute;top:0;bottom:0;left:${band.left}px;width:${band.width}px;background:${band.color};"></div>`
+    )).join('');
+  }
+
+  function renderDualMarketMasks(state) {
+    if (!state) return;
+    renderMarketMaskLayer(state.topContainer, state.topChart, state.marketStates, 'top');
+    if (state.bottomContainer && state.bottomChart) {
+      renderMarketMaskLayer(state.bottomContainer, state.bottomChart, state.marketStates, 'bottom');
+    } else if (state.bottomContainer) {
+      clearMarketMaskLayer(state.bottomContainer, 'bottom');
+    }
+  }
+
+  function ensureDualState(topContainer, bottomContainer, LWC) {
+    const needsReset = !dualState
+      || dualState.topContainer !== topContainer
+      || dualState.bottomContainer !== bottomContainer;
+    if (!needsReset) return dualState;
+
+    destroyPortfolioDualChartLW();
+
+    const topChart = createBaseChart(topContainer, LWC, {
+      leftScaleVisible: false,
+      rightScaleVisible: true,
+      showTimeScale: false,
+      interactive: true,
+    });
+
+    const topMaskSeries = addHistogramSeriesCompat(topChart, LWC, {
+      priceScaleId: 'overlay-mask-top',
+      base: 0,
+      color: 'rgba(0,0,0,0)',
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      autoscaleInfoProvider: () => ({
+        priceRange: { minValue: 0, maxValue: 1 },
+      }),
+    });
+    try {
+      topChart.priceScale('overlay-mask-top').applyOptions({
+        visible: false,
+        autoScale: false,
+        scaleMargins: { top: 0, bottom: 0 },
+      });
+    } catch (_) {}
+
+    const topNavSeries = addLineSeriesCompat(topChart, LWC, {
+      priceScaleId: 'right',
+      color: '#f59e0b',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: true,
+      priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+    });
+
+    const topBenchmarkSeries = addLineSeriesCompat(topChart, LWC, {
+      priceScaleId: 'right',
+      color: '#60a5fa',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: false,
+      priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+    });
+
+    let bottomChart = null;
+    let bottomBenchmarkSeries = null;
+    let bottomVolumeSeries = null;
+    let bottomMaskSeries = null;
+    if (bottomContainer) {
+      bottomChart = createBaseChart(bottomContainer, LWC, {
+        leftScaleVisible: true,
+        rightScaleVisible: false,
+        showTimeScale: true,
+        interactive: false,
+      });
+      bottomMaskSeries = addHistogramSeriesCompat(bottomChart, LWC, {
+        priceScaleId: 'overlay-mask-bottom',
+        base: 0,
+        color: 'rgba(0,0,0,0)',
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        autoscaleInfoProvider: () => ({
+          priceRange: { minValue: 0, maxValue: 1 },
+        }),
+      });
+      try {
+        bottomChart.priceScale('overlay-mask-bottom').applyOptions({
+          visible: false,
+          autoScale: false,
+          scaleMargins: { top: 0, bottom: 0 },
+        });
+      } catch (_) {}
+      bottomVolumeSeries = addHistogramSeriesCompat(bottomChart, LWC, {
+        priceScaleId: 'volume-overlay',
+        color: 'rgba(148, 163, 184, 0.35)',
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      try {
+        bottomChart.priceScale('volume-overlay').applyOptions({
+          visible: false,
+          autoScale: true,
+          scaleMargins: { top: 0.74, bottom: 0.05 },
+        });
+      } catch (_) {}
+      bottomBenchmarkSeries = addCandlestickSeriesCompat(bottomChart, LWC, {
+        upColor: '#ef4444',
+        downColor: '#22c55e',
+        borderDownColor: '#22c55e',
+        borderUpColor: '#ef4444',
+        wickDownColor: '#22c55e',
+        wickUpColor: '#ef4444',
+        priceScaleId: 'left',
+        priceLineVisible: false,
+        lastValueVisible: true,
+      });
+    }
+
+    dualState = {
+      topContainer,
+      bottomContainer,
+      topChart,
+      bottomChart,
+      topMaskSeries,
+      topNavSeries,
+      topBenchmarkSeries,
+      bottomBenchmarkSeries,
+      bottomVolumeSeries,
+      bottomMaskSeries,
+      topResizeObserver: null,
+      bottomResizeObserver: null,
+      topLogicalHandler: null,
+      syncLock: false,
+      bottomBenchRows: [],
+      marketStates: [],
+      visibleKey: '',
+      initialized: false,
+    };
+
+    dualState.topResizeObserver = null;
+    dualState.bottomResizeObserver = null;
+
+    const syncFromTop = (range) => {
+      if (!dualState || dualState.syncLock || !dualState.bottomChart || !range) return;
+      const bottomRange = dualState.bottomChart.timeScale()?.getVisibleLogicalRange?.();
+      if (logicalRangeEqual(range, bottomRange)) {
+        renderDualMarketMasks(dualState);
+        return;
+      }
+      dualState.syncLock = true;
+      try {
+        dualState.bottomChart.timeScale().setVisibleLogicalRange(range);
+      } catch (_) {
+      } finally {
+        dualState.syncLock = false;
+      }
+      renderDualMarketMasks(dualState);
+    };
+    dualState.topLogicalHandler = syncFromTop;
+
+    if (typeof dualState.topChart.timeScale()?.subscribeVisibleLogicalRangeChange === 'function') {
+      dualState.topChart.timeScale().subscribeVisibleLogicalRangeChange(syncFromTop);
+    }
+
+    return dualState;
+  }
+
+  function normalizeBenchmarkLine(benchOhlc) {
+    const rows = Array.isArray(benchOhlc) ? benchOhlc : [];
+    if (!rows.length) return [];
+    const firstClose = Number(rows[0]?.close);
+    if (!Number.isFinite(firstClose) || firstClose <= 0) return [];
+    return rows
+      .map((row) => {
+        const close = Number(row?.close);
+        if (!Number.isFinite(close)) return null;
+        return { time: row.time, value: close / firstClose };
+      })
+      .filter(Boolean);
+  }
+
+  function sliceVisibleRows(rows, chart) {
+    const arr = Array.isArray(rows) ? rows : [];
+    if (!arr.length || !chart) return [];
+    const logicalRange = chart.timeScale()?.getVisibleLogicalRange?.();
+    if (!logicalRange || !Number.isFinite(logicalRange.from) || !Number.isFinite(logicalRange.to)) {
+      return arr.slice(-Math.min(PORTFOLIO_VISIBLE_BARS, arr.length));
+    }
+    const from = Math.max(0, Math.floor(logicalRange.from));
+    const to = Math.min(arr.length - 1, Math.ceil(logicalRange.to));
+    return to >= from ? arr.slice(from, to + 1) : arr.slice(-Math.min(PORTFOLIO_VISIBLE_BARS, arr.length));
+  }
+
+  function buildExpandedPriceRange(rows) {
+    const arr = Array.isArray(rows) ? rows : [];
+    if (!arr.length) return null;
+    const lows = arr.map((row) => Number.isFinite(Number(row?.low)) ? Number(row.low) : Number(row?.close)).filter(Number.isFinite);
+    const highs = arr.map((row) => Number.isFinite(Number(row?.high)) ? Number(row.high) : Number(row?.close)).filter(Number.isFinite);
+    if (!lows.length || !highs.length) return null;
+    const min = Math.min(...lows);
+    const max = Math.max(...highs);
+    const span = Math.max(max - min, Math.max(Math.abs(max), 1) * 0.02, 1e-6);
+    const expanded = span / 0.9;
+    const mid = (min + max) / 2;
+    return {
+      min: mid - expanded / 2,
+      max: mid + expanded / 2,
+    };
+  }
+
+  function setInitialVisibleRange(state, totalBars) {
+    if (!state?.topChart || totalBars <= 0) return;
+    const visibleBars = Math.max(1, Math.min(PORTFOLIO_VISIBLE_BARS, totalBars));
+    const range = {
+      from: Math.max(0, totalBars - visibleBars) - 0.5,
+      to: totalBars - 1 + 2.5,
+    };
+    try { state.topChart.timeScale().setVisibleLogicalRange(range); } catch (_) {}
+  }
+
+  function updateTopBadge(state, navLineData, benchmarkLineData) {
+    if (!state?.topContainer || !Array.isArray(navLineData) || !navLineData.length) return;
+    const navLast = Number(navLineData[navLineData.length - 1]?.value);
+    const benchLast = Number(benchmarkLineData[benchmarkLineData.length - 1]?.value);
+    const label = Number.isFinite(benchLast)
+      ? `NAV ${num(navLast, 2)} | 涓婅瘉 ${num(benchLast, 2)}x`
+      : `NAV ${num(navLast, 2)}`;
+    renderChartValueBadge(state.topContainer, state.topNavSeries, navLast, label);
+  }
+
+  function updateBottomBadge(state, benchOhlc, benchmarkSymbol) {
+    if (!state?.bottomContainer || !state.bottomBenchmarkSeries || !Array.isArray(benchOhlc) || !benchOhlc.length) return;
+    const lastClose = Number(benchOhlc[benchOhlc.length - 1]?.close);
+    if (!Number.isFinite(lastClose)) return;
+    renderChartValueBadge(state.bottomContainer, state.bottomBenchmarkSeries, lastClose, `${benchmarkSymbol || '涓婅瘉'} ${num(lastClose, 2)}`);
+  }
+
+  function renderPortfolioDualChartLW(topContainerId, bottomContainerId, benchOhlc, navSeries, opts = {}) {
+    const topContainer = document.getElementById(topContainerId);
+    const bottomContainer = bottomContainerId ? document.getElementById(bottomContainerId) : null;
+    if (!topContainer) return;
+    clearChartValueBadge(topContainer);
+    if (bottomContainer) clearChartValueBadge(bottomContainer);
+
+    const LWC = window.LightweightCharts;
+    if (!LWC) {
+      destroyPortfolioDualChartLW();
+      topContainer.innerHTML = '<div class="wb-empty"><span>lightweight-charts 鍔犺浇澶辫触</span></div>';
+      if (bottomContainer) bottomContainer.innerHTML = '<div class="wb-empty"><span>lightweight-charts 鍔犺浇澶辫触</span></div>';
+      return;
+    }
+
+    const hasBench = Array.isArray(benchOhlc) && benchOhlc.length > 0;
+    const showBenchmark = !!opts.showBenchmark && hasBench;
+    const state = ensureDualState(topContainer, showBenchmark ? bottomContainer : null, LWC);
+    if (!state) return;
+
+    const navLineData = (Array.isArray(navSeries) ? navSeries : [])
+      .map((point) => ({ time: point.date, value: Number(point.value) }))
+      .filter((point) => Number.isFinite(point.value));
+    const benchmarkLineData = showBenchmark ? normalizeBenchmarkLine(benchOhlc) : [];
+    const benchmarkVolumeData = showBenchmark
+      ? (Array.isArray(benchOhlc) ? benchOhlc : [])
+        .map((row) => {
+          const volume = Number(row?.volume ?? row?.amount);
+          if (!Number.isFinite(volume) || volume <= 0) return null;
+          return {
+            time: String(row?.time || '').trim(),
+            value: volume,
+            color: Number(row?.close) >= Number(row?.open) ? 'rgba(239, 68, 68, 0.42)' : 'rgba(34, 197, 94, 0.42)',
+          };
+        })
+        .filter((row) => row && row.time)
+      : [];
+    const marketStates = Array.isArray(opts.marketStates) ? opts.marketStates : [];
+    const marketMaskData = buildMarketMaskData(marketStates);
+    state.marketStates = marketStates;
+
+    state.topMaskSeries?.setData(marketMaskData);
+    state.topNavSeries.setData(navLineData);
+    state.topBenchmarkSeries.setData(benchmarkLineData);
+    applyMarkers(state.topNavSeries, Array.isArray(opts.markers) ? opts.markers : []);
+    try {
+      state.topBenchmarkSeries.applyOptions({
+        visible: showBenchmark,
+        lastValueVisible: showBenchmark,
+      });
+      state.topChart.applyOptions({
+        rightPriceScale: { visible: true, borderColor: '#334155', autoScale: true },
+      });
+    } catch (_) {}
+
+    if (showBenchmark && state.bottomChart && state.bottomBenchmarkSeries) {
+      state.bottomBenchRows = Array.isArray(benchOhlc) ? benchOhlc : [];
+      state.bottomMaskSeries?.setData(marketMaskData);
+      state.bottomVolumeSeries?.setData(benchmarkVolumeData);
+      try {
+        state.bottomBenchmarkSeries.applyOptions({
+          priceScaleId: 'left',
+          priceLineVisible: false,
+          lastValueVisible: true,
+          priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+          autoscaleInfoProvider: () => {
+            const visibleRows = sliceVisibleRows(state.bottomBenchRows, state.bottomChart);
+            const range = buildExpandedPriceRange(visibleRows);
+            return range ? { priceRange: { minValue: range.min, maxValue: range.max } } : null;
+          },
+        });
+      } catch (_) {}
+      state.bottomBenchmarkSeries.setData(benchOhlc);
+      updateBottomBadge(state, benchOhlc, opts.benchmarkSymbol);
+    } else if (state.bottomContainer) {
+      state.bottomMaskSeries?.setData([]);
+      state.bottomVolumeSeries?.setData([]);
+      clearChartValueBadge(state.bottomContainer);
+    }
+
+    updateTopBadge(state, navLineData, benchmarkLineData);
+
+    const totalBars = Math.max(navLineData.length, showBenchmark ? benchOhlc.length : 0);
+    const visibleKey = [
+      totalBars,
+      navLineData[0]?.time || '',
+      navLineData[navLineData.length - 1]?.time || '',
+      showBenchmark ? (benchOhlc[0]?.time || '') : '',
+      showBenchmark ? (benchOhlc[benchOhlc.length - 1]?.time || '') : '',
+      showBenchmark ? 'with-bench' : 'nav-only',
+    ].join('|');
+
+    if (state.visibleKey !== visibleKey) {
+      if (!state.initialized) {
+        setInitialVisibleRange(state, totalBars);
+        state.initialized = true;
+      }
+      state.visibleKey = visibleKey;
+    }
+    renderDualMarketMasks(state);
+  }
+
+  window.renderPortfolioDualChartLW = renderPortfolioDualChartLW;
+  window.destroyPortfolioDualChartLW = destroyPortfolioDualChartLW;
+})();
+

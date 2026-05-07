@@ -1,5 +1,15 @@
-/* ── api-client.js ── API request helpers & status management ── */
-/* Globals used: state, byId, esc, toggleStatusPanel (all from backtest_v2.js) */
+/* desktop-shell/api-surface.js: formal desktop API/status surface owner. */
+/* Globals used: state, byId, esc (from desktop-shell/runtime-surface.js). */
+
+function apiTransportFetch(url, init = {}) {
+  if (globalThis.desktopApiAdapter && typeof globalThis.desktopApiAdapter.request === 'function') {
+    return globalThis.desktopApiAdapter.request(url, init);
+  }
+  if (typeof globalThis.sharedApiRequest === 'function') {
+    return globalThis.sharedApiRequest(url, init);
+  }
+  throw new Error('sharedApiRequest is unavailable');
+}
 
 function _apiFailureItems() {
   return Object.values(state.api_status || {})
@@ -214,9 +224,13 @@ async function apiRequestJson(key, url, options = {}) {
   const retryDelayMs = Number.isFinite(Number(requestOptions.retryDelayMs))
     ? Math.max(0, Number(requestOptions.retryDelayMs))
     : 350;
+  const timeoutMs = Number.isFinite(Number(requestOptions.timeoutMs))
+    ? Math.max(0, Number(requestOptions.timeoutMs))
+    : 0;
   delete requestOptions.suppressStatusOnError;
   delete requestOptions.retryCount;
   delete requestOptions.retryDelayMs;
+  delete requestOptions.timeoutMs;
 
   let lastError = null;
   const startedAt = Date.now();
@@ -227,7 +241,26 @@ async function apiRequestJson(key, url, options = {}) {
     for (let candidateIndex = 0; candidateIndex < endpointCandidates.length; candidateIndex += 1) {
       const endpoint = endpointCandidates[candidateIndex];
       try {
-        const r = await fetch(endpoint, requestOptions);
+        const fetchOptions = { ...requestOptions };
+        let timeoutHandle = null;
+        if (timeoutMs > 0 && !fetchOptions.signal && typeof AbortController === 'function') {
+          const ctrl = new AbortController();
+          fetchOptions.signal = ctrl.signal;
+          timeoutHandle = setTimeout(() => ctrl.abort(), timeoutMs);
+        }
+        let r;
+        try {
+          r = await apiTransportFetch(endpoint, fetchOptions);
+        } catch (rawError) {
+          if (rawError?.name === 'AbortError' && timeoutHandle !== null) {
+            const timeoutErr = new Error(`Request timeout (${Math.max(1, Math.round(timeoutMs / 1000))}s)`);
+            timeoutErr.endpoint = endpoint;
+            throw timeoutErr;
+          }
+          throw rawError;
+        } finally {
+          if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+        }
         const durationMs = Date.now() - startedAt;
         if (!r.ok) {
           const detail = await _readHttpErrorDetail(r);
@@ -301,6 +334,11 @@ async function refreshMarketDataSyncStatus() {
     const payload = await apiRequestJson(
       'market_data_sync_status',
       `/api/backtest_v2/market_data/sync_status?asset_scope=${encodeURIComponent(assetScope)}`,
+      {
+        retryCount: 0,
+        suppressStatusOnError: true,
+        timeoutMs: 5000,
+      },
     );
     renderMarketDataSyncStatus(payload);
     return payload;
@@ -315,3 +353,12 @@ async function refreshMarketDataSyncStatus() {
     return null;
   }
 }
+
+const apiSurfaceBoundary = {
+  owner: 'desktop_api_surface',
+  primary_transport: 'desktop_api_adapter',
+  direct_fetch_allowed: false,
+};
+
+globalThis.apiClientBoundary = apiSurfaceBoundary;
+globalThis.desktopApiSurfaceBoundary = apiSurfaceBoundary;

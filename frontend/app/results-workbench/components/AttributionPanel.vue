@@ -33,35 +33,35 @@ defineProps({
       </article>
 
       <article class="wb-detail-card">
-        <div class="wb-detail-title">Reason Code Families</div>
+        <div class="wb-detail-title">原因代码家族</div>
         <dl class="wb-detail-list">
           <div v-for="entry in model.budgetReasonCodes" :key="`budget-${entry.name}`">
-            <dt>Budget · {{ entry.name }}</dt>
+            <dt>预算 / {{ entry.name }}</dt>
             <dd>{{ entry.value }}</dd>
           </div>
           <div v-for="entry in model.sleeveReasonCodes" :key="`sleeve-${entry.name}`">
-            <dt>Sleeve · {{ entry.name }}</dt>
+            <dt>腿级 / {{ entry.name }}</dt>
             <dd>{{ entry.value }}</dd>
           </div>
           <div v-for="entry in model.stateReasonCodes" :key="`state-${entry.name}`">
-            <dt>State · {{ entry.name }}</dt>
+            <dt>状态 / {{ entry.name }}</dt>
             <dd>{{ entry.value }}</dd>
           </div>
           <div v-for="entry in model.manualOverrideReasons" :key="`override-${entry.name}`">
-            <dt>Override · {{ entry.name }}</dt>
+            <dt>覆盖 / {{ entry.name }}</dt>
             <dd>{{ entry.value }}</dd>
           </div>
           <div v-if="!model.budgetReasonCodes.length && !model.sleeveReasonCodes.length && !model.stateReasonCodes.length && !model.manualOverrideReasons.length">
-            <dt>Reason Codes</dt>
+            <dt>原因代码</dt>
             <dd>暂无</dd>
           </div>
         </dl>
       </article>
 
       <article class="wb-detail-card">
-        <div class="wb-detail-title">Sleeves / Refs</div>
+        <div class="wb-detail-title">腿级 / 引用</div>
         <div>
-          <div class="wb-field-label">Sleeves</div>
+          <div class="wb-field-label">腿级列表</div>
           <div class="wb-chip-list">
             <span v-for="sleeve in model.sleeves" :key="sleeve" class="wb-chip">{{ sleeve }}</span>
             <span v-if="!model.sleeves.length" class="wb-chip">无</span>
@@ -78,7 +78,7 @@ defineProps({
     </section>
 
     <section v-else class="wb-empty">
-      <span>当前结果未提供 Attribution 审计摘要。</span>
+      <span>当前结果未提供归因审计摘要。</span>
     </section>
   </section>
 </template>

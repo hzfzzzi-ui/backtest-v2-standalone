@@ -14,19 +14,19 @@ defineProps({
         <div class="wb-detail-title">状态摘要</div>
         <dl class="wb-detail-kv">
           <div>
-            <dt>基础五状态</dt>
+            <dt>基础五态</dt>
             <dd>{{ model.baseState }}</dd>
           </div>
           <div>
-            <dt>生效五状态</dt>
+            <dt>生效五态</dt>
             <dd>{{ model.effectiveState }}</dd>
           </div>
           <div>
-            <dt>基础三状态</dt>
+            <dt>基础三态</dt>
             <dd>{{ model.coarseState }}</dd>
           </div>
           <div>
-            <dt>生效三状态</dt>
+            <dt>生效三态</dt>
             <dd>{{ model.effectiveCoarseState }}</dd>
           </div>
           <div>
@@ -55,7 +55,7 @@ defineProps({
       <article class="wb-detail-card">
         <div class="wb-detail-title">原因与人工覆盖</div>
         <div>
-          <div class="wb-field-label">Reason Codes</div>
+          <div class="wb-field-label">原因代码</div>
           <div class="wb-chip-list">
             <span v-for="code in model.reasonCodes" :key="code" class="wb-chip">{{ code }}</span>
             <span v-if="!model.reasonCodes.length" class="wb-chip">无</span>
@@ -65,7 +65,7 @@ defineProps({
           <div class="wb-field-label">人工覆盖摘要</div>
           <div>{{ model.manualOverrideSummary }}</div>
         </div>
-        <div class="wb-note">Regime 面板只消费正式 snapshot / run_meta 字段，不从旧 market_state 或 trade_mode 反推状态。</div>
+        <div class="wb-note">市场状态面板只消费正式 snapshot / run_meta 字段，不从旧 market_state 或 trade_mode 反推状态。</div>
       </article>
 
       <article class="wb-detail-card">
@@ -76,14 +76,14 @@ defineProps({
             <dd>{{ entry.value }}</dd>
           </div>
           <div v-if="!model.subscores.length">
-            <dt>subscores</dt>
+            <dt>子分数</dt>
             <dd>暂无</dd>
           </div>
         </dl>
       </article>
 
       <article class="wb-detail-card">
-        <div class="wb-detail-title">Block Scores / Stability</div>
+        <div class="wb-detail-title">阻断分数 / 稳定性</div>
         <dl class="wb-detail-list">
           <div v-for="entry in model.blockScores" :key="`block-${entry.name}`">
             <dt>{{ entry.name }}</dt>
@@ -102,7 +102,7 @@ defineProps({
     </section>
 
     <section v-else class="wb-empty">
-      <span>当前结果未提供正式 Regime payload。</span>
+      <span>当前结果未提供正式市场状态载荷。</span>
     </section>
   </section>
 </template>

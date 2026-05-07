@@ -10,9 +10,14 @@ const props = defineProps({
     type: Function,
     required: true,
   },
+  sectionMode: {
+    type: String,
+    default: 'full',
+  },
 });
 
 const comboChartRef = ref(null);
+const comboBenchmarkChartRef = ref(null);
 const stockTopChartRef = ref(null);
 const stockBottomChartRef = ref(null);
 const etfTopChartRef = ref(null);
@@ -26,15 +31,22 @@ const COMBO_VISIBLE_BARS = 96;
 const artifacts = computed(() => props.snapshot?.artifacts || {});
 const view = computed(() => props.snapshot?.view || {});
 const comboNavRows = computed(() => (Array.isArray(artifacts.value.nav) ? artifacts.value.nav : []));
+const comboTradeMarkers = computed(() => {
+  const rows = Array.isArray(artifacts.value.tradesRows) ? artifacts.value.tradesRows : [];
+  if (typeof window.tradeMarkers === 'function') return window.tradeMarkers(rows, { combo: true, navRows: comboNavRows.value }) || [];
+  return [];
+});
+const runMeta = computed(() => {
+  const payload = artifacts.value.run_meta;
+  return payload && typeof payload === 'object' ? payload : {};
+});
 const comboTruth = computed(() => {
   const payload = artifacts.value.comboTruth;
   return payload && typeof payload === 'object' ? payload : {};
 });
 const comboComponents = computed(() => {
   const payload = comboTruth.value.components;
-  if (payload && typeof payload === 'object') return payload;
-  const legacyPayload = artifacts.value.researchComboComponents;
-  return legacyPayload && typeof legacyPayload === 'object' ? legacyPayload : {};
+  return payload && typeof payload === 'object' ? payload : {};
 });
 
 function normalizeComboComponent(componentPayload, fallbackBenchmarkSymbol) {
@@ -64,6 +76,7 @@ function normalizeComboComponent(componentPayload, fallbackBenchmarkSymbol) {
   }
   return payload && typeof payload === 'object' ? payload : {};
 }
+
 const stockComponent = computed(() => {
   const payload = comboComponents.value.stock;
   return normalizeComboComponent(payload, '000300.SH');
@@ -76,12 +89,87 @@ const stockNavRows = computed(() => (Array.isArray(stockComponent.value?.navRows
 const etfNavRows = computed(() => (Array.isArray(etfComponent.value?.navRows) ? etfComponent.value.navRows : []));
 const stockBenchmarkSymbol = computed(() => String(stockComponent.value?.benchmarkSymbol || '000300.SH').trim() || '000300.SH');
 const etfBenchmarkSymbol = computed(() => String(etfComponent.value?.benchmarkSymbol || '510050.SH').trim() || '510050.SH');
+const comboBenchmarkSymbol = computed(() => stockBenchmarkSymbol.value);
 const stockBenchmarkRows = ref([]);
 const etfBenchmarkRows = ref([]);
+const stockBenchmarkOhlc = ref([]);
+const etfBenchmarkOhlc = ref([]);
+const stockTradeMarkers = computed(() => {
+  const rows = Array.isArray(stockComponent.value?.snapshot?.artifacts?.tradesRows)
+    ? stockComponent.value.snapshot.artifacts.tradesRows
+    : [];
+  return typeof window.tradeMarkers === 'function'
+    ? (window.tradeMarkers(rows, { navRows: stockNavRows.value }) || [])
+    : [];
+});
+const etfTradeMarkers = computed(() => {
+  const rows = Array.isArray(etfComponent.value?.snapshot?.artifacts?.tradesRows)
+    ? etfComponent.value.snapshot.artifacts.tradesRows
+    : [];
+  return typeof window.tradeMarkers === 'function'
+    ? (window.tradeMarkers(rows, { navRows: etfNavRows.value }) || [])
+    : [];
+});
+
+const isResearchLikeCombo = computed(() => {
+  const comboRuntime = runMeta.value.combo_runtime && typeof runMeta.value.combo_runtime === 'object'
+    ? runMeta.value.combo_runtime
+    : {};
+  const comboResult = runMeta.value.combo_result && typeof runMeta.value.combo_result === 'object'
+    ? runMeta.value.combo_result
+    : {};
+  const researchCombo = runMeta.value.research_combo && typeof runMeta.value.research_combo === 'object'
+    ? runMeta.value.research_combo
+    : {};
+  const assetRole = String(runMeta.value?.data?.asset_role || '').trim().toLowerCase();
+  return assetRole === 'research_combo'
+    || comboResult.research_combo_only
+    || researchCombo.research_combo_only
+    || comboRuntime.research_combo_only;
+});
 
 const comboReturn = computed(() => buildReturnText(comboNavRows.value, 'nav'));
-const stockReturn = computed(() => buildReturnText(stockNavRows.value, 'nav'));
-const etfReturn = computed(() => buildReturnText(etfNavRows.value, 'nav'));
+const stockReturn = computed(() => (
+  stockNavRows.value.length
+    ? buildReturnText(stockNavRows.value, 'nav')
+    : buildReturnText(comboNavRows.value, 'stock_nav')
+));
+const etfReturn = computed(() => (
+  etfNavRows.value.length
+    ? buildReturnText(etfNavRows.value, 'nav')
+    : buildReturnText(comboNavRows.value, 'etf_nav')
+));
+const showMainChart = computed(() => props.sectionMode === 'full' || props.sectionMode === 'overview');
+const showSleeveCharts = computed(() => props.sectionMode === 'full' || props.sectionMode === 'sleeves');
+const showSleeveBenchmarks = computed(() => props.sectionMode === 'full');
+const compactSleeveChrome = computed(() => props.sectionMode === 'sleeves');
+const comboLegendItems = computed(() => [
+  { key: 'combo', label: '组合净值', color: '#f59e0b' },
+  { key: 'stock', label: '股票腿净值', color: '#60a5fa' },
+  { key: 'etf', label: 'ETF 腿净值', color: '#34d399' },
+]);
+const stockSleeveLegendItems = computed(() => [
+  { key: 'stock-nav', label: '股票腿净值', color: '#f59e0b' },
+  { key: 'stock-benchmark', label: '股票腿基准', color: '#60a5fa' },
+]);
+const etfSleeveLegendItems = computed(() => [
+  { key: 'etf-nav', label: 'ETF 腿净值', color: '#34d399' },
+  { key: 'etf-benchmark', label: 'ETF 腿基准', color: '#a78bfa' },
+]);
+const canvasTitle = computed(() => {
+  if (props.sectionMode === 'overview') return '组合主图';
+  if (props.sectionMode === 'sleeves') return '双腿拆解';
+  return '研究组合';
+});
+const canvasDescription = computed(() => {
+  if (props.sectionMode === 'overview') {
+    return '主图聚焦组合净值，并在下方补充股票腿对应的大盘 K 线。';
+  }
+  if (props.sectionMode === 'sleeves') {
+    return '双腿图表聚焦各组件相对自身基准的表现。';
+  }
+  return '上方展示组合线，下方补充大盘 K 线，并拆开展示股票腿与 ETF 腿。';
+});
 
 function buildReturnText(rows, key = 'nav') {
   const series = buildLineRows(rows, key, false);
@@ -115,11 +203,19 @@ function aggregateLineRows(rows, chartRange) {
   return aggregateNav(rows, String(chartRange || 'D'));
 }
 
-function createBaseChart(container, height, showTimeScale = true) {
+function aggregateCandleRows(rows, chartRange) {
+  const aggregateOhlc = typeof window.aggregateOhlc === 'function' ? window.aggregateOhlc : ((value) => value || []);
+  return aggregateOhlc(rows, String(chartRange || 'D'));
+}
+
+function createBaseChart(container, height, showTimeScale = true, scaleOptions = {}) {
   const LWC = window.LightweightCharts;
   if (!container || !LWC || typeof LWC.createChart !== 'function') return null;
   container.innerHTML = '';
-  const chart = LWC.createChart(container, {
+  const leftPriceScaleVisible = !!scaleOptions.leftPriceScaleVisible;
+  const rightPriceScaleVisible = scaleOptions.rightPriceScaleVisible !== false;
+  const interactive = scaleOptions.interactive !== false;
+  return LWC.createChart(container, {
     width: container.clientWidth || 640,
     height,
     layout: {
@@ -132,8 +228,8 @@ function createBaseChart(container, height, showTimeScale = true) {
       horzLines: { color: 'rgba(51,65,85,0.4)' },
     },
     crosshair: { mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 0 },
-    leftPriceScale: { visible: false, borderColor: '#334155', autoScale: true },
-    rightPriceScale: { visible: true, borderColor: '#334155', autoScale: true },
+    leftPriceScale: { visible: leftPriceScaleVisible, borderColor: '#334155', autoScale: true },
+    rightPriceScale: { visible: rightPriceScaleVisible, borderColor: '#334155', autoScale: true },
     timeScale: {
       borderColor: '#334155',
       timeVisible: false,
@@ -146,25 +242,30 @@ function createBaseChart(container, height, showTimeScale = true) {
       rightBarStaysOnScroll: true,
     },
     handleScale: {
-      mouseWheel: true,
-      pinch: true,
-      axisPressedMouseMove: { time: true, price: true },
-      axisDoubleClickReset: { time: true, price: true },
+      mouseWheel: interactive,
+      pinch: interactive,
+      axisPressedMouseMove: { time: interactive, price: interactive },
+      axisDoubleClickReset: { time: interactive, price: interactive },
     },
     handleScroll: {
-      mouseWheel: true,
-      pressedMouseMove: true,
-      horzTouchDrag: true,
+      mouseWheel: interactive,
+      pressedMouseMove: interactive,
+      horzTouchDrag: interactive,
       vertTouchDrag: false,
     },
   });
-  return chart;
 }
 
 function addLineSeries(chart, options) {
   if (!chart) return null;
   if (typeof chart.addLineSeries === 'function') return chart.addLineSeries(options);
   return chart.addSeries(window.LightweightCharts.LineSeries, options);
+}
+
+function addCandlestickSeries(chart, options) {
+  if (!chart) return null;
+  if (typeof chart.addCandlestickSeries === 'function') return chart.addCandlestickSeries(options);
+  return chart.addSeries(window.LightweightCharts.CandlestickSeries, options);
 }
 
 function setVisibleRange(chart, totalBars) {
@@ -218,51 +319,119 @@ function renderMultiLineChart(container, rowsBySeries, options = {}) {
       crosshairMarkerVisible: true,
     });
     series?.setData(entry.rows.map((row) => ({ time: row.date, value: Number(row.value) })));
+    if (entry === seriesEntries[0] && Array.isArray(options.markers) && options.markers.length) {
+      try {
+        if (typeof series?.setMarkers === 'function') {
+          series.setMarkers(options.markers);
+        } else if (typeof window.LightweightCharts?.createSeriesMarkers === 'function') {
+          window.LightweightCharts.createSeriesMarkers(series, options.markers);
+        }
+      } catch (_) {}
+    }
   });
   const totalBars = Math.max(...seriesEntries.map((entry) => entry.rows.length));
   setVisibleRange(chart, totalBars);
   registerChart(chart, container);
 }
 
-async function ensureBenchmarkRows(symbol, navRows) {
+function renderCandlestickChart(container, rows, options = {}) {
+  if (!container) return;
+  const candleRows = Array.isArray(rows)
+    ? rows
+      .map((row) => ({
+        time: String(row?.time || '').trim(),
+        open: Number(row?.open),
+        high: Number(row?.high),
+        low: Number(row?.low),
+        close: Number(row?.close),
+      }))
+      .filter((row) => row.time && Number.isFinite(row.open) && Number.isFinite(row.high) && Number.isFinite(row.low) && Number.isFinite(row.close))
+    : [];
+  if (!candleRows.length) return;
+  const chart = createBaseChart(
+    container,
+    Number(options.height || 220),
+    options.showTimeScale !== false,
+    {
+      leftPriceScaleVisible: options.leftPriceScaleVisible !== false,
+      rightPriceScaleVisible: !!options.rightPriceScaleVisible,
+      interactive: options.interactive !== false,
+    },
+  );
+  if (!chart) return;
+  const series = addCandlestickSeries(chart, {
+    upColor: '#ef4444',
+    downColor: '#22c55e',
+    borderDownColor: '#22c55e',
+    borderUpColor: '#ef4444',
+    wickDownColor: '#22c55e',
+    wickUpColor: '#ef4444',
+    priceScaleId: options.priceScaleId || 'left',
+    priceLineVisible: false,
+    lastValueVisible: options.lastValueVisible !== false,
+  });
+  series?.setData(candleRows);
+  setVisibleRange(chart, candleRows.length);
+  registerChart(chart, container);
+}
+
+async function ensureBenchmarkPayload(symbol, navRows) {
   const normalizedSymbol = String(symbol || '').trim();
   const rows = Array.isArray(navRows) ? navRows : [];
-  if (!normalizedSymbol || !rows.length || typeof window.loadBenchmarkSeries !== 'function') return [];
+  if (!normalizedSymbol || !rows.length || typeof window.loadBenchmarkSeries !== 'function') {
+    return { points: [], ohlc: [] };
+  }
   const start = String(rows[0]?.date || '').trim();
   const end = String(rows[rows.length - 1]?.date || '').trim();
   const cacheKey = `${normalizedSymbol}:${start}:${end}`;
-  if (Array.isArray(benchmarkCache.value[cacheKey])) return benchmarkCache.value[cacheKey];
+  const cached = benchmarkCache.value[cacheKey];
+  if (cached && typeof cached === 'object') return cached;
   try {
     const payload = await window.loadBenchmarkSeries(rows.map((row) => ({ date: row.date, nav: row.nav })), {
       symbol: normalizedSymbol,
       absolute: true,
     });
-    const points = Array.isArray(payload?.points)
+    const resolved = {
+      points: Array.isArray(payload?.points)
       ? payload.points
         .map((row) => ({ date: String(row?.date || '').trim(), nav: Number(row?.nav) }))
         .filter((row) => row.date && Number.isFinite(row.nav) && row.nav > 0)
-      : [];
+      : [],
+      ohlc: Array.isArray(payload?.ohlc)
+        ? payload.ohlc
+          .map((row) => ({
+            time: String(row?.time || row?.date || '').trim(),
+            open: Number(row?.open),
+            high: Number(row?.high),
+            low: Number(row?.low),
+            close: Number(row?.close),
+          }))
+          .filter((row) => row.time && Number.isFinite(row.open) && Number.isFinite(row.high) && Number.isFinite(row.low) && Number.isFinite(row.close))
+        : [],
+    };
     benchmarkCache.value = {
       ...benchmarkCache.value,
-      [cacheKey]: points,
+      [cacheKey]: resolved,
     };
-    return points;
+    return resolved;
   } catch (_) {
     benchmarkCache.value = {
       ...benchmarkCache.value,
-      [cacheKey]: [],
+      [cacheKey]: { points: [], ohlc: [] },
     };
-    return [];
+    return { points: [], ohlc: [] };
   }
 }
 
 async function loadBenchmarks() {
-  const [stockRows, etfRows] = await Promise.all([
-    ensureBenchmarkRows(stockBenchmarkSymbol.value, stockNavRows.value),
-    ensureBenchmarkRows(etfBenchmarkSymbol.value, etfNavRows.value),
+  const [stockPayload, etfPayload] = await Promise.all([
+    ensureBenchmarkPayload(stockBenchmarkSymbol.value, stockNavRows.value),
+    ensureBenchmarkPayload(etfBenchmarkSymbol.value, etfNavRows.value),
   ]);
-  stockBenchmarkRows.value = stockRows;
-  etfBenchmarkRows.value = etfRows;
+  stockBenchmarkRows.value = Array.isArray(stockPayload?.points) ? stockPayload.points : [];
+  etfBenchmarkRows.value = Array.isArray(etfPayload?.points) ? etfPayload.points : [];
+  stockBenchmarkOhlc.value = Array.isArray(stockPayload?.ohlc) ? stockPayload.ohlc : [];
+  etfBenchmarkOhlc.value = Array.isArray(etfPayload?.ohlc) ? etfPayload.ohlc : [];
 }
 
 function renderComponentCharts() {
@@ -270,12 +439,20 @@ function renderComponentCharts() {
   const comboSeries = aggregateLineRows(buildLineRows(comboNavRows.value, 'nav', false), chartRange);
   const stockSeries = aggregateLineRows(buildLineRows(stockNavRows.value, 'nav', false), chartRange);
   const etfSeries = aggregateLineRows(buildLineRows(etfNavRows.value, 'nav', false), chartRange);
+  const comboBenchmarkSeries = aggregateCandleRows(stockBenchmarkOhlc.value, chartRange);
 
   renderMultiLineChart(comboChartRef.value, [
     { rows: comboSeries, color: '#f59e0b', lineWidth: 3 },
     { rows: stockSeries, color: '#60a5fa', lineWidth: 2 },
     { rows: etfSeries, color: '#34d399', lineWidth: 2 },
-  ], { height: 420, showTimeScale: true });
+  ], { height: 420, showTimeScale: true, markers: comboTradeMarkers.value });
+  renderCandlestickChart(comboBenchmarkChartRef.value, comboBenchmarkSeries, {
+    height: 220,
+    showTimeScale: true,
+    leftPriceScaleVisible: true,
+    rightPriceScaleVisible: false,
+    interactive: true,
+  });
 
   const stockBenchmarkNormalized = aggregateLineRows(
     buildLineRows(stockBenchmarkRows.value, 'nav', true),
@@ -288,7 +465,7 @@ function renderComponentCharts() {
   renderMultiLineChart(stockTopChartRef.value, [
     { rows: stockSeries, color: '#f59e0b', lineWidth: 3 },
     { rows: stockBenchmarkNormalized, color: '#60a5fa', lineWidth: 2 },
-  ], { height: 260, showTimeScale: false });
+  ], { height: 260, showTimeScale: false, markers: stockTradeMarkers.value });
   renderMultiLineChart(stockBottomChartRef.value, [
     { rows: stockBenchmarkAbsolute, color: '#60a5fa', lineWidth: 2 },
   ], { height: 180, showTimeScale: true });
@@ -304,7 +481,7 @@ function renderComponentCharts() {
   renderMultiLineChart(etfTopChartRef.value, [
     { rows: etfSeries, color: '#34d399', lineWidth: 3 },
     { rows: etfBenchmarkNormalized, color: '#a78bfa', lineWidth: 2 },
-  ], { height: 260, showTimeScale: false });
+  ], { height: 260, showTimeScale: false, markers: etfTradeMarkers.value });
   renderMultiLineChart(etfBottomChartRef.value, [
     { rows: etfBenchmarkAbsolute, color: '#a78bfa', lineWidth: 2 },
   ], { height: 180, showTimeScale: true });
@@ -333,6 +510,7 @@ onBeforeUnmount(() => {
 watch(
   () => [
     props.snapshot?.updatedAt,
+    props.sectionMode,
     view.value.chartRange,
     comboNavRows.value.length,
     stockNavRows.value.length,
@@ -347,72 +525,146 @@ watch(
 </script>
 
 <template>
-  <section class="wb-canvas">
+  <section class="wb-canvas" :class="{ 'wb-canvas-compact': compactSleeveChrome }">
     <div class="wb-canvas-head">
-      <div class="wb-canvas-info">
-        <span class="wb-canvas-kicker">组合研究图</span>
-        <span class="wb-mini">{{ snapshot?.artifacts?.run_meta?.data?.asset_role === 'unified_multi_sleeve_combo' ? '正式 Unified Runtime' : '只读 Research Combo' }}</span>
+      <div v-if="!compactSleeveChrome" class="wb-canvas-info">
+        <span class="wb-canvas-kicker">{{ canvasTitle }}</span>
+        <span class="wb-mini">{{ isResearchLikeCombo ? '研究组合' : '统一运行' }}</span>
       </div>
       <div class="wb-inline wb-canvas-tools">
         <select :value="view.chartRange || 'D'" class="formInput wb-input-sm" @change="onChartRangeChange">
-          <option value="D">日</option>
-          <option value="W">周</option>
-          <option value="M">月</option>
-          <option value="Y">年</option>
+          <option value="D">D</option>
+          <option value="W">W</option>
+          <option value="M">M</option>
+          <option value="Y">Y</option>
         </select>
       </div>
     </div>
 
-    <div class="wb-mini" style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-bottom:10px;align-items:center;">
-      <span>组合 NAV: {{ comboReturn }}</span>
-      <span>个股 Sleeve: {{ stockReturn }}</span>
-      <span>ETF Sleeve: {{ etfReturn }}</span>
+    <div v-if="!compactSleeveChrome" class="wb-mini" style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-bottom:10px;align-items:center;">
+      <span>组合净值：{{ comboReturn }}</span>
+      <span>股票腿：{{ stockReturn }}</span>
+      <span>ETF 腿：{{ etfReturn }}</span>
     </div>
 
-    <div class="wb-mini" style="margin-bottom: 6px;">上图：组合 NAV + 个股 NAV + ETF NAV</div>
-    <div id="wbResearchComboChart" ref="comboChartRef" class="wb-chart wb-chart-main" style="height: 420px;">
-      <div class="wb-empty">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-        </svg>
-        <span>加载组合结果后，这里展示组合、个股和 ETF 三条净值线。</span>
+    <template v-if="showMainChart">
+      <div
+        class="wb-chart-stack"
+        style="display:grid;grid-template-rows:344px 244px;gap:12px;height:auto;min-height:0;"
+      >
+        <div class="wb-chart-stack-panel" style="min-height:344px;">
+          <div class="wb-mini" style="margin-bottom: 6px;">叠加：组合净值 + 股票腿净值 + ETF 腿净值</div>
+          <div class="wb-chart-legend" style="margin-bottom: 8px;">
+            <span
+              v-for="item in comboLegendItems"
+              :key="item.key"
+              class="wb-chart-legend-item"
+            >
+              <span class="wb-chart-legend-swatch" :style="{ background: item.color }"></span>
+              <span>{{ item.label }}</span>
+            </span>
+          </div>
+          <div id="wbResearchComboChart" ref="comboChartRef" class="wb-chart wb-chart-main" style="height: 320px;">
+            <div class="wb-empty">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+              <span>加载组合结果后，这里会渲染组合、股票腿和 ETF 腿净值线。</span>
+            </div>
+          </div>
+        </div>
+        <div class="wb-chart-stack-panel" style="min-height:244px;">
+          <div class="wb-mini" style="margin-bottom: 6px;">下图：股票腿大盘 K 线（{{ comboBenchmarkSymbol }}）</div>
+          <div id="wbResearchComboBenchmarkChart" ref="comboBenchmarkChartRef" class="wb-chart wb-chart-main" style="height: 220px;">
+            <div class="wb-empty">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+              <span>这里展示股票腿基准的大盘 K 线。</span>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </template>
 
-    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;">
-      <section style="padding:16px;border:1px solid rgba(51,65,85,0.65);border-radius:20px;background:rgba(15,23,42,0.38);">
-        <div class="wb-mini" style="margin-bottom: 8px;">A股个股：NAV 与大盘归一化走势（{{ stockBenchmarkSymbol }}）</div>
-        <div id="wbResearchComboStockChartTop" ref="stockTopChartRef" class="wb-chart wb-chart-main" style="height: 260px;">
-          <div class="wb-empty">
-            <span>加载个股组件实验后，这里展示个股 NAV 与大盘走势。</span>
+    <template v-if="showSleeveCharts">
+      <div class="wb-combo-sleeve-grid">
+        <section class="wb-combo-sleeve-card">
+          <div class="wb-mini" style="margin-bottom: 8px;">股票腿：净值 vs 归一化基准（{{ stockBenchmarkSymbol }}）</div>
+          <div class="wb-chart-legend" style="margin-bottom: 8px;">
+            <span
+              v-for="item in stockSleeveLegendItems"
+              :key="item.key"
+              class="wb-chart-legend-item"
+            >
+              <span class="wb-chart-legend-swatch" :style="{ background: item.color }"></span>
+              <span>{{ item.label }}</span>
+            </span>
           </div>
-        </div>
-        <div class="wb-mini" style="margin: 10px 0 6px;">A股个股下图：大盘绝对价格</div>
-        <div id="wbResearchComboStockChartBottom" ref="stockBottomChartRef" class="wb-chart wb-chart-main" style="height: 180px;">
-          <div class="wb-empty">
-            <span>这里展示个股组件使用的大盘绝对价格。</span>
+          <div id="wbResearchComboStockChartTop" ref="stockTopChartRef" class="wb-chart wb-chart-main" style="height: 260px;">
+            <div class="wb-empty">
+              <span>加载股票腿组件结果后，这里会渲染股票腿图表。</span>
+            </div>
           </div>
-        </div>
-      </section>
+          <details v-if="!showSleeveBenchmarks" class="wb-combo-benchmark-details">
+            <summary class="wb-mini wb-combo-benchmark-summary">基准上下文</summary>
+            <div class="wb-mini" style="margin: 10px 0 6px;">股票基准绝对价格</div>
+            <div id="wbResearchComboStockChartBottom" ref="stockBottomChartRef" class="wb-chart wb-chart-main" style="height: 180px;">
+              <div class="wb-empty">
+                <span>股票腿基准上下文显示在这里。</span>
+              </div>
+            </div>
+          </details>
+          <template v-else>
+            <div class="wb-mini" style="margin: 10px 0 6px;">股票基准绝对价格</div>
+            <div id="wbResearchComboStockChartBottom" ref="stockBottomChartRef" class="wb-chart wb-chart-main" style="height: 180px;">
+              <div class="wb-empty">
+                <span>股票腿基准上下文显示在这里。</span>
+              </div>
+            </div>
+          </template>
+        </section>
 
-      <section style="padding:16px;border:1px solid rgba(51,65,85,0.65);border-radius:20px;background:rgba(15,23,42,0.38);">
-        <div class="wb-mini" style="margin-bottom: 8px;">ETF：NAV 与基准归一化走势（{{ etfBenchmarkSymbol }}）</div>
-        <div id="wbResearchComboEtfChartTop" ref="etfTopChartRef" class="wb-chart wb-chart-main" style="height: 260px;">
-          <div class="wb-empty">
-            <span>加载 ETF 组件实验后，这里展示 ETF NAV 与基准走势。</span>
+        <section class="wb-combo-sleeve-card">
+          <div class="wb-mini" style="margin-bottom: 8px;">ETF 腿：净值 vs 归一化基准（{{ etfBenchmarkSymbol }}）</div>
+          <div class="wb-chart-legend" style="margin-bottom: 8px;">
+            <span
+              v-for="item in etfSleeveLegendItems"
+              :key="item.key"
+              class="wb-chart-legend-item"
+            >
+              <span class="wb-chart-legend-swatch" :style="{ background: item.color }"></span>
+              <span>{{ item.label }}</span>
+            </span>
           </div>
-        </div>
-        <div class="wb-mini" style="margin: 10px 0 6px;">ETF 下图：基准绝对价格</div>
-        <div id="wbResearchComboEtfChartBottom" ref="etfBottomChartRef" class="wb-chart wb-chart-main" style="height: 180px;">
-          <div class="wb-empty">
-            <span>这里展示 ETF 组件使用的基准绝对价格。</span>
+          <div id="wbResearchComboEtfChartTop" ref="etfTopChartRef" class="wb-chart wb-chart-main" style="height: 260px;">
+            <div class="wb-empty">
+              <span>加载 ETF 腿组件结果后，这里会渲染 ETF 腿图表。</span>
+            </div>
           </div>
-        </div>
-      </section>
-    </div>
+          <details v-if="!showSleeveBenchmarks" class="wb-combo-benchmark-details">
+            <summary class="wb-mini wb-combo-benchmark-summary">基准上下文</summary>
+            <div class="wb-mini" style="margin: 10px 0 6px;">ETF 基准绝对价格</div>
+            <div id="wbResearchComboEtfChartBottom" ref="etfBottomChartRef" class="wb-chart wb-chart-main" style="height: 180px;">
+              <div class="wb-empty">
+                <span>ETF 腿基准上下文显示在这里。</span>
+              </div>
+            </div>
+          </details>
+          <template v-else>
+            <div class="wb-mini" style="margin: 10px 0 6px;">ETF 基准绝对价格</div>
+            <div id="wbResearchComboEtfChartBottom" ref="etfBottomChartRef" class="wb-chart wb-chart-main" style="height: 180px;">
+              <div class="wb-empty">
+                <span>ETF 腿基准上下文显示在这里。</span>
+              </div>
+            </div>
+          </template>
+        </section>
+      </div>
+    </template>
 
-    <div class="wb-canvas-footer">
-      <div class="wb-mini">{{ snapshot?.artifacts?.run_meta?.data?.asset_role === 'unified_multi_sleeve_combo' ? '当前结果来自 unified runtime 组合实验。上图展示组合总线；下方分开展示 A股个股与 ETF 的净值和各自基准走势。' : '当前结果是只读 research combo。上图展示组合总线；下方分开展示 A股个股与 ETF 的净值和各自基准走势。' }}</div>
+    <div v-if="!compactSleeveChrome" class="wb-canvas-footer">
+      <div class="wb-mini">{{ isResearchLikeCombo ? `当前结果是只读研究组合。${canvasDescription}` : `当前结果来自统一运行时。${canvasDescription}` }}</div>
     </div>
   </section>
 </template>

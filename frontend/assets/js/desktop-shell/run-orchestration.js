@@ -1,4 +1,16 @@
-(function initDesktopRunControls(globalScope) {
+/* desktop shell owner: run_orchestration dispatch/poll path */
+(function initDesktopShellRunOrchestration(globalScope) {
+  function sanitizeRuntimeConfigDraft(draft) {
+    if (typeof buildFrontendSemanticPayload === 'function') {
+      return buildFrontendSemanticPayload(draft);
+    }
+    const core = globalScope.configDraftCore;
+    if (core && typeof core.serializeFrontendSemanticConfig === 'function') {
+      return core.serializeFrontendSemanticConfig(draft);
+    }
+    throw new Error('Frontend semantic config serializer is not available');
+  }
+
   function setRunStatusText(text) {
     const statusEl = byId('wbRunStatus');
     if (statusEl) statusEl.textContent = text;
@@ -77,13 +89,51 @@
         asset_scope: assetScope,
       };
     }
-    const d = buildConfigDraft();
-    return {
+    const loadedSourceConfig = cloneJson(state.loaded_source_config) || null;
+    const executionContract = loadedSourceConfig?.unified_runtime?.execution_contract
+      && typeof loadedSourceConfig.unified_runtime.execution_contract === 'object'
+      ? loadedSourceConfig.unified_runtime.execution_contract
+      : (
+        loadedSourceConfig?.unified_runtime?.combo_context?.execution_contract
+        && typeof loadedSourceConfig.unified_runtime.combo_context.execution_contract === 'object'
+          ? loadedSourceConfig.unified_runtime.combo_context.execution_contract
+          : null
+      );
+    const componentSourceContract = loadedSourceConfig?.unified_runtime?.component_source_contract
+      && typeof loadedSourceConfig.unified_runtime.component_source_contract === 'object'
+      ? loadedSourceConfig.unified_runtime.component_source_contract
+      : (
+        loadedSourceConfig?.unified_runtime?.combo_context?.component_source_contract
+        && typeof loadedSourceConfig.unified_runtime.combo_context.component_source_contract === 'object'
+          ? loadedSourceConfig.unified_runtime.combo_context.component_source_contract
+          : null
+      );
+    const unifiedRuntimePassthrough = !!(
+      loadedSourceConfig &&
+      loadedSourceConfig.unified_runtime &&
+      typeof loadedSourceConfig.unified_runtime === 'object' &&
+      loadedSourceConfig.unified_runtime.enabled === true &&
+      (executionContract || componentSourceContract)
+    );
+    const d = unifiedRuntimePassthrough ? loadedSourceConfig : buildConfigDraft();
+    const configJson = sanitizeRuntimeConfigDraft(d);
+    const payload = {
       preset: requestedPreset,
-      config_json: d,
+      config_json: configJson,
       fast_mode: true,
-      asset_scope: resolvePreferredAssetScope(d?.asset_scope || assetScope),
+      asset_scope: resolvePreferredAssetScope(configJson?.asset_scope || d?.asset_scope || assetScope),
     };
+    if (
+      String(state.loaded_source_kind || '').trim().toLowerCase() === 'baseline' &&
+      String(state.loaded_source_id || '').trim() &&
+      state.loaded_source_dirty !== true &&
+      state.loaded_source_meta?.execution_contract_ref &&
+      typeof state.loaded_source_meta.execution_contract_ref === 'object'
+    ) {
+      payload.baseline_id = String(state.loaded_source_id || '').trim();
+      payload.execution_contract_ref = cloneJson(state.loaded_source_meta.execution_contract_ref);
+    }
+    return payload;
   }
 
   function runPayloadFromDraft(preset) {
@@ -129,16 +179,17 @@
   }
 
   async function previewExecution() {
-    buildConfigDraft();
+    const draft = buildConfigDraft();
     if (!state.active_exp?.exp_id) {
       throw new Error('execution preview 需要先运行或加载一个实验');
     }
+    const configJson = sanitizeRuntimeConfigDraft(draft);
     const body = {
-      config_json: state.config_draft,
-      asset_scope: resolvePreferredAssetScope(state.config_draft?.asset_scope),
+      config_json: configJson,
+      asset_scope: resolvePreferredAssetScope(configJson?.asset_scope || draft?.asset_scope),
       exp_id: state.active_exp?.exp_id || null,
       as_of_date: byId('wbExecDate')?.value || null,
-      top_n: Number(state.config_draft?.position_risk?.max_positions || 10),
+      top_n: Number(draft?.position_risk?.max_positions || 10),
     };
     let payload;
     try {
@@ -191,4 +242,5 @@
   globalScope.previewExecution = previewExecution;
   globalScope.copyExecJson = copyExecJson;
   globalScope.runByMode = runByMode;
+  globalScope.sanitizeRuntimeConfigDraft = sanitizeRuntimeConfigDraft;
 })(window);

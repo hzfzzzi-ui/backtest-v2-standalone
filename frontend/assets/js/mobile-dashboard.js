@@ -18,6 +18,8 @@
     serviceWorkerReady: false,
   };
 
+  const MOBILE_READONLY_RESULT_SURFACE = true;
+
   const labelMaps = {
     sourceMode: { position_aware_reconcile: '持仓重算', experiment_fallback: '只读回退' },
     holdingSync: { fresh: '已同步', stale: '已过期', unsynced: '未同步' },
@@ -147,6 +149,13 @@
     dashboardInner: getTemplateHtml('mdDashboardTemplate'),
   };
 
+  function fetch(path, options) {
+    if (typeof window.sharedApiRequest === 'function') {
+      return window.sharedApiRequest(path, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...options });
+    }
+    throw new Error('shared api transport is unavailable');
+  }
+
   function api(path, options) {
     return fetch(path, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...options });
   }
@@ -246,6 +255,10 @@
     target.textContent = message || '';
     target.classList.toggle('is-error', kind === 'error');
     target.classList.toggle('is-success', kind === 'success');
+  }
+
+  function isReadonlyResultSurface() {
+    return MOBILE_READONLY_RESULT_SURFACE;
   }
 
   function setAuthMessage(message, isError) { setAlert(els.authMessage, message, isError ? 'error' : 'info'); }
@@ -717,6 +730,7 @@
       renderEmpty(els.tradeOrdersList, '资金已更新，策略重跑中，当前委托稍后刷新');
       return;
     }
+    const readOnly = isReadonlyResultSurface();
     const cards = getMergedTradeCards(payload);
     if (els.tradeOrdersCount) els.tradeOrdersCount.textContent = String(cards.length || 0);
     if (!cards.length) {
@@ -744,9 +758,9 @@
           </div>
           ${blockers.length ? `<div class="md-card-note">风险提示：${esc(blockers.join(' / '))}</div>` : ''}
           <div class="md-button-row">
-            ${card.can_confirm ? `<button class="md-inline-btn" type="button" data-md-action="edit" data-suggestion-id="${esc(card.suggestion_id)}">改单</button>` : ''}
-            ${card.can_reject ? `<button class="md-inline-btn md-inline-btn-danger" type="button" data-md-action="reject" data-suggestion-id="${esc(card.suggestion_id)}">驳回</button>` : ''}
-            ${card.can_confirm ? `<button class="md-inline-btn md-inline-btn-primary" type="button" data-md-action="approve" data-suggestion-id="${esc(card.suggestion_id)}">确认</button>` : ''}
+            ${!readOnly && card.can_confirm ? `<button class="md-inline-btn" type="button" data-md-action="edit" data-suggestion-id="${esc(card.suggestion_id)}">改单</button>` : ''}
+            ${!readOnly && card.can_reject ? `<button class="md-inline-btn md-inline-btn-danger" type="button" data-md-action="reject" data-suggestion-id="${esc(card.suggestion_id)}">驳回</button>` : ''}
+            ${!readOnly && card.can_confirm ? `<button class="md-inline-btn md-inline-btn-primary" type="button" data-md-action="approve" data-suggestion-id="${esc(card.suggestion_id)}">确认</button>` : ''}
             <span class="md-direction-pill ${directionClass(card.action_type)}">${esc(mapLabel('action', card.action_type))}</span>
           </div>
         </div>`;
@@ -755,6 +769,7 @@
 
   function renderTradeConfirmed(payload) {
     const tickets = getEffectiveTradeTickets(payload);
+    const readOnly = isReadonlyResultSurface();
     if (els.tradeConfirmedCount) els.tradeConfirmedCount.textContent = String(tickets.length || 0);
     if (!tickets.length) {
       renderEmpty(els.tradeConfirmedList, '当前还没有手动确认后的交易记录');
@@ -800,7 +815,7 @@
           </div>
           ${eventText ? `<div class="md-card-note">${esc(eventText).replaceAll('\n', '<br />')}</div>` : ''}
           <div class="md-button-row">
-            ${item.status === 'approved_pending' ? `<button class="md-inline-btn md-inline-btn-danger" type="button" data-md-action="revoke" data-ticket-id="${esc(item.ticket_id)}">撤回</button>` : ''}
+            ${!readOnly && item.status === 'approved_pending' ? `<button class="md-inline-btn md-inline-btn-danger" type="button" data-md-action="revoke" data-ticket-id="${esc(item.ticket_id)}">撤回</button>` : ''}
           </div>
         </div>`;
     }).join('');
@@ -872,6 +887,10 @@
   }
 
   function renderTradeTerminal(payload) {
+    if (!els.tradeTerminalHint) return payload;
+    if (isReadonlyResultSurface()) {
+      els.tradeTerminalHint.textContent = '当前为只读结果面，仅查看摘要、信号与执行结果，不提供移动端交易动作。';
+    }
     return payload;
   }
 
@@ -895,6 +914,7 @@
     const notifications = getNotifications(state.dashboard);
     const view = renderPositionList(state.dashboard);
     setSessionBadge(currentSessionBadge());
+    const readonlySurfaceNote = isReadonlyResultSurface() ? '当前为只读结果面，仅展示摘要、信号与执行结果。' : '';
     const runtimeNotificationNote = notifications && notifications.active_channel === 'in_app_feed'
       ? (state.runtimeMode === 'pwa' && state.secureContext ? '当前为 PWA 模式，站内提醒已可用' : '当前为浏览器模式，仅提供站内提醒')
       : '';
@@ -903,6 +923,7 @@
       els.headerStatus.textContent = String(holdingSync.status || '').toLowerCase() === 'unsynced'
         ? '当前未同步真实持仓，仅展示只读信息'
         : '持仓已同步，可查看今日动作与资产状态';
+      if (readonlySurfaceNote) els.headerStatus.textContent = `${els.headerStatus.textContent}；${readonlySurfaceNote}`;
     }
     if (els.holdingSync) els.holdingSync.textContent = `${mapLabel('holdingSync', holdingSync.status)}${holdingSync.trade_date ? ` / ${holdingSync.trade_date}` : ''}`;
     if (els.sourceMode) els.sourceMode.textContent = mapLabel('sourceMode', state.dashboard.source_mode || guidance.source_mode);
@@ -1084,6 +1105,9 @@
   }
 
   async function handleDeposit() {
+    if (isReadonlyResultSurface()) {
+      throw new Error('当前为只读结果面，不支持移动端存入资金');
+    }
     const rawValue = window.prompt('输入存入金额（元）', '10000');
     if (rawValue == null) return;
     const amount = Number(String(rawValue).replaceAll(',', '').trim());
@@ -1104,6 +1128,9 @@
   }
 
   async function handleDashboardAction(action, suggestionId, ticketId) {
+    if (isReadonlyResultSurface()) {
+      throw new Error('当前为只读结果面，不支持移动端交易动作');
+    }
     if (state.busy) return;
     state.busy = true;
     try {
@@ -1163,6 +1190,7 @@
     if (els.depositBtn && els.depositBtn.dataset.bound !== '1') {
       els.depositBtn.dataset.bound = '1';
       els.depositBtn.addEventListener('click', async () => {
+        if (isReadonlyResultSurface()) return;
         if (state.busy) return;
         state.busy = true;
         try {

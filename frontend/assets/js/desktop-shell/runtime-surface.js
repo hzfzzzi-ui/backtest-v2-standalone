@@ -1,65 +1,20 @@
-/* backtest_v2.js: desktop legacy shell bootstrap/controller only. */
-/* It must not own config compile truth or visible DOM under #wbResultsWorkbenchMount. */
-/* Inlined from ui.js to avoid ES-module scope isolation */
-function setActiveNav() {
-  const path = (location.pathname || '/').split('/').pop() || 'index.html';
-  document.querySelectorAll('[data-nav]')?.forEach(a => {
-    const href = a.getAttribute('href') || '';
-    const key = href.split('/').pop();
-    if (key === path) a.classList.add('active');
-  });
-}
+﻿/* desktop-shell/runtime-surface.js: formal shared runtime surface for desktop shell modules. */
+const state = (window.state && typeof window.state === 'object')
+  ? window.state
+  : (
+    (window.__WB_STATE__ && typeof window.__WB_STATE__ === 'object')
+      ? window.__WB_STATE__
+      : {
+        ...((window.createWorkbenchConfigDraftState && window.createWorkbenchConfigDraftState()) || {}),
+        ...((window.createRunSessionState && window.createRunSessionState()) || {}),
+        ...((window.createActiveExperimentState && window.createActiveExperimentState()) || {}),
+        ...((window.createViewState && window.createViewState()) || {}),
+        ...((window.createDesktopAppShellState && window.createDesktopAppShellState()) || {}),
+      }
+  );
+window.__WB_STATE__ = state;
+window.state = state;
 
-const state = {
-  ...((window.createWorkbenchConfigDraftState && window.createWorkbenchConfigDraftState()) || {}),
-  ...((window.createRunSessionState && window.createRunSessionState()) || {}),
-  ...((window.createActiveExperimentState && window.createActiveExperimentState()) || {}),
-  ...((window.createViewState && window.createViewState()) || {}),
-};
-
-const DEFAULT_BOOTSTRAP_CONFIG_ID = 'cfg_cn_stock_etf_v1';
-const DEFAULT_BOOTSTRAP_BASELINE_ID = 'baseline_V10_2';
-const DEFAULT_BOOTSTRAP_SOURCE = {
-  kind: 'config',
-  id: DEFAULT_BOOTSTRAP_CONFIG_ID,
-  label: 'A股个股+ETFV1',
-};
-const FALLBACK_BOOTSTRAP_SOURCE = {
-  kind: 'baseline',
-  id: 'baseline_V10_2',
-  label: 'V10.2 | 2012-2026',
-};
-
-const COMPOSE_MODULES = [
-  {
-    name: 'breakout_55',
-    label: 'Breakout 55',
-    alpha_id: 'breakout_55',
-    family: 'trend',
-    role: 'trend',
-    weight: 0.7,
-    priority: 100,
-  },
-  {
-    name: 'rsi_reversal',
-    label: 'RSI Reversal',
-    alpha_id: 'rsi_reversal',
-    family: 'mean_revert',
-    role: 'mean_revert',
-    weight: 0.3,
-    priority: 80,
-  },
-];
-const MULTI_ALPHA_COMPOSE_MODE = 'REGIME_ROUTE';
-const MULTI_ALPHA_SAME_SYMBOL_POLICY = 'PREFER_HIGHER_SCORE';
-const MULTI_ALPHA_HOLDING_OWNERSHIP = 'SOURCE_ONLY';
-const MULTI_ALPHA_PORTFOLIO_MODE = 'hard_sleeve_budget';
-const MULTI_ALPHA_REGIMES = ['TREND_UP', 'RANGE', 'WEAK_DOWN'];
-const DEFAULT_MULTI_ALPHA_REGIME_MATRIX = {
-  TREND_UP: ['breakout_55'],
-  RANGE: ['breakout_55', 'rsi_reversal'],
-  WEAK_DOWN: ['rsi_reversal'],
-};
 const DEFAULT_ASSET_SCOPE = 'cn_a_equity';
 const ASSET_CONTEXT_DEFAULTS = Object.freeze({
   cn_a_equity: Object.freeze({
@@ -138,39 +93,61 @@ function assetScopeDisplayNameLegacyShim(scope = null) {
   return isCnAAssetScope(scope) ? 'A股' : '美股';
 }
 
-function syncAssetAwareShell(scope = null) {
-  const resolvedScope = resolvePreferredAssetScope(scope);
-  const isCn = isCnAAssetScope(resolvedScope);
-  const brandText = isCn ? '多资产趋势研究台 | A股' : '多资产趋势研究台 | 美股入口准备中';
-  document.title = brandText;
-  const brandEl = document.querySelector('.wb-brand');
-  if (brandEl) brandEl.textContent = brandText;
-  document.body.dataset.assetScope = resolvedScope;
-
-  const runBtn = byId('wbRunBtn');
-  if (runBtn) {
-    runBtn.disabled = !isRuntimeSupportedAssetScope(resolvedScope);
-    runBtn.title = isCn ? '运行当前资产草稿' : '当前仅完成美股个股入口边界，尚未支持运行';
-  }
-
-  const pitStatus = byId('wbPitStatus');
-  if (pitStatus) {
-    pitStatus.textContent = isCn ? 'PIT 启用' : '美股入口准备中';
-    pitStatus.className = isCn ? 'wb-chip wb-ok' : 'wb-chip';
-  }
-
-  const universeModeGroup = byId('wbUniverseModeGroup');
-  if (universeModeGroup) {
-    universeModeGroup.dataset.assetScope = resolvedScope;
-    universeModeGroup.title = isCn ? '当前为 A 股 universe 入口' : '当前 universe 控件仅支持 A 股，切换到美股时不会运行';
-  }
-}
-
 function assetScopeDisplayName(scope = null) {
   const resolvedScope = resolvePreferredAssetScope(scope);
   if (resolvedScope === 'cn_etf') return 'A股ETF';
   if (resolvedScope === 'us_equity') return '美股';
   return 'A股个股';
+}
+
+function currentComboRuntimeMeta() {
+  return state?.active_artifacts?.run_meta && typeof state.active_artifacts.run_meta === 'object'
+    ? state.active_artifacts.run_meta
+    : {};
+}
+
+function comboRuntimeState(runMeta = null) {
+  const meta = runMeta && typeof runMeta === 'object' ? runMeta : currentComboRuntimeMeta();
+  const data = meta?.data && typeof meta.data === 'object' ? meta.data : {};
+  const comboRuntime = meta?.combo_runtime && typeof meta.combo_runtime === 'object' ? meta.combo_runtime : {};
+  const comboResult = meta?.combo_result && typeof meta.combo_result === 'object' ? meta.combo_result : {};
+  const researchCombo = meta?.research_combo && typeof meta.research_combo === 'object' ? meta.research_combo : {};
+  const comboContext = meta?.combo_context && typeof meta.combo_context === 'object' ? meta.combo_context : {};
+  const provenance = meta?.provenance && typeof meta.provenance === 'object' ? meta.provenance : {};
+  const executionContract = meta?.execution_contract && typeof meta.execution_contract === 'object'
+    ? meta.execution_contract
+    : {};
+  const executionContractRef = meta?.execution_contract_ref && typeof meta.execution_contract_ref === 'object'
+    ? meta.execution_contract_ref
+    : {};
+  const componentSourceContract = provenance.component_source_contract && typeof provenance.component_source_contract === 'object'
+    ? provenance.component_source_contract
+    : {};
+  const assetRole = String(data.asset_role || '').trim().toLowerCase();
+  const systemAssetScope = String(data.system_asset_scope || '').trim().toLowerCase();
+  const comboSourceMode = (
+    Object.keys(executionContractRef).length || Object.keys(executionContract).length
+      ? 'execution_contract'
+      : (Object.keys(componentSourceContract).length ? 'provenance' : '')
+  );
+  const researchComboOnly = Boolean(
+    comboResult.research_combo_only
+    || researchCombo.research_combo_only
+    || comboRuntime.research_combo_only
+  );
+  const isComboRuntime = assetRole === 'research_combo'
+    || assetRole === 'unified_multi_sleeve_combo'
+    || systemAssetScope === 'cn_a_multi_sleeve'
+    || Boolean(comboResult.type)
+    || Boolean(researchCombo.mode);
+  return {
+    assetRole,
+    systemAssetScope,
+    comboSourceMode,
+    researchComboOnly,
+    isComboRuntime,
+    isResearchLikeCombo: isComboRuntime && researchComboOnly,
+  };
 }
 
 function joinSummaryCodes(values) {
@@ -191,49 +168,85 @@ function summarizeGlobalManualOverride(payload) {
   return parts.length ? parts.join(' | ') : '已启用';
 }
 
+function getDesktopConfigWorkspaceStageCatalog() {
+  const shellState = state?.desktop_shell && typeof state.desktop_shell === 'object'
+    ? state.desktop_shell
+    : null;
+  const workspace = shellState?.config_workspace && typeof shellState.config_workspace === 'object'
+    ? shellState.config_workspace
+    : null;
+  if (Array.isArray(workspace?.stage_catalog) && workspace.stage_catalog.length) {
+    return workspace.stage_catalog;
+  }
+  if (typeof window.desktopAppShell?.getConfigWorkspaceStageCatalog === 'function') {
+    const catalog = window.desktopAppShell.getConfigWorkspaceStageCatalog();
+    if (Array.isArray(catalog) && catalog.length) return catalog;
+  }
+  return [];
+}
+
+function catalogToPanelMeta(catalog) {
+  const meta = {};
+  (Array.isArray(catalog) ? catalog : []).forEach((item) => {
+    const panel = String(item?.panel || '').trim().toLowerCase();
+    if (!panel) return;
+    meta[panel] = {
+      label: String(item?.label || '').trim() || panel.toUpperCase(),
+      title: String(item?.title || '').trim() || String(item?.label || panel.toUpperCase()),
+      hidden: !!item?.hidden,
+    };
+  });
+  return meta;
+}
+
 function resolveAssetScopedPanelMeta(scope = null) {
   const resolvedScope = resolvePreferredAssetScope(scope);
+  const stageCatalog = catalogToPanelMeta(getDesktopConfigWorkspaceStageCatalog());
+  if (resolvedScope === 'cn_a_equity' && Object.keys(stageCatalog).length >= 9) {
+    return stageCatalog;
+  }
   if (resolvedScope === 'cn_etf') {
     return {
-      s1: { label: 'ETF池', title: 'ETF Beta 范围', hidden: false },
-      s2: { label: 'Regime', title: 'Regime 规则', hidden: true },
-      s3: { label: '候选池', title: 'ETF 候选池', hidden: false },
-      s4: { label: 'Beta', title: 'ETF Beta 规则', hidden: false },
-      s5: { label: '排序', title: 'ETF 排序', hidden: false },
-      s6: { label: '调仓', title: '调仓 / 配置', hidden: false },
-      s7: { label: 'Governor', title: 'Governor 预算', hidden: true },
-      s8: { label: '风险', title: '风险约束', hidden: false },
-      s9: { label: '退出', title: '退出 / 保护', hidden: false },
+      s1: { label: 'ETF池', title: 'ETF 池与基础过滤', hidden: false },
+      s2: { label: '环境', title: '高级环境参数', hidden: true },
+      s3: { label: '候选', title: 'ETF 候选池', hidden: false },
+      s4: { label: '信号', title: 'ETF Beta 规则', hidden: false },
+      s5: { label: '排序', title: 'ETF 排序与候选保留', hidden: false },
+      s6: { label: '建仓', title: '调仓与组合约束', hidden: false },
+      s7: { label: '预算', title: '高级预算参数', hidden: true },
+      s8: { label: '风险', title: '风险保护', hidden: false },
+      s9: { label: '退出', title: '退出规则', hidden: false },
     };
   }
   if (resolvedScope === 'us_equity') {
     return {
       s1: { label: '入口', title: '美股入口', hidden: false },
-      s2: { label: 'Regime', title: 'Regime 规则', hidden: true },
+      s2: { label: '环境', title: '高级环境参数', hidden: true },
       s3: { label: '预留', title: '预留', hidden: true },
       s4: { label: '预留', title: '预留', hidden: true },
       s5: { label: '预留', title: '预留', hidden: true },
       s6: { label: '预留', title: '预留', hidden: true },
-      s7: { label: 'Governor', title: 'Governor 预算', hidden: true },
+      s7: { label: '预算', title: '高级预算参数', hidden: true },
       s8: { label: '预留', title: '预留', hidden: true },
       s9: { label: '预留', title: '预留', hidden: true },
     };
   }
   return {
-    s1: { label: '股票池', title: '股票 Alpha 范围', hidden: false },
-    s2: { label: 'Regime', title: 'Regime 规则', hidden: true },
-    s3: { label: '范围', title: '股票范围 / 行业', hidden: false },
-    s4: { label: '趋势', title: '趋势 / 信号', hidden: false },
-    s5: { label: '排序', title: '残差排序', hidden: false },
-    s6: { label: '建仓', title: '组合构建', hidden: false },
-    s7: { label: 'Governor', title: 'Governor 预算', hidden: true },
-    s8: { label: '风控', title: '风险控制', hidden: false },
+    s1: { label: '资产池', title: '资产池与基础过滤', hidden: false },
+    s2: { label: '环境', title: '高级环境参数', hidden: true },
+    s3: { label: '行业', title: '行业门控', hidden: true },
+    s4: { label: '信号', title: '入场信号与组合', hidden: false },
+    s5: { label: '排序', title: '排序与候选保留', hidden: false },
+    s6: { label: '建仓', title: '建仓与组合约束', hidden: false },
+    s7: { label: '预算', title: '高级预算参数', hidden: true },
+    s8: { label: '风险', title: '风险保护', hidden: false },
     s9: { label: '退出', title: '退出规则', hidden: false },
   };
 }
 
 function syncAssetScopedRail(scope = null) {
   const resolvedScope = resolvePreferredAssetScope(scope);
+  const comboRuntime = comboRuntimeState();
   const panelMeta = resolveAssetScopedPanelMeta(resolvedScope);
   const fallbackPanel = Object.entries(panelMeta).find(([, meta]) => !meta.hidden)?.[0] || 's1';
 
@@ -243,7 +256,11 @@ function syncAssetScopedRail(scope = null) {
     const labelEl = byId(`wbStage${upperPanel}Label`) || button?.querySelector?.('.wb-rail-label') || null;
     if (button) {
       button.hidden = !!meta.hidden;
-      if (meta.title) button.title = meta.title;
+      if (meta.title) {
+        button.title = comboRuntime.isComboRuntime
+          ? `组合结果页：${meta.title}`
+          : meta.title;
+      }
     }
     if (labelEl && meta.label) labelEl.textContent = meta.label;
   });
@@ -255,42 +272,68 @@ function syncAssetScopedRail(scope = null) {
 
 function syncGlobalControlStrip(scope = null) {
   const resolvedScope = resolvePreferredAssetScope(scope);
-  const runMeta = state?.active_artifacts?.run_meta && typeof state.active_artifacts.run_meta === 'object'
-    ? state.active_artifacts.run_meta
-    : {};
+  const runMeta = currentComboRuntimeMeta();
+  const comboRuntime = comboRuntimeState(runMeta);
   const comboTruth = state?.active_artifacts?.comboTruth
     && typeof state.active_artifacts.comboTruth === 'object'
       ? state.active_artifacts.comboTruth
       : null;
-  const researchComboDisplay = comboTruth?.display && typeof comboTruth.display === 'object'
+  const comboTruthDisplay = comboTruth?.display && typeof comboTruth.display === 'object'
     ? comboTruth.display
-    : (
-      state?.active_artifacts?.researchComboDisplay
-      && typeof state.active_artifacts.researchComboDisplay === 'object'
-        ? state.active_artifacts.researchComboDisplay
-        : null
-    );
+    : null;
   const configDraft = state?.config_draft && typeof state.config_draft === 'object'
     ? state.config_draft
     : {};
   const universe = configDraft.universe && typeof configDraft.universe === 'object'
     ? configDraft.universe
     : {};
-  const isResearchCombo = String(runMeta?.data?.asset_role || '').trim().toLowerCase() === 'research_combo';
+  const comboMetrics = runMeta?.combo_metrics && typeof runMeta.combo_metrics === 'object'
+    ? runMeta.combo_metrics
+    : {};
+  const accountAllocatorRuntime = runMeta?.account_allocator_runtime
+    && typeof runMeta.account_allocator_runtime === 'object'
+      ? runMeta.account_allocator_runtime
+      : {};
+  const comboMode = String(
+    accountAllocatorRuntime.runtime_truth_source === 'account_allocator'
+      ? 'account_allocator_runtime'
+      : (
+        runMeta?.combo_runtime?.mode
+        || runMeta?.research_combo?.mode
+        || runMeta?.combo_result?.mode
+        || runMeta?.combo_context?.combo_mode
+        || '-'
+      ),
+  ).trim() || '-';
+  const comboWindowStart = String(
+    comboMetrics.start
+    || runMeta?.data?.coverage_start
+    || universe.start
+    || '-',
+  ).trim() || '-';
+  const comboWindowEnd = String(
+    comboMetrics.end
+    || runMeta?.data?.coverage_end
+    || universe.end
+    || '-',
+  ).trim() || '-';
+  const isComboResult = comboRuntime.isComboRuntime;
+  const useComboDisplay = isComboResult && Boolean(comboTruthDisplay);
+  const isResearchCombo = useComboDisplay;
   const latestRegime = runMeta.regime?.latest_state && typeof runMeta.regime.latest_state === 'object'
     ? runMeta.regime.latest_state
     : {};
   const governedSnapshot = runMeta.governed_snapshot && typeof runMeta.governed_snapshot === 'object'
     ? runMeta.governed_snapshot
     : {};
-  const comboRegime = researchComboDisplay?.regime && typeof researchComboDisplay.regime === 'object'
-    ? researchComboDisplay.regime
+  const comboRegime = comboTruthDisplay?.regime && typeof comboTruthDisplay.regime === 'object'
+    ? comboTruthDisplay.regime
     : {};
-  const comboGovernor = researchComboDisplay?.governor && typeof researchComboDisplay.governor === 'object'
-    ? researchComboDisplay.governor
+  const comboGovernor = comboTruthDisplay?.governor && typeof comboTruthDisplay.governor === 'object'
+    ? comboTruthDisplay.governor
     : {};
 
-  const assetModeSummary = resolvedScope === 'cn_etf'
+  const assetModeSummary = isComboResult
     ? `ETF池：${String(runMeta.universe?.preset_id || configDraft.universe_mode || 'CUSTOM').trim() || 'CUSTOM'}`
     : `股票池：${String(configDraft.universe_mode || 'ALL_A').trim() || 'ALL_A'}`;
   const timeWindowSummary = `窗口：${String(universe.start || '-')} ~ ${String(universe.end || '-')}`;
@@ -350,20 +393,31 @@ function syncGlobalControlStrip(scope = null) {
     || governedSnapshot.budget_reason_codes?.length
   );
 
-  setTextById('wbGlobalAssetSummary', assetScopeDisplayName(resolvedScope));
-  setTextById('wbGlobalAssetModeSummary', assetModeSummary);
-  setTextById('wbGlobalDataWindowSummary', timeWindowSummary);
+  setTextById('wbGlobalAssetSummary', isComboResult ? 'A股个股 + A股ETF 组合' : assetScopeDisplayName(resolvedScope));
+  setTextById(
+    'wbGlobalAssetModeSummary',
+    isComboResult
+      ? `组合模式：${comboMode}`
+      : (resolvedScope === 'cn_etf'
+        ? `ETF池：${String(runMeta.universe?.preset_id || configDraft.universe_mode || 'CUSTOM').trim() || 'CUSTOM'}`
+        : assetModeSummary),
+  );
+  setTextById('wbGlobalDataWindowSummary', isComboResult ? `窗口：${comboWindowStart} ~ ${comboWindowEnd}` : timeWindowSummary);
   setTextById('wbGlobalRegimeBase', baseState);
   setTextById('wbGlobalRegimeEffective', effectiveState);
   setTextById('wbGlobalRegimeCoarse', coarseState);
   setTextById('wbGlobalRegimeBudgetMultiplier', budgetMultiplier);
   setTextById('wbGlobalRegimeReason', regimeReason);
   setTextById('wbGlobalRegimeManual', manualOverrideSummary);
+  setTextById('wbGlobalRegimeSummaryPrimary', `基础：${baseState} / 生效：${effectiveState}`);
+  setTextById('wbGlobalRegimeSummarySecondary', `预算倍率：${budgetMultiplier}`);
   setTextById('wbGlobalGovernorBudget', totalRiskBudget);
   setTextById('wbGlobalGovernorExposure', totalExposureCap);
   setTextById('wbGlobalGovernorSleeve', budgetConsumer);
   setTextById('wbGlobalGovernorDefense', defenseBias != null ? pct(defenseBias) : '-');
   setTextById('wbGlobalGovernorReason', budgetReason);
+  setTextById('wbGlobalGovernorSummaryPrimary', `预算：${totalRiskBudget} / 暴露：${totalExposureCap}`);
+  setTextById('wbGlobalGovernorSummarySecondary', `消费者：${budgetConsumer}`);
 
   const regimeDetail = byId('wbGlobalRegimeDetail');
   const regimeEmpty = byId('wbGlobalRegimeEmpty');
@@ -384,6 +438,10 @@ function syncGlobalControlStrip(scope = null) {
       ? '当前结果未提供 governed snapshot'
       : '运行后在这里显示 Governor 摘要';
   }
+  const regimeCard = byId('wbGlobalRegimeCard');
+  if (regimeCard) regimeCard.hidden = !!hasRunResult;
+  const governorCard = byId('wbGlobalGovernorCard');
+  if (governorCard) governorCard.hidden = !!hasRunResult;
 }
 
 function syncAssetAwareShell(scope = null) {
@@ -391,12 +449,25 @@ function syncAssetAwareShell(scope = null) {
   const isCn = isCnAAssetScope(resolvedScope);
   const isEtf = isCnEtfAssetScope(resolvedScope);
   const isSupported = isRuntimeSupportedAssetScope(resolvedScope);
+  const comboRuntime = comboRuntimeState();
+  const etfResearchConfig = state?.config_draft?.governed_a_share?.etf_beta
+    || state?.loaded_source_config?.governed_a_share?.etf_beta
+    || {};
+  const etfResearchLabel = String(
+    etfResearchConfig?.template_id
+      ? `模板 ${etfResearchConfig.template_id}`
+      : (etfResearchConfig?.research_rule_family
+        ? `规则 ${etfResearchConfig.research_rule_family}`
+        : (etfResearchConfig?.source_entry_type
+          ? `入口 ${etfResearchConfig.source_entry_type}`
+          : 'ETF 目录研究'))
+  ).trim() || 'ETF 目录研究';
   const brandText = isCn
     ? '多资产趋势研究台 | A股个股'
     : (isEtf ? '多资产趋势研究台 | A股ETF' : '多资产趋势研究台 | 美股入口准备中');
-  document.title = brandText;
+  document.title = comboRuntime.isComboRuntime ? '多资产趋势研究台 | A股个股+ETF组合' : brandText;
   const brandEl = document.querySelector('.wb-brand');
-  if (brandEl) brandEl.textContent = brandText;
+  if (brandEl) brandEl.textContent = comboRuntime.isComboRuntime ? '多资产趋势研究台 | A股个股+ETF组合' : brandText;
   document.body.dataset.assetScope = resolvedScope;
 
   const runBtn = byId('wbRunBtn');
@@ -407,7 +478,7 @@ function syncAssetAwareShell(scope = null) {
 
   const pitStatus = byId('wbPitStatus');
   if (pitStatus) {
-    pitStatus.textContent = isCn ? 'PIT 启用' : (isEtf ? 'ETF 目录研究' : '美股入口准备中');
+    pitStatus.textContent = isCn ? 'PIT 启用' : (isEtf ? etfResearchLabel : '美股入口准备中');
     pitStatus.className = isSupported ? 'wb-chip wb-ok' : 'wb-chip';
   }
 
@@ -468,7 +539,7 @@ function reasonZh(code) { return REASON_MAP[code] || String(code ?? ''); }
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
-const LOADED_SOURCE_LABELS = { baseline: 'Baseline', search: 'Search', template: 'Template', derived: 'Derived', config: 'Config' };
+const LOADED_SOURCE_LABELS = { baseline: 'Baseline', search: 'Search', template: 'Template', derived: 'Derived', config: 'Source' };
 const CONFIG_OWNER_LABELS = { manual: 'Manual', claude: 'Claude', script: 'Script', builtin: 'Built-in' };
 
 function stableSerializeConfig(value) {
@@ -737,8 +808,6 @@ function syncLoadedSourceUI() {
   const sourceKind = String(state.loaded_source_kind || '').trim();
   const sourceId = String(state.loaded_source_id || '').trim();
   const sourceLabel = compactLoadedSourceLabel(sourceKind, sourceId);
-  const idEl = byId('wbConfigId');
-  if (idEl) idEl.textContent = runtimeSource.id || sourceId || '-';
   const chip = byId('wbInputSourceChip');
   const textEl = byId('wbInputSourceText');
   if (!chip || !textEl) return mode;
@@ -817,7 +886,10 @@ function rememberLoadedSource(record, snapshot = null, sourceConfig = null) {
   state.loaded_source_asset_context = cloneJson(state.loaded_source_meta?.asset_context)
     || assetContextFromPayload(sourceConfig || record?.config_json || record, DEFAULT_ASSET_SCOPE);
   state.loaded_source_config = cloneJson(sourceConfig || record?.config_json || null);
-  state.loaded_source_kind = String(record?.loaded_kind || 'config').trim() || 'config';
+  state.loaded_source_kind = String(
+    record?.loaded_kind
+    || (String(record?.source_type || '').trim().toLowerCase() === 'experiment' ? 'experiment' : 'baseline'),
+  ).trim() || 'baseline';
   state.loaded_source_id = String(state.loaded_source_meta?.source_id || '').trim();
   syncWorkbenchLoadedSourceToUrl(state.loaded_source_kind, state.loaded_source_id);
   state.loaded_source_snapshot = snapshot || stableSerializeConfig(state.config_draft || {});
@@ -871,7 +943,6 @@ function compactLoadedSourceLabel(kind, sourceId) {
   if (!normalizedId) return '';
   if (String(kind || '').trim().toLowerCase() === 'experiment') return `Experiment ${normalizedId}`;
   if (String(kind || '').trim().toLowerCase() === 'baseline') return `Baseline ${normalizedId}`;
-  if (String(kind || '').trim().toLowerCase() === 'config') return `Config ${normalizedId}`;
   return `Source ${normalizedId}`;
 }
 
@@ -885,12 +956,10 @@ function loadItemYearLabel(item) {
 }
 
 function loadItemBadgeLabel(item) {
-  if (item?.kind === 'config') return 'Config';
   return item?.kind === 'baseline' ? 'Baseline' : 'Experiment';
 }
 
 function loadItemBadgeClass(item) {
-  if (item?.kind === 'config') return 'wb-load-kind-config';
   return item?.kind === 'baseline' ? 'wb-load-kind-baseline' : 'wb-load-kind-experiment';
 }
 
@@ -914,9 +983,16 @@ function currentWorkbenchInputSourceFromUrl() {
     const loadId = String(params.get('load_id') || '').trim();
     const loadKind = String(params.get('load_kind') || '').trim().toLowerCase();
     if (loadId) {
-      if (loadKind === 'config') return { kind: 'config', id: loadId };
       return { kind: loadKind === 'experiment' ? 'experiment' : 'baseline', id: loadId };
     }
+    const experimentId = String(
+      params.get('exp_id')
+      || params.get('experiment_id')
+      || '',
+    ).trim();
+    if (experimentId) return { kind: 'experiment', id: experimentId };
+    const baselineId = String(params.get('baseline_id') || '').trim();
+    if (baselineId) return { kind: 'baseline', id: baselineId };
   } catch (_) {
     return null;
   }
@@ -929,10 +1005,10 @@ function syncWorkbenchLoadedSourceToUrl(kind, sourceId) {
     const normalizedId = String(sourceId || '').trim();
     const normalizedKind = String(kind || '').trim().toLowerCase();
     url.searchParams.delete('exp_id');
+    url.searchParams.delete('experiment_id');
+    url.searchParams.delete('baseline_id');
     if (normalizedId) {
-      const persistedKind = normalizedKind === 'experiment'
-        ? 'experiment'
-        : (normalizedKind === 'config' ? 'config' : 'baseline');
+      const persistedKind = normalizedKind === 'experiment' ? 'experiment' : 'baseline';
       url.searchParams.set('load_kind', persistedKind);
       url.searchParams.set('load_id', normalizedId);
     } else {
@@ -944,586 +1020,6 @@ function syncWorkbenchLoadedSourceToUrl(kind, sourceId) {
     // URL sync failure should not block experiment loading.
   }
 }
-
-async function resolveBootstrapSource(source) {
-  const normalizedKind = String(source?.kind || '').trim().toLowerCase();
-  const normalizedId = String(source?.id || '').trim();
-  if (!normalizedId) return null;
-  try {
-    if (normalizedKind === 'config') {
-      const payload = await apiRequestJson(
-        `bootstrap_config_${normalizedId}`,
-        `/api/backtest_v2/configs/${encodeURIComponent(normalizedId)}`,
-        { suppressStatusOnError: true },
-      );
-      if (String(payload?.config_id || '').trim() === normalizedId) return source;
-    } else if (normalizedKind === 'experiment') {
-      const payload = await apiRequestJson(
-        'bootstrap_experiments_index',
-        '/api/backtest_v2/experiments',
-        { suppressStatusOnError: true },
-      );
-      const rows = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload) ? payload : []);
-      if (rows.some((item) => String(item?.exp_id || '').trim() === normalizedId)) return source;
-    } else {
-      const payload = await apiRequestJson(
-        'bootstrap_baselines_index',
-        '/api/backtest_v2/baselines',
-        { suppressStatusOnError: true },
-      );
-      const rows = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload) ? payload : []);
-      if (rows.some((item) => String(item?.baseline_id || '').trim() === normalizedId)) return source;
-    }
-  } catch (_) {
-    return source;
-  }
-  if (String(FALLBACK_BOOTSTRAP_SOURCE?.id || '').trim() && normalizedId !== String(FALLBACK_BOOTSTRAP_SOURCE.id || '').trim()) {
-    return FALLBACK_BOOTSTRAP_SOURCE;
-  }
-  if (String(DEFAULT_BOOTSTRAP_BASELINE_ID || '').trim()) {
-    return { kind: 'baseline', id: DEFAULT_BOOTSTRAP_BASELINE_ID, label: `Baseline ${DEFAULT_BOOTSTRAP_BASELINE_ID}` };
-  }
-  return source;
-}
-
-async function bootstrapInitialExperiment() {
-  const explicitSource = currentWorkbenchInputSourceFromUrl();
-  const source = await resolveBootstrapSource(explicitSource || DEFAULT_BOOTSTRAP_SOURCE);
-  if (!source?.id || currentRuntimeSourceRef().id || state.loaded_source_id) return;
-  try {
-    if (source.kind === 'config') await loadConfig(source.id);
-    else if (source.kind === 'experiment') await loadExperimentBundle(source.id);
-    else await loadBaselineToWorkbench(source.id, { loadLinkedResult: !!explicitSource });
-  } catch (e) {
-    addLog(`Load source failed: ${source?.id || '-'} | ${e?.message || e}`);
-    const fallback = FALLBACK_BOOTSTRAP_SOURCE;
-    const shouldFallback = !!fallback?.id
-      && String(source?.id || '').trim() !== String(fallback.id || '').trim();
-    if (!shouldFallback) return;
-    try {
-      addLog(`Fallback to preserved source: ${fallback.id}`);
-      if (fallback.kind === 'experiment') await loadExperimentBundle(fallback.id);
-      else await loadBaselineToWorkbench(fallback.id, { loadLinkedResult: true });
-    } catch (fallbackError) {
-      addLog(`Fallback source failed: ${fallback?.id || '-'} | ${fallbackError?.message || fallbackError}`);
-    }
-  }
-}
-
-/* Main tab switch */
-
-function syncLoadHint(expId = '') {
-  const hint = byId('wbLoadHint');
-  if (!hint) return;
-  const runtimeSource = currentRuntimeSourceRef();
-  const activeId = String(expId || runtimeSource.id || state.loaded_source_id || '').trim();
-  const activeKind = String(
-    (expId ? 'experiment' : '')
-    || runtimeSource.kind
-      || state.loaded_source_kind
-    || ''
-  ).trim().toLowerCase();
-  if (activeId) {
-    hint.textContent = compactLoadedSourceLabel(activeKind, activeId);
-    hint.title = activeKind === 'experiment'
-      ? `Current page result source: ${activeId}`
-      : (activeKind === 'config'
-        ? `Current page config source: ${activeId}`
-        : (activeKind === 'baseline' ? `Current page baseline source: ${activeId}` : `Current page source: ${activeId}`));
-    return;
-  }
-  hint.textContent = DEFAULT_BOOTSTRAP_SOURCE.label || `Baseline ${DEFAULT_BOOTSTRAP_BASELINE_ID}`;
-  hint.title = 'Click load to import a baseline or experiment. Without a loaded source, the page uses the current draft.';
-}
-function normalizeLoadItems(baselines, experiments) {
-  const baselineRows = (Array.isArray(baselines) ? baselines : [])
-    .filter((item) => String(item?.baseline_id || '').trim())
-    .map((item) => ({
-      kind: 'baseline',
-      id: String(item.baseline_id || '').trim(),
-      label: String(item.display_name || item.name || item.baseline_id || '').trim(),
-      created_at: String(item.updated_at || item.created_at || '').trim(),
-      has_result: !!item.has_result,
-      linked_exp_id: String(item.linked_exp_id || '').trim(),
-      universe_mode: String(item.universe_mode || '').trim(),
-      membership_mode: String(item.membership_mode || '').trim(),
-      start_year: item?.start_year,
-      end_year: item?.end_year,
-      cagr: item?.cagr,
-      max_drawdown: item?.max_drawdown,
-      trades: null,
-    }));
-  const experimentRows = (Array.isArray(experiments) ? experiments : [])
-    .filter((item) => String(item?.exp_id || '').trim())
-    .map((item) => ({
-      kind: 'experiment',
-      id: String(item.exp_id || '').trim(),
-      label: compactExperimentLabel(item),
-      created_at: String(item.created_at || '').trim(),
-      has_result: true,
-      linked_exp_id: String(item.exp_id || '').trim(),
-      universe_mode: String(item?.universe_mode || '').trim(),
-      membership_mode: String(item?.membership_mode || '').trim(),
-      start_year: item?.start_year,
-      end_year: item?.end_year,
-      cagr: item?.cagr,
-      max_drawdown: item?.max_drawdown,
-      trades: item?.trades,
-    }));
-  const ensureDefault = baselineRows.some((item) => item.id === DEFAULT_BOOTSTRAP_BASELINE_ID);
-  if (!ensureDefault) {
-    baselineRows.unshift({
-      kind: 'baseline',
-      id: DEFAULT_BOOTSTRAP_BASELINE_ID,
-      label: DEFAULT_BOOTSTRAP_BASELINE_ID,
-      created_at: '',
-      has_result: false,
-      linked_exp_id: '',
-      universe_mode: '',
-      membership_mode: '',
-      cagr: null,
-      trades: null,
-    });
-  }
-  baselineRows.sort((a, b) => {
-    if (a.id === DEFAULT_BOOTSTRAP_BASELINE_ID && b.id !== DEFAULT_BOOTSTRAP_BASELINE_ID) return -1;
-    if (b.id === DEFAULT_BOOTSTRAP_BASELINE_ID && a.id !== DEFAULT_BOOTSTRAP_BASELINE_ID) return 1;
-    return (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
-  });
-  experimentRows.sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0));
-  return [...baselineRows, ...experimentRows];
-}
-
-function experimentLoadSummary(item) {
-  const parts = [];
-  if (Number.isFinite(Number(item?.cagr))) parts.push(`CAGR ${pct(item.cagr)}`);
-  if (Number.isFinite(Number(item?.max_drawdown))) parts.push(`MaxDD ${pct(item.max_drawdown)}`);
-  const yearLabel = loadItemYearLabel(item);
-  if (yearLabel) parts.push(yearLabel);
-  if (item?.universe_mode) parts.push(item.universe_mode);
-  const membershipLabel = membershipModeDisplayLabel(item?.universe_mode, item?.membership_mode);
-  if (membershipLabel) parts.push(membershipLabel);
-  if (!parts.length && item?.kind === 'baseline') {
-    parts.push(item?.has_result ? 'Has result' : 'Config only');
-  }
-  if (!parts.length && item?.kind === 'experiment' && Number.isFinite(Number(item?.trades))) {
-    parts.push(`Trades ${fmtInt(item.trades)}`);
-  }
-  return parts.join(' | ') || 'Pending result';
-}
-
-async function fetchExperimentLoadMetrics(expId) {
-  const normalizedExpId = String(expId || '').trim();
-  if (!normalizedExpId) return {};
-  const experiments = await apiRequestJson('experiments', '/api/backtest_v2/experiments');
-  const row = (Array.isArray(experiments) ? experiments : []).find((item) => String(item?.exp_id || '').trim() === normalizedExpId) || {};
-  const perf = row?.perf || {};
-  return {
-    cagr: perf?.cagr,
-    max_drawdown: perf?.max_drawdown,
-    universe_mode: String(row?.universe_mode || '').trim(),
-    membership_mode: String(row?.membership_mode || '').trim(),
-    start_year: Number.isFinite(Number(row?.start_year)) ? Number(row.start_year) : null,
-    end_year: Number.isFinite(Number(row?.end_year)) ? Number(row.end_year) : null,
-  };
-}
-
-async function enrichLoadItems(items) {
-  const rows = Array.isArray(items) ? items.map((item) => ({ ...item })) : [];
-  const experimentCache = new Map();
-  const ensureExperimentMetrics = async (expId) => {
-    const normalizedExpId = String(expId || '').trim();
-    if (!normalizedExpId) return {};
-    if (!experimentCache.has(normalizedExpId)) {
-      experimentCache.set(normalizedExpId, fetchExperimentLoadMetrics(normalizedExpId).catch(() => ({})));
-    }
-    return experimentCache.get(normalizedExpId);
-  };
-  await Promise.all(rows.map(async (item) => {
-    if (item.kind === 'baseline') {
-      try {
-        const detail = await apiRequestJson(
-          `baseline_${item.id}`,
-          `/api/backtest_v2/baselines/${encodeURIComponent(item.id)}`,
-        );
-        const universe = detail?.config_json?.universe || {};
-        if (!item.universe_mode) item.universe_mode = String(detail?.config_json?.universe_mode || '').trim();
-        if (!item.membership_mode) item.membership_mode = String(universe?.membership_mode || '').trim();
-        const start = String(universe?.start || '').trim();
-        const end = String(universe?.end || '').trim();
-        if (!item.start_year && /^\d{4}/.test(start)) item.start_year = Number(start.slice(0, 4));
-        if (!item.end_year && /^\d{4}/.test(end)) item.end_year = Number(end.slice(0, 4));
-        if (detail?.linked_exp_id && item.has_result) {
-        const metrics = await ensureExperimentMetrics(detail.linked_exp_id);
-          item.cagr = metrics?.cagr ?? item.cagr;
-          item.max_drawdown = metrics?.max_drawdown ?? item.max_drawdown;
-          item.universe_mode = item.universe_mode || metrics?.universe_mode || '';
-          item.membership_mode = item.membership_mode || metrics?.membership_mode || '';
-          item.start_year = item.start_year || metrics?.start_year;
-          item.end_year = item.end_year || metrics?.end_year;
-        }
-      } catch (_) {
-        // best effort only
-      }
-      return;
-    }
-    try {
-      const metrics = await ensureExperimentMetrics(item.id);
-      item.cagr = metrics?.cagr ?? item.cagr;
-      item.max_drawdown = metrics?.max_drawdown ?? item.max_drawdown;
-      item.universe_mode = item.universe_mode || metrics?.universe_mode || '';
-      item.membership_mode = item.membership_mode || metrics?.membership_mode || '';
-      item.start_year = item.start_year || metrics?.start_year;
-      item.end_year = item.end_year || metrics?.end_year;
-    } catch (_) {
-      // best effort only
-    }
-  }));
-  return rows;
-}
-
-
-function switchMainTab(tab) {
-  const next = tab || 'overview';
-  state.main_tab = next;
-  document.querySelectorAll('.wb-main-tabs button[data-main-tab]').forEach((b) => b.classList.toggle('active', b.getAttribute('data-main-tab') === next));
-  document.querySelectorAll('.wb-main-panel').forEach((p) => p.classList.remove('active'));
-  const panel = byId(next === 'overview' ? 'wbTabOverview' : 'wbTabAnalysis');
-  if (panel) panel.classList.add('active');
-}
-
-/* Wrapper functions that delegate into page modules */
-
-function renderRightInspector() {
-  syncResultsWorkbenchSurface();
-}
-
-
-function bindEvents() {
-  document.querySelectorAll('#wbMode button').forEach((btn) => btn.addEventListener('click', () => setMode(btn.getAttribute('data-mode') || 'experiment')));
-  document.querySelectorAll('[data-open-panel]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const panel = String(btn.getAttribute('data-open-panel') || '').trim();
-      if (!panel || typeof setDrawerPanel !== 'function') return;
-      toggleDrawer(false);
-      setDrawerPanel(panel);
-    });
-  });
-  document.querySelectorAll('#wbAssetScopeGroup button').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const val = btn.getAttribute('data-val');
-      if (!val) return;
-      document.querySelectorAll('#wbAssetScopeGroup button').forEach((button) => button.classList.remove('active'));
-      btn.classList.add('active');
-      const selectEl = byId('wbAssetScope');
-      if (selectEl) selectEl.value = val;
-      updateUniverseInputVisibility();
-      buildConfigDraft();
-      renderRunHints();
-    });
-  });
-  byId('wbAssetScope')?.addEventListener('change', () => {
-    const value = byId('wbAssetScope')?.value || DEFAULT_ASSET_SCOPE;
-    document.querySelectorAll('#wbAssetScopeGroup button').forEach((button) => {
-      button.classList.toggle('active', button.getAttribute('data-val') === value);
-    });
-    updateUniverseInputVisibility();
-    buildConfigDraft();
-    renderRunHints();
-  });
-  // Universe mode buttons keep the hidden select in sync
-  document.querySelectorAll('#wbUniverseModeGroup button').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (btn.disabled) return;
-      const val = btn.getAttribute('data-val');
-      if (!val) return;
-      // Toggle active style
-      document.querySelectorAll('#wbUniverseModeGroup button').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      // Sync hidden select
-      const sel = byId('wbUniverseMode');
-      if (sel) sel.value = val;
-      updateUniverseInputVisibility();
-      buildConfigDraft();
-      renderRunHints();
-    });
-  });
-  byId('wbUniverseMode')?.addEventListener('change', () => { updateUniverseInputVisibility(); buildConfigDraft(); renderRunHints(); });
-  document.querySelectorAll('#wbConstituentGroup button').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const val = btn.getAttribute('data-val');
-      if (!val) return;
-      if (typeof syncMembershipModeButtons === 'function') syncMembershipModeButtons(val);
-      else {
-        document.querySelectorAll('#wbConstituentGroup button').forEach((button) => button.classList.remove('active'));
-        btn.classList.add('active');
-        const sel = byId('wbConstituent');
-        if (sel) sel.value = val;
-      }
-      buildConfigDraft();
-      renderRunHints();
-    });
-  });
-  byId('wbConstituent')?.addEventListener('change', () => {
-    if (typeof syncMembershipModeButtons === 'function') syncMembershipModeButtons(byId('wbConstituent')?.value || 'dynamic');
-    buildConfigDraft();
-    renderRunHints();
-  });
-  document.querySelectorAll('#wbEtfPresetWrap button[data-preset]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const preset = String(btn.getAttribute('data-preset') || '').trim();
-      const symbolsValue = String(btn.getAttribute('data-symbols') || '').trim();
-      const assetScopeSelect = byId('wbAssetScope');
-      if (assetScopeSelect) assetScopeSelect.value = 'cn_etf';
-      document.querySelectorAll('#wbAssetScopeGroup button').forEach((button) => {
-        button.classList.toggle('active', button.getAttribute('data-val') === 'cn_etf');
-      });
-      const presetInput = byId('wbEtfPreset');
-      if (presetInput) presetInput.value = preset;
-      const symbolsInput = byId('wbSymbols');
-      if (symbolsInput) symbolsInput.value = symbolsValue;
-      document.querySelectorAll('#wbEtfPresetWrap button[data-preset]').forEach((button) => {
-        button.classList.toggle('active', button === btn);
-      });
-      updateUniverseInputVisibility();
-      buildConfigDraft();
-      renderRunHints();
-    });
-  });
-  // Price adjustment toggle buttons keep the hidden select in sync
-  document.querySelectorAll('#wbAdjGroup button').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const val = btn.getAttribute('data-val');
-      if (!val) return;
-      document.querySelectorAll('#wbAdjGroup button').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const sel = byId('wbPriceAdj');
-      if (sel) sel.value = val;
-      buildConfigDraft();
-      updateAtrNote();
-    });
-  });
-  byId('wbTrendStrategy')?.addEventListener('change', () => { buildConfigDraft(); });
-  byId('wbMrStrategy')?.addEventListener('change', () => { buildConfigDraft(); });
-  byId('wbRegimeEngine')?.addEventListener('change', () => {
-    if (typeof updateRegimeEngineUi === 'function') updateRegimeEngineUi(byId('wbRegimeEngine')?.value || 'ma200_legacy');
-    buildConfigDraft();
-  });
-  byId('wbRegimeEnabled')?.addEventListener('change', () => {
-    const on = !!byId('wbRegimeEnabled').checked;
-    const regimeParams = byId('wbRegimeParams'); if (regimeParams) regimeParams.style.display = on ? '' : 'none';
-    const mrPanel = byId('wbMrPanel'); if (mrPanel) mrPanel.style.opacity = on ? '1' : '0.45';
-    const rfBlock = byId('wbRegimeFilterBlock'); if (rfBlock) rfBlock.style.display = on ? '' : 'none';
-    buildConfigDraft();
-  });
-  byId('wbRegimeFilterEnabled')?.addEventListener('change', () => {
-    const on = !!byId('wbRegimeFilterEnabled').checked;
-    const rfParams = byId('wbRegimeFilterParams'); if (rfParams) rfParams.style.display = on ? '' : 'none';
-    buildConfigDraft();
-  });
-  byId('wbEntrySlowMaSlope')?.addEventListener('change', () => {
-    const lb = byId('wbEntrySlopeLookback');
-    if (lb) lb.disabled = !byId('wbEntrySlowMaSlope').checked;
-    buildConfigDraft();
-  });
-  byId('wbEntryAboveSlowMa')?.addEventListener('change', buildConfigDraft);
-  document.querySelectorAll('.wb-rail-btn').forEach((btn) => btn.addEventListener('click', () => {
-    const panel = btn.getAttribute('data-panel') || 's1';
-    setDrawerPanel(panel);
-    /* open drawer if collapsed */
-    const app = document.querySelector('.wb-app');
-    if (app && app.classList.contains('wb-drawer-hidden')) toggleDrawer(false);
-    if (panel === 'history') loadExperimentList();
-  }));
-
-  byId('wbRunBtn')?.addEventListener('click', async () => {
-    try { setStatusItems([]); await runByMode(); } catch (e) {
-      const msg = e.message || String(e);
-      const statusEl = byId('wbRunStatus');
-      if (statusEl) statusEl.textContent = `Run failed: ${msg}`;
-      addLog(String(e));
-      setStatusItems([{ title: 'Run failed', message: msg, detail: String(e) }]);
-    }
-  });
-  byId('wbPresetSelect')?.addEventListener('change', () => { syncPresetHint(); });
-  byId('wbRunPreset')?.addEventListener('click', async () => {
-    try { setStatusItems([]); await runExperiment(); } catch (e) {
-      const msg = e.message || String(e);
-      const statusEl = byId('wbRunStatus');
-      if (statusEl) statusEl.textContent = `Preset run failed: ${msg}`;
-      addLog(String(e));
-      setStatusItems([{ title: 'Preset run failed', message: msg, detail: String(e) }]);
-    }
-  });
-  byId('wbSaveBaseline')?.addEventListener('click', async () => {
-    try {
-      await saveCurrentBaseline();
-    } catch (e) {
-        addLog(`Save baseline failed: ${e?.message || e}`);
-    }
-  });
-
-  byId('wbSaveConfig')?.addEventListener('click', async () => { try { await saveConfig('draft'); } catch (e) { addLog(`Save config failed: ${e.message || e}`); } });
-  byId('wbSaveTemplate')?.addEventListener('click', async () => { try { await saveConfig('template'); } catch (e) { addLog(`Save template failed: ${e.message || e}`); } });
-  byId('wbSaveFlowScript')?.addEventListener('click', async () => { try { await saveConfig('flow_script'); } catch (e) { addLog(`Save flow script failed: ${e.message || e}`); } });
-  byId('wbCopyCfgJson')?.addEventListener('click', copyConfigJson);
-  byId('wbPasteCfgJson')?.addEventListener('click', pasteConfigJson);
-  byId('wbDiffCfg')?.addEventListener('click', renderConfigDiff);
-  byId('wbApplyGroup')?.addEventListener('click', async () => {
-    const cfg = state.active_artifacts?.config;
-    if (!cfg) { addLog('Current result is missing config.json'); return; }
-    const draft = cfg?.overrides?.workbench_config || cfg?.workbench_config || cfg;
-    applyConfigToUI(draft || {});
-    clearLoadedSource();
-    addLog(`Applied result config back into draft: exp_id=${state.active_result?.exp_id || '-'}`);
-  });
-
-  document.querySelectorAll('.wb-main-tabs button[data-main-tab]').forEach((btn) => btn.addEventListener('click', () => switchMainTab(btn.getAttribute('data-main-tab') || 'overview')));
-  document.querySelectorAll('.wb-analysis-tabs button[data-dock], .wb-dock-tabs button[data-dock]').forEach((btn) => {
-    btn.addEventListener('click', () => switchDockTab(btn.getAttribute('data-dock') || 'explain'));
-  });
-  byId('wbPreviewExec')?.addEventListener('click', async () => { try { await previewExecution(); } catch (e) { addLog(`Execution preview failed: ${e.message || e}`); } });
-  byId('wbCopyExec')?.addEventListener('click', copyExecJson);
-  byId('wbChartMode')?.addEventListener('change', (e) => {
-    state.chart_mode = String(e.target.value || 'portfolio');
-    syncResultsWorkbenchVisuals();
-  });
-  byId('wbChartBenchToggle')?.addEventListener('change', (e) => { state.chart_show_benchmark = !!e.target.checked; syncResultsWorkbenchVisuals(); });
-  byId('wbChartRange')?.addEventListener('change', (e) => { state.chart_range = String(e.target.value || 'ALL'); syncResultsWorkbenchVisuals(); });
-  byId('wbSymbolFilter')?.addEventListener('input', (e) => {
-    state.symbol_filter = String(e.target.value || '').trim();
-    syncResultsWorkbenchSymbols();
-  });
-  byId('wbSymbolSort')?.addEventListener('change', (e) => {
-    state.symbol_sort = String(e.target.value || 'return_desc');
-    syncResultsWorkbenchSymbols();
-  });
-  byId('wbStatusBell')?.addEventListener('click', () => toggleStatusPanel());
-  byId('wbErrorBannerView')?.addEventListener('click', () => toggleStatusPanel(true));
-  byId('wbDrawerToggle')?.addEventListener('click', () => {
-    const app = document.querySelector('.wb-app');
-    if (!app) return;
-    toggleDrawer(!app.classList.contains('wb-drawer-hidden'));
-  });
-  byId('wbDrawerPin')?.addEventListener('click', () => {
-    state.drawer_pinned = !state.drawer_pinned;
-    const btn = byId('wbDrawerPin');
-    if (btn) btn.classList.toggle('active', state.drawer_pinned);
-    addLog(state.drawer_pinned ? 'Drawer pinned' : 'Drawer unpinned');
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && (e.key === 'b' || e.key === 'B')) {
-      e.preventDefault();
-      const app = document.querySelector('.wb-app');
-      if (!app) return;
-      toggleDrawer(!app.classList.contains('wb-drawer-hidden'));
-    }
-  });
-
-  // Clear all experiments handler
-  byId('wbHistoryClear')?.addEventListener('click', async () => {
-    if (!confirm('Clear all experiments? This cannot be undone.')) return;
-    try {
-      await apiRequestJson('clearExperiments', '/api/backtest_v2/experiments', { method: 'DELETE' });
-      addLog('All experiments cleared');
-      renderHistoryPanel([]);
-    } catch (e) {
-      addLog(`Clear failed: ${e?.message || e}`);
-    }
-  });
-  byId('wbHistoryCompare')?.addEventListener('click', async () => {
-    try {
-      await openExperimentCompare();
-    } catch (e) {
-      addLog(`Open experiment compare failed: ${e?.message || e}`);
-    }
-  });
-  byId('wbCompareClose')?.addEventListener('click', () => closeExperimentCompare());
-
-  document.querySelectorAll('input,select,textarea').forEach((el) => {
-    el.addEventListener('input', () => buildConfigDraft());
-    el.addEventListener('change', () => buildConfigDraft());
-  });
-
-  byId('wbEnableComposition')?.addEventListener('change', () => {
-    const enabled = !!byId('wbEnableComposition')?.checked;
-    const portfolioMode = byId('wbPortfolioMode');
-    if (!portfolioMode) return;
-    if (enabled && ['equal_10', 'profit_release', ''].includes(String(portfolioMode.value || '').trim())) {
-      portfolioMode.value = MULTI_ALPHA_PORTFOLIO_MODE;
-    }
-    if (!enabled && String(portfolioMode.value || '').trim() === MULTI_ALPHA_PORTFOLIO_MODE) {
-      portfolioMode.value = 'equal_10';
-    }
-    buildConfigDraft();
-  });
-
-  // Exit checkbox/input linkage
-  byId('wbExitTrail')?.addEventListener('change', syncExitLinkage);
-  byId('wbExitTime')?.addEventListener('change', syncExitLinkage);
-
-  // Update ATR hint when price adjustment or match price changes
-  byId('wbPriceAdj')?.addEventListener('change', updateAtrNote);
-  byId('wbMatchPrice')?.addEventListener('change', updateAtrNote);
-
-// Public surface keeps one unified load entry for config / baseline / experiment.
-  const quickLoadBtn = byId('wbQuickLoad');
-  if (quickLoadBtn) {
-    const cleanQuickLoadBtn = quickLoadBtn.cloneNode(true);
-    quickLoadBtn.replaceWith(cleanQuickLoadBtn);
-    cleanQuickLoadBtn.addEventListener('click', async (evt) => {
-      evt.preventDefault();
-      evt.stopImmediatePropagation();
-      evt.stopPropagation();
-      try {
-        await openExperimentLoadDropdown(cleanQuickLoadBtn);
-      } catch (e) {
-        addLog(`Open experiment load menu failed: ${e?.message || e}`);
-      }
-    });
-  }
-}
-
-function init() {
-  setActiveNav();
-  hydrateComposeRows(defaultComposeRows());
-  if (byId('wbExecDate')) byId('wbExecDate').value = todayISO();
-  if (byId('wbChartBenchToggle')) byId('wbChartBenchToggle').checked = true;
-  if (byId('wbChartRange')) byId('wbChartRange').value = 'D';
-  if (byId('wbChartMode')) byId('wbChartMode').value = 'portfolio';
-  if (byId('wbSymbolSort')) byId('wbSymbolSort').value = 'return_desc';
-  bindEvents();
-  setDrawerPanel('s1');
-  switchMainTab('overview');
-  syncAssetAwareShell();
-  updateUniverseInputVisibility();
-  if (typeof updateRegimeEngineUi === 'function') updateRegimeEngineUi();
-  renderRunHints();
-  buildConfigDraft();
-  syncExitLinkage();
-  updateAtrNote();
-  syncPresetHint();
-  syncLoadHint();
-  if (typeof renderMarketDataSyncStatus === 'function') {
-    renderMarketDataSyncStatus({ status: 'running', message: '正在读取市场数据同步状态' });
-  }
-  setStatusItems([]);
-  renderRightInspector();
-  if (typeof refreshMarketDataSyncStatus === 'function') {
-    refreshMarketDataSyncStatus().catch((e) => { addLog(`Market data sync status bootstrap failed: ${e?.message || e}`); });
-    if (!window.__wbMarketDataSyncPoller) {
-      window.__wbMarketDataSyncPoller = window.setInterval(() => {
-        refreshMarketDataSyncStatus().catch((e) => { addLog(`Market data sync status refresh failed: ${e?.message || e}`); });
-      }, 300000);
-    }
-  }
-  bootstrapInitialExperiment().catch((e) => { addLog(`Default experiment bootstrap failed: ${e?.message || e}`); });
-  addLog('Strategy Workbench ready');
-}
-
-// Desktop experiment history panel is provided by desktop-history-panel.js.
-
 
 
 

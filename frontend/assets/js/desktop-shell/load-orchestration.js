@@ -1,66 +1,5 @@
-(function initDesktopLoadControls(globalScope) {
-  const DEFAULT_PINNED_CONFIG_ID = 'cfg_cn_stock_etf_v1';
-
-  function configLoadSummary(item) {
-    const parts = [];
-    const sourceType = String(item?.source_type || '').trim();
-    const owner = String(item?.owner || '').trim();
-    if (sourceType || owner) {
-      const sourceLabel = sourceType || 'derived';
-      const ownerLabel = owner || 'manual';
-      parts.push(`${sourceLabel}/${ownerLabel}`);
-    }
-    const savedAt = String(item?.saved_at || '').trim();
-    if (savedAt) parts.push(savedAt.slice(0, 10));
-    if (item?.universe_mode) parts.push(String(item.universe_mode).trim());
-    return parts.join(' | ') || 'Saved config';
-  }
-
-  function normalizeConfigLoadItems(configs) {
-    const rows = (Array.isArray(configs) ? configs : [])
-      .filter((item) => String(item?.config_id || '').trim())
-      .map((item) => ({
-        kind: 'config',
-        id: String(item.config_id || '').trim(),
-        label: String(configDisplayName(item) || item.config_id || '').trim(),
-        created_at: String(item.saved_at || '').trim(),
-        source_type: String(item.source_type || '').trim(),
-        owner: String(item.owner || '').trim(),
-        locked: !!item.locked,
-        universe_mode: String(item.universe_mode || '').trim(),
-        tags: Array.isArray(item?.tags) ? item.tags.map((tag) => String(tag || '').trim().toLowerCase()) : [],
-      }))
-      .filter((item) => {
-        if (item.label) return true;
-        return item.locked || item.tags.includes('template') || item.tags.includes('builtin');
-      });
-
-    const score = (item) => {
-      let value = 0;
-      if (item.locked) value += 50;
-      if (item.tags.includes('frontier')) value += 40;
-      if (item.tags.includes('template')) value += 30;
-      if (item.tags.includes('builtin')) value += 20;
-      if (item.tags.includes('candidate')) value += 10;
-      if (item.label) value += 5;
-      return value;
-    };
-
-    rows.sort((a, b) => {
-      const scoreDiff = score(b) - score(a);
-      if (scoreDiff !== 0) return scoreDiff;
-      return (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
-    });
-    return rows.slice(0, 12);
-  }
-
-  function splitPinnedConfig(configItems) {
-    const rows = Array.isArray(configItems) ? configItems : [];
-    const pinned = rows.find((item) => String(item?.id || '').trim() === DEFAULT_PINNED_CONFIG_ID) || null;
-    const remaining = rows.filter((item) => String(item?.id || '').trim() !== DEFAULT_PINNED_CONFIG_ID);
-    return { pinned, remaining };
-  }
-
+/* desktop shell owner: run_orchestration load/hydrate path */
+(function initDesktopShellLoadOrchestration(globalScope) {
   function appendLoadSection(dropdown, label, rows, activeSourceKind, activeSourceId) {
     if (!Array.isArray(rows) || !rows.length) return;
 
@@ -71,9 +10,7 @@
 
     rows.forEach((item) => {
       const sourceId = String(item?.id || '').trim();
-      const kindClass = item?.kind === 'baseline'
-        ? 'baseline'
-        : (item?.kind === 'config' ? 'config' : 'experiment');
+      const kindClass = item?.kind === 'baseline' ? 'baseline' : 'experiment';
       const isActive = sourceId && sourceId === activeSourceId && item.kind === activeSourceKind;
       const row = document.createElement('button');
       row.type = 'button';
@@ -83,20 +20,18 @@
         <span class="wb-load-kind ${loadItemBadgeClass(item)}">${esc(loadItemBadgeLabel(item))}</span>
         <span class="wb-config-center-title">${esc(item?.label || sourceId)}</span>
       </div>
-      <span class="wb-config-center-desc">${esc(item?.kind === 'config' ? configLoadSummary(item) : experimentLoadSummary(item))}</span>
+      <span class="wb-config-center-desc">${esc(experimentLoadSummary(item))}</span>
     `;
       row.addEventListener('click', async () => {
         dropdown.remove();
         try {
           if (typeof setTextById === 'function') setTextById('wbRunStatus', `Loading ${sourceId}...`);
-          if (item.kind === 'config') {
-            await loadConfig(sourceId);
-          } else if (item.kind === 'experiment') {
+          if (item.kind === 'experiment') {
             await loadExperimentBundle(sourceId);
           } else {
             await loadBaselineToWorkbench(sourceId);
           }
-          if (typeof setTextById === 'function') setTextById('wbRunStatus', `Loaded ${sourceId}`);
+          if (typeof setTextById === 'function') setTextById('wbRunStatus', '');
         } catch (error) {
           reportLoadFailure(sourceId, error);
         }
@@ -126,10 +61,8 @@
       return;
     }
 
-    const configPayload = await apiRequestJson('configs_list', '/api/backtest_v2/configs?latest=50');
     const baselinePayload = await apiRequestJson('baselines', '/api/backtest_v2/baselines');
     const experimentPayload = await apiRequestJson('experiments', '/api/backtest_v2/experiments');
-    const configItems = normalizeConfigLoadItems(configPayload?.items || []);
     const experimentItems = Array.isArray(experimentPayload?.items)
       ? experimentPayload.items
       : (Array.isArray(experimentPayload) ? experimentPayload : []);
@@ -137,17 +70,16 @@
       normalizeLoadItems(baselinePayload?.items || [], experimentItems),
       { experiments: experimentItems },
     );
-    const { pinned: pinnedConfigItem, remaining: listedConfigItems } = splitPinnedConfig(configItems);
     const baselineItems = runtimeItems.filter((item) => item.kind === 'baseline');
     const loadableExperimentItems = runtimeItems.filter((item) => item.kind === 'experiment');
 
-    if (!configItems.length && !baselineItems.length && !loadableExperimentItems.length) {
-      if (typeof setTextById === 'function') setTextById('wbRunStatus', 'No config, baseline, or experiment available');
+    if (!baselineItems.length && !loadableExperimentItems.length) {
+      if (typeof setTextById === 'function') setTextById('wbRunStatus', 'No baseline or experiment available');
       if (typeof setStatusItems === 'function') {
         setStatusItems([{
           title: 'Load menu empty',
-          message: 'No config, baseline, or experiment available',
-          file: '/api/backtest_v2/configs + /api/backtest_v2/baselines + /api/backtest_v2/experiments',
+          message: 'No baseline or experiment available',
+          file: '/api/backtest_v2/baselines + /api/backtest_v2/experiments',
           detail: 'quick load dropdown has no items',
         }]);
       }
@@ -161,8 +93,6 @@
 
     const activeSourceId = String(state.loaded_source_id || '').trim();
     const activeSourceKind = String(state.loaded_source_kind || '').trim();
-    appendLoadSection(dropdown, '默认配置', pinnedConfigItem ? [pinnedConfigItem] : [], activeSourceKind, activeSourceId);
-    appendLoadSection(dropdown, '配置锚点', listedConfigItems, activeSourceKind, activeSourceId);
     appendLoadSection(dropdown, '基线', baselineItems, activeSourceKind, activeSourceId);
     appendLoadSection(dropdown, '实验结果', loadableExperimentItems, activeSourceKind, activeSourceId);
 
@@ -179,9 +109,9 @@
 
   function extractWorkbenchConfigFromExperimentPayload(payload) {
     const cfg = payload && typeof payload === 'object' ? payload : {};
-    return cfg?.overrides?.original_workbench_config
-      || cfg?.overrides?.workbench_config
+    return cfg?.overrides?.workbench_config
       || cfg?.workbench_config
+      || cfg?.overrides?.original_workbench_config
       || null;
   }
 
@@ -229,6 +159,10 @@
       source_type: String(meta?.source_type || 'derived').trim() || 'derived',
       owner: String(meta?.owner || 'manual').trim() || 'manual',
       locked: !!meta?.locked,
+      linked_exp_id: String(meta?.linked_exp_id || '').trim() || null,
+      execution_contract_ref: meta?.execution_contract_ref && typeof meta.execution_contract_ref === 'object'
+        ? cloneJson(meta.execution_contract_ref)
+        : null,
       baseline_of: null,
       universe_mode: workbenchConfig?.universe_mode || null,
       membership_mode: workbenchConfig?.universe?.membership_mode || null,
@@ -246,7 +180,7 @@
     renderRunHints();
     syncExitLinkage();
     updateAtrNote();
-    syncLoadHint(state.loaded_source_id);
+    syncLoadHint();
     renderRightInspector();
   }
 
@@ -307,6 +241,10 @@
       source_type: 'baseline',
       owner: String(payload?.owner || 'manual'),
       locked: true,
+      linked_exp_id: String(payload?.linked_exp_id || '').trim() || null,
+      execution_contract_ref: payload?.execution_contract_ref && typeof payload.execution_contract_ref === 'object'
+        ? cloneJson(payload.execution_contract_ref)
+        : null,
       loaded_kind: 'baseline',
       loaded_id: normalizedBaselineId,
     });
@@ -319,6 +257,7 @@
       renderRightInspector();
     }
 
+    if (typeof setTextById === 'function') setTextById('wbRunStatus', '');
     addLog(`Baseline imported: ${normalizedBaselineId}`);
   }
 
@@ -327,6 +266,7 @@
     if (!normalizedExpId) throw new Error('missing experiment_id');
     await loadExperimentConfigToWorkbench(normalizedExpId);
     await loadHistoricalExperiment(normalizedExpId);
+    if (typeof setTextById === 'function') setTextById('wbRunStatus', '');
   }
 
   function buildExperimentMetricMap(experiments) {

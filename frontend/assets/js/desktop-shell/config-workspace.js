@@ -1,11 +1,76 @@
-/* ui-controls.js: transitional desktop control wiring only. */
+﻿/* desktop-shell/config-workspace.js: desktop shell owner for draft editing, drawer switching, and stage interactions. */
+/* Saved config anchors have exited the frontend load surface; config_workspace only manages the current draft. */
+
+(function initDesktopConfigControls(globalScope) {
+  function copyConfigJson() {
+    navigator.clipboard?.writeText(JSON.stringify(state.config_draft || {}, null, 2));
+    addLog('配置 JSON 已复制');
+  }
+
+  async function pasteConfigJson() {
+    try {
+      const text = await navigator.clipboard.readText();
+      const payload = JSON.parse(text);
+      applyConfigToUI(payload || {});
+      clearLoadedSource();
+      addLog('已从剪贴板粘贴配置 JSON');
+    } catch (error) {
+      addLog(`粘贴 JSON 失败: ${error?.message || error}`);
+    }
+  }
+
+  globalScope.buildFrontendSemanticPayload = buildFrontendSemanticPayload;
+  globalScope.copyConfigJson = copyConfigJson;
+  globalScope.pasteConfigJson = pasteConfigJson;
+})(window);
+
+
+/* Desktop shell control wiring only. */
 /* Config compile/validate truth belongs to window.configDraftCore, not this shell file. */
-/* ui-controls.js: UI interactions, config building, drawer, dock tabs */
+/* Desktop shell UI interactions, config building, drawer, dock tabs */
 /* Globals used: state, byId, esc, num, pct, fmtInt, fmtMoney, setTextById, setHtmlById,
    getStrategySelector, getStrategyPackValue, COMPOSE_MODULES, reasonZh, addLog,
    apiRequestJson, setStatusItems, _apiTag,
    renderPerfPanel, renderNavChartLW, renderDdChartLW,
    loadActiveArtifacts, renderRightInspector, renderArtifacts (from other modules) */
+
+const multiAlphaUi = window.multiAlphaUi || {};
+const normalizeMultiAlphaName = typeof multiAlphaUi.normalizeMultiAlphaName === 'function'
+  ? multiAlphaUi.normalizeMultiAlphaName
+  : ((value) => String(value || '').trim().toLowerCase());
+const supportedMultiAlphaDescriptor = typeof multiAlphaUi.supportedMultiAlphaDescriptor === 'function'
+  ? multiAlphaUi.supportedMultiAlphaDescriptor
+  : (() => null);
+const defaultRegimeMatrix = typeof multiAlphaUi.defaultRegimeMatrix === 'function'
+  ? multiAlphaUi.defaultRegimeMatrix
+  : (() => ({}));
+const defaultComposeRows = typeof multiAlphaUi.defaultComposeRows === 'function'
+  ? multiAlphaUi.defaultComposeRows
+  : (() => []);
+const composeRowNames = typeof multiAlphaUi.composeRowNames === 'function'
+  ? multiAlphaUi.composeRowNames
+  : ((rows) => (Array.isArray(rows) ? rows : []).map((row) => normalizeMultiAlphaName(row && row.name)).filter(Boolean));
+const normalizePhase1MultiAlphaRegimeMatrix = typeof multiAlphaUi.normalizePhase1MultiAlphaRegimeMatrix === 'function'
+  ? multiAlphaUi.normalizePhase1MultiAlphaRegimeMatrix
+  : ((matrix) => (matrix && typeof matrix === 'object' ? matrix : {}));
+const hasPhase1MultiAlphaIntent = typeof multiAlphaUi.hasPhase1MultiAlphaIntent === 'function'
+  ? multiAlphaUi.hasPhase1MultiAlphaIntent
+  : (() => false);
+const ensurePhase1ComposeRows = typeof multiAlphaUi.ensurePhase1ComposeRows === 'function'
+  ? multiAlphaUi.ensurePhase1ComposeRows
+  : ((rows) => (Array.isArray(rows) ? rows : []));
+const bindDraftListeners = typeof multiAlphaUi.bindDraftListeners === 'function'
+  ? multiAlphaUi.bindDraftListeners
+  : (() => {});
+const cleanupUnsupportedOptions = typeof multiAlphaUi.cleanupUnsupportedOptions === 'function'
+  ? multiAlphaUi.cleanupUnsupportedOptions
+  : (() => {});
+const setSelectValuePreserveUnsupported = typeof multiAlphaUi.setSelectValuePreserveUnsupported === 'function'
+  ? multiAlphaUi.setSelectValuePreserveUnsupported
+  : (() => {});
+const mergeComposeRowsFromConfig = typeof multiAlphaUi.mergeComposeRowsFromConfig === 'function'
+  ? multiAlphaUi.mergeComposeRowsFromConfig
+  : (() => []);
 
 const LOCKED_CANDIDATE_PRESETS = {
   'v2-breakout-atr-stop-k10-candidate': {
@@ -32,43 +97,12 @@ function selectedExperimentPreset(defaultPreset = 'single') {
   return selected || defaultPreset || 'single';
 }
 
-function resolveMultiAlphaUiHelper(name) {
-  const globalHelper = globalThis?.[name];
-  if (typeof globalHelper === 'function') return globalHelper;
-  const namespaceHelper = globalThis?.multiAlphaUi?.[name];
-  if (typeof namespaceHelper === 'function') return namespaceHelper;
-  return null;
-}
-
 function cleanupUnsupportedOptionsCompat(selectEl) {
-  const helper = resolveMultiAlphaUiHelper('cleanupUnsupportedOptions');
-  if (helper) {
-    helper(selectEl);
-    return;
-  }
-  if (!selectEl) return;
-  Array.from(selectEl.querySelectorAll('option[data-unsupported="1"]')).forEach((option) => option.remove());
+  cleanupUnsupportedOptions(selectEl);
 }
 
 function setSelectValuePreserveUnsupportedCompat(id, value, fallback = '') {
-  const helper = resolveMultiAlphaUiHelper('setSelectValuePreserveUnsupported');
-  if (helper) {
-    helper(id, value, fallback);
-    return;
-  }
-  const selectEl = byId(id);
-  if (!selectEl) return;
-  cleanupUnsupportedOptionsCompat(selectEl);
-  const normalized = value == null ? '' : String(value);
-  if (normalized && !Array.from(selectEl.options).some((option) => option.value === normalized)) {
-    const option = document.createElement('option');
-    option.value = normalized;
-    option.textContent = 'UNSUPPORTED: ' + normalized;
-    option.dataset.unsupported = '1';
-    selectEl.appendChild(option);
-  }
-  const target = normalized || fallback || selectEl.value;
-  if (target) selectEl.value = target;
+  setSelectValuePreserveUnsupported(id, value, fallback);
 }
 
 function syncPresetHint() {
@@ -96,12 +130,12 @@ function syncPresetHint() {
   const sourceId = String(state.loaded_source_id || '').trim();
   const sourceLabel = meta?.display_name || meta?.name || compactLoadedSourceLabel(sourceKind, sourceId);
   const mode = currentLoadedSourceMode();
-  if (sourceId && mode === 'source-clean') {
+  if (sourceId && mode === 'loaded-clean') {
     hint.textContent = `Source: ${sourceLabel}`;
     hint.title = `Loaded source ${sourceLabel}; preview and run share the same runtime snapshot.`;
     return;
   }
-  if (sourceId && mode === 'source-dirty') {
+  if (sourceId && mode === 'loaded-dirty') {
     hint.textContent = `Draft diverged from ${sourceLabel}`;
     hint.title = 'The source marker is kept, but preview and run now use the current draft snapshot.';
     return;
@@ -121,6 +155,92 @@ const CN_ETF_PRESET_SYMBOLS = Object.freeze({
   cn_etf_first_wave_core: 'cn_etf_first_wave_core',
   cn_etf_first_wave_all: 'cn_etf_first_wave_all',
 });
+const ETF_STAGE_S1_LABEL = 'S1 ETF Universe';
+
+function pickFirstNonEmptyString(...values) {
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function uniqueUpperSymbols(...groups) {
+  const seen = new Set();
+  const values = [];
+  groups.flat().forEach((item) => {
+    const text = String(item || '').trim().toUpperCase();
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    values.push(text);
+  });
+  return values;
+}
+
+function resolveEditorComponentSourceContract(cfg) {
+  const unifiedRuntime = cfg?.unified_runtime && typeof cfg.unified_runtime === 'object'
+    ? cfg.unified_runtime
+    : {};
+  const provenanceContract = unifiedRuntime.provenance?.component_source_contract;
+  if (provenanceContract && typeof provenanceContract === 'object') return provenanceContract;
+  const legacyContract = unifiedRuntime.component_source_contract;
+  if (legacyContract && typeof legacyContract === 'object') return legacyContract;
+  const comboContextContract = unifiedRuntime.combo_context?.component_source_contract;
+  return comboContextContract && typeof comboContextContract === 'object' ? comboContextContract : null;
+}
+
+function resolveEtfSemanticConfig(cfg) {
+  const contract = resolveEditorComponentSourceContract(cfg);
+  const unifiedEtfConfig = contract?.components?.etf_component?.compile_input?.semantic_config
+    && typeof contract.components.etf_component.compile_input.semantic_config === 'object'
+      ? contract.components.etf_component.compile_input.semantic_config
+      : null;
+  if (unifiedEtfConfig) return unifiedEtfConfig;
+  const governedEtfConfig = cfg?.governed_a_share?.etf_beta;
+  return governedEtfConfig && typeof governedEtfConfig === 'object' ? governedEtfConfig : {};
+}
+
+function resolveStockSemanticConfig(cfg) {
+  const contract = resolveEditorComponentSourceContract(cfg);
+  const unifiedStockConfig = contract?.components?.stock_component?.compile_input?.semantic_config
+    && typeof contract.components.stock_component.compile_input.semantic_config === 'object'
+      ? contract.components.stock_component.compile_input.semantic_config
+      : null;
+  if (unifiedStockConfig) return unifiedStockConfig;
+  return cfg && typeof cfg === 'object' ? cfg : {};
+}
+
+function deriveEtfDisplaySymbols(etfConfig, fallbackSymbols = []) {
+  const payload = etfConfig && typeof etfConfig === 'object' ? etfConfig : {};
+  return uniqueUpperSymbols(
+    payload.template_target_formal_symbols || [],
+    payload.core_slot_symbols || [],
+    payload.growth_slot_symbols || [],
+    payload.core_beta_symbols || [],
+    payload.growth_seat_symbol ? [payload.growth_seat_symbol] : [],
+    payload.limited_defense_candidates || [],
+    payload.fallback_symbol ? [payload.fallback_symbol] : [],
+    Array.isArray(fallbackSymbols) ? fallbackSymbols : String(fallbackSymbols || '').split(','),
+  );
+}
+
+function detectCnEtfPresetFromConfig(etfConfig, symbols = []) {
+  const payload = etfConfig && typeof etfConfig === 'object' ? etfConfig : {};
+  const templateId = String(payload.template_id || '').trim();
+  if (templateId === 'cn_etf_first_wave_core') return 'cn_etf_first_wave_core';
+  if (templateId === 'cn_etf_first_wave_all') return 'cn_etf_first_wave_all';
+  return detectCnEtfPresetFromSymbols(symbols);
+}
+
+function describeEtfResearchPath(etfConfig) {
+  const payload = etfConfig && typeof etfConfig === 'object' ? etfConfig : {};
+  return pickFirstNonEmptyString(
+    payload.template_id ? `妯℃澘 ${payload.template_id}` : '',
+    payload.research_rule_family ? `瑙勫垯 ${payload.research_rule_family}` : '',
+    payload.source_entry_type ? `鍏ュ彛 ${payload.source_entry_type}` : '',
+    'ETF 鐩綍鐮旂┒',
+  );
+}
 
 function syncCnEtfPresetButtons(preset = '') {
   const normalized = String(preset || '').trim();
@@ -182,11 +302,14 @@ function updateUniverseInputVisibility() {
     : 'cn_a_equity';
   const isCn = typeof isCnAAssetScope === 'function' ? isCnAAssetScope(assetScope) : assetScope === 'cn_a_equity';
   const isEtf = typeof isCnEtfAssetScope === 'function' ? isCnEtfAssetScope(assetScope) : assetScope === 'cn_etf';
+  const etfUniverseHint = `${ETF_STAGE_S1_LABEL}：当前仅支持 CUSTOM 和预设名单`;
   const mode = byId('wbUniverseMode')?.value || 'ALL_A';
   const symbolsWrap = byId('wbSymbolsWrap');
   const industryWrap = byId('wbIndustryPickerWrap');
+  const universeModeWrap = byId('wbUniverseModeWrap');
   const universeModeSelect = byId('wbUniverseMode');
   const etfPresetWrap = byId('wbEtfPresetWrap');
+  const stageS1Btn = byId('wbStageS1Btn');
   const stockOnlyWrapIds = [
     'wbStockBasicFiltersWrap',
     'wbMinListDaysWrap',
@@ -205,10 +328,15 @@ function updateUniverseInputVisibility() {
     button.disabled = !(isCn || (isEtf && isCustom));
     button.title = isCn
       ? ''
-      : (isEtf ? (isCustom ? '' : 'A股 ETF 当前仅支持 CUSTOM 和预设名单') : '当前 universe 控件仅支持 A 股与 ETF');
+      : (isEtf ? (isCustom ? (String(ETF_STAGE_S1_LABEL || 'S1 ETF Universe') + '：ETF 自定义名单 / 预设入口') : etfUniverseHint) : '当前 universe 控件仅支持 A 股与 ETF');
   });
   if (universeModeSelect) universeModeSelect.disabled = !(isCn || isEtf);
   if (isEtf) {
+    if (stageS1Btn) {
+      stageS1Btn.dataset.stageScope = ETF_STAGE_S1_LABEL;
+      stageS1Btn.title = etfUniverseHint;
+    }
+    if (universeModeWrap) universeModeWrap.hidden = true;
     if (universeModeSelect) universeModeSelect.value = 'CUSTOM';
     document.querySelectorAll('#wbUniverseModeGroup button').forEach((button) => {
       button.classList.toggle('active', button.getAttribute('data-val') === 'CUSTOM');
@@ -221,6 +349,11 @@ function updateUniverseInputVisibility() {
     return;
   }
   if (etfPresetWrap) etfPresetWrap.hidden = true;
+  if (universeModeWrap) universeModeWrap.hidden = false;
+  if (stageS1Btn) {
+    if (typeof stageS1Btn.removeAttribute === 'function') stageS1Btn.removeAttribute('data-stage-scope');
+    stageS1Btn.title = isCn ? '鑲＄エ Alpha 鑼冨洿' : '缇庤偂鍏ュ彛';
+  }
   stockOnlyWrapIds.forEach((id) => setHidden(id, false));
   if (!isCn) {
     if (symbolsWrap) symbolsWrap.style.display = 'none';
@@ -273,11 +406,32 @@ function getSelectedIndustries() {
   return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
 }
 
+function drawerPanelLeadText(panel) {
+  const leads = {
+    s1: '先确定资产范围、时间窗口和基础过滤。',
+    s2: '这里只放低频调整的环境参数，默认不需要改。',
+    s3: '这里只放行业门控，默认不占主流程。',
+    s4: '这里定义入场信号和最终信号组合。',
+    s5: '这里决定候选如何排序，以及最终保留多少。',
+    s6: '这里决定建仓方式、仓位分配和组合约束。',
+    s7: '这里只放低频预算参数，默认不占主流程。',
+    s8: '这里定义风险预算、保护规则和回撤约束。',
+    s9: '这里定义止损、止盈和退出优先级。',
+    json: '这里只看草稿 JSON 和差异，不参与主流程。',
+    history: '这里只看历史实验和回放，不参与当前配置编辑。',
+  };
+  return leads[String(panel || '').trim().toLowerCase()] || '';
+}
+
 function setDrawerPanel(panel) {
   state.drawer_panel = panel || 's1';
+  if (state.config_workspace && typeof state.config_workspace === 'object' && /^s[1-9]$/i.test(state.drawer_panel)) {
+    state.config_workspace.active_stage = state.drawer_panel.toLowerCase();
+  }
   document.querySelectorAll('.wb-rail-btn').forEach((btn) => btn.classList.toggle('active', btn.getAttribute('data-panel') === state.drawer_panel));
   document.querySelectorAll('.wb-module').forEach((m) => m.classList.toggle('active', m.getAttribute('data-module') === state.drawer_panel));
   const titleEl = byId('wbDrawerTitle');
+  const leadEl = byId('wbDrawerLead');
   if (titleEl) {
     const assetScope = typeof resolvePreferredAssetScope === 'function'
       ? resolvePreferredAssetScope()
@@ -286,20 +440,21 @@ function setDrawerPanel(panel) {
       ? resolveAssetScopedPanelMeta(assetScope)
       : {};
     const titles = {
-      s1: panelMeta.s1?.title || '资产范围',
-      s2: panelMeta.s2?.title || 'Regime 规则',
-      s3: panelMeta.s3?.title || '资产特化范围',
-      s4: panelMeta.s4?.title || '信号逻辑',
-      s5: panelMeta.s5?.title || '排序逻辑',
-      s6: panelMeta.s6?.title || '组合构建',
-      s7: panelMeta.s7?.title || 'Governor 预算',
-      s8: panelMeta.s8?.title || '风险约束',
+      s1: panelMeta.s1?.title || '资产池与基础过滤',
+      s2: panelMeta.s2?.title || '高级环境参数',
+      s3: panelMeta.s3?.title || '行业门控',
+      s4: panelMeta.s4?.title || '入场信号与组合',
+      s5: panelMeta.s5?.title || '排序与候选保留',
+      s6: panelMeta.s6?.title || '建仓与组合约束',
+      s7: panelMeta.s7?.title || '高级预算参数',
+      s8: panelMeta.s8?.title || '风险保护',
       s9: panelMeta.s9?.title || '退出规则',
-      json: 'JSON',
+      json: '草稿 JSON',
       history: '历史实验',
     };
     titleEl.textContent = titles[state.drawer_panel] || state.drawer_panel;
   }
+  if (leadEl) leadEl.textContent = drawerPanelLeadText(state.drawer_panel);
 }
 
 function toggleDrawer(force = null) {
@@ -357,6 +512,14 @@ function validateConfigDraft(draft) {
     throw new Error('configDraftCore.validateConfigDraft is not available');
   }
   return core.validateConfigDraft(draft);
+}
+
+function buildFrontendSemanticPayload(draft) {
+  const core = window.configDraftCore;
+  if (!core || typeof core.serializeFrontendSemanticConfig !== 'function') {
+    throw new Error('configDraftCore.serializeFrontendSemanticConfig is not available');
+  }
+  return core.serializeFrontendSemanticConfig(draft);
 }
 
 function flattenObject(obj, prefix = '', out = {}) {
@@ -455,7 +618,7 @@ function refreshConfigPanels() {
   }
   if (typeof setValidationStatusItems === 'function') {
     setValidationStatusItems(errors.map((message, index) => ({
-      title: '配置校验失败',
+      title: '閰嶇疆鏍￠獙澶辫触',
       message,
       file: 'config_draft',
       detail: 'validation #' + String(index + 1),
@@ -554,9 +717,9 @@ function renderRunHints() {
 function resolveSummaryConfig() {
   const artCfg = (state.active_artifacts || {}).config;
   if (artCfg && typeof artCfg === 'object') {
-    const preferredWorkbenchCfg = artCfg?.overrides?.original_workbench_config
-      || artCfg?.overrides?.workbench_config
-      || artCfg?.workbench_config;
+    const preferredWorkbenchCfg = artCfg?.overrides?.workbench_config
+      || artCfg?.workbench_config
+      || artCfg?.overrides?.original_workbench_config;
     if (preferredWorkbenchCfg && typeof preferredWorkbenchCfg === 'object') {
       return preferredWorkbenchCfg;
     }
@@ -734,6 +897,8 @@ function renderSummaryBar() {
   setTextById('wbSummaryStrategy', strategyInfo.extra);
 }
 
+window.renderSummaryBar = renderSummaryBar;
+
 function selectedRegimeEngineValue() {
   return String(byId('wbRegimeEngine')?.value || 'ma200_legacy').trim().toLowerCase() || 'ma200_legacy';
 }
@@ -765,21 +930,65 @@ function applyConfigToUI(cfg) {
   const _set = (id, val) => { const el = byId(id); if (el && val != null) el.value = val; };
   const _chk = (id, val) => { const el = byId(id); if (el) el.checked = !!val; };
 
-  const assetScope = typeof resolvePreferredAssetScope === 'function'
-    ? resolvePreferredAssetScope(cfg?.asset_scope || state.loaded_source_asset_context?.asset_scope)
+  const currentRequestedScope = state?.active_asset_context?.asset_scope
+    || state?.loaded_source_asset_context?.asset_scope
+    || cfg?.asset_scope;
+  const currentPreferredScope = typeof resolvePreferredAssetScope === 'function'
+    ? resolvePreferredAssetScope(currentRequestedScope)
     : 'cn_a_equity';
+  const governedEtfConfig = resolveEtfSemanticConfig(cfg);
+  const governedStockConfig = resolveStockSemanticConfig(cfg);
+  const preferEtfScope = currentPreferredScope === 'cn_etf' && Object.keys(governedEtfConfig || {}).length > 0;
+  const assetScope = preferEtfScope
+    ? 'cn_etf'
+    : (typeof resolvePreferredAssetScope === 'function'
+      ? resolvePreferredAssetScope(cfg?.asset_scope || state.loaded_source_asset_context?.asset_scope)
+      : 'cn_a_equity');
   const isEtf = typeof isCnEtfAssetScope === 'function' ? isCnEtfAssetScope(assetScope) : assetScope === 'cn_etf';
+  const comboStockConfig = governedStockConfig;
+  const comboEtfConfig = governedEtfConfig;
   _set('wbAssetScope', assetScope);
   document.querySelectorAll('#wbAssetScopeGroup button').forEach((button) => {
     button.classList.toggle('active', button.getAttribute('data-val') === assetScope);
   });
 
-  const u = cfg?.universe || {};
+  const u = isEtf
+    ? ((comboEtfConfig?.universe && typeof comboEtfConfig.universe === 'object')
+      ? comboEtfConfig.universe
+      : ((cfg?.universe && typeof cfg.universe === 'object')
+        ? cfg.universe
+        : ((comboStockConfig?.universe && typeof comboStockConfig.universe === 'object') ? comboStockConfig.universe : {})))
+    : ((cfg?.universe && typeof cfg.universe === 'object')
+      ? cfg.universe
+      : ((comboStockConfig?.universe && typeof comboStockConfig.universe === 'object')
+        ? comboStockConfig.universe
+        : ((comboEtfConfig?.universe && typeof comboEtfConfig.universe === 'object') ? comboEtfConfig.universe : {})));
   const f = u.filters || {};
   _set('wbStartDate', u.start);
   _set('wbEndDate', u.end);
-  _set('wbBenchmark', u.benchmark);
-  const loadedMode = isEtf ? 'CUSTOM' : (cfg?.universe_mode || byId('wbUniverseMode')?.value || 'ALL_A');
+  _set(
+    'wbBenchmark',
+    isEtf
+      ? (
+        u.benchmark
+        || comboEtfConfig?.universe?.benchmark
+        || comboStockConfig?.universe?.benchmark
+      )
+      : (
+        u.benchmark
+        || comboStockConfig?.universe?.benchmark
+        || comboEtfConfig?.universe?.benchmark
+      ),
+  );
+  const loadedMode = isEtf
+    ? 'CUSTOM'
+    : (
+      cfg?.universe_mode
+      || comboStockConfig?.universe_mode
+      || comboEtfConfig?.universe_mode
+      || byId('wbUniverseMode')?.value
+      || 'ALL_A'
+    );
   _set('wbUniverseMode', loadedMode);
   document.querySelectorAll('#wbUniverseModeGroup button').forEach((b) => {
     b.classList.toggle('active', b.getAttribute('data-val') === loadedMode);
@@ -787,8 +996,9 @@ function applyConfigToUI(cfg) {
   const membershipUiValue = membershipUiValueFromConfig(u.membership_mode, loadedMode);
   syncMembershipModeButtons(membershipUiValue);
   updateMembershipModeVisibility(loadedMode);
-  _set('wbSymbols', Array.isArray(u.symbols) ? u.symbols.join(',') : undefined);
-  syncCnEtfPresetButtons(isEtf ? detectCnEtfPresetFromSymbols(u.symbols || []) : '');
+  const etfDisplaySymbols = isEtf ? deriveEtfDisplaySymbols(comboEtfConfig, u.symbols || []) : [];
+  _set('wbSymbols', isEtf ? etfDisplaySymbols.join(',') : (Array.isArray(u.symbols) ? u.symbols.join(',') : undefined));
+  syncCnEtfPresetButtons(isEtf ? detectCnEtfPresetFromConfig(comboEtfConfig, etfDisplaySymbols) : '');
   _set('wbUniverseLimit', u.limit);
   _chk('wbExcludeSt', f.exclude_st);
   _chk('wbExcludeSuspended', f.exclude_suspended);
@@ -798,6 +1008,8 @@ function applyConfigToUI(cfg) {
   _set('wbPriceMin', f.price_min ?? cfg?.universe_filter?.min_price);
   _set('wbPriceMax', f.price_max);
   _set('wbLimitRule', f.limit_rule);
+
+  if (isEtf) setTextById('wbPitStatus', describeEtfResearchPath(comboEtfConfig));
 
   const loadedAdj = isEtf ? (u.price_adj || 'none') : (u.price_adj || 'hfq');
   _set('wbPriceAdj', loadedAdj);
@@ -1150,4 +1362,5 @@ function populateMarketStateStats(counters) {
     }
   });
 }
+
 

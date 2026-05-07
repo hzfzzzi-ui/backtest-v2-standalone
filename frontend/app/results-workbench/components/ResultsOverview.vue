@@ -1,10 +1,18 @@
 <script setup>
-defineProps({
+import { computed } from 'vue';
+
+const props = defineProps({
   summary: {
     type: Object,
     required: true,
   },
+  mode: {
+    type: String,
+    default: 'full',
+  },
 });
+
+const isHeadlineMode = computed(() => props.mode === 'headline');
 </script>
 
 <template>
@@ -13,7 +21,7 @@ defineProps({
       <div class="wb-overview-title">运行概览</div>
       <dl class="wb-overview-grid">
         <div>
-          <dt>实验ID</dt>
+          <dt>实验</dt>
           <dd>{{ summary.expId }}</dd>
         </div>
         <div>
@@ -31,7 +39,7 @@ defineProps({
       </dl>
     </article>
 
-    <article class="wb-overview-card">
+    <article v-if="!isHeadlineMode" class="wb-overview-card">
       <div class="wb-overview-title">{{ summary.universeSectionTitle }}</div>
       <dl class="wb-overview-grid">
         <div>
@@ -56,7 +64,7 @@ defineProps({
             <dd>{{ summary.etfBatch }}</dd>
           </div>
           <div>
-            <dt>覆盖窗口</dt>
+            <dt>覆盖区间</dt>
             <dd>{{ summary.coverageWindow }}</dd>
           </div>
           <div>
@@ -64,22 +72,22 @@ defineProps({
             <dd>{{ summary.priceSeriesSemantics }}</dd>
           </div>
           <div>
-            <dt>ETF名单</dt>
+            <dt>ETF列表</dt>
             <dd>{{ summary.etfSymbols }}</dd>
           </div>
         </template>
       </dl>
     </article>
 
-    <article class="wb-overview-card">
-      <div class="wb-overview-title">策略口径</div>
+    <article v-if="!isHeadlineMode" class="wb-overview-card">
+      <div class="wb-overview-title">策略上下文</div>
       <dl class="wb-overview-grid">
         <div>
           <dt>策略</dt>
           <dd>{{ summary.strategy }}</dd>
         </div>
         <div>
-          <dt>主参数</dt>
+          <dt>核心参数</dt>
           <dd>{{ summary.strategyCore }}</dd>
         </div>
         <div>
@@ -87,18 +95,18 @@ defineProps({
           <dd>{{ summary.portfolioMode }}</dd>
         </div>
         <div>
-          <dt>补充信息</dt>
+          <dt>备注</dt>
           <dd>{{ summary.strategySummary }}</dd>
         </div>
       </dl>
     </article>
   </section>
 
-  <section class="wb-kpi-grid">
+  <section class="wb-kpi-grid" :class="{ 'wb-kpi-grid-headline': isHeadlineMode }">
     <article class="wb-kpi-card wb-kpi-pair">
       <div class="wb-kpi-pair-grid">
         <div>
-          <span class="wb-kpi-sub">期初资金</span>
+          <span class="wb-kpi-sub">初始资金</span>
           <strong>{{ summary.initialCapital }}</strong>
         </div>
         <div>
@@ -111,7 +119,7 @@ defineProps({
     <article class="wb-kpi-card wb-kpi-pair">
       <div class="wb-kpi-pair-grid">
         <div>
-          <span class="wb-kpi-sub">年化收益</span>
+          <span class="wb-kpi-sub">CAGR</span>
           <strong>{{ summary.cagr }}</strong>
         </div>
         <div>
@@ -128,7 +136,7 @@ defineProps({
           <strong>{{ summary.maxDrawdown }}</strong>
         </div>
         <div>
-          <span class="wb-kpi-sub">最大回撤时长</span>
+          <span class="wb-kpi-sub">回撤时长</span>
           <strong>{{ summary.maxDrawdownDuration }}</strong>
         </div>
       </div>
@@ -137,76 +145,91 @@ defineProps({
     <article class="wb-kpi-card wb-kpi-pair">
       <div class="wb-kpi-pair-grid">
         <div>
-          <span class="wb-kpi-sub">夏普比率</span>
+          <span class="wb-kpi-sub">夏普</span>
           <strong>{{ summary.sharpe }}</strong>
         </div>
         <div>
-          <span class="wb-kpi-sub">卡玛比率</span>
+          <span class="wb-kpi-sub">Calmar</span>
           <strong>{{ summary.calmar }}</strong>
         </div>
       </div>
     </article>
 
-    <article class="wb-kpi-card">
-      <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">滚动夏普(126D)</span>
-        <strong class="wb-kpi-value">{{ summary.rollingSharpe }}</strong>
-      </div>
-    </article>
-
-    <article class="wb-kpi-card wb-kpi-pair">
+    <article v-if="isHeadlineMode" class="wb-kpi-card wb-kpi-pair">
       <div class="wb-kpi-pair-grid">
         <div>
-          <span class="wb-kpi-sub">Alpha</span>
-          <strong>{{ summary.alpha }}</strong>
+          <span class="wb-kpi-sub">胜率</span>
+          <strong>{{ summary.winRate }}</strong>
         </div>
         <div>
-          <span class="wb-kpi-sub">Beta</span>
-          <strong>{{ summary.beta }}</strong>
+          <span class="wb-kpi-sub">交易数</span>
+          <strong>{{ summary.trades }}</strong>
         </div>
       </div>
     </article>
 
-    <article class="wb-kpi-card">
-      <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">单笔交易期望</span>
-        <strong class="wb-kpi-value">{{ summary.expectancyPerTrade }}</strong>
-      </div>
-    </article>
+    <template v-else>
+      <article class="wb-kpi-card">
+        <div class="wb-kpi-single">
+          <span class="wb-kpi-sub">滚动夏普（126日）</span>
+          <strong class="wb-kpi-value">{{ summary.rollingSharpe }}</strong>
+        </div>
+      </article>
 
-    <article class="wb-kpi-card">
-      <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">Profit Factor</span>
-        <strong class="wb-kpi-value">{{ summary.profitFactor }}</strong>
-      </div>
-    </article>
+      <article class="wb-kpi-card wb-kpi-pair">
+        <div class="wb-kpi-pair-grid">
+          <div>
+            <span class="wb-kpi-sub">Alpha</span>
+            <strong>{{ summary.alpha }}</strong>
+          </div>
+          <div>
+            <span class="wb-kpi-sub">Beta</span>
+            <strong>{{ summary.beta }}</strong>
+          </div>
+        </div>
+      </article>
 
-    <article class="wb-kpi-card">
-      <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">Win Rate</span>
-        <strong class="wb-kpi-value">{{ summary.winRate }}</strong>
-      </div>
-    </article>
+      <article class="wb-kpi-card">
+        <div class="wb-kpi-single">
+          <span class="wb-kpi-sub">单笔期望</span>
+          <strong class="wb-kpi-value">{{ summary.expectancyPerTrade }}</strong>
+        </div>
+      </article>
 
-    <article class="wb-kpi-card">
-      <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">交易次数</span>
-        <strong class="wb-kpi-value">{{ summary.trades }}</strong>
-      </div>
-    </article>
+      <article class="wb-kpi-card">
+        <div class="wb-kpi-single">
+          <span class="wb-kpi-sub">Profit Factor</span>
+          <strong class="wb-kpi-value">{{ summary.profitFactor }}</strong>
+        </div>
+      </article>
 
-    <article class="wb-kpi-card">
-      <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">换手率</span>
-        <strong class="wb-kpi-value">{{ summary.turnover }}</strong>
-      </div>
-    </article>
+      <article class="wb-kpi-card">
+        <div class="wb-kpi-single">
+          <span class="wb-kpi-sub">胜率</span>
+          <strong class="wb-kpi-value">{{ summary.winRate }}</strong>
+        </div>
+      </article>
 
-    <article class="wb-kpi-card">
-      <div class="wb-kpi-single">
-        <span class="wb-kpi-sub">TOP10收益集中度</span>
-        <strong class="wb-kpi-value">{{ summary.top10ProfitConcentration }}</strong>
-      </div>
-    </article>
+      <article class="wb-kpi-card">
+        <div class="wb-kpi-single">
+          <span class="wb-kpi-sub">交易数</span>
+          <strong class="wb-kpi-value">{{ summary.trades }}</strong>
+        </div>
+      </article>
+
+      <article class="wb-kpi-card">
+        <div class="wb-kpi-single">
+          <span class="wb-kpi-sub">换手率</span>
+          <strong class="wb-kpi-value">{{ summary.turnover }}</strong>
+        </div>
+      </article>
+
+      <article class="wb-kpi-card">
+        <div class="wb-kpi-single">
+          <span class="wb-kpi-sub">前十盈利集中度</span>
+          <strong class="wb-kpi-value">{{ summary.top10ProfitConcentration }}</strong>
+        </div>
+      </article>
+    </template>
   </section>
 </template>

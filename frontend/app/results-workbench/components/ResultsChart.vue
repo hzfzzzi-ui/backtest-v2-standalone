@@ -23,7 +23,46 @@ const portfolioBenchmarkCache = ref({});
 
 const artifacts = computed(() => props.snapshot?.artifacts || {});
 const view = computed(() => props.snapshot?.view || {});
+const navRows = computed(() => Array.isArray(artifacts.value.navSeries) ? artifacts.value.navSeries : []);
 const symbolRows = computed(() => Array.isArray(artifacts.value.symbolPerformanceRows) ? artifacts.value.symbolPerformanceRows : []);
+const tradeMarkers = computed(() => {
+  const rows = Array.isArray(artifacts.value.tradesRows) ? artifacts.value.tradesRows : [];
+  if (typeof window.tradeMarkers === 'function') return window.tradeMarkers(rows, { navRows: navRows.value }) || [];
+  return rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => String(row?.date || '').trim())
+    .map(({ row, index }) => {
+      const side = String(row?.side || '').trim().toUpperCase();
+      const isBuy = side === 'BUY';
+      const isSell = side === 'SELL';
+      if (!isBuy && !isSell) return null;
+      let meta = {};
+      try {
+        meta = typeof row?.meta_json === 'string' && row.meta_json.trim() ? JSON.parse(row.meta_json) : {};
+      } catch (_) {
+        meta = {};
+      }
+      const candidates = [
+        Number(meta?.target_weight),
+        Number(meta?.final_target_weight),
+        Number(meta?.requested_target_weight),
+      ].filter((value) => Number.isFinite(value) && value >= 0);
+      const weight = candidates.length ? candidates[0] : null;
+      const symbol = String(row?.symbol || '').trim().toUpperCase();
+      return {
+        time: String(row.date).slice(0, 10),
+        position: isBuy ? 'belowBar' : 'aboveBar',
+        color: isBuy ? '#22c55e' : '#ef4444',
+        shape: isBuy ? 'arrowUp' : 'arrowDown',
+        text: Number.isFinite(weight) ? `${(weight * 100).toFixed(1).replace(/\.0$/, '')}%` : '',
+        id: `${symbol || 'ALL'}_${String(row.date)}_${side}_${index}`,
+        symbol: String(row?.symbol || '').trim().toLowerCase(),
+        side,
+      };
+    })
+    .filter(Boolean);
+});
+const tradeMarkerPreview = computed(() => tradeMarkers.value.slice(-8));
 const isResearchCombo = computed(() => {
   const runMeta = artifacts.value.run_meta && typeof artifacts.value.run_meta === 'object'
     ? artifacts.value.run_meta
@@ -46,7 +85,7 @@ const portfolioBenchmarkSymbol = computed(() => {
   return String(metaData.benchmark || etfSymbols[0] || DEFAULT_PORTFOLIO_BENCHMARK_SYMBOL).trim() || DEFAULT_PORTFOLIO_BENCHMARK_SYMBOL;
 });
 const benchmarkToggleLabel = computed(() => (isSymbolMode.value ? '对比基准' : `对比 ${portfolioBenchmarkSymbol.value}`));
-const showPortfolioBenchmark = computed(() => !isSymbolMode.value && !isResearchCombo.value && !!view.value.showBenchmark);
+const showPortfolioBenchmark = computed(() => !isSymbolMode.value && !isResearchCombo.value && (view.value.showBenchmark !== false));
 const showBenchmarkToggle = computed(() => !isResearchCombo.value);
 
 const REGIME_MODE_LABELS = {
@@ -228,6 +267,12 @@ const groupLoadStatus = computed(() => {
   return missing.length ? `缺少 ${missing.length} 个产物，请查看状态中心` : '产物已加载';
 });
 
+function tradeMarkerPreviewLabel(marker) {
+  const arrow = marker?.position === 'belowBar' ? '↑' : '↓';
+  const text = String(marker?.text || '').trim();
+  return text ? `${arrow} ${text}` : arrow;
+}
+
 function destroyInactiveCharts(forSymbolMode) {
   if (forSymbolMode) {
     if (typeof window.destroyPortfolioDualChartLW === 'function') {
@@ -256,7 +301,7 @@ async function redrawChart() {
     const ohlc = Array.isArray(cache.ohlc) ? cache.ohlc : [];
     const lastClose = Number(ohlc[ohlc.length - 1]?.close);
     const markers = typeof window.symbolTradeMarkers === 'function'
-      ? window.symbolTradeMarkers(selectedSymbol.value, artifacts.value.tradesRows || [])
+      ? window.symbolTradeMarkers(selectedSymbol.value, artifacts.value.tradesRows || [], { navRows: navRows.value })
       : [];
     const suspensionRanges = Array.isArray(cache.suspensionRanges) ? cache.suspensionRanges : [];
 
@@ -291,6 +336,9 @@ async function redrawChart() {
   );
   const aggregateNav = typeof window.aggregateNav === 'function' ? window.aggregateNav : ((rows) => rows || []);
   const aggregateOhlc = typeof window.aggregateOhlc === 'function' ? window.aggregateOhlc : ((rows) => rows || []);
+  const markers = typeof window.tradeMarkers === 'function'
+    ? window.tradeMarkers(artifacts.value.tradesRows || [], { navRows: navRows.value })
+    : tradeMarkers.value;
 
   window.renderPortfolioDualChartLW(
     portfolioTopChartRef.value.id,
@@ -298,9 +346,10 @@ async function redrawChart() {
     aggregateOhlc(benchmarkOhlc, chartRange),
     aggregateNav(navSeries, chartRange),
     {
-      showBenchmark: !!view.value.showBenchmark,
+      showBenchmark: showPortfolioBenchmark.value,
       benchmarkSymbol: portfolioBenchmarkSymbol.value,
       marketStates,
+      markers,
     },
   );
 }
@@ -315,6 +364,15 @@ function onChartRangeChange(event) {
 
 function onShowBenchmarkChange(event) {
   props.patchViewState({ showBenchmark: !!event.target.checked });
+}
+
+function jumpToTradeSymbol(symbol) {
+  const normalized = String(symbol || '').trim().toLowerCase();
+  if (!normalized) return;
+  props.patchViewState({
+    chartMode: 'symbol',
+    selectedSymbol: normalized,
+  });
 }
 
 onMounted(async () => {
@@ -355,6 +413,19 @@ watch(
           <option value="Y">年K</option>
         </select>
       </div>
+    </div>
+
+    <div v-if="tradeMarkerPreview.length" class="wb-inline" style="gap:6px 8px;flex-wrap:wrap;margin:0 0 10px;">
+      <span class="wb-mini">买卖点</span>
+      <button
+        v-for="marker in tradeMarkerPreview"
+        :key="marker.id"
+        type="button"
+        class="pill wb-cmd-btn"
+        @click="jumpToTradeSymbol(marker.symbol)"
+      >
+        {{ tradeMarkerPreviewLabel(marker) }} · {{ marker.time }}
+      </button>
     </div>
 
     <div

@@ -368,6 +368,5 @@ function validateMultiAlphaDraft(draft) {
     validateMultiAlphaDraft,
   };
 
-  globalScope.multiAlphaUi = api;
-  Object.assign(globalScope, api);
+  globalScope.multiAlphaUi = Object.freeze(api);
 })(window);

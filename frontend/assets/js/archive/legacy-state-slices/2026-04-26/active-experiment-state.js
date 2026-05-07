@@ -11,7 +11,6 @@
       runtime_source_id: '',
       loaded_source_kind: '',
       loaded_source_id: '',
-      compare_selected_ids: [],
     };
   };
 })(window);

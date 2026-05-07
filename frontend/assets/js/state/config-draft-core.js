@@ -1,6 +1,156 @@
 /* config-draft-core.js: sole owner of desktop config compile/validate truth. */
 (function initConfigDraftCore(globalScope) {
+  const multiAlphaUi = globalScope.multiAlphaUi || {};
+  const normalizeMultiAlphaName = typeof multiAlphaUi.normalizeMultiAlphaName === 'function'
+    ? multiAlphaUi.normalizeMultiAlphaName
+    : ((value) => String(value || '').trim().toLowerCase());
+  const hasPhase1MultiAlphaIntent = typeof multiAlphaUi.hasPhase1MultiAlphaIntent === 'function'
+    ? multiAlphaUi.hasPhase1MultiAlphaIntent
+    : (() => false);
+  const validateMultiAlphaDraft = typeof multiAlphaUi.validateMultiAlphaDraft === 'function'
+    ? multiAlphaUi.validateMultiAlphaDraft
+    : (() => []);
+  const ensurePhase1ComposeRows = typeof multiAlphaUi.ensurePhase1ComposeRows === 'function'
+    ? multiAlphaUi.ensurePhase1ComposeRows
+    : ((rows) => (Array.isArray(rows) ? rows : []));
+  const currentComposeRows = typeof multiAlphaUi.currentComposeRows === 'function'
+    ? multiAlphaUi.currentComposeRows
+    : (() => []);
+  const composeRowNames = typeof multiAlphaUi.composeRowNames === 'function'
+    ? multiAlphaUi.composeRowNames
+    : ((rows) => (Array.isArray(rows) ? rows : []).map((row) => normalizeMultiAlphaName(row && row.name)).filter(Boolean));
+  const normalizePhase1MultiAlphaRegimeMatrix = typeof multiAlphaUi.normalizePhase1MultiAlphaRegimeMatrix === 'function'
+    ? multiAlphaUi.normalizePhase1MultiAlphaRegimeMatrix
+    : ((matrix) => (matrix && typeof matrix === 'object' ? matrix : {}));
+  const buildRegimeMatrixFromUi = typeof multiAlphaUi.buildRegimeMatrixFromUi === 'function'
+    ? multiAlphaUi.buildRegimeMatrixFromUi
+    : (() => ({}));
+  const readOptionalInputValue = typeof multiAlphaUi.readOptionalInputValue === 'function'
+    ? multiAlphaUi.readOptionalInputValue
+    : (() => null);
+  const readOptionalNumberInput = typeof multiAlphaUi.readOptionalNumberInput === 'function'
+    ? multiAlphaUi.readOptionalNumberInput
+    : (() => null);
+  const hasOwnConfigKey = typeof multiAlphaUi.hasOwnConfigKey === 'function'
+    ? multiAlphaUi.hasOwnConfigKey
+    : ((obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key));
+  const buildKnownModuleParams = typeof multiAlphaUi.buildKnownModuleParams === 'function'
+    ? multiAlphaUi.buildKnownModuleParams
+    : ((name, params = {}) => cloneJson(params) || {});
+  const coercePhase1MultiAlphaOption = typeof multiAlphaUi.coercePhase1MultiAlphaOption === 'function'
+    ? multiAlphaUi.coercePhase1MultiAlphaOption
+    : ((value, fallback = '') => String(value || fallback || '').trim() || fallback);
+  const normalizeMultiAlphaOption = typeof multiAlphaUi.normalizeMultiAlphaOption === 'function'
+    ? multiAlphaUi.normalizeMultiAlphaOption
+    : ((value, fallback = '') => {
+      const text = String(value || '').trim();
+      return text || fallback;
+    });
+  const FRONTEND_SEMANTIC_TOP_LEVEL_FIELDS = new Set([
+    'asset_scope',
+    'asset_context',
+    'governed_a_share',
+    'mode',
+    'initial_capital',
+    'strategy_pack',
+    'universe_mode',
+    'industries',
+    'universe',
+    'signal_generation',
+    'benchmark_regime',
+    'stock_trend_filter',
+    'sector_gate',
+    'signal_composition',
+    'exit_rules',
+    'universe_filter',
+    'position_risk',
+    'sizing',
+    'flow_script',
+    'data_source',
+    'regime_engine',
+    'exit_priority',
+    'unified_runtime',
+  ]);
+
+  const FRONTEND_SEMANTIC_STRIP_FIELDS = new Set([
+    'combo_context',
+    'combo_result',
+    'combo_runtime',
+    'research_combo',
+    'combo_display',
+    'analysis_mode',
+    'compiled_plan',
+    'asset_role',
+    'market_data_contract',
+    'resolved_config_meta',
+    'source_manifest',
+    'workbench_context',
+    'results_surface',
+    'data',
+    'summary',
+  ]);
+
+  function sanitizeDataSourceConfig(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+    const next = cloneJson(payload) || {};
+    delete next.data_role;
+    delete next.stocks_table;
+    return Object.keys(next).length ? next : null;
+  }
+
+  function sanitizeFrontendSemanticPayload(draft) {
+    const source = cloneJson(draft) || {};
+    Object.keys(source).forEach((key) => {
+      if (FRONTEND_SEMANTIC_STRIP_FIELDS.has(key)) {
+        delete source[key];
+        return;
+      }
+      if (!FRONTEND_SEMANTIC_TOP_LEVEL_FIELDS.has(key)) {
+        delete source[key];
+      }
+    });
+    if (Object.prototype.hasOwnProperty.call(source, 'data_source')) {
+      const dataSource = sanitizeDataSourceConfig(source.data_source);
+      if (dataSource) source.data_source = dataSource;
+      else delete source.data_source;
+    }
+    if (!isUnifiedRuntimePassthroughConfig(source)) {
+      delete source.asset_context;
+      delete source.unified_runtime;
+    }
+    return source;
+  }
+
+  function isUnifiedRuntimePassthroughConfig(config) {
+    if (!config || typeof config !== 'object') return false;
+    const runtime = config.unified_runtime;
+    if (!runtime || typeof runtime !== 'object' || runtime.enabled !== true) return false;
+    const executionContract = runtime.execution_contract
+      && typeof runtime.execution_contract === 'object'
+        ? runtime.execution_contract
+        : (
+          runtime.combo_context?.execution_contract
+          && typeof runtime.combo_context.execution_contract === 'object'
+            ? runtime.combo_context.execution_contract
+            : null
+        );
+    if (executionContract) return true;
+    const contract = runtime.component_source_contract
+      && typeof runtime.component_source_contract === 'object'
+        ? runtime.component_source_contract
+        : (
+          runtime.combo_context?.component_source_contract
+          && typeof runtime.combo_context.component_source_contract === 'object'
+            ? runtime.combo_context.component_source_contract
+            : null
+        );
+    if (contract) return true;
+    const sleeves = runtime.sleeves;
+    return !!(sleeves && typeof sleeves === 'object' && !Array.isArray(sleeves) && Object.keys(sleeves).length);
+  }
+
   function validateConfigDraftCore(draft) {
+    if (isUnifiedRuntimePassthroughConfig(draft)) return [];
     const errors = [];
     const multiAlphaEnabled = hasPhase1MultiAlphaIntent(draft);
     if (multiAlphaEnabled) {
@@ -30,6 +180,10 @@
 
   function buildConfigDraftCore() {
     const loadedBase = cloneJson(state.loaded_source_config) || {};
+    if (isUnifiedRuntimePassthroughConfig(loadedBase)) {
+      state.config_draft = loadedBase;
+      return loadedBase;
+    }
     const loadedUniverse = loadedBase.universe || {};
     const loadedUniverseFilters = loadedUniverse.filters || {};
     const loadedSignalGeneration = loadedBase.signal_generation || {};
@@ -552,5 +706,6 @@
   globalScope.configDraftCore = Object.freeze({
     buildConfigDraft: buildConfigDraftCore,
     validateConfigDraft: validateConfigDraftCore,
+    serializeFrontendSemanticConfig: sanitizeFrontendSemanticPayload,
   });
 })(window);

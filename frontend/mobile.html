@@ -14,8 +14,23 @@
   <link rel="icon" type="image/svg+xml" href="/assets/icons/trading-assistant.svg?v=20260316_mobileapp15" />
   <link rel="apple-touch-icon" href="/assets/icons/trading-assistant-180.png?v=20260316_mobileapp15" />
   <link rel="stylesheet" href="/assets/css/mobile-dashboard.css?v=20260316_mobileapp15" />
+  <style>
+    body[data-mobile-surface="readonly"] #mdDepositBtn,
+    body[data-mobile-surface="readonly"] [data-md-action],
+    body[data-mobile-surface="readonly"] .md-trade-terminal [data-md-action] {
+      display: none !important;
+    }
+
+    body[data-mobile-surface="readonly"] .md-note-pill {
+      display: inline-flex;
+    }
+
+    body[data-mobile-surface="readonly"] .md-button-row {
+      justify-content: flex-start;
+    }
+  </style>
 </head>
-<body>
+<body data-mobile-surface="readonly">
   <div class="md-app">
     <div class="md-bg-grid"></div>
     <div class="md-bg-glow md-bg-glow-a"></div>
@@ -57,7 +72,7 @@
           </div>
           <div class="md-kicker">私有访问</div>
           <h1>交易助手</h1>
-          <p>查看真实持仓、今日信号与人工确认动作。仅建议在私有网络或 Tailscale 网络中访问。</p>
+          <p>查看真实持仓、今日信号与执行结果摘要。当前为只读结果面，仅建议在私有网络或 Tailscale 网络中访问。</p>
         </div>
 
         <form id="mdLoginForm" class="md-auth-form">
@@ -214,6 +229,7 @@
             <div class="md-trade-header">
               <div>
                 <h2>A股 / CN-A</h2>
+                <p id="mdTradeTerminalHint" class="md-home-secondary">当前为只读结果面，仅查看摘要、信号与执行结果。</p>
               </div>
             </div>
           </section>
@@ -326,8 +342,8 @@
     </template>
   </div>
 
+  <script src="/assets/js/shared-api.js?v=20260404_sharedapi01"></script>
   <script src="/assets/js/state/mobile-state.js?v=20260316_mobileapp15"></script>
-  <script src="/assets/js/pages/mobile-dashboard-page.js?v=20260316_mobileapp15"></script>
-  <script src="/assets/js/mobile-dashboard.js?v=20260316_mobileapp15"></script>
+  <script src="/assets/js/mobile-dashboard.js?v=20260426_mobileowner01"></script>
 </body>
 </html>

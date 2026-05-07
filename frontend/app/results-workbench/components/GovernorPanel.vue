@@ -11,18 +11,18 @@ defineProps({
   <section class="wb-workbench-panel">
     <section v-if="model.available" class="wb-detail-grid">
       <article class="wb-detail-card">
-        <div class="wb-detail-title">总控摘要</div>
+        <div class="wb-detail-title">治理摘要</div>
         <dl class="wb-detail-kv">
           <div>
             <dt>资产范围</dt>
             <dd>{{ model.assetScope }}</dd>
           </div>
           <div>
-            <dt>预算 Owner</dt>
+            <dt>预算归属</dt>
             <dd>{{ model.budgetOwner }}</dd>
           </div>
           <div>
-            <dt>消费者 Sleeve</dt>
+            <dt>消费腿</dt>
             <dd>{{ model.consumerSleeveId }}</dd>
           </div>
           <div>
@@ -83,13 +83,13 @@ defineProps({
       </article>
 
       <article class="wb-detail-card">
-        <div class="wb-detail-title">Budget Reason Codes</div>
+        <div class="wb-detail-title">预算原因代码</div>
         <div class="wb-chip-list">
           <span v-for="code in model.budgetReasonCodes" :key="code" class="wb-chip">{{ code }}</span>
           <span v-if="!model.budgetReasonCodes.length" class="wb-chip">无</span>
         </div>
         <div>
-          <div class="wb-field-label">Local Budget Controls</div>
+          <div class="wb-field-label">局部预算控制</div>
           <div class="wb-chip-list">
             <span v-for="control in model.localBudgetControls" :key="control" class="wb-chip">{{ control }}</span>
             <span v-if="!model.localBudgetControls.length" class="wb-chip">无</span>
@@ -98,14 +98,14 @@ defineProps({
       </article>
 
       <article class="wb-detail-card">
-        <div class="wb-detail-title">Sleeve Budget 摘要</div>
+        <div class="wb-detail-title">腿级预算摘要</div>
         <dl class="wb-detail-list">
           <div v-for="item in model.sleeveBudgets" :key="item.sleeveId">
             <dt>{{ item.sleeveId }}</dt>
-            <dd>{{ item.systemRole }} | slots {{ item.slotCap }} / {{ item.availableSlots }} | candidates {{ item.candidateCount }} | selected {{ item.selectedCount }} | share {{ item.budgetShare }}</dd>
+            <dd>{{ item.systemRole }} | 槽位 {{ item.slotCap }} / {{ item.availableSlots }} | 候选 {{ item.candidateCount }} | 已选 {{ item.selectedCount }} | 占比 {{ item.budgetShare }}</dd>
           </div>
           <div v-if="!model.sleeveBudgets.length">
-            <dt>Sleeve Budget</dt>
+            <dt>腿级预算</dt>
             <dd>暂无</dd>
           </div>
         </dl>
@@ -113,7 +113,7 @@ defineProps({
     </section>
 
     <section v-else class="wb-empty">
-      <span>当前结果未提供正式 Governor snapshot。</span>
+      <span>当前结果未提供正式治理快照。</span>
     </section>
   </section>
 </template>
