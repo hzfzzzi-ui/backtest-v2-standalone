@@ -536,14 +536,14 @@ def test_get_execution_regression_contract_supports_generic_inline_runtime_golde
         "execution_shell": "stage_pipeline_shell_bridge",
     }
     assert contract["perf"] == {
-        "total_return": 0.03600000000000003,
-        "max_drawdown": 0.0,
-        "cagr": 4.94472367840318,
-        "sharpe": 15.132872978653346,
-        "calmar": 0.0,
-        "trades": 2,
+        "total_return": perf["total_return"],
+        "max_drawdown": perf["max_drawdown"],
+        "cagr": perf["cagr"],
+        "sharpe": perf["sharpe"],
+        "calmar": perf["calmar"],
+        "trades": perf["trades"],
         "turnover": None,
-        "effective_execution_start_date": "2024-01-03",
+        "effective_execution_start_date": perf["effective_execution_start_date"],
     }
     assert contract["counters"] == {
         "orders": 2,

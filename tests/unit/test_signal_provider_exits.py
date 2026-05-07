@@ -3,8 +3,13 @@ from __future__ import annotations
 from datetime import date
 
 from backend.core.config.models import ExitConfig, StrategyConfig
-from backend.core.engine_vector.signal_provider import evaluate_engine_exits
+from backend.core.engine_vector.signal_provider import evaluate_engine_exits as _evaluate_engine_exits
 from backend.core.strategies.registry import build_strategy
+
+
+def evaluate_engine_exits(*args, **kwargs):
+    exits, exit_syms, counts, _fragility_diag = _evaluate_engine_exits(*args, **kwargs)
+    return exits, exit_syms, counts
 
 
 def test_build_strategy_preserves_bear_only_risk_off_exit_mode() -> None:

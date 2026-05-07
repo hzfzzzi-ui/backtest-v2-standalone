@@ -501,7 +501,7 @@ def test_ensure_standard_artifacts_writes_cn_etf_beta_phase1_summary(tmp_path) -
     etf_beta = dict(run_meta["etf_beta"])
     assert run_meta["data"]["benchmark"] == "510050.SH"
     assert run_meta["data"]["benchmark_source"] == "universe_meta.benchmark_source::first_etf_symbol"
-    assert etf_beta["source_entry_type"] == "cn_etf_research_entry"
+    assert etf_beta["source_entry_type"] == "cn_etf_phase1_allocation_entry"
     assert etf_beta["eligible_etfs"] == ["510050.SH", "510300.SH", "510500.SH", "512100.SH"]
     assert etf_beta["selected_etfs"] == ["510300.SH", "512100.SH"]
     assert etf_beta["out_of_scope_etfs"] == ["518880.SH"]

@@ -1182,8 +1182,10 @@ def evaluate_price_adjustment_integrity(
         fail_count = int(adj_stats.get("symbols_exceeding_fail_count") or 0)
         warn_count = int(adj_stats.get("symbols_exceeding_warn_count") or 0)
         null_count = int(adj_stats.get("null_count") or 0)
+        missing_count = int(adj_stats.get("symbols_with_missing_count") or 0)
         symbol_count = int(adj_stats.get("symbol_count") or 0)
-        if symbol_count <= 0:
+        has_stale_count_evidence = fail_count > 0 or warn_count > 0 or null_count > 0 or missing_count > 0
+        if symbol_count <= 0 and not has_stale_count_evidence:
             status = "UNKNOWN"
             reason = "Price adjustment is enabled, but adj_factor statistics cover zero symbols."
         elif fail_count > 0:

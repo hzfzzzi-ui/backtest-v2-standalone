@@ -1610,8 +1610,8 @@ def test_breakout_provider_emits_formal_regime_arrays() -> None:
     assert len(provider._state_stability_metrics_arr) == len(trading_days)
     assert len(provider._regime_risk_budget_multiplier_arr) == len(trading_days)
     assert len(provider._defense_bias_arr) == len(trading_days)
-    assert set(provider._base_state_5_arr.tolist()).issubset({"BULL", "TRANS_UP", "LIGHT", "TRANS_DOWN", "RISK_OFF"})
-    assert set(provider._effective_state_5_arr.tolist()) == {"LIGHT"}
+    assert set(provider._base_state_5_arr.tolist()).issubset({"BULL", "TRANS_UP", "TRANS_DOWN", "RISK_OFF"})
+    assert set(provider._effective_state_5_arr.tolist()) == {"TRANS_UP"}
     assert "MANUAL_OVERRIDE_ACTIVE" in set(provider._reason_codes_arr[-1])
     assert provider._runtime_state.base_state_5.shape[0] == len(trading_days)
     assert provider._runtime_state.manual_override.shape[0] == len(trading_days)

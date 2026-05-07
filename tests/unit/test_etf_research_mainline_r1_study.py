@@ -4,7 +4,9 @@ from backend.research import study_loader, study_runner
 
 
 def test_etf_research_mainline_r1_builds_expected_execution_plan() -> None:
-    study = study_loader.load_study_definition("etf/cn_broad_based_research_mainline_r1")
+    study = study_loader.load_study_definition(
+        "research/archive/research_only_studies/2026-04-26/etf/cn_broad_based_research_mainline_r1.study.yaml"
+    )
     plan = study_runner.build_execution_plan(study)
 
     assert len(plan) == 1
