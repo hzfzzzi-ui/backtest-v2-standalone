@@ -10,6 +10,7 @@ from backend.core.services.experiment_history_service import delete_experiment
 from backend.core.services.market_data_sync_service import build_market_data_sync_status
 from backend.core.tools.baseline_access import (
     baseline_dir,
+    baseline_config_snapshot_path,
     baseline_index_path,
     load_baseline_record,
     sanitize_json,
@@ -79,6 +80,9 @@ def _latest_display_trade_date() -> tuple[str, dict[str, Any]]:
 
 
 def _baseline_config_path(baseline_id: str) -> Path:
+    snapshot = baseline_config_snapshot_path(baseline_id)
+    if snapshot.exists():
+        return snapshot
     return baseline_dir(baseline_id) / "config.json"
 
 
@@ -210,6 +214,7 @@ def main() -> None:
                 "baseline_record": {
                     "baseline_id": baseline_record.get("baseline_id"),
                     "linked_exp_id": baseline_record.get("linked_exp_id"),
+                    "execution_contract_ref": baseline_record.get("execution_contract_ref"),
                     "updated_at": baseline_record.get("updated_at"),
                 },
             }

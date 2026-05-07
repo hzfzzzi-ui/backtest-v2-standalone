@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from backend.core.config.loader import load_config
-from backend.core.data.pg_provider import PostgresDataProvider
+from backend.core.data.provider_factory import build_runtime_provider_from_config
 from backend.core.engine_vector.breakout_signal_provider import _build_industry_assignment_matrices
 
 
@@ -46,7 +46,7 @@ def _membership_mask(
 
 
 def _active_price_mask(
-    provider: PostgresDataProvider,
+    provider: object,
     *,
     symbols: list[str],
     start: date,
@@ -62,7 +62,10 @@ def _active_price_mask(
         "AND symbol = ANY(%s) "
         "ORDER BY trade_date, symbol"
     )
-    raw = provider._exec_df(
+    exec_df = getattr(provider, "_exec_df", None)
+    if not callable(exec_df):
+        raise TypeError("ops industry PIT audit requires a provider with _exec_df support")
+    raw = exec_df(
         q,
         (start, end, symbols),
         {
@@ -92,14 +95,14 @@ def _resolve_output_dir(base: Path | None) -> Path:
     return (
         Path("outputs")
         / "ops"
-        / "audit_0726_industry_pit_after_repairs_20260314"
+        / "audit_1226_industry_pit_after_repairs_20260314"
     ).resolve()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Audit 07-26 PIT industry mapping after repairs.")
+    parser = argparse.ArgumentParser(description="Audit 12-26 PIT industry mapping after repairs.")
     parser.add_argument("--config", default="backend/configs/pams_cn_pg.json")
-    parser.add_argument("--start", default="2007-01-15")
+    parser.add_argument("--start", default="2012-01-04")
     parser.add_argument("--end", default="2026-03-01")
     parser.add_argument("--index-code", default="000906.SH")
     parser.add_argument("--output-dir", default="")
@@ -111,12 +114,10 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     cfg_obj, _ = load_config(args.config)
-    provider = PostgresDataProvider(
-        db=cfg_obj.db,
-        runtime=cfg_obj.db_runtime,
-        data_source=cfg_obj.data_source,
-        schema_mapping=cfg_obj.schema_mapping,
-        rules_path="backend/core/data/rules.csv",
+    provider = build_runtime_provider_from_config(
+        cfg_obj,
+        "backend/core/data/rules.csv",
+        use_cache=False,
     )
 
     membership_history = provider.load_index_constituent_history(args.index_code, start, end)

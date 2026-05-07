@@ -1,14 +1,14 @@
 study_id: etf/cn_etf_first_wave_all
 title: CN ETF First Wave All
 asset_scope: cn_etf
-baseline_id: baseline_V10_2
-hypothesis: 第一波全量 9 只 ETF 可作为 A股 ETF 研究全集入口，用于检查更完整的资产暴露集合在当前 V10.2 壳下的可运行性和产物一致性。
+baseline_id: baseline_V10_1
+hypothesis: First-wave CN ETF preset for full-pool compile and smoke verification.
 change_scope:
   modules_modified:
     - research_entry.cn_etf.first_wave_all
 variants:
   - name: ALL
-    description: 首波全量 9 只 ETF 预设组
+    description: First-wave all ETF preset compile/smoke entry.
     config_patches:
       - path: asset_scope
         value: cn_etf
@@ -45,7 +45,7 @@ required_outputs:
   - machine_bundle
   - human_bundle
 request_template:
-  config_path: outputs/baselines/baseline_V10_2/config.json
+  config_path: outputs/baselines/baseline_V10_1/config.json
   fast_mode: true
 metadata:
   materialize_config_json: true

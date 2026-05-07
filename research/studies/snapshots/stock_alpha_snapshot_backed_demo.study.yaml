@@ -1,0 +1,45 @@
+study_id: snapshots/stock_alpha_snapshot_backed_demo
+title: Snapshot Backed Stock Alpha 研究示例
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: 已冻结的 stock alpha factor snapshot 可以被 research runtime 直接消费，而不需要重新计算因子。
+change_scope:
+  modules_modified:
+    - backend.research.snapshot_backed_study
+    - backend.research.study_runner
+variants:
+  - name: B0_SNAPSHOT
+    request_overrides:
+      run_params:
+        snapshot_surface_kind: stock_alpha
+        snapshot_inputs:
+          - name: factor_catalog
+            type: stock_alpha_factor_catalog_json
+            path: outputs/studies/factors/stock_alpha_factor_surface_demo/2326/B0_EQUAL/machine/factor_catalog.json
+            window_key: 2326
+            variant_name: B0_EQUAL
+          - name: factor_snapshot
+            type: stock_alpha_factor_snapshot_csv
+            path: outputs/studies/factors/stock_alpha_factor_surface_demo/2326/B0_EQUAL/machine/factor_snapshot.csv
+            window_key: 2326
+            variant_name: B0_EQUAL
+          - name: factor_score_snapshot
+            type: stock_alpha_factor_score_snapshot_csv
+            path: outputs/studies/factors/stock_alpha_factor_surface_demo/2326/B0_EQUAL/machine/factor_score_snapshot.csv
+            window_key: 2326
+            variant_name: B0_EQUAL
+windows:
+  - key: 2326
+    role: main
+    start: "2023-01-03"
+    end: "2026-03-20"
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+hard_gates: {}
+metadata:
+  runner_mode: snapshot_backed_research_runtime
+  snapshot_surface_kind: stock_alpha

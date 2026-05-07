@@ -1,0 +1,45 @@
+study_id: snapshots/account_state_snapshot_backed_demo
+title: Snapshot Backed Account State 研究示例
+asset_scope: cn_multi_asset
+baseline_id: baseline_V10_1
+hypothesis: 已冻结的账户层连续状态分数快照可以被 research runtime 直接消费，而不需要重新计算状态分数。
+change_scope:
+  modules_modified:
+    - backend.research.snapshot_backed_study
+    - backend.research.study_runner
+variants:
+  - name: B0_SNAPSHOT
+    request_overrides:
+      run_params:
+        snapshot_surface_kind: account_state
+        snapshot_inputs:
+          - name: score_catalog
+            type: account_state_score_catalog_json
+            path: outputs/studies/state_scores/account_state_score_surface_demo/2326/B0_EQUAL/machine/score_catalog.json
+            window_key: 2326
+            variant_name: B0_EQUAL
+          - name: score_snapshot
+            type: account_state_score_snapshot_csv
+            path: outputs/studies/state_scores/account_state_score_surface_demo/2326/B0_EQUAL/machine/score_snapshot.csv
+            window_key: 2326
+            variant_name: B0_EQUAL
+          - name: score_combo_snapshot
+            type: account_state_combo_score_snapshot_csv
+            path: outputs/studies/state_scores/account_state_score_surface_demo/2326/B0_EQUAL/machine/score_combo_snapshot.csv
+            window_key: 2326
+            variant_name: B0_EQUAL
+windows:
+  - key: 2326
+    role: main
+    start: "2023-01-03"
+    end: "2026-03-20"
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+hard_gates: {}
+metadata:
+  runner_mode: snapshot_backed_research_runtime
+  snapshot_surface_kind: account_state

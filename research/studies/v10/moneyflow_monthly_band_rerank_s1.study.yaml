@@ -1,0 +1,47 @@
+study_id: v10/moneyflow_monthly_band_rerank_s1
+title: V10 Moneyflow Monthly Band Rerank S1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  Evaluate whether monthly_divergence_rate works better as a bounded candidate-band rerank
+  than as a weak tiebreak or a pure sizing overlay. Keep the live residual ranking shell
+  intact, and rerank only the top candidate band with monthly moneyflow scores.
+change_scope:
+  modules_modified:
+    - asset_context.moneyflow_overlay
+    - backend.core.portfolio.candidate_plan
+variants:
+  - name: B0
+    description: Current baseline control with no moneyflow overlay.
+  - name: MF_BAND20
+    description: Rerank only the top-20 candidate band with monthly_divergence_rate and keep the suffix unchanged.
+    request_overrides:
+      runtime_config_json:
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: band_rerank
+            factor_role: rank
+            apply_layer: ranking
+            band_limit: 20
+windows:
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+    request_overrides:
+      runtime_config_path: research/studies/v10/configs/moneyflow_monthly_shadow_s1/1217_base.json
+  - key: "1226"
+    role: audit
+    start: "2012-01-04"
+    end: "2026-03-01"
+    request_overrides:
+      runtime_config_path: research/studies/v10/configs/moneyflow_monthly_shadow_s1/1226_base.json
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json

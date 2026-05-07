@@ -1,0 +1,58 @@
+study_id: v10/moneyflow_monthly_band_rerank_state_gate_s1
+title: V10 Moneyflow Monthly Band Rerank State Gate S1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  Evaluate whether monthly_divergence_rate candidate-band rerank is more stable when it is
+  only active in stronger market states. Keep the same top-20 rerank band and compare
+  BULL-only vs BULL+TRANS_UP gating against the current baseline shell.
+change_scope:
+  modules_modified:
+    - asset_context.moneyflow_overlay
+    - backend.core.portfolio.candidate_plan
+variants:
+  - name: B0
+    description: Current baseline control with no moneyflow overlay.
+  - name: MF_BAND20_BULL
+    description: Activate top-20 moneyflow rerank only in BULL.
+    request_overrides:
+      runtime_config_json:
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: bull_only_band_rerank
+            factor_role: rank
+            apply_layer: ranking
+            band_limit: 20
+  - name: MF_BAND20_BULL_TRANSUP
+    description: Activate top-20 moneyflow rerank in BULL and TRANS_UP.
+    request_overrides:
+      runtime_config_json:
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: bull_trans_up_band_rerank
+            factor_role: rank
+            apply_layer: ranking
+            band_limit: 20
+windows:
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+    request_overrides:
+      runtime_config_path: research/studies/v10/configs/moneyflow_monthly_shadow_s1/1217_base.json
+  - key: "1226"
+    role: audit
+    start: "2012-01-04"
+    end: "2026-03-01"
+    request_overrides:
+      runtime_config_path: research/studies/v10/configs/moneyflow_monthly_shadow_s1/1226_base.json
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json

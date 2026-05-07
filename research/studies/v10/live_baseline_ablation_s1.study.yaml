@@ -1,0 +1,67 @@
+study_id: v10/live_baseline_ablation_s1
+title: V10 Live Baseline Ablation S1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  The current A-share live baseline is more dependent on benchmark gating, market filtering,
+  exit protection, and risk-budget controls than on the residual_strength_score ranking itself.
+  Remove one active live component at a time on the formal 2012-2026 audit window to identify
+  which live component is actually carrying the baseline.
+change_scope:
+  modules_modified:
+    - signal_generation.ranking.score_source_mode
+    - benchmark_regime.enabled
+    - position_risk.market_filter.enabled
+    - position_risk.risk_budget.enabled
+    - exit_rules.low10_exit.enabled
+    - exit_rules.risk_off_exit.enabled
+    - exit_rules.trailing.pre_profit_breakout_failure_enabled
+variants:
+  - name: B0
+    description: Current live baseline control.
+    request_overrides:
+      config_path: research/studies/v10/configs/live_baseline_ablation_s1/B0.json
+  - name: A1_NO_RESIDUAL_RANK
+    description: Disable the current live residual-only ranking.
+    request_overrides:
+      config_path: research/studies/v10/configs/live_baseline_ablation_s1/A1_NO_RESIDUAL_RANK.json
+  - name: A2_NO_BENCHMARK_REGIME
+    description: Disable benchmark regime gating only.
+    request_overrides:
+      config_path: research/studies/v10/configs/live_baseline_ablation_s1/A2_NO_BENCHMARK_REGIME.json
+  - name: A3_NO_MARKET_FILTER
+    description: Disable the position-risk market filter only.
+    request_overrides:
+      config_path: research/studies/v10/configs/live_baseline_ablation_s1/A3_NO_MARKET_FILTER.json
+  - name: A4_NO_RISK_BUDGET
+    description: Disable drawdown-driven risk-budget scaling only.
+    request_overrides:
+      config_path: research/studies/v10/configs/live_baseline_ablation_s1/A4_NO_RISK_BUDGET.json
+  - name: A5_NO_PROTECTIVE_EXITS
+    description: Disable low10, risk-off, and pre-profit breakout-failure protective exits.
+    request_overrides:
+      config_path: research/studies/v10/configs/live_baseline_ablation_s1/A5_NO_PROTECTIVE_EXITS.json
+windows:
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: audit
+    start: "2012-01-04"
+    end: "2026-03-01"
+    periods:
+      phase_2012_2013_range: ["2012-01-04", "2013-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2019_2021_bull: ["2019-01-02", "2021-02-18"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: research/studies/v10/configs/live_baseline_ablation_s1/B0.json
+  universe_mode: HS300_ZZ500
+  price_adj: hfq

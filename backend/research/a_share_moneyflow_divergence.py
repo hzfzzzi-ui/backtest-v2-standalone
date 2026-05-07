@@ -14,8 +14,8 @@ import pandas as pd
 
 from backend.api.shared.json_utils import sanitize_json
 from backend.core.config.loader import load_config
-from backend.core.data.pg_provider import PostgresDataProvider
 from backend.core.data.provider import DataProvider
+from backend.core.data.provider_factory import build_runtime_provider_from_config
 from backend.core.portfolio.metrics import compute_backtest_metrics
 from backend.core.universe.hs300_csi500 import UniverseFilterConfig, apply_universe_filters
 from backend.core.universe.universe_resolver import resolve_universe_by_mode
@@ -565,12 +565,9 @@ def _create_provider_from_payload(request_payload: dict[str, Any]) -> tuple[Data
         if not config_path:
             raise ValueError("custom study runner requires request_payload.config_path")
         cfg_obj, config_hash = load_config(config_path)
-    provider: DataProvider = PostgresDataProvider(
-        db=cfg_obj.db,
-        runtime=cfg_obj.db_runtime,
-        data_source=cfg_obj.data_source,
-        schema_mapping=cfg_obj.schema_mapping,
-        rules_path=str((_repo_root() / "config" / "rules.csv").resolve()),
+    provider = build_runtime_provider_from_config(
+        cfg_obj,
+        (_repo_root() / "config" / "rules.csv").resolve(),
     )
     return provider, cfg_obj.to_dict(), config_hash
 

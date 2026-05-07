@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from backend.core.config.loader import load_config
-from backend.core.data.pg_provider import PostgresDataProvider
+from backend.core.data.provider_factory import build_runtime_provider_from_config
 from backend.core.data.price_adjust import apply_price_adjustment
 from backend.core.engine_vector.breakout_signal_provider import _build_industry_assignment_matrices
 
@@ -18,11 +18,10 @@ from backend.core.engine_vector.breakout_signal_provider import _build_industry_
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / "outputs" / "ops" / "v10_1_pnl_source_analysis_20260314"
 WINDOWS = {
-    "07-17": {
+    "12-17": {
         "exp_id": "exp_20260314_144431437_56c4",
         "subphases": {
-            "2009": ("2009-01-05", "2009-12-31"),
-            "2010-2013": ("2010-01-04", "2013-12-31"),
+            "2012-2013": ("2012-01-04", "2013-12-31"),
             "2014-2015": ("2014-01-02", "2015-06-12"),
             "2015-2017": ("2015-06-15", "2017-01-13"),
         },
@@ -41,14 +40,12 @@ def _safe_float(value: object, default: float = np.nan) -> float:
         return float(default)
 
 
-def _provider() -> PostgresDataProvider:
+def _provider():
     cfg, _ = load_config(str(ROOT / "backend" / "configs" / "pams_cn_pg.json"))
-    return PostgresDataProvider(
-        db=cfg.db,
-        runtime=cfg.db_runtime,
-        data_source=cfg.data_source,
-        schema_mapping=cfg.schema_mapping,
-        rules_path=ROOT / "backend" / "core" / "data" / "rules.csv",
+    return build_runtime_provider_from_config(
+        cfg,
+        ROOT / "backend" / "core" / "data" / "rules.csv",
+        use_cache=False,
     )
 
 
@@ -403,9 +400,9 @@ def _attach_trade_features(
     return out
 
 
-def _phase_0717(buy_date: pd.Timestamp) -> str:
+def _phase_1217(buy_date: pd.Timestamp) -> str:
     dt = pd.Timestamp(buy_date).normalize()
-    for phase, (start, end) in WINDOWS["07-17"]["subphases"].items():
+    for phase, (start, end) in WINDOWS["12-17"]["subphases"].items():
         if pd.Timestamp(start) <= dt <= pd.Timestamp(end):
             return phase
     return "OTHER"
@@ -578,7 +575,7 @@ def main() -> None:
     sector_data = {str(code).upper(): grp.reset_index(drop=True) for code, grp in sec_df.groupby("index_code")} if not sec_df.empty else {}
     daily_cross = _build_daily_cross(feature_frame, benchmark, index_hist, industry_map, industry_history, sector_data, calendar.normalize(), universe_symbols)
     tagged = _attach_trade_features(roundtrips, feature_frame, daily_cross, prev_map)
-    tagged["phase_0717"] = tagged["buy_date"].map(_phase_0717)
+    tagged["phase_1217"] = tagged["buy_date"].map(_phase_1217)
     fields = [
         "industry_relative_score", "residual_score", "benchmark_relative_component", "sector_relative_component",
         "breakout_distance_pct", "distance_to_ma20_pct", "distance_to_ma60_pct", "trailing_10d_return", "trailing_20d_return",
@@ -591,10 +588,10 @@ def main() -> None:
     for label, grp in tagged.groupby("window_label", sort=False):
         c20 = _group_compare(grp, fields, 0.2); c20["window_label"] = label; c20["group_label"] = "top20_bottom20"; compare_rows.append(c20)
         c10 = _group_compare(grp, fields, 0.1); c10["window_label"] = label; c10["group_label"] = "top10_bottom10"; compare_rows.append(c10)
-    for phase in ["2009", "2010-2013", "2014-2015", "2015-2017"]:
-        grp = tagged[(tagged["window_label"] == "07-17") & (tagged["phase_0717"] == phase)]
+    for phase in ["2012-2013", "2014-2015", "2015-2017"]:
+        grp = tagged[(tagged["window_label"] == "12-17") & (tagged["phase_1217"] == phase)]
         if len(grp) >= 10:
-            c20 = _group_compare(grp, fields, 0.2); c20["window_label"] = f"07-17/{phase}"; c20["group_label"] = "top20_bottom20"; compare_rows.append(c20)
+            c20 = _group_compare(grp, fields, 0.2); c20["window_label"] = f"12-17/{phase}"; c20["group_label"] = "top20_bottom20"; compare_rows.append(c20)
     comparisons = pd.concat(compare_rows, ignore_index=True) if compare_rows else pd.DataFrame()
 
     bucket_rows = []
@@ -657,9 +654,9 @@ def main() -> None:
         },
         "facts": {
             "roundtrips_total": int(len(tagged)),
-            "roundtrips_0717": int((tagged["window_label"] == "07-17").sum()),
+            "roundtrips_1217": int((tagged["window_label"] == "12-17").sum()),
             "roundtrips_1626": int((tagged["window_label"] == "16-26").sum()),
-            "matched_pairs_top20_0717": int((matched20["window_label"] == "07-17").sum()) if not matched20.empty else 0,
+            "matched_pairs_top20_1217": int((matched20["window_label"] == "12-17").sum()) if not matched20.empty else 0,
             "matched_pairs_top20_1626": int((matched20["window_label"] == "16-26").sum()) if not matched20.empty else 0,
         },
     }

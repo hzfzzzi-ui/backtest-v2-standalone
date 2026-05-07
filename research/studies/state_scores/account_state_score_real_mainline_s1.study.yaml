@@ -1,0 +1,48 @@
+study_id: state_scores/account_state_score_real_mainline_s1
+title: Account state score real mainline s1
+asset_scope: cn_multi_asset
+baseline_id: baseline_V10_1
+hypothesis: >
+  Evaluate account-level continuous state scores over the formal three-window
+  framework before wiring any of them into the formal runtime.
+change_scope:
+  modules_modified:
+    - backend.research.account_state_score_catalog
+    - backend.research.account_state_score_snapshots
+    - backend.research.account_state_score_study
+variants:
+  - name: B0_EQUAL
+    request_overrides:
+      run_params:
+        benchmark_symbol: 000300.SH
+        score_ids:
+          - risk_on_score
+          - recovery_score
+          - defense_score
+        score_weights:
+          risk_on_score: 1.0
+          recovery_score: 1.0
+          defense_score: 1.0
+windows:
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1222"
+    role: main
+    start: "2012-01-04"
+    end: "2022-12-30"
+  - key: "1226"
+    role: audit
+    start: "2012-01-04"
+    end: "2026-03-20"
+hard_gates:
+  min_usable_days: 120
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+metadata:
+  runner_mode: account_state_score_surface

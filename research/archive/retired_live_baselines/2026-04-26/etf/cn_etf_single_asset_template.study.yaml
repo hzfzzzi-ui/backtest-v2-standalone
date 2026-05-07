@@ -1,0 +1,51 @@
+study_id: etf/cn_etf_single_asset_template
+title: CN ETF Single Asset Template
+asset_scope: cn_etf
+baseline_id: baseline_V10_2
+hypothesis: 在不改 V10.2 执行壳和退出壳的前提下，单只 A股 ETF 可作为最小研究入口，用于验证 ETF 资产是否适合作为多资产主线暴露表达。
+change_scope:
+  modules_modified:
+    - research_entry.cn_etf.custom_single_asset
+variants:
+  - name: SINGLE_512100
+    description: 使用 512100.SH 作为首个单 ETF 研究入口
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: ""
+      - path: universe.symbols
+        value:
+          - 512100.SH
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-11-04"
+    end: "2026-03-20"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: outputs/baselines/baseline_V10_2/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true

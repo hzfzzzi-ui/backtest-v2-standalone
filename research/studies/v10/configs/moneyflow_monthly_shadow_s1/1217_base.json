@@ -1,0 +1,516 @@
+{
+  "db": {
+    "host": "pams-postgres",
+    "port": 5432,
+    "dbname": "pams",
+    "user": "pams",
+    "password": ""
+  },
+  "db_runtime": {
+    "statement_timeout_ms": 60000
+  },
+  "universe": {
+    "symbols": [],
+    "benchmark": "000300.SH",
+    "start": "2012-01-04",
+    "end": "2017-12-29",
+    "price_adj": "hfq",
+    "membership_mode": "PIT_DYNAMIC",
+    "filters": {
+      "exclude_st": true,
+      "exclude_delisted": true,
+      "exclude_suspended": true,
+      "min_list_days": 120,
+      "min_avg_turnover_20d": 100000000.0,
+      "min_avg_turnover_rate_20d": 0.0,
+      "turnover_rate_field": "turnover_rate_f",
+      "price_min": 5.0,
+      "price_max": 99999.0,
+      "atr_pct_range": "0,100",
+      "limit_rule": "ignore"
+    }
+  },
+  "market_data_contract": "canonical_market",
+  "data_source": {
+    "stocks_table": "pams_ohlcv_daily_v2",
+    "v2_canonical_stocks_table": "pams_ohlcv_daily_v2",
+    "v2_runtime_stocks_table": "pams_ohlcv_daily_v2_runtime",
+    "v2_schema_mapping_table": "pams_ohlcv_daily_v2",
+    "index_table": "pit_index_daily",
+    "prefer_index_table": true,
+    "allow_cn_index_in_stocks_table": false,
+    "cn_index_filter_column": "market",
+    "cn_index_filter_value": "CN_INDEX"
+  },
+  "schema_mapping": {
+    "pams_ohlcv_daily_v2": {
+      "date": "trade_date",
+      "symbol": "symbol",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "turnover",
+      "limit_up": "limit_up",
+      "limit_down": "limit_down",
+      "is_suspended": "is_suspended",
+      "adj_factor": "adj_factor",
+      "turnover_rate": "turnover_rate",
+      "turnover_rate_f": "turnover_rate_f",
+      "volume_ratio": "volume_ratio",
+      "float_share": "float_share",
+      "free_share": "free_share",
+      "circ_mv": "circ_mv"
+    },
+    "pams_ohlcv_daily": {
+      "date": "trade_date",
+      "symbol": "symbol",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "turnover",
+      "limit_up": "limit_up",
+      "limit_down": "limit_down",
+      "is_suspended": "is_suspended",
+      "adj_factor": "adj_factor",
+      "turnover_rate": "turnover_rate",
+      "turnover_rate_f": "turnover_rate_f",
+      "volume_ratio": "volume_ratio",
+      "float_share": "float_share",
+      "free_share": "free_share",
+      "circ_mv": "circ_mv"
+    },
+    "pit_index_daily": {
+      "date": "trade_date",
+      "symbol": "index_code",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "turnover"
+    },
+    "pams_cn_etf_daily": {
+      "date": "trade_date",
+      "symbol": "symbol",
+      "open": "open",
+      "high": "high",
+      "low": "low",
+      "close": "close",
+      "volume": "volume",
+      "amount": "amount",
+      "adj_factor": "adj_factor",
+      "turnover": "turnover"
+    }
+  },
+  "data_scope": {
+    "extend_prev_close": true,
+    "prev_close_missing_policy": "disable_limit_check"
+  },
+  "execution": {
+    "lot_size": 100,
+    "tick_size": 0.01,
+    "limit_pct_default": 0.1,
+    "limit_pct_star": 0.05,
+    "limit_pct_kcb_gem": 0.2,
+    "liquidity_cap_pct": 0.1,
+    "allow_liquidity_without_volume": false,
+    "t_plus_one": true,
+    "t_plus_one_cash": false,
+    "limit_price_epsilon_mode": "tick_or_default",
+    "limit_price_epsilon_default": 0.01
+  },
+  "costs": {
+    "commission_rate": 0.0003,
+    "commission_min": 5.0,
+    "stamp_tax_rate": 0.001,
+    "slippage_bps": 2.0,
+    "slippage_mode": "price_adjustment_only"
+  },
+  "initial_capital": 1000000.0,
+  "strategy": {
+    "name": "breakout_trend",
+    "fast": 5,
+    "slow": 20,
+    "order_size": 1000,
+    "params": {
+      "breakout_window": 45,
+      "enable_dual_breakout": false,
+      "breakout_window_short": 20,
+      "breakout_window_long": 55,
+      "dual_breakout_mode": "or",
+      "dual_breakout_gate_ma_window": 120,
+      "dual_breakout_gate_slope_lookback": 10,
+      "breakout_entry_buffer_pct": 0.0,
+      "entry_confirm_mode": "none",
+      "entry_delay_mode": "none",
+      "enable_entry_gap_guard": false,
+      "entry_gap_guard_pct": 0.04,
+      "enable_pullback_candidates": false,
+      "pullback_variant_mode": "pb_reclaim_ma20",
+      "pullback_touch_lookback": 12,
+      "pullback_reclaim_window": 3,
+      "pullback_ma20_touch_band_pct": 0.01,
+      "pullback_low_lookback": 10,
+      "pullback_low_band_pct": 0.02,
+      "pullback_box_window": 5,
+      "pullback_box_range_pct_max": 0.08,
+      "enable_entry_above_slow_ma": false,
+      "enable_entry_slow_ma_slope": false,
+      "entry_slope_lookback": 5,
+      "portfolio_mode": "profit_release",
+      "order_size": 1000,
+      "enable_v2_trend_filter": false,
+      "enable_atr_stop": true,
+      "atr_stop_k": 1.2,
+      "enable_atr_trail": true,
+      "atr_trail_k": 3.0,
+      "trailing_activate_profit_pct": 0.15,
+      "enable_pre_profit_breakout_failure_exit": true,
+      "pre_profit_breakout_failure_max_bars": 5,
+      "pre_profit_breakout_failure_atr_buffer_k": 0.5,
+      "max_hold_days": 0,
+      "min_hold_days": 5,
+      "cooldown_days": 5,
+      "enable_take_profit": false,
+      "take_profit_mode": "pct",
+      "take_profit_pct": 0.2,
+      "take_profit_atr_k": 3.0,
+      "enable_fixed_stop_loss": false,
+      "fixed_stop_loss_pct": 0.05,
+      "enable_ma20_exit": false,
+      "enable_low10_exit": true,
+      "enable_risk_off_exit": true,
+      "risk_off_exit_mode": "trans_down_or_bear",
+      "min_price": 5.0,
+      "regime_ma": 60,
+      "momentum_top_pct": 0.0,
+      "ranking_mode": "residual_only",
+      "enable_residual_ranking": true,
+      "enable_sector_quality_ranking": false,
+      "source_aware_residual_mode": "off",
+      "residual_window": 40,
+      "residual_benchmark_weight": 0.0,
+      "residual_industry_weight": 1.0,
+      "industry_relative_mode": "sector_proxy",
+      "industry_relative_regime_mode": "off",
+      "residual_weight_regime_mode": "off",
+      "residual_benchmark_weight_fallback": 0.0,
+      "residual_industry_weight_fallback": 1.0,
+      "breakout_quality_gate_min_score": 0.55,
+      "breakout_quality_margin_cap_pct": 0.08,
+      "breakout_quality_fade_cap_pct": 0.035,
+      "breakout_quality_open_gap_cap_pct": 0.04,
+      "bull_breakout_quality_veto_enabled": false,
+      "bull_breakout_quality_veto_min_residual_strength_score": 0.0,
+      "bull_breakout_quality_veto_min_breakout_margin_score": 0.0,
+      "leadership_route_bucket_count": 3,
+      "residual_window_regime_mode": "off",
+      "residual_window_fallback": 40,
+      "residual_window_regime_fast_ma": 120,
+      "residual_window_regime_slow_ma": 200,
+      "residual_refine_mode": "off",
+      "residual_refine_weight": 0.0,
+      "residual_weight": 0.5,
+      "sector_weight": 0.3,
+      "quality_weight": 0.2,
+      "v2_trend_short_ma": 20,
+      "v2_trend_long_ma": 60,
+      "enable_sector_gate": false,
+      "sector_rank_window": 60,
+      "sector_top_pct": 0.3
+    }
+  },
+  "universe_mode": "HS300_ZZ500",
+  "industries": [],
+  "asset_scope": "cn_a_equity",
+  "asset_context": {
+    "asset_scope": "cn_a_equity",
+    "asset_profile_id": "cn_a_equity_mainline",
+    "asset_family": "equity",
+    "asset_class": "equity",
+    "market_profile_id": "cn_a_mainland_equity_market",
+    "execution_profile_id": "cn_a_tplus1_next_open",
+    "market_profile": {
+      "profile_id": "cn_a_mainland_equity_market",
+      "market_key": "CN_A",
+      "venue": "SSE_SZSE",
+      "timezone": "Asia/Shanghai",
+      "currency": "CNY",
+      "benchmark_symbol": "000300.SH",
+      "industry_model": "sw_l1",
+      "symbol_namespace": "cn_equity"
+    },
+    "execution_profile": {
+      "profile_id": "cn_a_tplus1_next_open",
+      "signal_clock": "POST_CLOSE",
+      "execution_clock": "NEXT_OPEN",
+      "settlement_cycle": "T+1",
+      "lot_size": 100,
+      "price_adjust_default": "hfq",
+      "long_only": true
+    },
+    "moneyflow_overlay": {
+      "source_kind": "daily_factor_snapshot",
+      "factor_snapshot_path": "outputs/studies/factors/moneyflow_factor_real_mainline_s2/1217/A_H20_CONTROL/machine/factor_snapshot.csv",
+      "factor_id": "monthly_divergence_rate",
+      "score_field": "rank_value",
+      "available_column": "availability_flag",
+      "lower_is_better": false,
+      "score_source": "moneyflow_factor_real_mainline_s2:A_H20_CONTROL:1217"
+    },
+    "tags": [
+      "current_mainline",
+      "a_share"
+    ]
+  },
+  "exit": {
+    "enable_take_profit": false,
+    "take_profit_mode": "pct",
+    "take_profit_pct": 0.2,
+    "take_profit_atr_k": 3.0,
+    "enable_fixed_stop_loss": false,
+    "fixed_stop_loss_pct": 0.05,
+    "enable_atr_stop": true,
+    "atr_stop_k": 1.2,
+    "enable_atr_trail": true,
+    "atr_trail_k": 3.0,
+    "trailing_activate_profit_pct": 0.15,
+    "enable_pre_profit_breakout_failure_exit": true,
+    "pre_profit_breakout_failure_max_bars": 5,
+    "pre_profit_breakout_failure_atr_buffer_k": 0.5,
+    "enable_ma20_exit": false,
+    "enable_low10_exit": true
+  },
+  "risk_budget": {
+    "enabled": true,
+    "dd_reduce_pct": 0.1,
+    "dd_reduce_scale": 0.5,
+    "atr_stop_k": 1.2
+  },
+  "market_filter": {
+    "enabled": true,
+    "long_ma_window": 200,
+    "slope_window": 10,
+    "slope_ma_period": 50,
+    "bull_multiplier": 1.8,
+    "light_multiplier": 0.6,
+    "trans_up_multiplier": 1.6,
+    "freeze_trans_up_entries": false,
+    "allow_trans_up_recovery_entries_when_benchmark_off": true,
+    "trans_up_recovery_entry_scale_when_benchmark_off": 1.0,
+    "trans_up_recovery_confirmed_top_up_scale_when_benchmark_on": 0.0,
+    "ema_light_fast": 5,
+    "ema_light_slow": 20
+  },
+  "benchmark_regime": {
+    "enabled": true,
+    "fast_period": 20,
+    "slow_period": 120,
+    "slope_window": 5
+  },
+  "regime_engine": {
+    "engine": "ma200_legacy",
+    "benchmark": "000300.SH",
+    "fallback": {
+      "required_blocks": [],
+      "on_feature_unavailable": "disabled",
+      "emit_feature_availability": false
+    }
+  },
+  "governed_a_share": {
+    "enabled": true,
+    "contract_version": "cn_a_governed_mainline@1",
+    "system_id": "cn_a_governed_multi_sleeve_phase1",
+    "phase": "phase1_contract",
+    "regime": {
+      "enabled": true,
+      "owner": "market_regime_engine",
+      "primary_state_model": "five_state",
+      "coarse_state_model": "derived_two_state",
+      "subscore_contract": [
+        "technical",
+        "sentiment",
+        "macro_global"
+      ],
+      "manual_override": {
+        "active": false,
+        "reason": null,
+        "scope": null,
+        "actor": null,
+        "effective_window": null,
+        "target_state_5": null,
+        "risk_budget_multiplier": null,
+        "defense_bias": null
+      }
+    },
+    "governor": {
+      "enabled": true,
+      "owner": "global_portfolio_governor",
+      "contract_only": true,
+      "budget_source_of_truth": true
+    },
+    "stock_alpha_core": {
+      "enabled": true,
+      "sleeve_id": "cn_stock_trend_alpha_core",
+      "system_role": "stock_alpha_sleeve",
+      "legacy_anchor": "baseline_V10.1",
+      "strategy_semantics": "trend_breakout_residual",
+      "budget_semantics": "consume_governor_sleeve_budget",
+      "total_budget_owner": "global_portfolio_governor",
+      "local_budget_controls": [
+        "max_positions",
+        "single_stock_cap",
+        "industry_cap"
+      ],
+      "phase1_excluded_capabilities": [
+        "value_bluechip_satellite",
+        "cn_etf_beta",
+        "insurance_overlay"
+      ]
+    },
+    "etf_beta": {
+      "enabled": false,
+      "sleeve_id": "cn_etf_beta",
+      "system_role": "market_beta_sleeve",
+      "strategy_role": "strategic_beta_stabilizer",
+      "governor_boundary_mode": "consume_governor_sleeve_budget",
+      "local_policy_mode": "phase1_bucket_allocation",
+      "boundary_policy_mode": "formal_phase1_document_aligned_v1",
+      "exposure_policy_family": "phase1_governed_allocation_v1",
+      "policy_scope": "broad_based_only",
+      "broad_based_only": true,
+      "layering_policy": "none",
+      "controlled_accumulation_mode": "none",
+      "allocation_engine_mode": "phase1_three_bucket_v1",
+      "bucket_policy_profile": "phase1_state_template_v1",
+      "template_id": null,
+      "template_asset_pool_version": "formal_etf_pool_v1",
+      "template_role_map": {},
+      "template_proxy_map": {},
+      "template_target_formal_symbols": [],
+      "proxy_replacement_mode": "none",
+      "formal_replacement_pairs": {},
+      "core_slot_symbols": [],
+      "growth_slot_symbols": [],
+      "growth_seat_symbol": null,
+      "budget_semantics": "consume_governor_sleeve_budget",
+      "total_budget_owner": "global_portfolio_governor",
+      "source_entry_type": "cn_etf_phase1_allocation_entry",
+      "phase1_scope_mode": "core_beta_plus_limited_defense",
+      "equity_core_bucket_by_state_5": {
+        "BULL": 0.9,
+        "TRANS_UP": 0.85,
+        "TRANS_DOWN": 0.45,
+        "RISK_OFF": 0.15
+      },
+      "defense_tilt_bucket_by_state_5": {
+        "BULL": 0.0,
+        "TRANS_UP": 0.05,
+        "TRANS_DOWN": 0.1,
+        "RISK_OFF": 0.15
+      },
+      "cash_buffer_bucket_by_state_5": {
+        "BULL": 0.1,
+        "TRANS_UP": 0.1,
+        "TRANS_DOWN": 0.45,
+        "RISK_OFF": 0.7
+      },
+      "equity_core_template_weights": {},
+      "equity_core_tilt_limits": {
+        "510300.SH": 0.55,
+        "510500.SH": 0.35,
+        "510050.SH": 0.55,
+        "512100.SH": 0.15
+      },
+      "defense_asset_weights": {
+        "511010.SH": 1.0
+      },
+      "core_beta_symbols": [
+        "510300.SH",
+        "510500.SH",
+        "510050.SH",
+        "512100.SH"
+      ],
+      "core_accumulator_symbols": [
+        "510300.SH",
+        "510050.SH"
+      ],
+      "tactical_satellite_symbols": [
+        "510500.SH",
+        "512100.SH"
+      ],
+      "limited_defense_candidates": [
+        "511010.SH"
+      ],
+      "research_rule_family": "phase1_allocation_engine_v1",
+      "absolute_filter_profile": null,
+      "candidate_pool_profile": null,
+      "selection_chain_profile": null,
+      "rebalance_frequency": "monthly",
+      "absolute_filter_mode": "none",
+      "fallback_mode": "none",
+      "fallback_symbol": null,
+      "relative_strength_fast_window": 60,
+      "relative_strength_mid_window": null,
+      "relative_strength_slow_window": 120,
+      "relative_strength_fast_weight": 0.4,
+      "relative_strength_mid_weight": 0.0,
+      "relative_strength_slow_weight": 0.6,
+      "max_selected_symbols": 3,
+      "target_exposure": null,
+      "min_deployable_exposure": null,
+      "target_exposure_by_state_5": {},
+      "min_deployable_exposure_by_state_5": {},
+      "fallback_allowed": null,
+      "target_selected_count_by_state_5": {},
+      "fallback_allowed_by_state_5": {},
+      "weak_state_defense_policy": {
+        "enabled": true,
+        "policy_id": "formal_weak_state_defense_v1",
+        "minimum_defense_seats_by_state_5": {
+          "TRANS_DOWN": 1,
+          "RISK_OFF": 1
+        },
+        "defense_candidate_symbols_by_state_5": {
+          "TRANS_DOWN": [
+            "511010.SH"
+          ],
+          "RISK_OFF": [
+            "511010.SH"
+          ]
+        },
+        "allow_core_beta_by_state_5": {
+          "TRANS_DOWN": true,
+          "RISK_OFF": true
+        },
+        "target_weights_by_state_5": {
+          "TRANS_DOWN": {
+            "511010.SH": 0.55,
+            "510300.SH": 0.45
+          },
+          "RISK_OFF": {
+            "511010.SH": 0.7,
+            "510300.SH": 0.3
+          }
+        }
+      },
+      "vol_target_window": 20,
+      "vol_target_annualized_target": 0.18,
+      "vol_target_min_scale": 0.35,
+      "vol_target_max_scale": 1.0,
+      "bull_partial_overlay_pace_ratio": 0.5,
+      "symbol_role_map": {
+        "510300.SH": "core_accumulator",
+        "510050.SH": "core_accumulator",
+        "510500.SH": "tactical_satellite",
+        "512100.SH": "tactical_satellite",
+        "511010.SH": "limited_defense"
+      }
+    }
+  },
+  "sizing": {}
+}

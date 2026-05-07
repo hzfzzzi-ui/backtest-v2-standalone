@@ -1,0 +1,77 @@
+study_id: v10/moneyflow_monthly_soft_weight_s1
+title: V10 Moneyflow Monthly Soft Weight S1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  Evaluate whether monthly_divergence_rate is more useful as a monthly auxiliary sizing
+  weight than as a weak tiebreak. Keep the live residual ranking shell intact, and only
+  let moneyflow adjust score-weighted order sizing inside the planned candidate band.
+change_scope:
+  modules_modified:
+    - sizing.weight_mode
+    - asset_context.moneyflow_overlay
+variants:
+  - name: B0
+    description: Current baseline control with no score-weighted sizing and no moneyflow overlay.
+  - name: SCORE_WEIGHT_BASE
+    description: Turn on score-weighted sizing only, using the current baseline score without moneyflow.
+    request_overrides:
+      runtime_config_json:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.9
+          score_weight_max_scale: 1.1
+  - name: MF_SOFT_10
+    description: Keep baseline ordering and let monthly_divergence_rate adjust planned order sizing inside a 0.9 to 1.1 band.
+    request_overrides:
+      runtime_config_json:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.9
+          score_weight_max_scale: 1.1
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_role: context
+            apply_layer: candidate
+  - name: MF_SOFT_20
+    description: Same as MF_SOFT_10 but widen the sizing band to 0.8 to 1.2.
+    request_overrides:
+      runtime_config_json:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.8
+          score_weight_max_scale: 1.2
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: soft_weight
+            factor_role: context
+            apply_layer: candidate
+windows:
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+    request_overrides:
+      runtime_config_path: research/studies/v10/configs/moneyflow_monthly_soft_weight_s1/1217_base.json
+  - key: "1226"
+    role: audit
+    start: "2012-01-04"
+    end: "2026-03-01"
+    periods:
+      phase_2012_2013_range: ["2012-01-04", "2013-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2019_2021_bull: ["2019-01-02", "2021-02-18"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+    request_overrides:
+      runtime_config_path: research/studies/v10/configs/moneyflow_monthly_soft_weight_s1/1226_base.json
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json

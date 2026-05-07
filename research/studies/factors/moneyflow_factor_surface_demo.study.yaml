@@ -1,0 +1,41 @@
+﻿study_id: factors/moneyflow_factor_surface_demo
+title: A股 moneyflow factor surface demo
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: 把 monthly_divergence_rate 正式化成独立研究 surface 后，可以先做 research-only 因子分析，再决定是否进入 runtime。
+change_scope:
+  modules_modified:
+    - backend.research.moneyflow_factor_catalog
+    - backend.research.moneyflow_factor_snapshots
+    - backend.research.moneyflow_factor_study
+    - backend.research.study_runner
+variants:
+  - name: B0_EQUAL
+    request_overrides:
+      run_params:
+        symbols:
+          - sh600000
+          - sz000001
+          - sh601318
+          - sz300750
+        factor_ids:
+          - monthly_divergence_rate
+        factor_weights:
+          monthly_divergence_rate: 1.0
+        horizon_days: 20
+        moneyflow_table: pit_stock_moneyflow_v2
+windows:
+  - key: 2326
+    role: main
+    start: "2023-01-03"
+    end: "2026-03-20"
+hard_gates:
+  min_symbol_count: 4
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+metadata:
+  runner_mode: moneyflow_factor_surface

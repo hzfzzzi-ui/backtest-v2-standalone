@@ -1,0 +1,121 @@
+study_id: factors/negative_conditional_context_real_mainline_s1
+title: Negative conditional context real mainline s1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  Evaluate the real mainline negative conditional context family on the baseline stock leg's
+  traded core symbols under the 2012-anchored three-window research contract.
+change_scope:
+  modules_modified:
+    - backend.research.mainline_breakout_runtime_context
+    - backend.research.negative_conditional_context_factor_catalog
+    - backend.research.negative_conditional_context_factor_snapshots
+    - backend.research.negative_conditional_context_factor_study
+    - backend.research.study_runner
+variants:
+  - name: B0_EQUAL
+    request_overrides:
+      run_params:
+        symbols:
+          - sh600015
+          - sh600183
+          - sh600000
+          - sh600031
+          - sh600066
+          - sh600588
+          - sh600039
+          - sh600036
+          - sh600068
+          - sh600171
+          - sh600038
+          - sh600176
+          - sh600009
+          - sh600160
+          - sh600089
+          - sh600521
+          - sh600585
+          - sh600309
+          - sh600511
+          - sh600118
+          - sh601211
+          - sh600016
+          - sh600839
+          - sh600027
+          - sh600426
+          - sh600109
+          - sh600161
+          - sh600050
+          - sh600188
+          - sh600489
+          - sh600004
+          - sh600158
+          - sh600460
+          - sh600570
+          - sh600362
+          - sh600704
+          - sh600875
+          - sh600023
+          - sh600563
+          - sh600438
+          - sh600298
+          - sh600329
+          - sh600660
+          - sh600415
+          - sh600500
+          - sh600703
+          - sh600037
+          - sh600499
+          - sh600674
+          - sh600999
+          - sh600030
+          - sh600406
+          - sh600276
+          - sh600271
+          - sh600258
+          - sh600315
+          - sh600996
+          - sh600100
+          - sh600584
+          - sh600745
+        factor_ids:
+          - conditional_tiebreak_score
+          - conditional_factor_leader_score
+          - conditional_institution_proxy_score
+          - conditional_crowding_score
+          - conditional_recent_limit_hit_3d
+          - conditional_near_limit_up
+        factor_weights:
+          conditional_tiebreak_score: 1.0
+          conditional_factor_leader_score: 1.0
+          conditional_institution_proxy_score: 1.0
+          conditional_crowding_score: 1.0
+          conditional_recent_limit_hit_3d: 1.0
+          conditional_near_limit_up: 1.0
+        horizons:
+          - 5
+          - 10
+          - 20
+windows:
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1222"
+    role: main
+    start: "2012-01-04"
+    end: "2022-12-30"
+  - key: "1226"
+    role: audit
+    start: "2012-01-04"
+    end: "2026-03-20"
+hard_gates:
+  min_symbol_count: 40
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  runtime_config_path: outputs/experiments/exp_20260409_052948616_a4c5/run_config.json
+  config_path: backend/configs/pams_cn_pg_study_long_timeout.json
+metadata:
+  runner_mode: negative_conditional_context_factor_surface

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-_REQUIRED_OUTPUTS = {"machine_bundle", "human_bundle", "baseline_append"}
+_REQUIRED_OUTPUTS = {"machine_bundle", "human_bundle", "baseline_append", "study_conclusion"}
 
 
 class StudyValidationError(ValueError):

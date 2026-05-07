@@ -1,0 +1,58 @@
+study_id: factors/execution_pressure_factor_real_mainline_s1
+title: Execution pressure factor real mainline s1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  Evaluate stock sleeve execution pressure factors from the baseline stock leg's
+  portfolio_daily output under the 2012-anchored three-window research contract.
+change_scope:
+  modules_modified:
+    - backend.research.execution_pressure_factor_catalog
+    - backend.research.execution_pressure_factor_snapshots
+    - backend.research.execution_pressure_factor_study
+    - backend.research.study_runner
+variants:
+  - name: B0_EQUAL
+    request_overrides:
+      run_params:
+        factor_ids:
+          - slot_overhang_pressure
+          - cash_lot_pressure
+          - budget_reject_pressure
+          - deployment_gap_pressure
+          - underexposure_pressure
+          - cash_drag_pressure
+        factor_weights:
+          slot_overhang_pressure: 1.0
+          cash_lot_pressure: 1.0
+          budget_reject_pressure: 1.0
+          deployment_gap_pressure: 1.0
+          underexposure_pressure: 1.0
+          cash_drag_pressure: 1.0
+        horizons:
+          - 5
+          - 10
+          - 20
+windows:
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1222"
+    role: main
+    start: "2012-01-04"
+    end: "2022-12-30"
+  - key: "1226"
+    role: audit
+    start: "2012-01-04"
+    end: "2026-03-20"
+hard_gates:
+  min_symbol_count: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  portfolio_daily_path: outputs/experiments/exp_20260409_052948616_a4c5/portfolio_daily.csv
+metadata:
+  runner_mode: execution_pressure_factor_surface

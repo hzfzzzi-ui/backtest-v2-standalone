@@ -1,0 +1,61 @@
+study_id: v10/moneyflow_monthly_shadow_s1
+title: V10 Moneyflow Monthly Shadow S1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  Evaluate whether monthly_divergence_rate deserves to enter the stock baseline shadow queue
+  when inserted only as a modern daily-factor-snapshot overlay, without rewriting the live
+  residual ranking shell. The minimal question is whether shadow diagnostics and bull-only
+  tiebreak produce coherent, auditable differentiation under the formal 2012-anchored windows.
+change_scope:
+  modules_modified:
+    - asset_context.moneyflow_overlay
+variants:
+  - name: B0
+    description: Current baseline control with no moneyflow overlay.
+  - name: SHADOW
+    description: Load monthly_divergence_rate diagnostics only and keep baseline behavior unchanged.
+    request_overrides:
+      runtime_config_json:
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: shadow
+            factor_role: context
+            apply_layer: candidate
+  - name: BULL_ONLY_TIEBREAK
+    description: Use monthly_divergence_rate only as a BULL-only tiebreak on top of the live baseline shell.
+    request_overrides:
+      runtime_config_json:
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            mode: bull_only_tiebreak
+            factor_role: rank
+            apply_layer: candidate
+windows:
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+    request_overrides:
+      runtime_config_path: research/studies/v10/configs/moneyflow_monthly_shadow_s1/1217_base.json
+  - key: "1226"
+    role: audit
+    start: "2012-01-04"
+    end: "2026-03-01"
+    periods:
+      phase_2012_2013_range: ["2012-01-04", "2013-12-31"]
+      phase_2014_2015_bull: ["2014-01-02", "2015-06-12"]
+      phase_2019_2021_bull: ["2019-01-02", "2021-02-18"]
+      phase_2024_2026_recovery: ["2024-02-06", "2026-02-27"]
+    request_overrides:
+      runtime_config_path: research/studies/v10/configs/moneyflow_monthly_shadow_s1/1226_base.json
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json

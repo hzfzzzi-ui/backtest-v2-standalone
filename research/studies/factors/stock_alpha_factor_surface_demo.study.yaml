@@ -1,0 +1,43 @@
+study_id: factors/stock_alpha_factor_surface_demo
+title: A股个股 alpha 因子研究入口示例
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: 将个股 alpha 原子因子与日频快照正式化后，可以先做单因子与因子组合研究，再决定是否接入 runtime。
+change_scope:
+  modules_modified:
+    - backend.research.stock_alpha_factor_catalog
+    - backend.research.stock_alpha_factor_snapshots
+    - backend.research.stock_alpha_factor_study
+    - backend.research.study_runner
+variants:
+  - name: B0_EQUAL
+    request_overrides:
+      run_params:
+        symbols:
+          - sh600000
+          - sz000001
+          - sh601318
+          - sz300750
+        factor_ids:
+          - breakout_distance
+          - residual_strength
+          - trend_quality
+        factor_weights:
+          breakout_distance: 1.0
+          residual_strength: 1.0
+          trend_quality: 1.0
+windows:
+  - key: 2326
+    role: main
+    start: "2023-01-03"
+    end: "2026-03-20"
+hard_gates:
+  min_symbol_count: 4
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - baseline_append
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+metadata:
+  runner_mode: stock_alpha_factor_surface

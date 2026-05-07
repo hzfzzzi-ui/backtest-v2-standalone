@@ -1,14 +1,14 @@
 study_id: etf/cn_etf_single_asset_template
 title: CN ETF Single Asset Template
 asset_scope: cn_etf
-baseline_id: baseline_V10_2
-hypothesis: 在不改 V10.2 执行壳和退出壳的前提下，单只 A股 ETF 可作为最小研究入口，用于验证 ETF 资产是否适合作为多资产主线暴露表达。
+baseline_id: baseline_V10_1
+hypothesis: Minimal CN ETF single-asset research entry for compile and smoke verification.
 change_scope:
   modules_modified:
     - research_entry.cn_etf.custom_single_asset
 variants:
   - name: SINGLE_512100
-    description: 使用 512100.SH 作为首个单 ETF 研究入口
+    description: Single ETF compile/smoke entry using 512100.SH.
     config_patches:
       - path: asset_scope
         value: cn_etf
@@ -45,7 +45,7 @@ required_outputs:
   - machine_bundle
   - human_bundle
 request_template:
-  config_path: outputs/baselines/baseline_V10_2/config.json
+  config_path: outputs/baselines/baseline_V10_1/config.json
   fast_mode: true
 metadata:
   materialize_config_json: true

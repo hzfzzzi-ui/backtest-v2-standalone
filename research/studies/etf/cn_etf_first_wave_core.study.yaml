@@ -1,14 +1,14 @@
 study_id: etf/cn_etf_first_wave_core
 title: CN ETF First Wave Core
 asset_scope: cn_etf
-baseline_id: baseline_V10_2
-hypothesis: 第一波核心 ETF 组合可作为 A股 ETF 研究主入口，用于替代个股池去表达宽基、黄金、债券和中小盘风格暴露。
+baseline_id: baseline_V10_1
+hypothesis: Formal Phase 1 ETF sleeve anchor used by the stock+ETF unified runtime.
 change_scope:
   modules_modified:
-    - research_entry.cn_etf.first_wave_core
+    - research_entry.cn_etf.strategic_beta_stabilizer
 variants:
   - name: CORE
-    description: 首波核心 ETF 预设组
+    description: Formal Phase 1 governed allocation engine using the first-wave core ETF preset.
     config_patches:
       - path: asset_scope
         value: cn_etf
@@ -17,7 +17,7 @@ variants:
       - path: industries
         value: []
       - path: universe.benchmark
-        value: ""
+        value: 510300.SH
       - path: universe.symbols
         value:
           - cn_etf_first_wave_core
@@ -35,6 +35,47 @@ variants:
         value: pams_cn_etf_daily
       - path: data_source.data_role
         value: v1
+      - path: governed_a_share.etf_beta.enabled
+        value: true
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: phase1_allocation_engine_v1
+      - path: governed_a_share.etf_beta.strategy_role
+        value: strategic_beta_stabilizer
+      - path: governed_a_share.etf_beta.source_entry_type
+        value: cn_etf_phase1_allocation_entry
+      - path: governed_a_share.etf_beta.governor_boundary_mode
+        value: consume_governor_sleeve_budget
+      - path: governed_a_share.etf_beta.local_policy_mode
+        value: phase1_bucket_allocation
+      - path: governed_a_share.etf_beta.boundary_policy_mode
+        value: formal_phase1_document_aligned_v1
+      - path: governed_a_share.etf_beta.exposure_policy_family
+        value: phase1_governed_allocation_v1
+      - path: governed_a_share.etf_beta.policy_scope
+        value: broad_based_only
+      - path: governed_a_share.etf_beta.broad_based_only
+        value: true
+      - path: governed_a_share.etf_beta.allocation_engine_mode
+        value: phase1_three_bucket_v1
+      - path: governed_a_share.etf_beta.bucket_policy_profile
+        value: phase1_state_template_v1
+      - path: governed_a_share.etf_beta.phase1_scope_mode
+        value: core_beta_plus_limited_defense
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 510050.SH
+          - 512100.SH
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value:
+          - 511010.SH
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: none
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: none
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 3
 windows:
   - key: "1626"
     role: main
@@ -45,10 +86,11 @@ required_outputs:
   - machine_bundle
   - human_bundle
 request_template:
-  config_path: outputs/baselines/baseline_V10_2/config.json
+  config_path: outputs/baselines/baseline_V10_1/config.json
   fast_mode: true
 metadata:
   materialize_config_json: true
+  diagnostic_mode: cn_etf_phase1_zero_trade_mainline
   formal_alignment_classification: formal_mainline
-  formal_alignment_reference: A股ETF子系统策略思路md
+  formal_alignment_reference: formal_phase1_etf_pool_v1
   formal_alignment_reason_codes: []

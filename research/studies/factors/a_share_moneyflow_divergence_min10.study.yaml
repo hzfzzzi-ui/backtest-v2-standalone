@@ -1,7 +1,7 @@
 study_id: factors/a_share_moneyflow_divergence_min10
 title: A股主力分歧率最小前十
 asset_scope: cn_a_equity
-baseline_id: baseline_V10.1
+baseline_id: baseline_V10_1
 hypothesis: 主力分歧率最小的股票在月频上可能对应更低拥挤度或更稳定筹码结构，值得作为独立研究主题验证。
 change_scope:
   modules_modified:
