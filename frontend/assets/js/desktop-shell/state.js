@@ -80,6 +80,7 @@
     { id: 'config_workspace', role: 'config_editor' },
     { id: 'run_orchestration', role: 'run_loader_save_hydrate' },
     { id: 'results_workspace', role: 'results_display' },
+    { id: 'study_journal_workspace', role: 'research_journal_display' },
     { id: 'status_center', role: 'status_summary_only' },
   ];
 
@@ -124,6 +125,11 @@
         mounted: false,
         source_mode: 'desktop_shell_snapshot',
         bridge_ready: true,
+      },
+      study_journal_workspace: {
+        workspace_kind: 'study_journal_workspace',
+        mounted: false,
+        source_mode: 'embedded_research_journal',
       },
       status_center: {
         workspace_kind: 'status_center',

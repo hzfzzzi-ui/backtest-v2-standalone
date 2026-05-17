@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -871,8 +872,27 @@ def _read_component_snapshot(result: dict[str, Any]) -> dict[str, Any]:
         "results_dir": str(results_dir),
         "perf": _read_json(results_dir / "perf.json"),
         "run_meta": _read_json(results_dir / "run_meta.json"),
+        "run_profile": _read_json(results_dir / "run_profile.json"),
         "audit": _read_json(results_dir / "audit.json"),
     }
+
+
+def _summarize_runtime_profile(profile: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(profile, dict):
+        return {}
+    stage_seconds = profile.get("stage_seconds") if isinstance(profile.get("stage_seconds"), dict) else {}
+    perf = profile.get("perf") if isinstance(profile.get("perf"), dict) else {}
+    return sanitize_json(
+        {
+            "total_wall_seconds": profile.get("total_wall_seconds"),
+            "stage_seconds": {str(k): float(v or 0.0) for k, v in stage_seconds.items()},
+            "bottleneck_stage": profile.get("bottleneck_stage"),
+            "bottleneck_label": profile.get("bottleneck_label"),
+            "symbols_count": profile.get("symbols_count"),
+            "trading_days": profile.get("trading_days"),
+            "perf": perf,
+        }
+    )
 
 
 def _build_sleeve_summary(component: dict[str, Any], *, sleeve_id: str, asset_scope: str) -> dict[str, Any]:
@@ -1104,6 +1124,31 @@ def _component_execution_overrides_for_request(
     return _derive_component_execution_overrides_from_runtime(runtime_cfg)
 
 
+def _component_benchmark_from_inputs(
+    *,
+    runtime_cfg: dict[str, Any] | None,
+    semantic_cfg: dict[str, Any] | None,
+) -> str:
+    for cfg in (runtime_cfg, semantic_cfg):
+        universe = cfg.get("universe") if isinstance(cfg, dict) and isinstance(cfg.get("universe"), dict) else {}
+        benchmark = str(universe.get("benchmark") or "").strip()
+        if benchmark:
+            return benchmark
+    return ""
+
+
+def _runtime_config_with_component_benchmark(runtime_cfg: dict[str, Any], benchmark: str) -> dict[str, Any]:
+    payload = sanitize_json(dict(runtime_cfg or {}))
+    if not isinstance(payload, dict):
+        return {}
+    benchmark_text = str(benchmark or "").strip()
+    if not benchmark_text:
+        return payload
+    universe = payload.get("universe") if isinstance(payload.get("universe"), dict) else {}
+    payload["universe"] = {**dict(universe), "benchmark": benchmark_text}
+    return payload
+
+
 def _apply_execution_overrides_to_child_payload(
     payload: dict[str, Any],
     execution_overrides: dict[str, Any] | None,
@@ -1169,6 +1214,16 @@ def run_cn_stock_etf_unified_runtime(
     request_model: type,
     progress_hook: Callable[[int, str], None] | None = None,
 ) -> dict[str, Any]:
+    runtime_t0 = time.perf_counter()
+    runtime_stage_t0 = runtime_t0
+    runtime_stage_seconds: dict[str, float] = {}
+
+    def _finish_runtime_stage(name: str) -> None:
+        nonlocal runtime_stage_t0
+        now = time.perf_counter()
+        runtime_stage_seconds[str(name)] = float(runtime_stage_seconds.get(str(name), 0.0)) + float(now - runtime_stage_t0)
+        runtime_stage_t0 = now
+
     unified_runtime = semantic_compile.get("unified_runtime") if isinstance(semantic_compile.get("unified_runtime"), dict) else {}
     combo_context = dict(unified_runtime.get("combo_context") or {})
     account_budget_control = _normalize_account_budget_control(
@@ -1239,8 +1294,17 @@ def run_cn_stock_etf_unified_runtime(
     }
     if stock_price_adj:
         stock_body_payload["price_adj"] = stock_price_adj
+    stock_benchmark = _component_benchmark_from_inputs(
+        runtime_cfg=stock_runtime_cfg if isinstance(stock_runtime_cfg, dict) else None,
+        semantic_cfg=stock_semantic_cfg if isinstance(stock_semantic_cfg, dict) else None,
+    )
+    if stock_benchmark:
+        stock_body_payload["benchmark"] = stock_benchmark
     if isinstance(stock_runtime_cfg, dict) and stock_runtime_cfg:
-        stock_body_payload["runtime_config_json"] = stock_runtime_cfg
+        stock_body_payload["runtime_config_json"] = _runtime_config_with_component_benchmark(
+            stock_runtime_cfg,
+            stock_benchmark,
+        )
     else:
         stock_body_payload["config_json"] = stock_semantic_cfg
     _apply_execution_overrides_to_child_payload(stock_body_payload, stock_execution_overrides)
@@ -1250,6 +1314,7 @@ def run_cn_stock_etf_unified_runtime(
         _child_progress(progress_hook, start=5, end=45, prefix="个股 sleeve"),
     )
 
+    _finish_runtime_stage("stock_component_run")
     _emit_progress(progress_hook, 46, "开始运行 ETF beta sleeve")
     etf_body_payload = {
         "preset": requested_preset or "single",
@@ -1259,8 +1324,17 @@ def run_cn_stock_etf_unified_runtime(
     }
     if etf_price_adj:
         etf_body_payload["price_adj"] = etf_price_adj
+    etf_benchmark = _component_benchmark_from_inputs(
+        runtime_cfg=etf_runtime_cfg if isinstance(etf_runtime_cfg, dict) else None,
+        semantic_cfg=etf_semantic_cfg if isinstance(etf_semantic_cfg, dict) else None,
+    )
+    if etf_benchmark:
+        etf_body_payload["benchmark"] = etf_benchmark
     if isinstance(etf_runtime_cfg, dict) and etf_runtime_cfg:
-        etf_body_payload["runtime_config_json"] = etf_runtime_cfg
+        etf_body_payload["runtime_config_json"] = _runtime_config_with_component_benchmark(
+            etf_runtime_cfg,
+            etf_benchmark,
+        )
     else:
         etf_body_payload["config_json"] = etf_semantic_cfg
     _apply_execution_overrides_to_child_payload(etf_body_payload, etf_execution_overrides)
@@ -1270,6 +1344,7 @@ def run_cn_stock_etf_unified_runtime(
         _child_progress(progress_hook, start=46, end=86, prefix="ETF sleeve"),
     )
 
+    _finish_runtime_stage("etf_component_run")
     stock_component = _read_component_snapshot(stock_result)
     etf_component = _read_component_snapshot(etf_result)
     stock_dir = Path(str(stock_component.get("results_dir") or "")).resolve()
@@ -1463,6 +1538,7 @@ def run_cn_stock_etf_unified_runtime(
         }
     )
 
+    _finish_runtime_stage("combo_assembly")
     _emit_progress(progress_hook, 90, "写入统一组合产物")
     combo_nav.to_csv(results_dir / ARTIFACT_FILENAMES["nav"], index=False)
     combo_daily.to_csv(results_dir / ARTIFACT_FILENAMES["daily"], index=False)
@@ -1492,6 +1568,45 @@ def run_cn_stock_etf_unified_runtime(
         execution_contract=execution_contract,
         artifact_rel=execution_contract_rel,
     )
+    _finish_runtime_stage("combo_artifact_write")
+    bottleneck_stage = ""
+    bottleneck_seconds = 0.0
+    if runtime_stage_seconds:
+        bottleneck_stage, bottleneck_seconds = max(
+            runtime_stage_seconds.items(),
+            key=lambda item: float(item[1] or 0.0),
+        )
+    total_wall_seconds = float(time.perf_counter() - runtime_t0)
+    row_count = int(len(combo_daily.index) + len(combo_trades.index) + len(combo_orders.index))
+    combo_runtime_profile = sanitize_json(
+        {
+            "preset": requested_preset or "single",
+            "created_at_utc": datetime.utcnow().isoformat() + "Z",
+            "results_dir": str(results_dir),
+            "stage_seconds": {str(k): float(v or 0.0) for k, v in runtime_stage_seconds.items()},
+            "total_wall_seconds": total_wall_seconds,
+            "symbols_count": int(len(combo_weights)),
+            "trading_days": int(len(combo_nav.index)),
+            "row_count": row_count,
+            "rows_per_second": float(row_count / max(total_wall_seconds, 1e-9)),
+            "bottleneck_stage": bottleneck_stage,
+            "bottleneck_stage_seconds": float(bottleneck_seconds),
+            "bottleneck_label": (
+                "BOTTLENECK_COMPONENT_RUN"
+                if str(bottleneck_stage).endswith("_component_run")
+                else "BOTTLENECK_COMBO_ASSEMBLY"
+            ),
+            "component_profiles": {
+                "stock_alpha_core": _summarize_runtime_profile(
+                    stock_component.get("run_profile") if isinstance(stock_component.get("run_profile"), dict) else None
+                ),
+                "etf_beta": _summarize_runtime_profile(
+                    etf_component.get("run_profile") if isinstance(etf_component.get("run_profile"), dict) else None
+                ),
+            },
+        }
+    )
+    _write_json(results_dir / "run_profile.json", combo_runtime_profile)
 
     combo_run_meta = sanitize_json(
         {
@@ -1517,6 +1632,7 @@ def run_cn_stock_etf_unified_runtime(
             },
             "dependencies": combo_dependencies,
             "runtime_truth_source": "account_allocator",
+            "run_profile": _summarize_runtime_profile(combo_runtime_profile),
             "stage_pipeline": combo_stage_pipeline,
             "account_allocator_runtime": account_allocator_runtime,
             "combo_runtime": {
@@ -1632,6 +1748,9 @@ def run_cn_stock_etf_unified_runtime(
             "effective_execution_start_date": combo_perf.get("effective_execution_start_date"),
             "effective_signal_start_date": combo_perf.get("effective_signal_start_date"),
             "asset_context": build_asset_context("cn_a_equity"),
+            "run_profile": combo_runtime_profile,
+            "runtime_profile": _summarize_runtime_profile(combo_runtime_profile),
+            "run_profile_summary": _summarize_runtime_profile(combo_runtime_profile),
             "artifacts": {
                 "perf": ARTIFACT_FILENAMES["perf"],
                 "nav": ARTIFACT_FILENAMES["nav"],

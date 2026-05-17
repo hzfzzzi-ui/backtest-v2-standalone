@@ -1,0 +1,136 @@
+{
+  "round_id": "sr_20260510_v3_industry_theme_etf_index_attribution",
+  "title": "V3???????????ETF??????",
+  "status": "decided",
+  "asset_scope": "cn_stock_etf",
+  "study_id": "cn_stock_etf/v3_industry_theme_etf_index_attribution",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "??V3?2025.12-2026.04??????????????????????CPO/??????ETF??/?????????????",
+  "primary_variable": "read-only attribution: stock trades/candidates + ETF industry/theme proxy indices",
+  "tags": [
+    "V3",
+    "stock-leg",
+    "ETF",
+    "industry-theme",
+    "attribution",
+    "read-only"
+  ],
+  "windows": [
+    "2025.12-2026.01",
+    "2026.03",
+    "2026.04",
+    "2025.12-2026.04"
+  ],
+  "variants": [
+    "V3_ATTRIBUTION_ONLY"
+  ],
+  "fixed_assumptions": [
+    "baseline fixed at CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "stock component fixed at exp_20260510_033603951_8649",
+    "ETF component fixed at exp_20260510_034150821_8962",
+    "no trading logic, universe, baseline, timing, ranking, or portfolio construction change",
+    "ETF industry/theme index analysis uses domestic ETF proxy returns; cross-border ETFs are excluded from main ranking"
+  ],
+  "key_findings": [
+    "2025.12-2026.01: stock leg bought power/electric, partial nonferrous, and CPO/optical names; CPO/compute/storage candidates still had many SKIP_NO_CASH misses.",
+    "2026.03: risk exit/empty-stock behavior is directionally valid; ETF proxy leadership narrowed to bank/low-vol/defense.",
+    "2026.04: ETF theme proxies showed strong semiconductor/chip/electronics/AI/communication recovery, while stock leg re-entered late and was still biased to coal, power, cyclicals, and a small semiconductor exposure.",
+    "The main strategy gap is not simply universe size, but lack of a daily industry/theme attribution layer and active rotation/swap discipline when cash or old holdings block stronger themes."
+  ],
+  "next_actions": [
+    "Do not directly change buy rules from this read-only study.",
+    "First solidify a daily industry/theme attribution layer with candidate strength, holding exposure, ETF proxy strength, and cash-block reason.",
+    "Then design a single-variable AB test for theme-aware replacement discipline, compared against V3."
+  ],
+  "audit": {
+    "same_window_compare": false,
+    "docker_run_checked": true,
+    "config_truth_checked": true,
+    "nav_lineage_checked": true,
+    "read_only_attribution": true
+  },
+  "decision": {
+    "status": "continue_research",
+    "reason": "The analysis identifies a theme-rotation/explanation-layer gap, but it is not a baseline change and does not justify direct trading-rule edits yet."
+  },
+  "evidence": [
+    {
+      "kind": "study_output",
+      "exp_id": "exp_20260510_034302669_7790",
+      "study_id": "cn_stock_etf/v3_industry_theme_etf_index_attribution",
+      "window_key": "2025.12-2026.04",
+      "variant_name": "V3_ATTRIBUTION_ONLY",
+      "path": "outputs/studies/cn_stock_etf/sr_20260510_v3_industry_theme_etf_index_attribution",
+      "note": "Read-only attribution report based on V3 combo baseline and linked stock/ETF component experiments.",
+      "linked_at": "",
+      "stock_exp_id": "exp_20260510_033603951_8649",
+      "etf_exp_id": "exp_20260510_034150821_8962"
+    }
+  ],
+  "notes": [
+    {
+      "note_id": "note_20260510_v3_theme_proxy_outputs",
+      "kind": "artifact",
+      "body": "Generated conclusion.md plus CSVs for NAV summary, stock trade/candidate industry-theme summaries, theme watchlist misses, ETF theme index proxy returns, and ETF trade attribution.",
+      "created_at": "2026-05-10T17:10:00+08:00"
+    },
+    {
+      "note_id": "note_20260510_deep_234",
+      "kind": "deep_attribution",
+      "body": "Added daily attribution layer, ETF proxy alignment, theme gap summary, complete_analysis_234.md, and ab_test_design_234.md. This remains read-only and does not change V3 runtime logic.",
+      "created_at": "2026-05-10T09:23:43+00:00"
+    },
+    {
+      "note_id": "note_20260510_long_horizon",
+      "kind": "long_horizon_attribution",
+      "body": "Extended analysis to 2012-2017, 2016-2026, 2012-2026, 2020-2026, 2023-2026, and 2024-2026. Added long_horizon_analysis.md and long_* CSV artifacts. Still read-only; no V3 runtime logic changed.",
+      "created_at": "2026-05-10T15:19:28+00:00"
+    },
+    {
+      "note_id": "note_20260510_b0_shadow",
+      "kind": "b0_shadow",
+      "body": "Generated B0 shadow replacement audit. Outputs include raw triggers, daily plan, gap-no-candidate, window/theme/year summaries, risk audit, and b0_shadow_analysis.md. Read-only; no V3 runtime logic changed.",
+      "created_at": "2026-05-10T15:38:04+00:00"
+    },
+    {
+      "note_id": "note_20260510_b01_shadow",
+      "kind": "b01_shadow",
+      "body": "Generated B0.1 protected shadow audit. Hard protections include target-related theme, core tech theme, strong ret20/ret60, still-strong holding theme, new-position cooldown, and risk-off state block. Outputs include b01_shadow_analysis.md and b01_* CSV artifacts.",
+      "created_at": "2026-05-10T15:50:21+00:00"
+    }
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "updated_at": "2026-05-10T15:50:21+00:00",
+  "reliability": "low",
+  "created_at": "2026-05-10T09:06:55+00:00",
+  "auto_summary": {
+    "schema_version": "openclaw_study_auto_summary@1",
+    "generated_at": "2026-05-10T15:50:21+00:00",
+    "headline": "V3???????????ETF??????：主变量=read-only attribution: stock trades/candidates + ETF industry/theme proxy indices",
+    "conclusion_draft": "已有证据链接但缺少可解析 conclusion registry，结论需要人工补证。",
+    "reliability": "low",
+    "facts": [
+      "已关联 1 条证据。",
+      "匹配到 0 条 study conclusion registry 记录。"
+    ],
+    "risks": [
+      "关联证据未匹配到 conclusion registry，指标和 verdict 需要人工核对。",
+      "三窗口证据尚不完整，不能作为 baseline 升级依据。",
+      "尚未确认 same-window compare。"
+    ],
+    "next_actions": [
+      "Do not directly change buy rules from this read-only study.",
+      "First solidify a daily industry/theme attribution layer with candidate strength, holding exposure, ETF proxy strength, and cash-block reason.",
+      "Then design a single-variable AB test for theme-aware replacement discipline, compared against V3.",
+      "补齐 2016-2026、2012-2017、2012-2026 三窗口证据。"
+    ],
+    "evidence_counts": {
+      "linked": 1,
+      "matched_conclusions": 0
+    },
+    "window_coverage": [],
+    "verdict_counts": {},
+    "gate_status_counts": {},
+    "metric_highlights": []
+  }
+}

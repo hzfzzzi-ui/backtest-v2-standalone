@@ -1,0 +1,63 @@
+study_id: cn_stock_etf/cn_stock_etf_theme_health_shadow_v1
+title: CN Stock ETF Theme Health Shadow V1
+asset_scope: cn_stock_etf
+baseline_id: CN_STOCK_ETF_COMBO_BASELINE_V3
+hypothesis: Held stock themes show observable weakening before or alongside market-level risk-off and single-name exits; the first step is a research-only shadow audit, not a runtime rule.
+change_scope:
+  modules_modified:
+    - research_entry.cn_stock_etf.theme_health_shadow_v1
+    - backend.research.theme_health_shadow_study
+variants:
+  - name: C1_THEME_HEALTH_SHADOW
+    description: Research-only held-theme health labels from V3 attribution artifacts; no trades, no NAV recomputation, no baseline change.
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-05-08"
+  - key: "2020_2026"
+    role: diagnostic
+    start: "2020-01-01"
+    end: "2026-05-08"
+  - key: "2024_2026"
+    role: diagnostic
+    start: "2024-01-01"
+    end: "2026-05-08"
+  - key: "2025_2026"
+    role: diagnostic
+    start: "2025-01-01"
+    end: "2026-05-08"
+  - key: "2025_12_2026_04"
+    role: diagnostic
+    start: "2025-12-01"
+    end: "2026-04-30"
+  - key: "2026_03"
+    role: diagnostic
+    start: "2026-03-01"
+    end: "2026-03-31"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  fast_mode: true
+  runner_params:
+    input_artifact_dir: outputs/studies/cn_stock_etf/sr_20260510_v3_industry_theme_etf_index_attribution
+    thresholds:
+      proxy_ret20_weak_threshold: 0.0
+      proxy_ret60_weak_threshold: 0.0
+      rank_pct_weak_threshold: 0.6
+      candidate_collapse_days: 10
+      watch_min_flags: 2
+      confirmed_min_flags: 3
+      min_proxy_coverage_ratio: 0.35
+metadata:
+  runner_mode: cn_stock_etf_theme_health_shadow
+  research_only: true
+  not_nav_backtest: true
+  compared_baseline_id: CN_STOCK_ETF_COMBO_BASELINE_V3
+  source_round_id: sr_20260510_v3_industry_theme_etf_index_attribution
+  source_policy: consume_v3_attribution_bundle_only
+  runtime_policy: unchanged_from_v3

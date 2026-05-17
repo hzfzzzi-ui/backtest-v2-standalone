@@ -117,6 +117,17 @@ class SizingConfig:
     rotation_replace_max_swaps_per_day: int = 1
     rotation_replace_candidate_top_n: int = 3
     rotation_replace_min_score_gap: float = 0.15
+    # Research-only A2 high-chase activity size-down. Default off preserves baseline.
+    high_chase_a2_size_down_enabled: bool = False
+    high_chase_a2_size_down_scale: float = 0.5
+    high_chase_a2_pre20_ret_threshold: float = 0.50
+    high_chase_a2_turnover_rate_f20_threshold: float = 8.0
+    high_chase_a2_volume_20d_vs_60d_threshold: float = 1.5
+    # Research-only hot liquidity/turnover size-down. Default off preserves baseline.
+    hot_amount_turnover_size_down_enabled: bool = False
+    hot_amount_turnover_size_down_scale: float = 0.8
+    hot_amount_turnover_amount_pct_threshold: float = 0.8
+    hot_amount_turnover_turnover_pct_threshold: float = 0.8
 
 
 @dataclass(slots=True)

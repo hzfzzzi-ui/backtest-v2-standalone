@@ -1,0 +1,92 @@
+{
+  "round_id": "sr_20260511_v3_d5_mfe_mae_confirmation_shadow",
+  "title": "V3 D5 MFE不足 + MAE扩大确认失败 Shadow",
+  "status": "audited",
+  "study_id": "cn_stock_etf/v3_d5_mfe_mae_confirmation_shadow_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "只用买入后自身价格路径的 MFE 不足 + MAE 扩大，是否能更干净识别假突破？",
+  "primary_variable": "close MFE/MAE post-entry confirmation failure",
+  "fixed_assumptions": [
+    "CN_STOCK_ETF_COMBO_BASELINE_V3 fixed",
+    "stock closed trades only; ETF sleeve excluded",
+    "no runtime, NAV, signal, ranking, execution, exit, pool, industry, theme, or benchmark changes",
+    "trigger uses only adjusted close path visible at evaluation date",
+    "half exit only"
+  ],
+  "windows": [
+    "2012-2026"
+  ],
+  "variants": [
+    "D5_3D_MFE2_MAE5_HALF",
+    "D5_5D_MFE3_MAE6_HALF",
+    "D5_10D_MFE5_MAE8_HALF"
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "study_id": "cn_stock_etf/v3_d5_mfe_mae_confirmation_shadow_v1",
+      "window_key": "1226",
+      "variant_name": "D5_MFE_MAE_CONFIRMATION_SHADOW",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_d5_mfe_mae_confirmation_shadow\\human\\d5_mfe_mae_confirmation_shadow.md",
+      "note": "human D5 MFE/MAE confirmation shadow report",
+      "linked_at": "2026-05-11T06:06:58+08:00"
+    },
+    {
+      "kind": "table",
+      "study_id": "cn_stock_etf/v3_d5_mfe_mae_confirmation_shadow_v1",
+      "window_key": "1226",
+      "variant_name": "D5_MFE_MAE_CONFIRMATION_SHADOW",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_d5_mfe_mae_confirmation_shadow\\machine\\d5_trade_detail.csv",
+      "note": "per-trade D5 counterfactual detail",
+      "linked_at": "2026-05-11T06:06:58+08:00"
+    }
+  ],
+  "key_findings": [
+    "Best variant: D5_10D_MFE5_MAE8_HALF delta=41,681, active=43.",
+    "No industry/theme/benchmark/candidate/liquidity fields are used by the trigger."
+  ],
+  "audit": {
+    "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "closed_trades": 388,
+    "symbols_requested": 320,
+    "symbols_loaded": 320,
+    "ohlcv_rows": 974244,
+    "min_query_date": "2012-10-16",
+    "max_query_date": "2026-05-18",
+    "source_prices": "public.pams_ohlcv_daily_v2 adjusted OHLCV",
+    "source_candidates": "outputs\\experiments\\exp_20260510_033603951_8649\\candidate_signals.csv",
+    "read_only_shadow": true,
+    "trigger_scope": "stock adjusted close path only",
+    "excluded_from_trigger": [
+      "industry",
+      "theme",
+      "benchmark",
+      "candidate_rank",
+      "liquidity",
+      "entry_chase"
+    ],
+    "source_parent_audit": "outputs/studies/cn_stock_etf/sr_20260511_v3_d4_profit_loss_top30_difference_audit"
+  },
+  "decision": {
+    "status": "continue",
+    "reason": "Best D5 variant is positive at trade-level shadow."
+  },
+  "next_actions": [
+    "If positive, inspect profit TOP30 damage before Docker AB.",
+    "If non-positive, do not tune thresholds blindly; add an explicit profit-runner protection condition."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "D5",
+    "mfe",
+    "mae",
+    "confirmation-failure",
+    "shadow",
+    "research-only"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T06:06:58+08:00",
+  "updated_at": "2026-05-11T06:06:58+08:00"
+}

@@ -131,6 +131,15 @@ def build_candidate_plan_result(
         rotation_replace_candidate_top_n=int(getattr(getattr(runtime, "_sizing_cfg", None), "rotation_replace_candidate_top_n", 3) or 3),
         rotation_replace_min_score_gap=float(getattr(getattr(runtime, "_sizing_cfg", None), "rotation_replace_min_score_gap", 0.15) or 0.15),
         rotation_min_hold_days=int(getattr(getattr(getattr(runtime, "request", None), "strategy", None), "min_hold_days", 0) or 0),
+        high_chase_a2_size_down_enabled=bool(getattr(getattr(runtime, "_sizing_cfg", None), "high_chase_a2_size_down_enabled", False)),
+        high_chase_a2_size_down_scale=float(getattr(getattr(runtime, "_sizing_cfg", None), "high_chase_a2_size_down_scale", 0.5) or 0.5),
+        high_chase_a2_pre20_ret_threshold=float(getattr(getattr(runtime, "_sizing_cfg", None), "high_chase_a2_pre20_ret_threshold", 0.50) or 0.50),
+        high_chase_a2_turnover_rate_f20_threshold=float(getattr(getattr(runtime, "_sizing_cfg", None), "high_chase_a2_turnover_rate_f20_threshold", 8.0) or 8.0),
+        high_chase_a2_volume_20d_vs_60d_threshold=float(getattr(getattr(runtime, "_sizing_cfg", None), "high_chase_a2_volume_20d_vs_60d_threshold", 1.5) or 1.5),
+        hot_amount_turnover_size_down_enabled=bool(getattr(getattr(runtime, "_sizing_cfg", None), "hot_amount_turnover_size_down_enabled", False)),
+        hot_amount_turnover_size_down_scale=float(getattr(getattr(runtime, "_sizing_cfg", None), "hot_amount_turnover_size_down_scale", 0.8) or 0.8),
+        hot_amount_turnover_amount_pct_threshold=float(getattr(getattr(runtime, "_sizing_cfg", None), "hot_amount_turnover_amount_pct_threshold", 0.8) or 0.8),
+        hot_amount_turnover_turnover_pct_threshold=float(getattr(getattr(runtime, "_sizing_cfg", None), "hot_amount_turnover_turnover_pct_threshold", 0.8) or 0.8),
     )
     planned_items = list(plan.get("planned_items") or [])
     payload = _build_candidate_plan_payload(

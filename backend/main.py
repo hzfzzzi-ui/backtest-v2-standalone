@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from backend.api.backtest_v2.router import router as backtest_v2_router  # noqa: E402
 from backend.api.mobile import router as mobile_dashboard_router  # noqa: E402
+from backend.api.research_journal import router as research_journal_router  # noqa: E402
 from backend.api.transactions import router as transactions_router  # noqa: E402
 from backend.api.shared.mobile_access import (  # noqa: E402
     is_allowed_mobile_host,
@@ -66,6 +67,7 @@ app.add_middleware(NoCacheMiddleware)
 app.add_middleware(PrivateMobileAccessMiddleware)
 app.include_router(backtest_v2_router)
 app.include_router(mobile_dashboard_router)
+app.include_router(research_journal_router)
 app.include_router(transactions_router)
 
 app.add_middleware(
@@ -96,6 +98,16 @@ def index() -> FileResponse:
 @app.get("/index.html")
 def page() -> FileResponse:
     return FileResponse(str(FRONTEND_DIR / "index.html"), headers=_NO_CACHE)
+
+
+@app.get("/study-journal")
+def study_journal_index() -> FileResponse:
+    return FileResponse(str(FRONTEND_DIR / "study-journal.html"), headers=_NO_CACHE)
+
+
+@app.get("/study-journal.html")
+def study_journal_page() -> FileResponse:
+    return FileResponse(str(FRONTEND_DIR / "study-journal.html"), headers=_NO_CACHE)
 
 
 @app.get("/mobile")

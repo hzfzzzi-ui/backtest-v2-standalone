@@ -1,0 +1,95 @@
+{
+  "round_id": "sr_20260511_v3_c3_industry_riskoff_buffer_counterfactual",
+  "title": "V3 C3-I 申万一级行业 Risk-Off 缓冲反事实",
+  "status": "audited",
+  "study_id": "cn_stock_etf/v3_c3_industry_riskoff_buffer_counterfactual_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "当 V3 股票腿 RISK_OFF_EXIT 触发时，如果申万一级行业仍强，延迟或分批退出是否能减少误杀且不破坏风险保护？",
+  "primary_variable": "industry-only counterfactual buffer over V3 stock-leg risk-off exits",
+  "fixed_assumptions": [
+    "CN_STOCK_ETF_COMBO_BASELINE_V3 fixed",
+    "stock_alpha_core risk-off exits only; ETF sleeve excluded",
+    "no runtime, NAV, signal, pool, ranking, execution, or exit-rule changes",
+    "industry strength trigger uses only as-of pre-exit SW L1 index data",
+    "C2 verdict is evaluation-only and not used as a trigger"
+  ],
+  "windows": [
+    "1626",
+    "2020_2026",
+    "2024_2026",
+    "2025_2026",
+    "2025_12_2026_04",
+    "2026_03"
+  ],
+  "variants": [
+    "C3I_DELAY_1D_FULL",
+    "C3I_DELAY_3D_FULL",
+    "C3I_HALF_3D"
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "study_id": "cn_stock_etf/v3_c3_industry_riskoff_buffer_counterfactual_v1",
+      "window_key": "1626",
+      "variant_name": "C3I_INDUSTRY_RISKOFF_BUFFER_COUNTERFACTUAL",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_c3_industry_riskoff_buffer_counterfactual\\human\\c3_industry_counterfactual_report.md",
+      "note": "human C3-I industry-only counterfactual report",
+      "linked_at": "2026-05-11T05:19:39+08:00"
+    },
+    {
+      "kind": "summary",
+      "study_id": "cn_stock_etf/v3_c3_industry_riskoff_buffer_counterfactual_v1",
+      "window_key": "multi",
+      "variant_name": "C3I_INDUSTRY_RISKOFF_BUFFER_COUNTERFACTUAL",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_c3_industry_riskoff_buffer_counterfactual\\machine\\summary.json",
+      "note": "machine summary with variant, verdict, industry, and guardrail breakdowns",
+      "linked_at": "2026-05-11T05:19:39+08:00"
+    },
+    {
+      "kind": "table",
+      "study_id": "cn_stock_etf/v3_c3_industry_riskoff_buffer_counterfactual_v1",
+      "window_key": "1626",
+      "variant_name": "C3I_INDUSTRY_RISKOFF_BUFFER_COUNTERFACTUAL",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_c3_industry_riskoff_buffer_counterfactual\\machine\\c3_trade_detail_1626.csv",
+      "note": "per-trade C3-I counterfactual detail",
+      "linked_at": "2026-05-11T05:19:39+08:00"
+    }
+  ],
+  "key_findings": [
+    "Industry-only eligible exits: 72/227.",
+    "Best shadow variant by delta_pnl: C3I_HALF_3D delta=-211,200.",
+    "C2 verdict is evaluation-only; C3-I trigger uses no theme or post-sell information.",
+    "C3-I industry-only buffer is not promoted when the best variant delta is non-positive."
+  ],
+  "audit": {
+    "same_window_compare": false,
+    "config_truth_checked": false,
+    "nav_lineage_checked": false,
+    "docker_run_checked": false,
+    "source_artifact_checked": true,
+    "db_price_lineage_checked": true,
+    "read_only_shadow": true
+  },
+  "decision": {
+    "status": "reject",
+    "reason": "Industry-only risk-off buffer has negative delta_pnl in the main window and deteriorates the recent 2025-2026 / 2026-03 windows; do not promote to Docker runtime AB."
+  },
+  "next_actions": [
+    "Inspect whether C3-I improvement is concentrated by industry or a few symbols.",
+    "If stable, promote only the best C3-I variant to a Docker runtime AB proposal.",
+    "Keep theme-triggered C3-T as a separate later study."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "C3-I",
+    "industry-index",
+    "risk-off-exit",
+    "counterfactual",
+    "shadow"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T05:19:39+08:00",
+  "updated_at": "2026-05-11T05:19:39+08:00"
+}

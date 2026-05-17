@@ -1,0 +1,92 @@
+{
+  "round_id": "sr_20260511_v3_c2_theme_weak_confirmation_shadow",
+  "title": "V3 C2 主题转弱确认 Shadow",
+  "status": "audited",
+  "study_id": "cn_stock_etf/v3_c2_theme_weak_confirmation_shadow_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "V3 股票腿 RISK_OFF_EXIT 是否能被大盘、行业、主题和卖后表现共同解释，哪些卖出疑似误杀？",
+  "primary_variable": "read-only C2 shadow labels over V3 stock-leg risk-off exits",
+  "fixed_assumptions": [
+    "CN_STOCK_ETF_COMBO_BASELINE_V3 fixed",
+    "stock_alpha_core risk-off exits only; ETF sleeve excluded",
+    "no runtime, NAV, signal, pool, ranking, execution, or exit-rule changes",
+    "theme health reused from C1 and matched as-of on or before exit date with 10-calendar-day limit"
+  ],
+  "windows": [
+    "1626",
+    "2020_2026",
+    "2024_2026",
+    "2025_2026",
+    "2025_12_2026_04",
+    "2026_03"
+  ],
+  "variants": [
+    "C2_THEME_WEAK_CONFIRMATION_SHADOW"
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "study_id": "cn_stock_etf/v3_c2_theme_weak_confirmation_shadow_v1",
+      "window_key": "1626",
+      "variant_name": "C2_THEME_WEAK_CONFIRMATION_SHADOW",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_c2_theme_weak_confirmation_shadow\\human\\c2_theme_weak_confirmation_shadow.md",
+      "note": "human C2 shadow report",
+      "linked_at": "2026-05-11T04:52:35+08:00"
+    },
+    {
+      "kind": "summary",
+      "study_id": "cn_stock_etf/v3_c2_theme_weak_confirmation_shadow_v1",
+      "window_key": "multi",
+      "variant_name": "C2_THEME_WEAK_CONFIRMATION_SHADOW",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_c2_theme_weak_confirmation_shadow\\machine\\summary.json",
+      "note": "machine summary with window and verdict breakdowns",
+      "linked_at": "2026-05-11T04:52:35+08:00"
+    },
+    {
+      "kind": "table",
+      "study_id": "cn_stock_etf/v3_c2_theme_weak_confirmation_shadow_v1",
+      "window_key": "1626",
+      "variant_name": "C2_THEME_WEAK_CONFIRMATION_SHADOW",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_c2_theme_weak_confirmation_shadow\\machine\\risk_off_exit_c2_detail_1626.csv",
+      "note": "per-trade risk-off exit C2 labels",
+      "linked_at": "2026-05-11T04:52:35+08:00"
+    }
+  ],
+  "key_findings": [
+    "Main window has 227 risk-off exits; theme evidence coverage is 58.1%.",
+    "Protected-profit exits count=56, pnl=4,953,274; these exits generally avoided later weakness.",
+    "Suspected theme-not-weak overkill count=25, pnl=2,740,892; these rebounded after risk-off exit.",
+    "Mixed industry-weak-but-rebounded count=35, pnl=-132,637; industry weakness alone is not enough for final confirmation.",
+    "C2 should stay as a diagnostic layer until C3 counterfactual proves delayed or staged exit is stable across windows."
+  ],
+  "audit": {
+    "same_window_compare": false,
+    "config_truth_checked": false,
+    "nav_lineage_checked": false,
+    "docker_run_checked": false,
+    "source_artifact_checked": true,
+    "theme_proxy_source_checked": true,
+    "read_only_shadow": true
+  },
+  "decision": {
+    "status": "continue",
+    "reason": "Continue to C3 counterfactual; do not promote C2 directly to runtime because theme coverage and false-positive risk are still material."
+  },
+  "next_actions": [
+    "Run C3 delayed/staged exit counterfactual for suspected overkill samples only.",
+    "Separate results by profitable protected exits, losing exits, and rebounded exits.",
+    "Require cross-window stability before any formal AB."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "C2",
+    "theme-health",
+    "risk-off-exit",
+    "shadow"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T04:52:35+08:00",
+  "updated_at": "2026-05-11T04:52:35+08:00"
+}

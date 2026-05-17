@@ -75,6 +75,7 @@ class ExitCounts:
     ma20_exit: int = 0
     low10_exit: int = 0
     profit_decay_exit: int = 0
+    mfe_mae_confirmation_exit: int = 0
 
 
 @dataclass(slots=True)

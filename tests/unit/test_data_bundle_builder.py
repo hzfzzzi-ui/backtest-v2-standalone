@@ -15,7 +15,7 @@ from backend.core.config.models import (
     UniverseConfig,
 )
 from backend.core.data.provider import DataProvider
-from backend.core.tools.data_bundle_builder import build_data_bundle
+from backend.core.tools.data_bundle_builder import _prune_history_to_membership_intervals, build_data_bundle
 
 
 class _FakeProvider(DataProvider):
@@ -142,6 +142,187 @@ class _FakeProvider(DataProvider):
 
     def load_cn_etf_coverage(self, symbols: list[str]) -> pd.DataFrame:
         return pd.DataFrame(columns=["ts_code", "coverage_start", "coverage_end", "daily_table", "price_series_semantics"])
+
+
+class _CompositePitProvider(_FakeProvider):
+    def load_ohlcv_daily(self, symbols: list[str], start: date, end: date, source: str) -> pd.DataFrame:
+        rows = []
+        normalized = {str(symbol).strip().lower() for symbol in symbols}
+        template = {
+            "sh600000": 10.0,
+            "sz000001": 8.0,
+            "sz300001": 20.0,
+        }
+        for symbol, base in template.items():
+            if symbol not in normalized:
+                continue
+            rows.extend(
+                [
+                    {
+                        "date": pd.Timestamp("2024-01-02"),
+                        "symbol": symbol,
+                        "open": base,
+                        "high": base + 0.5,
+                        "low": base - 0.2,
+                        "close": base + 0.2,
+                        "volume": 1000,
+                        "amount": 10000,
+                        "adj_factor": 1.0,
+                    },
+                    {
+                        "date": pd.Timestamp("2024-01-03"),
+                        "symbol": symbol,
+                        "open": base + 0.3,
+                        "high": base + 0.7,
+                        "low": base,
+                        "close": base + 0.4,
+                        "volume": 1100,
+                        "amount": 11000,
+                        "adj_factor": 1.1,
+                    },
+                ]
+            )
+        return pd.DataFrame(rows)
+
+    def load_security_master(self, symbols: list[str]) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"symbol": str(symbol).strip().lower(), "list_date": "2010-01-01", "delist_date": None}
+                for symbol in symbols
+            ]
+        )
+
+    def load_industry_mapping(self, symbols: list[str]) -> dict[str, str]:
+        return {str(symbol).strip().lower(): "Bank" for symbol in symbols}
+
+    def load_industry_history(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": str(symbol).strip().lower(),
+                    "start_date": pd.Timestamp(start),
+                    "end_date": None,
+                    "industry_l1": "Bank",
+                }
+                for symbol in symbols
+            ]
+        )
+
+    def load_index_constituent_history(self, index_code: str, start: date, end: date) -> pd.DataFrame:
+        index_code = str(index_code).strip().upper()
+        if index_code == "000906.SH":
+            return pd.DataFrame(
+                [
+                    {
+                        "index_code": index_code,
+                        "symbol": "sh600000",
+                        "start_date": "2024-01-01",
+                        "end_date": None,
+                        "source": "tushare_csi800_formal",
+                    },
+                    {
+                        "index_code": index_code,
+                        "symbol": "sz000001",
+                        "start_date": "2024-01-01",
+                        "end_date": None,
+                        "source": "tushare_csi800_formal",
+                    },
+                ]
+            )
+        return pd.DataFrame(
+            [
+                {
+                    "index_code": index_code,
+                    "symbol": "sz000001",
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-01-03",
+                    "source": "tushare_csi1000_calendar",
+                    "event_type": "scheduled",
+                    "rebalance_calendar_version": "seed-v1",
+                    "rebalance_calendar_source": "csindex_seed_schedule",
+                    "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
+                },
+                {
+                    "index_code": index_code,
+                    "symbol": "sz300001",
+                    "start_date": "2024-01-02",
+                    "end_date": None,
+                    "source": "tushare_csi1000_calendar",
+                    "event_type": "scheduled",
+                    "rebalance_calendar_version": "seed-v1",
+                    "rebalance_calendar_source": "csindex_seed_schedule",
+                    "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
+                },
+            ]
+        )
+
+    def load_index_constituent_refresh_membership(self, index_code: str) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "index_code": "000852.SH",
+                    "refresh_date": "2024-01-01",
+                    "symbol": "sz000001",
+                    "constituent_start_date": "2024-01-01",
+                    "source": "tushare_csi1000_calendar",
+                    "event_type": "scheduled",
+                    "snapshot_trade_date": "2024-01-01",
+                    "rebalance_calendar_version": "seed-v1",
+                    "rebalance_calendar_source": "csindex_seed_schedule",
+                    "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
+                },
+                {
+                    "index_code": "000852.SH",
+                    "refresh_date": "2024-01-02",
+                    "symbol": "sz300001",
+                    "constituent_start_date": "2024-01-02",
+                    "source": "tushare_csi1000_calendar",
+                    "event_type": "scheduled",
+                    "snapshot_trade_date": "2024-01-02",
+                    "rebalance_calendar_version": "seed-v1",
+                    "rebalance_calendar_source": "csindex_seed_schedule",
+                    "rebalance_calendar_generated_at": "2026-03-11T00:00:00+08:00",
+                },
+            ]
+        )
+
+
+class _CompositeStaticFallbackProvider(_CompositePitProvider):
+    def load_index_constituent_history(self, index_code: str, start: date, end: date) -> pd.DataFrame:
+        index_code = str(index_code).strip().upper()
+        if index_code == "000906.SH":
+            return super().load_index_constituent_history(index_code, start, end)
+        return pd.DataFrame(
+            [
+                {
+                    "index_code": index_code,
+                    "symbol": "sz000001",
+                    "start_date": "2024-01-01",
+                    "end_date": None,
+                    "source": "akshare_csi1000_static_fallback",
+                },
+                {
+                    "index_code": index_code,
+                    "symbol": "sz300001",
+                    "start_date": "2024-01-01",
+                    "end_date": None,
+                    "source": "akshare_csi1000_static_fallback",
+                },
+            ]
+        )
+
+    def load_index_constituent_refresh_membership(self, index_code: str) -> pd.DataFrame:
+        return pd.DataFrame(
+            columns=[
+                "index_code",
+                "refresh_date",
+                "symbol",
+                "constituent_start_date",
+                "source",
+                "event_type",
+                "snapshot_trade_date",
+            ]
+        )
 
 
 class _AdjFactorStaleProvider(_FakeProvider):
@@ -365,6 +546,89 @@ def test_build_data_bundle_exposes_csi1000_calendar_lineage_metadata() -> None:
     assert bundle.universe_meta["refresh_event_count"] == 1
     assert bundle.summary["rebalance_calendar_version"] == "seed-v1"
     assert bundle.summary["rebalance_calendar_source"] == "csindex_seed_schedule"
+
+
+def test_build_data_bundle_supports_hs300_zz500_csi1000_dynamic_membership() -> None:
+    bundle = build_data_bundle(
+        cfg_obj=_cfg(),
+        cfg_merged={"universe": {"membership_mode": "PIT_DYNAMIC"}},
+        overrides={"universe_mode": "HS300_ZZ500_CSI1000", "price_adj": "hfq"},
+        rules_path=Path("instrument_rules_cn.csv"),
+        provider=_CompositePitProvider(),
+        default_experiment_symbols=["600000.SH"],
+    )
+
+    assert bundle.universe_meta["index_codes"] == ["000906.SH", "000852.SH"]
+    assert set(bundle.membership_history["index_code"].astype(str).str.upper()) == {"000906.SH", "000852.SH"}
+    assert bundle.universe_meta["union_symbol_count"] == 3
+    assert bundle.universe_meta["csi1000_membership_data_quality"] == "pit_verified"
+    assert bundle.universe_meta["csi1000_provider_floor_date"] == "2024-01-01"
+    assert bundle.summary["index_codes"] == ["000906.SH", "000852.SH"]
+    assert bundle.summary["csi1000_membership_data_quality"] == "pit_verified"
+    assert sorted(bundle.symbols) == ["sh600000", "sz000001", "sz300001"]
+
+
+def test_pit_interval_pushdown_prunes_rows_outside_membership_with_warmup() -> None:
+    history = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2024-01-02"), "symbol": "sh600000", "close": 10.0},
+            {"date": pd.Timestamp("2024-01-03"), "symbol": "sh600000", "close": 10.1},
+            {"date": pd.Timestamp("2024-01-02"), "symbol": "sz300001", "close": 20.0},
+            {"date": pd.Timestamp("2024-01-03"), "symbol": "sz300001", "close": 20.1},
+        ]
+    )
+    membership = pd.DataFrame(
+        [
+            {"index_code": "000906.SH", "symbol": "sh600000", "start_date": "2024-01-02", "end_date": None},
+            {"index_code": "000852.SH", "symbol": "sz300001", "start_date": "2024-01-03", "end_date": None},
+        ]
+    )
+
+    pruned, audit = _prune_history_to_membership_intervals(
+        history,
+        membership,
+        [date(2024, 1, 2), date(2024, 1, 3)],
+        warmup_trading_days=0,
+    )
+
+    kept = sorted((str(row.symbol), str(pd.Timestamp(row.date).date())) for row in pruned.itertuples(index=False))
+    assert kept == [
+        ("sh600000", "2024-01-02"),
+        ("sh600000", "2024-01-03"),
+        ("sz300001", "2024-01-03"),
+    ]
+    assert audit["pit_interval_pushdown_enabled"] is True
+    assert audit["pit_interval_pushdown_rows_before"] == 4
+    assert audit["pit_interval_pushdown_rows_after"] == 3
+    assert audit["pit_interval_pushdown_rows_dropped"] == 1
+
+    warm_pruned, warm_audit = _prune_history_to_membership_intervals(
+        history,
+        membership,
+        [date(2024, 1, 2), date(2024, 1, 3)],
+        warmup_trading_days=1,
+    )
+    assert len(warm_pruned.index) == 4
+    assert warm_audit["pit_interval_pushdown_rows_dropped"] == 0
+
+
+def test_build_data_bundle_blocks_static_fallback_csi1000_inside_composite_pool() -> None:
+    try:
+        build_data_bundle(
+            cfg_obj=_cfg(),
+            cfg_merged={"universe": {"membership_mode": "PIT_DYNAMIC"}},
+            overrides={"universe_mode": "HS300_ZZ500_CSI1000", "price_adj": "hfq"},
+            rules_path=Path("instrument_rules_cn.csv"),
+            provider=_CompositeStaticFallbackProvider(),
+            default_experiment_symbols=["600000.SH"],
+        )
+    except ValueError as exc:
+        message = str(exc)
+        assert "csi1000" in message
+        assert "static_fallback" in message
+        assert "audit_reason=" in message
+    else:
+        raise AssertionError("expected composite CSI1000 static fallback gate to block")
 
 
 class _StaticFallbackProvider(_FakeProvider):

@@ -1,0 +1,98 @@
+{
+  "schema_version": "openclaw_study_round@1",
+  "round_id": "sr_20260510_theme_protected_replacement_v1",
+  "title": "B0.1 保护替换正式影子研究",
+  "status": "auditing",
+  "created_at": "2026-05-11T00:02:30+08:00",
+  "updated_at": "2026-05-11T00:02:30+08:00",
+  "asset_scope": "cn_stock_etf",
+  "study_id": "cn_stock_etf/cn_stock_etf_theme_protected_replacement_v1",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "B0.1 保护规则过滤后，主题替换 shadow 是否仍有足够触发密度，且没有卖出核心科技/强趋势/目标相关主题的明显违规，从而值得进入 B1 真实 AB？",
+  "primary_variable": "B01_PROTECTED_SHADOW: protected replacement shadow trigger density and protection audit",
+  "tags": [
+    "V3",
+    "stock-leg",
+    "theme-protected-replacement",
+    "B0.1",
+    "shadow",
+    "research-only"
+  ],
+  "windows": [
+    "1626",
+    "1217",
+    "1226",
+    "2020_2026",
+    "2024_2026",
+    "2025_12_2026_04"
+  ],
+  "variants": [
+    "B01_PROTECTED_SHADOW"
+  ],
+  "fixed_assumptions": [
+    "baseline fixed at CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "source stock component fixed at exp_20260510_033603951_8649",
+    "source ETF component fixed at exp_20260510_034150821_8962",
+    "no trading logic, universe, baseline, timing, ranking, defense layer, ETF sleeve, or portfolio construction change",
+    "this study is research-only shadow and does not recompute NAV",
+    "source evidence coverage is 2016-01-01 to 2026-05-08"
+  ],
+  "key_findings": [
+    "2016-2026 main window: B0 149 rows -> B0.1 53 rows, 53 trigger days, 33 buy symbols, 13 sell symbols, capped potential replacement amount 1050.17 万.",
+    "2020-2026 diagnostic window: B0.1 keeps 52 rows and 0 core-tech sell rows, so modern ETF theme proxy period still has enough trigger density.",
+    "2024-2026 diagnostic window: B0.1 keeps 22 rows, concentrated in 电力/电气、有色金属、消费、存储; sell side only 3 unique symbols.",
+    "2025.12-2026.04 recent window: B0.1 keeps 9 rows, mainly 有色金属 and 消费; sell side only 兴业证券.",
+    "1217 and 1226 are inconclusive as baseline gates because B0.1 source evidence starts at 2016-01-01, not 2012-01-04.",
+    "This round confirms only that B0.1 is worth entering B1 AB design; it does not prove NAV improvement."
+  ],
+  "next_actions": [
+    "Do not promote this shadow result to baseline.",
+    "Design B1 runtime AB as a single-variable change: theme-protected replacement only, fixed V3 stock pool and ETF sleeve.",
+    "Before B1, specify execution order, cash accounting, replacement cap, same-day buy/sell priority, and NAV/account lineage checks.",
+    "Run B1 on 1626 first; only if it improves or controls drawdown without contract drift, then run 1217 and 1226."
+  ],
+  "audit": {
+    "same_window_compare": false,
+    "docker_run_checked": false,
+    "config_truth_checked": true,
+    "nav_lineage_checked": true,
+    "source_artifact_checked": true,
+    "not_nav_backtest": true,
+    "research_only_shadow": true,
+    "conclusion_registry_written": true
+  },
+  "decision": {
+    "status": "continue_to_b1_ab_design",
+    "reason": "Main and modern diagnostic windows confirm protected shadow activity with no core-tech sell breach, but hard/full 2012 windows are coverage-incomplete and this round does not recompute NAV."
+  },
+  "evidence": [
+    {
+      "kind": "study_output",
+      "exp_id": "",
+      "study_id": "cn_stock_etf/cn_stock_etf_theme_protected_replacement_v1",
+      "window_key": "1626",
+      "variant_name": "B01_PROTECTED_SHADOW",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_theme_protected_replacement_v1",
+      "note": "Formal research-only shadow study output and matrix summary.",
+      "linked_at": "2026-05-11T00:02:30+08:00"
+    },
+    {
+      "kind": "source_artifact",
+      "exp_id": "exp_20260510_034302669_7790",
+      "study_id": "cn_stock_etf/v3_industry_theme_etf_index_attribution",
+      "window_key": "2016_2026_main",
+      "variant_name": "V3_ATTRIBUTION_ONLY",
+      "path": "outputs/studies/cn_stock_etf/sr_20260510_v3_industry_theme_etf_index_attribution",
+      "note": "Source V3 attribution bundle used by the formal B0.1 protected shadow study.",
+      "linked_at": "2026-05-11T00:02:30+08:00"
+    }
+  ],
+  "notes": [
+    {
+      "note_id": "note_20260510_formal_shadow_registered",
+      "kind": "formal_study",
+      "body": "Ran cn_stock_etf/cn_stock_etf_theme_protected_replacement_v1 through study_run. Outputs include per-window machine summaries, human summaries, matrix summary, and conclusion registry records. This remains shadow-only and not a NAV backtest.",
+      "created_at": "2026-05-11T00:02:30+08:00"
+    }
+  ]
+}

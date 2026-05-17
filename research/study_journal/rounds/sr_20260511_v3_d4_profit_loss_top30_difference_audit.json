@@ -1,0 +1,94 @@
+{
+  "round_id": "sr_20260511_v3_d4_profit_loss_top30_difference_audit",
+  "title": "V3 D4 盈利 TOP30 vs 亏损 TOP30 差异审计",
+  "status": "audited",
+  "study_id": "cn_stock_etf/v3_d4_profit_loss_top30_difference_audit_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "盈利 TOP30 与亏损 TOP30 的稳定差异来自入场前、入场后确认、相对强度、候选持续性还是流动性？",
+  "primary_variable": "profit_top30_vs_loss_top30 post-hoc diagnostic feature differences",
+  "fixed_assumptions": [
+    "CN_STOCK_ETF_COMBO_BASELINE_V3 fixed",
+    "D0 closed stock trade reconstruction fixed",
+    "no runtime, NAV, signal, ranking, execution, exit, pool, or ETF changes",
+    "TOP30 labels are post-hoc diagnostics and not live-rule conditions"
+  ],
+  "windows": [
+    "2012-2026"
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "study_id": "cn_stock_etf/v3_d4_profit_loss_top30_difference_audit_v1",
+      "window_key": "1226",
+      "variant_name": "D4_PROFIT_LOSS_TOP30_DIFFERENCE_AUDIT",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_d4_profit_loss_top30_difference_audit\\human\\d4_profit_loss_top30_difference_audit.md",
+      "note": "human D4 profit/loss top30 difference audit report",
+      "linked_at": "2026-05-11T06:00:01+08:00"
+    },
+    {
+      "kind": "table",
+      "study_id": "cn_stock_etf/v3_d4_profit_loss_top30_difference_audit_v1",
+      "window_key": "1226",
+      "variant_name": "D4_PROFIT_LOSS_TOP30_DIFFERENCE_AUDIT",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_d4_profit_loss_top30_difference_audit\\machine\\d4_profit_loss_top30_detail.csv",
+      "note": "per-trade top30 difference detail",
+      "linked_at": "2026-05-11T06:00:01+08:00"
+    }
+  ],
+  "key_findings": [
+    "Entry-only differences exist but overlap is large; post-entry relative strength and MFE/MAE separate better.",
+    "Candidate persistence has weak fixed-window coverage in this audit and is not treated as a decisive finding.",
+    "days_to_peak: profit_median=46.5, loss_median=5.0, gap=41.5",
+    "days_dd10_warning_before_exit: profit_median=55.0, loss_median=27.0, gap=28.0",
+    "days_below_ma20_warning_before_exit: profit_median=43.0, loss_median=23.0, gap=20.0",
+    "days_from_peak_to_exit: profit_median=19.0, loss_median=25.0, gap=-6.0",
+    "below_ma20_days_last10: profit_median=4.0, loss_median=9.5, gap=-5.5",
+    "below_ma60_days_last20: profit_median=0.0, loss_median=3.0, gap=-3.0",
+    "h10_down_days: profit_median=5.0, loss_median=6.0, gap=-1.0",
+    "h5_down_days: profit_median=2.0, loss_median=3.0, gap=-1.0"
+  ],
+  "audit": {
+    "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "source_d0_detail": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_d0_trade_path_morphology_audit\\machine\\d0_trade_path_detail.csv",
+    "stock_top30_rows": 60,
+    "profit_top30_rows": 30,
+    "loss_top30_rows": 30,
+    "symbols_requested": 58,
+    "symbols_loaded": 58,
+    "ohlcv_rows": 160080,
+    "index_codes_requested": 23,
+    "index_codes_loaded": 23,
+    "candidate_rows": 9844,
+    "source_prices": "public.pams_ohlcv_daily_v2 adjusted OHLCV",
+    "source_indices": "public.pit_index_daily",
+    "source_candidates": "outputs\\experiments\\exp_20260510_033603951_8649\\candidate_signals.csv",
+    "horizons_trading_days_after_entry": [
+      3,
+      5,
+      10,
+      20
+    ],
+    "read_only_audit": true
+  },
+  "decision": {
+    "status": "continue",
+    "reason": "This diagnostic identifies post-entry relative strength and candidate persistence as better next-rule candidates than raw entry labels."
+  },
+  "next_actions": [
+    "Design a shadow rule using post-entry relative strength and candidate persistence, not TOP30 labels.",
+    "Keep entry chase/quality/liquidity as secondary gates only if they reduce profit-top30 damage."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "D4",
+    "profit-top30",
+    "loss-top30",
+    "difference-audit",
+    "research-only"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T06:00:01+08:00",
+  "updated_at": "2026-05-11T06:00:01+08:00"
+}

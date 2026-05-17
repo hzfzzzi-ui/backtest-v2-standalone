@@ -134,6 +134,7 @@ def run_foundation_execution_shell(request: FoundationExecutionRequest):
             regime_engine_cfg=request.cfg_obj.regime_engine,
             asset_context=runtime_config.get("asset_context") if isinstance(runtime_config.get("asset_context"), dict) else {},
             governed_a_share=runtime_config.get("governed_a_share") if isinstance(runtime_config.get("governed_a_share"), dict) else {},
+            runtime_optimization=runtime_config.get("runtime_optimization") if isinstance(runtime_config.get("runtime_optimization"), dict) else {},
         )
     )
     base_result = adapter_result.portfolio_result

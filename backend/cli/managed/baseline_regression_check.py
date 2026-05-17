@@ -29,6 +29,9 @@ APPROVED_ASSET_BOUNDARY_KEYS = {
     "market_profile_id",
     "execution_profile_id",
 }
+TRADE_SEMANTIC_IGNORE_FIELDS = {
+    "component_exp_id",
+}
 
 
 def _repo_root() -> Path:
@@ -310,13 +313,22 @@ def _summarize_nav(nav_rows: list[dict[str, Any]], nav_path: Path) -> dict[str, 
 
 def _summarize_trades(trade_rows: list[dict[str, Any]], trades_path: Path) -> dict[str, Any]:
     reason_counts: dict[str, int] = {}
+    semantic_rows: list[dict[str, str]] = []
     for row in trade_rows:
         code = str(row.get("reason_code") or "")
         reason_counts[code] = int(reason_counts.get(code, 0)) + 1
+        semantic_rows.append(
+            {
+                str(key): str(value or "")
+                for key, value in sorted(row.items())
+                if str(key) not in TRADE_SEMANTIC_IGNORE_FIELDS
+            }
+        )
     return {
         "rows": len(trade_rows),
         "reason_counts": dict(sorted(reason_counts.items())),
-        "file_hash": _file_hash(trades_path),
+        "semantic_hash": _json_hash(semantic_rows),
+        "ignored_fields": sorted(TRADE_SEMANTIC_IGNORE_FIELDS),
     }
 
 

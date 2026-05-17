@@ -1,0 +1,63 @@
+study_id: cn_stock_etf/cn_stock_etf_theme_protected_replacement_v1
+title: CN Stock ETF Theme Protected Replacement V1
+asset_scope: cn_stock_etf
+baseline_id: CN_STOCK_ETF_COMBO_BASELINE_V3
+hypothesis: B0.1 protected theme replacement shadow remains active enough after protection rules to justify a later B1 runtime AB, without being treated as a NAV backtest or baseline improvement.
+change_scope:
+  modules_modified:
+    - research_entry.cn_stock_etf.theme_protected_replacement_v1
+    - backend.research.theme_protected_replacement_study
+variants:
+  - name: B01_PROTECTED_SHADOW
+    description: Research-only protected shadow based on V3 attribution bundle; no trades, no NAV recomputation, no baseline change.
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-05-08"
+  - key: "1217"
+    role: hard_gate
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-08"
+  - key: "2020_2026"
+    role: diagnostic
+    start: "2020-01-01"
+    end: "2026-05-08"
+  - key: "2024_2026"
+    role: diagnostic
+    start: "2024-01-01"
+    end: "2026-05-08"
+  - key: "2025_12_2026_04"
+    role: diagnostic
+    start: "2025-12-01"
+    end: "2026-04-30"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  fast_mode: true
+  runner_params:
+    input_artifact_dir: outputs/studies/cn_stock_etf/sr_20260510_v3_industry_theme_etf_index_attribution
+    source_coverage_start: "2016-01-01"
+    source_coverage_end: "2026-05-08"
+    min_b01_plan_rows:
+      default: 1
+      "1626": 20
+      "2020_2026": 20
+      "2024_2026": 5
+      "2025_12_2026_04": 5
+metadata:
+  runner_mode: cn_stock_etf_theme_protected_replacement
+  research_only: true
+  not_nav_backtest: true
+  compared_baseline_id: CN_STOCK_ETF_COMBO_BASELINE_V3
+  source_round_id: sr_20260510_v3_industry_theme_etf_index_attribution
+  stock_sleeve_policy: unchanged_from_v3_artifacts
+  etf_sleeve_policy: unchanged_from_v3_artifacts

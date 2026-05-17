@@ -1,0 +1,102 @@
+study_id: cn_stock_etf/cn_stock_profit_giveback_ma20_protection_ab_v1
+title: CN Stock Profit Giveback MA20 Protection AB V1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  Some recent stock-leg losses came from profitable positions that later gave
+  back sharply after breaking MA20. A simple partial-exit rule based on peak
+  profit, peak giveback, and MA20 break may reduce drawdown without changing
+  entry, ranking, universe, industry/theme inputs, or market regime logic.
+change_scope:
+  modules_modified:
+    - strategy.params.enable_peak_giveback_ma20_exit
+    - strategy.params.peak_giveback_ma20_min_peak_profit_pct
+    - strategy.params.peak_giveback_ma20_min_giveback_pct
+    - strategy.params.peak_giveback_ma20_min_hold_bars
+    - strategy.params.peak_giveback_ma20_exit_pct
+  fixed_modules:
+    - universe.universe_mode
+    - universe.membership_mode
+    - universe.filters
+    - ranking
+    - entry_rules
+    - execution_timing
+    - costs
+    - sizing
+    - market_regime
+    - etf_leg
+    - combo_allocator
+variants:
+  - name: B0_V4_STOCK_REPLAY
+    description: Same-runtime replay of the current V4 stock-leg rule set.
+  - name: GIVEBACK20_MA20_HALF
+    description: Half exit after peak profit >= 20%, giveback from peak >= 20%, and close below MA20.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_peak_giveback_ma20_exit: true
+            peak_giveback_ma20_min_peak_profit_pct: 0.20
+            peak_giveback_ma20_min_giveback_pct: 0.20
+            peak_giveback_ma20_min_hold_bars: 10
+            peak_giveback_ma20_exit_pct: 0.5
+  - name: GIVEBACK25_MA20_HALF
+    description: Half exit after peak profit >= 20%, giveback from peak >= 25%, and close below MA20.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_peak_giveback_ma20_exit: true
+            peak_giveback_ma20_min_peak_profit_pct: 0.20
+            peak_giveback_ma20_min_giveback_pct: 0.25
+            peak_giveback_ma20_min_hold_bars: 10
+            peak_giveback_ma20_exit_pct: 0.5
+  - name: GIVEBACK30_MA20_HALF
+    description: Half exit after peak profit >= 20%, giveback from peak >= 30%, and close below MA20.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_peak_giveback_ma20_exit: true
+            peak_giveback_ma20_min_peak_profit_pct: 0.20
+            peak_giveback_ma20_min_giveback_pct: 0.30
+            peak_giveback_ma20_min_hold_bars: 10
+            peak_giveback_ma20_exit_pct: 0.5
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-05-12"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-12"
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  runtime_config_path: outputs/experiments/exp_20260513_025957649_4f17/run_config.json
+  fast_mode: true
+  initial_capital: 1000000
+  enable_multifactor_rank: true
+  momentum_top_pct: 0.0
+  universe_mode: HS300_ZZ500
+  price_adj: hfq
+metadata:
+  research_only: true
+  primary_variable: peak_giveback_ma20_partial_exit
+  docker_required: true
+  source_stock_baseline_id: baseline_V10_1
+  source_stock_full_exp_id: exp_20260513_025957649_4f17
+  same_window_compare_required: true
+  stock_only: true
+  etf_or_combo_inputs: false
+  industry_or_theme_inputs: false

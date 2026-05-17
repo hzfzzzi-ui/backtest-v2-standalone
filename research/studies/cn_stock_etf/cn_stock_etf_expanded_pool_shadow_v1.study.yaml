@@ -1,0 +1,82 @@
+study_id: cn_stock_etf/cn_stock_etf_expanded_pool_shadow_v1
+title: CN Stock ETF Expanded Pool Shadow V1
+asset_scope: cn_a_equity
+baseline_id: CN_STOCK_ETF_FORMAL_V1
+hypothesis: Expanded ETF pools must still improve the stock+ETF combo after the A-share stock sleeve is held fixed and only the ETF sleeve source is changed.
+change_scope:
+  modules_modified:
+    - research_entry.cn_stock_etf.expanded_pool_shadow_v1
+    - backend.research.cn_stock_etf_expanded_pool_shadow_study
+variants:
+  - name: CURRENT_FORMAL_COMBO_REPLAY
+    description: Replay the current formal stock+ETF combo template with only window bounds refreshed.
+    request_overrides:
+      runner_params:
+        etf_source:
+          mode: current_formal_combo_template
+          pool_version: current_formal_combo_template
+  - name: FORMAL_POOL_ROTATION_CONTROL
+    description: Formal ETF pool under the same standalone rotation contract used by the ETF expansion studies.
+    request_overrides:
+      runner_params:
+        etf_source:
+          mode: etf_study_variant
+          study_id: etf/cn_etf_formal_pool_rotation_control_v1
+          variant_name: FORMAL_POOL_ROTATION_CONTROL
+          pool_version: formal_etf_pool_v1_rotation_control
+  - name: REALWORLD_POOL_V1
+    description: Real-world ETF research pool in stock+ETF combo context.
+    request_overrides:
+      runner_params:
+        etf_source:
+          mode: etf_study_variant
+          study_id: etf/cn_etf_research_realworld_pool_v1
+          variant_name: REALWORLD_POOL_V1
+          pool_version: cn_etf_research_realworld_pool_v1
+  - name: INDUSTRY_THEME_POOL_V2
+    description: Industry/theme ETF research pool in stock+ETF combo context.
+    request_overrides:
+      runner_params:
+        etf_source:
+          mode: etf_study_variant
+          study_id: etf/cn_etf_research_industry_theme_pool_v2
+          variant_name: INDUSTRY_THEME_POOL_V2
+          pool_version: cn_etf_research_industry_theme_pool_v2
+  - name: STYLE_SMART_BETA_POOL_V2
+    description: Style and smart-beta ETF research pool in stock+ETF combo context.
+    request_overrides:
+      runner_params:
+        etf_source:
+          mode: etf_study_variant
+          study_id: etf/cn_etf_research_style_smart_beta_pool_v2
+          variant_name: STYLE_SMART_BETA_POOL_V2
+          pool_version: cn_etf_research_style_smart_beta_pool_v2
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-04"
+    end: "2026-05-08"
+  - key: "1217"
+    role: hard_gate
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-08"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  fast_mode: true
+  runner_params:
+    combo_template_path: outputs/baselines/CN_STOCK_ETF_FORMAL_V1/config.json
+metadata:
+  runner_mode: cn_stock_etf_expanded_pool_shadow
+  research_only: true
+  combo_template_baseline_id: CN_STOCK_ETF_FORMAL_V1
+  stock_sleeve_policy: fixed_from_combo_template
+  etf_sleeve_policy: replace_compile_input_only

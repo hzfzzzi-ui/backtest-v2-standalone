@@ -16,6 +16,21 @@ from backend.core.tools import experiment_runtime_access
 from backend.research.cn_etf_phase1_zero_trade_diagnostics import (
     write_cn_etf_phase1_zero_trade_diagnostics,
 )
+from backend.research.cn_stock_etf_expanded_pool_shadow_study import (
+    run_cn_stock_etf_expanded_pool_shadow_study,
+)
+from backend.research.cn_stock_etf_stock_rule_combo_ab_study import (
+    run_cn_stock_etf_stock_rule_combo_ab_study,
+)
+from backend.research.theme_protected_replacement_study import (
+    run_theme_protected_replacement_study,
+)
+from backend.research.theme_health_shadow_study import (
+    run_theme_health_shadow_study,
+)
+from backend.research.style_industry_state_switch_shadow_study import (
+    run_style_industry_state_switch_shadow_study,
+)
 from backend.research.a_share_moneyflow_divergence import run_a_share_moneyflow_divergence_study
 from backend.research.account_state_score_study import run_account_state_score_study
 from backend.research.execution_pressure_factor_study import run_execution_pressure_factor_study
@@ -292,6 +307,87 @@ def _load_config_snapshot(exp_id: str, results_dir: str | Path | None) -> dict[s
     )
 
 
+def _num(value: Any) -> float | None:
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _compare_delta(compare: dict[str, Any] | None, metric_name: str) -> float | None:
+    metrics = compare.get("metrics") if isinstance(compare, dict) else {}
+    if not isinstance(metrics, dict):
+        return None
+    row = metrics.get(metric_name)
+    if not isinstance(row, dict):
+        return None
+    return _num(row.get("delta"))
+
+
+def _derive_study_verdict(gate_verdict: dict[str, Any] | None, compare: dict[str, Any] | None) -> dict[str, Any]:
+    payload = dict(gate_verdict or {})
+    raw_status = str(payload.get("status") or "").strip()
+    raw_status_lower = raw_status.lower()
+    gate_status = str(payload.get("gate_status") or raw_status or "UNKNOWN").strip().upper() or "UNKNOWN"
+    if raw_status_lower in {"confirmed", "falsified", "inconclusive"}:
+        return sanitize_json(
+            {
+                "status": raw_status_lower,
+                "reason": str(payload.get("reason") or "").strip(),
+                "gate_status": gate_status,
+                "gate_reason": str(payload.get("gate_reason") or "").strip(),
+                "gate_checks": dict(payload.get("gate_checks") or payload.get("checks") or {}),
+                "verdict_source": str(payload.get("verdict_source") or "explicit_study_verdict").strip(),
+            }
+        )
+
+    gate_reason = str(payload.get("reason") or "").strip()
+    checks = dict(payload.get("checks") or payload.get("gate_checks") or {})
+    if gate_status != "PASS":
+        return sanitize_json(
+            {
+                "status": "inconclusive",
+                "reason": gate_reason or f"hard gate status is {gate_status}",
+                "gate_status": gate_status,
+                "gate_reason": gate_reason,
+                "gate_checks": checks,
+                "verdict_source": "derived_from_hard_gate",
+            }
+        )
+
+    deltas = {
+        name: delta
+        for name in ("cagr", "sharpe", "max_drawdown")
+        if (delta := _compare_delta(compare, name)) is not None
+    }
+    if len(deltas) < 2:
+        status = "inconclusive"
+        reason = "hard gate passed, but baseline compare has insufficient directional metrics"
+    else:
+        worse = [name for name, delta in deltas.items() if delta < 0]
+        better = [name for name, delta in deltas.items() if delta > 0]
+        if len(worse) == len(deltas):
+            status = "falsified"
+            reason = "hard gate passed, but same-window baseline compare worsened on " + ", ".join(worse)
+        elif len(better) == len(deltas):
+            status = "confirmed"
+            reason = "hard gate passed and same-window baseline compare improved on " + ", ".join(better)
+        else:
+            status = "inconclusive"
+            reason = "hard gate passed, but same-window baseline compare is mixed"
+
+    return sanitize_json(
+        {
+            "status": status,
+            "reason": reason,
+            "gate_status": gate_status,
+            "gate_reason": gate_reason,
+            "gate_checks": checks,
+            "verdict_source": "derived_from_gate_and_compare",
+        }
+    )
+
+
 def _append_study_conclusions(study: StudyDefinition, result: dict[str, Any]) -> dict[str, Any]:
     runs = result.get("runs")
     if not isinstance(runs, list):
@@ -306,16 +402,21 @@ def _append_study_conclusions(study: StudyDefinition, result: dict[str, Any]) ->
                 exp_id=exp_id,
                 baseline_id=study.baseline_id,
             )
+        study_verdict = _derive_study_verdict(
+            run_row.get("verdict") if isinstance(run_row.get("verdict"), dict) else {},
+            compare,
+        )
         conclusion_outputs = study_conclusion_registry.append_study_conclusion(
             study_id=study.study_id,
             compared_baseline_id=study.baseline_id,
-            verdict=run_row.get("verdict") if isinstance(run_row.get("verdict"), dict) else {},
+            verdict=study_verdict,
             exp_id=exp_id or None,
             window_key=str(run_row.get("window_key") or "").strip(),
             variant_name=str(run_row.get("variant_name") or "").strip(),
             compare=compare,
             results_dir=run_row.get("results_dir"),
         )
+        run_row["study_verdict"] = study_verdict
         run_row["conclusion_outputs"] = conclusion_outputs
         updated_runs.append(sanitize_json(run_row))
     out = dict(result)
@@ -423,6 +524,41 @@ def run_study(
         ))
     if runner_mode == "snapshot_backed_research_runtime":
         return _append_study_conclusions(study, run_snapshot_backed_research_study(
+            study=study,
+            plan=plan,
+            write_dual_output=write_dual_output,
+            append_to_baseline=append_to_baseline,
+        ))
+    if runner_mode == "cn_stock_etf_expanded_pool_shadow":
+        return _append_study_conclusions(study, run_cn_stock_etf_expanded_pool_shadow_study(
+            study=study,
+            plan=plan,
+            write_dual_output=write_dual_output,
+            append_to_baseline=append_to_baseline,
+        ))
+    if runner_mode == "cn_stock_etf_stock_rule_combo_ab":
+        return _append_study_conclusions(study, run_cn_stock_etf_stock_rule_combo_ab_study(
+            study=study,
+            plan=plan,
+            write_dual_output=write_dual_output,
+            append_to_baseline=append_to_baseline,
+        ))
+    if runner_mode == "cn_stock_etf_theme_protected_replacement":
+        return _append_study_conclusions(study, run_theme_protected_replacement_study(
+            study=study,
+            plan=plan,
+            write_dual_output=write_dual_output,
+            append_to_baseline=append_to_baseline,
+        ))
+    if runner_mode == "cn_stock_etf_theme_health_shadow":
+        return _append_study_conclusions(study, run_theme_health_shadow_study(
+            study=study,
+            plan=plan,
+            write_dual_output=write_dual_output,
+            append_to_baseline=append_to_baseline,
+        ))
+    if runner_mode == "cn_stock_style_industry_state_switch_shadow":
+        return _append_study_conclusions(study, run_style_industry_state_switch_shadow_study(
             study=study,
             plan=plan,
             write_dual_output=write_dual_output,

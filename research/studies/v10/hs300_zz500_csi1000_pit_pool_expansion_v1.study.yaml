@@ -1,0 +1,95 @@
+study_id: v10/hs300_zz500_csi1000_pit_pool_expansion_v1
+title: HS300 + ZZ500 + CSI1000 PIT Stock Pool Expansion V1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  Expanding the current HS300+ZZ500 PIT stock universe to include CSI1000 PIT constituents
+  may improve opportunity breadth, but it must be evaluated stock-only first because the
+  added small/mid-cap exposure may increase liquidity, turnover, suspension, and drawdown risk.
+change_scope:
+  modules_modified:
+    - universe.universe_mode
+  fixed_modules:
+    - strategy.params
+    - ranking
+    - entry_rules
+    - exit_rules
+    - position_risk
+    - execution
+    - costs
+variants:
+  - name: B0_HS300_ZZ500
+    description: Current CSI800 PIT stock pool control.
+    request_overrides:
+      universe_mode: HS300_ZZ500
+      runtime_config_json:
+        universe_mode: HS300_ZZ500
+        universe:
+          membership_mode: PIT_DYNAMIC
+  - name: A1_HS300_ZZ500_CSI1000
+    description: Research-only union of CSI800 PIT and CSI1000 PIT stock pools.
+    request_overrides:
+      universe_mode: HS300_ZZ500_CSI1000
+      runtime_config_json:
+        universe_mode: HS300_ZZ500_CSI1000
+        universe:
+          membership_mode: PIT_DYNAMIC
+  - name: A2_HS300_ZZ500_CSI1000_MCAP100
+    description: A1 plus a daily CSI1000_new circulating market-cap gate at 100yi CNY.
+    request_overrides:
+      universe_mode: HS300_ZZ500_CSI1000
+      runtime_config_json:
+        universe_mode: HS300_ZZ500_CSI1000
+        universe:
+          membership_mode: PIT_DYNAMIC
+          filters:
+            csi1000_new_min_circ_mv_yi: 100
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-04"
+    end: "2026-03-01"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: audit
+    start: "2012-01-04"
+    end: "2026-03-01"
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  runtime_config_path: research/studies/v10/configs/live_baseline_ablation_s1/B0.json
+  universe_mode: HS300_ZZ500
+  price_adj: hfq
+  runtime_config_json:
+    runtime_optimization:
+      pit_interval_pushdown:
+        enabled: false
+        warmup_trading_days: 260
+      topk_partial_selection:
+        enabled: true
+      candidate_first_expensive_scoring:
+        enabled: true
+      active_set_sparse_scoring:
+        enabled: true
+        mode: residual_only_deferred_row_rank
+      streaming_rolling_state:
+        enabled: false
+metadata:
+  research_only: true
+  primary_variable: stock_pool
+  baseline_universe_mode: HS300_ZZ500
+  candidate_universe_mode: HS300_ZZ500_CSI1000
+  execution_order:
+    - static_audit
+    - dry_run
+    - 1626_stock_only
+    - 1217_stock_only_if_main_window_interpretable
+    - 1226_stock_only_if_guardrail_acceptable

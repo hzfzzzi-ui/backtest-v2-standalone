@@ -139,6 +139,19 @@ def build_rebalance_orders(
     rotation_replace_candidate_top_n: int = 3,
     rotation_replace_min_score_gap: float = 0.15,
     rotation_min_hold_days: int = 0,
+    high_chase_a2_size_down_enabled: bool = False,
+    high_chase_a2_size_down_scale: float = 0.5,
+    high_chase_a2_pre20_ret_threshold: float = 0.50,
+    high_chase_a2_turnover_rate_f20_threshold: float = 8.0,
+    high_chase_a2_volume_20d_vs_60d_threshold: float = 1.5,
+    hot_amount_turnover_size_down_enabled: bool = False,
+    hot_amount_turnover_size_down_scale: float = 0.8,
+    hot_amount_turnover_amount_pct_threshold: float = 0.8,
+    hot_amount_turnover_turnover_pct_threshold: float = 0.8,
+    slip_bps: float = 0.0,
+    comm_rate: float = 0.0,
+    comm_min: float = 0.0,
+    stamp_rate: float = 0.0,
 ) -> list[PortfolioOrder]:
     _ = strength_top_k_mode, sizing_cfg
 
@@ -194,6 +207,15 @@ def build_rebalance_orders(
         rotation_replace_candidate_top_n=int(rotation_replace_candidate_top_n),
         rotation_replace_min_score_gap=float(rotation_replace_min_score_gap),
         rotation_min_hold_days=int(rotation_min_hold_days),
+        high_chase_a2_size_down_enabled=bool(high_chase_a2_size_down_enabled),
+        high_chase_a2_size_down_scale=float(high_chase_a2_size_down_scale),
+        high_chase_a2_pre20_ret_threshold=float(high_chase_a2_pre20_ret_threshold),
+        high_chase_a2_turnover_rate_f20_threshold=float(high_chase_a2_turnover_rate_f20_threshold),
+        high_chase_a2_volume_20d_vs_60d_threshold=float(high_chase_a2_volume_20d_vs_60d_threshold),
+        hot_amount_turnover_size_down_enabled=bool(hot_amount_turnover_size_down_enabled),
+        hot_amount_turnover_size_down_scale=float(hot_amount_turnover_size_down_scale),
+        hot_amount_turnover_amount_pct_threshold=float(hot_amount_turnover_amount_pct_threshold),
+        hot_amount_turnover_turnover_pct_threshold=float(hot_amount_turnover_turnover_pct_threshold),
     )
 
     if candidate_audit is not None:
@@ -222,6 +244,10 @@ def build_rebalance_orders(
         overlay_gate_on_today=bool(overlay_gate_on_today),
         overlay_observation_date=overlay_observation_date,
         overlay_score_source=str(overlay_score_source or ''),
+        slip_bps=float(slip_bps),
+        comm_rate=float(comm_rate),
+        comm_min=float(comm_min),
+        stamp_rate=float(stamp_rate),
         base_order_value=float(base_order_value),
         risk_amount=float(risk_amount),
         atr_stop_k=float(atr_stop_k),

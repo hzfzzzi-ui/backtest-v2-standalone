@@ -187,8 +187,14 @@ def _make_exp_dir(
 
 def test_load_contract_has_foundation_baseline() -> None:
     contract = _load_contract(Path("backend/scripts/ops/v2_backend_refactor_baseline_contract.json"))
-    assert contract["baseline_exp_id"] == "exp_20260426_005716047_8650"
-    assert contract["current_anchor"]["baseline_id"] == "CN_STOCK_ETF_FORMAL_V1"
+    assert contract["baseline_exp_id"] == "exp_20260511_073506050_3d22"
+    assert contract["current_anchor"]["baseline_id"] == "CN_STOCK_ETF_COMBO_BASELINE_V4"
+    assert contract["current_anchor"]["exp_id"] == "exp_20260511_073506050_3d22"
+    superseded = {row["exp_id"] for row in contract["superseded_anchors"]}
+    assert "exp_20260510_034302669_7790" in superseded
+    assert "exp_20260509_074944369_5f6c" in superseded
+    assert "exp_20260508_124555553_fabd" in superseded
+    assert "exp_20260426_005716047_8650" in superseded
     missing = {row["exp_id"] for row in contract["historical_missing_anchors"]}
     assert "exp_20260314_144548534_7db9" in missing
     assert "exp_20260328_220801073_478b" in missing
@@ -204,6 +210,31 @@ def test_compare_experiment_dirs_passes_with_allowed_drift(tmp_path: Path) -> No
         cagr=0.1,
         manifest_exp_id="exp_candidate",
         run_meta_exp_id="exp_candidate",
+    )
+
+    result = compare_experiment_dirs(baseline_dir=baseline_dir, candidate_dir=candidate_dir, contract=contract)
+
+    assert result["status"] == "PASS"
+    assert result["mismatch_counts"]["total"] == 0
+
+
+def test_compare_experiment_dirs_ignores_component_exp_id_in_trades(tmp_path: Path) -> None:
+    contract = _load_contract(Path("backend/scripts/ops/v2_backend_refactor_baseline_contract.json"))
+    baseline_dir = _make_exp_dir(tmp_path, "exp_baseline", cagr=0.1)
+    candidate_dir = _make_exp_dir(tmp_path, "exp_candidate", cagr=0.1)
+    _write_text(
+        baseline_dir / "portfolio_trades.csv",
+        (
+            "date,symbol,side,reason_code,qty,component_exp_id\n"
+            "2024-01-02,600000.sh,BUY,BUY_SIGNAL,100,exp_component_a\n"
+        ),
+    )
+    _write_text(
+        candidate_dir / "portfolio_trades.csv",
+        (
+            "date,symbol,side,reason_code,qty,component_exp_id\n"
+            "2024-01-02,600000.sh,BUY,BUY_SIGNAL,100,exp_component_b\n"
+        ),
     )
 
     result = compare_experiment_dirs(baseline_dir=baseline_dir, candidate_dir=candidate_dir, contract=contract)

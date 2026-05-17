@@ -41,3 +41,35 @@ def test_membership_history_gates_tradable_outside_active_ranges() -> None:
     assert bool(mx.tradable[1, sym_to_col["sz000001"]]) is True
     assert bool(mx.tradable[2, sym_to_col["sz000001"]]) is False
     assert mx.close[2, sym_to_col["sz000001"]] == 8.3
+
+
+def test_csi1000_new_market_cap_gate_only_blocks_new_csi1000_names() -> None:
+    history = pd.DataFrame(
+        [
+            {"date": "2024-01-02", "symbol": "sh600000", "open": 10.0, "high": 10.5, "low": 9.9, "close": 10.2, "volume": 1000, "amount": 10000, "circ_mv": 500000.0},
+            {"date": "2024-01-02", "symbol": "sz000001", "open": 8.0, "high": 8.2, "low": 7.9, "close": 8.1, "volume": 1000, "amount": 9000, "circ_mv": 900000.0},
+            {"date": "2024-01-03", "symbol": "sz000001", "open": 8.1, "high": 8.3, "low": 8.0, "close": 8.2, "volume": 1000, "amount": 9200, "circ_mv": 1100000.0},
+            {"date": "2024-01-02", "symbol": "sz300001", "open": 12.0, "high": 12.2, "low": 11.9, "close": 12.1, "volume": 1000, "amount": 12000, "circ_mv": 800000.0},
+        ]
+    )
+    membership_history = pd.DataFrame(
+        [
+            {"index_code": "000906.SH", "symbol": "sh600000", "start_date": "2024-01-01", "end_date": None},
+            {"index_code": "000852.SH", "symbol": "sz000001", "start_date": "2024-01-01", "end_date": None},
+            {"index_code": "000906.SH", "symbol": "sz300001", "start_date": "2024-01-01", "end_date": None},
+            {"index_code": "000852.SH", "symbol": "sz300001", "start_date": "2024-01-01", "end_date": None},
+        ]
+    )
+
+    mx = build_ohlc_matrices_from_history(
+        history,
+        [date(2024, 1, 2), date(2024, 1, 3)],
+        membership_history=membership_history,
+        csi1000_new_min_circ_mv_yi=100,
+    )
+
+    sym_to_col = {sym: idx for idx, sym in enumerate(mx.symbols)}
+    assert bool(mx.tradable[0, sym_to_col["sh600000"]]) is True
+    assert bool(mx.tradable[0, sym_to_col["sz000001"]]) is False
+    assert bool(mx.tradable[1, sym_to_col["sz000001"]]) is True
+    assert bool(mx.tradable[0, sym_to_col["sz300001"]]) is True

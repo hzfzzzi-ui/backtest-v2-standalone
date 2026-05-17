@@ -121,6 +121,31 @@ def test_component_execution_overrides_fallback_derives_multifactor_rank_from_ru
     assert overrides["enable_multifactor_rank"] is True
 
 
+def test_component_benchmark_prefers_runtime_then_semantic_universe() -> None:
+    assert service._component_benchmark_from_inputs(
+        runtime_cfg={"universe": {"benchmark": "510300.SH"}},
+        semantic_cfg={"universe": {"benchmark": "000300.SH"}},
+    ) == "510300.SH"
+    assert service._component_benchmark_from_inputs(
+        runtime_cfg={"universe": {"benchmark": ""}},
+        semantic_cfg={"universe": {"benchmark": "510300.SH"}},
+    ) == "510300.SH"
+    assert service._component_benchmark_from_inputs(runtime_cfg={}, semantic_cfg={}) == ""
+
+
+def test_runtime_config_with_component_benchmark_patches_copy() -> None:
+    runtime_cfg = {
+        "asset_scope": "cn_etf",
+        "universe": {"benchmark": "", "price_adj": "none"},
+    }
+
+    patched = service._runtime_config_with_component_benchmark(runtime_cfg, "510300.SH")
+
+    assert patched["universe"]["benchmark"] == "510300.SH"
+    assert patched["universe"]["price_adj"] == "none"
+    assert runtime_cfg["universe"]["benchmark"] == ""
+
+
 def test_build_combo_governed_snapshot_reads_latest_component_actual_role_exposures(tmp_path) -> None:
     stock_dir = tmp_path / "stock_component"
     stock_dir.mkdir(parents=True, exist_ok=True)

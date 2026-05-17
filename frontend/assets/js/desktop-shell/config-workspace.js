@@ -38,6 +38,12 @@ const multiAlphaUi = window.multiAlphaUi || {};
 const normalizeMultiAlphaName = typeof multiAlphaUi.normalizeMultiAlphaName === 'function'
   ? multiAlphaUi.normalizeMultiAlphaName
   : ((value) => String(value || '').trim().toLowerCase());
+const normalizeMultiAlphaOption = typeof multiAlphaUi.normalizeMultiAlphaOption === 'function'
+  ? multiAlphaUi.normalizeMultiAlphaOption
+  : ((value, fallback = '') => {
+      const text = String(value || '').trim();
+      return text || fallback;
+    });
 const supportedMultiAlphaDescriptor = typeof multiAlphaUi.supportedMultiAlphaDescriptor === 'function'
   ? multiAlphaUi.supportedMultiAlphaDescriptor
   : (() => null);
@@ -419,8 +425,44 @@ function drawerPanelLeadText(panel) {
     s9: '这里定义止损、止盈和退出优先级。',
     json: '这里只看草稿 JSON 和差异，不参与主流程。',
     history: '这里只看历史实验和回放，不参与当前配置编辑。',
+    research: '这里记录每轮研究问题、证据、审计项和结论草案，不参与回测执行。',
   };
   return leads[String(panel || '').trim().toLowerCase()] || '';
+}
+
+function syncStudyJournalWorkspace(panel) {
+  const isResearch = String(panel || '').trim().toLowerCase() === 'research';
+  const app = document.querySelector('.wb-app');
+  if (app) app.classList.toggle('wb-research-mode', isResearch);
+
+  const mainContent = document.querySelector('.wb-main-content');
+  if (mainContent) mainContent.classList.toggle('wb-study-journal-active', isResearch);
+
+  const journal = byId('wbStudyJournalEmbed');
+  if (journal) journal.hidden = !isResearch;
+  if (window.desktopAppShell && typeof window.desktopAppShell.markWorkspaceMounted === 'function') {
+    window.desktopAppShell.markWorkspaceMounted('study_journal_workspace', !!journal);
+  }
+
+  const results = byId('wbResultsWorkbenchMount');
+  if (!results) return;
+  if (isResearch) {
+    results.dataset.hiddenByStudyJournal = '1';
+    results.hidden = true;
+    if (window.desktopAppShell && typeof window.desktopAppShell.setActiveWorkspace === 'function') {
+      window.desktopAppShell.setActiveWorkspace('study_journal_workspace');
+    }
+    return;
+  }
+  if (results.dataset.hiddenByStudyJournal === '1') {
+    delete results.dataset.hiddenByStudyJournal;
+    if (results.dataset.vueShell === 'mounted') {
+      results.hidden = false;
+    }
+    if (window.desktopAppShell && typeof window.desktopAppShell.setActiveWorkspace === 'function') {
+      window.desktopAppShell.setActiveWorkspace('results_workspace');
+    }
+  }
 }
 
 function setDrawerPanel(panel) {
@@ -451,10 +493,12 @@ function setDrawerPanel(panel) {
       s9: panelMeta.s9?.title || '退出规则',
       json: '草稿 JSON',
       history: '历史实验',
+      research: '研究日志',
     };
     titleEl.textContent = titles[state.drawer_panel] || state.drawer_panel;
   }
   if (leadEl) leadEl.textContent = drawerPanelLeadText(state.drawer_panel);
+  syncStudyJournalWorkspace(state.drawer_panel);
 }
 
 function toggleDrawer(force = null) {

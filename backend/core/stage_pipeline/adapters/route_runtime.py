@@ -258,7 +258,12 @@ def precompute_signal_provider(
     sizing_cfg: SizingConfig | None = None,
     risk_budget_cfg: RiskBudgetConfig | None = None,
     governed_a_share: Mapping[str, Any] | None = None,
+    runtime_optimization: Mapping[str, Any] | None = None,
 ) -> None:
+    try:
+        setattr(provider, "_runtime_optimization", dict(runtime_optimization or {}))
+    except Exception:
+        pass
     provider.precompute(
         history=data_bundle.signal_history,
         benchmark=data_bundle.benchmark,

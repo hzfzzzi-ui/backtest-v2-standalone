@@ -860,6 +860,11 @@ def ensure_standard_artifacts(
             run_meta_obj["data"]["etf_symbols"] = sanitize_json(result["universe_meta"].get("etf_symbols") or [])
     if isinstance(result.get("data_bundle"), dict):
         run_meta_obj["data_bundle"] = sanitize_json(result["data_bundle"])
+    runtime_profile_obj = result.get("runtime_profile")
+    if not isinstance(runtime_profile_obj, dict):
+        runtime_profile_obj = result.get("run_profile_summary")
+    if isinstance(runtime_profile_obj, dict) and runtime_profile_obj:
+        run_meta_obj["run_profile"] = sanitize_json(runtime_profile_obj)
     if isinstance(overrides.get("candidate_context"), dict) and overrides.get("candidate_context"):
         run_meta_obj["candidate"] = sanitize_json(overrides["candidate_context"])
     if isinstance(stage_pipeline_obj, dict) and stage_pipeline_obj:

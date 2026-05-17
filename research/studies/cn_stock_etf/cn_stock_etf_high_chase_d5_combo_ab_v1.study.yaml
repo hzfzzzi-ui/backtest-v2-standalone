@@ -1,0 +1,125 @@
+study_id: cn_stock_etf/cn_stock_etf_high_chase_d5_combo_ab_v1
+title: CN Stock ETF High Chase D5 Combo AB V1
+asset_scope: cn_a_equity
+baseline_id: CN_STOCK_ETF_COMBO_BASELINE_V3
+hypothesis: >
+  The stock-leg High Chase plus D5 day3 failure is a useful weak signal, but
+  immediate half-exit may be too early. Immediate, watch-day5, and watch-day10
+  actions must be compared after they are run through the unified stock+ETF
+  combo runtime. The ETF sleeve, account allocator, execution timing, universe,
+  ranking, and combo assembly remain fixed except for window bounds.
+change_scope:
+  modules_modified:
+    - research_entry.cn_stock_etf.high_chase_d5_combo_ab_v1
+    - backend.research.cn_stock_etf_stock_rule_combo_ab_study
+    - backend.research.study_runner
+    - strategy.params.enable_mfe_mae_confirmation_exit
+    - strategy.params.mfe_mae_confirmation_scope
+    - strategy.params.mfe_mae_confirmation_action
+    - strategy.params.mfe_mae_confirmation_lookahead_bars
+    - strategy.params.mfe_mae_confirmation_min_mfe_pct
+    - strategy.params.mfe_mae_confirmation_max_mae_pct
+    - strategy.params.mfe_mae_confirmation_exit_pct
+    - strategy.params.mfe_mae_watch_review_bars
+    - strategy.params.mfe_mae_watch_review_min_mfe_pct
+    - strategy.params.mfe_mae_watch_review_max_current_return_pct
+    - strategy.params.mfe_mae_watch_review_max_mae_pct
+    - strategy.params.mfe_mae_watch_deep_mae_immediate_pct
+  fixed_modules:
+    - universe.universe_mode
+    - universe.membership_mode
+    - ranking
+    - entry_rules
+    - execution
+    - costs
+    - etf_sleeve
+    - account_allocator
+    - combo_nav_assembly
+variants:
+  - name: B0_COMBO_V3_REPLAY
+    description: Replay the V3 stock+ETF combo template with stock and ETF component runtime configs refreshed only by window bounds.
+  - name: HC_D5_IMMEDIATE_COMBO
+    description: Apply the stock-leg High Chase D5 3-day immediate half-exit in the unified combo runtime.
+    request_overrides:
+      runner_params:
+        stock_runtime_param_patch:
+          enable_mfe_mae_confirmation_exit: true
+          mfe_mae_confirmation_scope: high_chase
+          mfe_mae_confirmation_action: exit
+          mfe_mae_confirmation_lookahead_bars: 3
+          mfe_mae_confirmation_min_mfe_pct: 0.02
+          mfe_mae_confirmation_max_mae_pct: -0.05
+          mfe_mae_confirmation_exit_pct: 0.5
+  - name: HC_D5_WATCH_DAY5_COMBO
+    description: High-chase day3 D5 failure enters watch; day5 unresolved mild failures half-exit, deep MAE still exits immediately.
+    request_overrides:
+      runner_params:
+        stock_runtime_param_patch:
+          enable_mfe_mae_confirmation_exit: true
+          mfe_mae_confirmation_scope: high_chase
+          mfe_mae_confirmation_action: watch_day10
+          mfe_mae_confirmation_lookahead_bars: 3
+          mfe_mae_confirmation_min_mfe_pct: 0.02
+          mfe_mae_confirmation_max_mae_pct: -0.05
+          mfe_mae_confirmation_exit_pct: 0.5
+          mfe_mae_watch_review_bars: 5
+          mfe_mae_watch_review_min_mfe_pct: 0.02
+          mfe_mae_watch_review_max_current_return_pct: 0.0
+          mfe_mae_watch_review_max_mae_pct: -0.05
+          mfe_mae_watch_deep_mae_immediate_pct: -0.08
+  - name: HC_D5_WATCH_DAY10_COMBO
+    description: High-chase day3 D5 failure enters watch; day10 unresolved mild failures half-exit, deep MAE still exits immediately.
+    request_overrides:
+      runner_params:
+        stock_runtime_param_patch:
+          enable_mfe_mae_confirmation_exit: true
+          mfe_mae_confirmation_scope: high_chase
+          mfe_mae_confirmation_action: watch_day10
+          mfe_mae_confirmation_lookahead_bars: 3
+          mfe_mae_confirmation_min_mfe_pct: 0.02
+          mfe_mae_confirmation_max_mae_pct: -0.05
+          mfe_mae_confirmation_exit_pct: 0.5
+          mfe_mae_watch_review_bars: 10
+          mfe_mae_watch_review_min_mfe_pct: 0.02
+          mfe_mae_watch_review_max_current_return_pct: 0.0
+          mfe_mae_watch_review_max_mae_pct: -0.05
+          mfe_mae_watch_deep_mae_immediate_pct: -0.08
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-05-08"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-08"
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  fast_mode: true
+  runner_params:
+    combo_template_path: outputs/baselines/CN_STOCK_ETF_COMBO_BASELINE_V3/config.json
+    stock_runtime_config_path: outputs/experiments/exp_20260510_033603951_8649/run_config.json
+    etf_runtime_config_path: outputs/experiments/exp_20260510_034150821_8962/run_config.json
+    source_stock_component_exp_id: exp_20260510_033603951_8649
+metadata:
+  runner_mode: cn_stock_etf_stock_rule_combo_ab
+  research_only: true
+  docker_required: true
+  source_combo_baseline_id: CN_STOCK_ETF_COMBO_BASELINE_V3
+  source_stock_component_exp_id: exp_20260510_033603951_8649
+  source_etf_component_exp_id: exp_20260510_034150821_8962
+  source_stock_only_study_id: cn_stock_etf/cn_stock_etf_high_chase_d5_action_ab_v1
+  same_window_compare_required: true
+  nav_truth: unified_runtime_combo_nav
+  precomputed_component_results_allowed: false
+  primary_variable: stock_leg_high_chase_d5_watch_timing_in_combo

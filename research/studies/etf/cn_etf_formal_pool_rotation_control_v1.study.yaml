@@ -1,0 +1,189 @@
+study_id: etf/cn_etf_formal_pool_rotation_control_v1
+title: CN ETF Formal Pool Rotation Control V1
+asset_scope: cn_etf
+baseline_id: baseline_V10_1
+hypothesis: Research-only control run using the formal ETF pool under the same standalone rotation contract as cn_etf_research_shadow_pool_v1.
+change_scope:
+  modules_modified:
+    - research_entry.cn_etf.formal_pool_rotation_control_v1
+variants:
+  - name: FORMAL_POOL_ROTATION_CONTROL
+    description: Formal ETF pool under the same broad-based standalone rotation contract used by the shadow pool research study.
+    request_overrides:
+      benchmark: 510300.SH
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - cn_etf_first_wave_core
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: universe_filter.min_price
+        value: 0.0
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_id
+        value: formal_etf_pool_v1_rotation_control
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: formal_etf_pool_v1
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510300.SH: formal_hs300_core
+          510500.SH: formal_csi500_core
+          510050.SH: formal_sse50_core
+          512100.SH: formal_csi1000_tactical
+          511010.SH: formal_bond_defense
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 510050.SH
+          - 512100.SH
+      - path: governed_a_share.etf_beta.core_slot_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 510050.SH
+      - path: governed_a_share.etf_beta.growth_slot_symbols
+        value:
+          - 512100.SH
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 512100.SH
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510300.SH
+          - 510500.SH
+          - 510050.SH
+          - 512100.SH
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value:
+          - 511010.SH
+      - path: governed_a_share.etf_beta.defense_asset_weights
+        value:
+          511010.SH: 1.0
+      - path: governed_a_share.etf_beta.strategy_role
+        value: governed_broad_based_standalone_mainline
+      - path: governed_a_share.etf_beta.source_entry_type
+        value: cn_etf_broad_based_standalone_mainline_entry
+      - path: governed_a_share.etf_beta.governor_boundary_mode
+        value: consume_governor_state_and_budget
+      - path: governed_a_share.etf_beta.local_policy_mode
+        value: broad_based_rotation_mainline
+      - path: governed_a_share.etf_beta.controlled_accumulation_mode
+        value: light_and_controlled_trans_down
+      - path: governed_a_share.etf_beta.exposure_policy_family
+        value: broad_based_standalone_mainline_v1
+      - path: governed_a_share.etf_beta.policy_scope
+        value: general
+      - path: governed_a_share.etf_beta.broad_based_only
+        value: false
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma150_and_positive_12m
+      - path: governed_a_share.etf_beta.selection_chain_profile
+        value: core_growth_slot
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511010.SH
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 0.9
+          TRANS_DOWN: 0.4
+          RISK_OFF: 0.15
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.45
+          TRANS_UP: 0.35
+          TRANS_DOWN: 0.1
+          RISK_OFF: 0.05
+      - path: governed_a_share.etf_beta.target_selected_count_by_state_5
+        value:
+          BULL: 2
+          TRANS_UP: 2
+          TRANS_DOWN: 1
+          RISK_OFF: 1
+      - path: governed_a_share.etf_beta.fallback_allowed_by_state_5
+        value:
+          BULL: true
+          TRANS_UP: true
+          TRANS_DOWN: true
+          RISK_OFF: true
+      - path: governed_a_share.etf_beta.equity_core_bucket_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 0.8
+          TRANS_DOWN: 0.4
+          RISK_OFF: 0.15
+      - path: governed_a_share.etf_beta.defense_tilt_bucket_by_state_5
+        value:
+          BULL: 0.0
+          TRANS_UP: 0.1
+          TRANS_DOWN: 0.35
+          RISK_OFF: 0.45
+      - path: governed_a_share.etf_beta.cash_buffer_bucket_by_state_5
+        value:
+          BULL: 0.0
+          TRANS_UP: 0.1
+          TRANS_DOWN: 0.25
+          RISK_OFF: 0.4
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-04"
+    end: "2026-05-08"
+  - key: "1217"
+    role: hard_gate
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-08"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: outputs/baselines/baseline_V10_1/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true
+  research_only: true
+  control_for: cn_etf_research_shadow_pool_v1
+  pool_version: formal_etf_pool_v1_rotation_control

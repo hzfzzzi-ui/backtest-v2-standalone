@@ -316,6 +316,62 @@ def test_build_etf_beta_phase1_summary_emits_phase1_budget_and_target_fields() -
     assert summary["local_policy_decision"]["bucket_policy_profile"] == "phase1_state_template_v1"
 
 
+def test_build_etf_beta_phase1_summary_emits_shadow_pool_metadata() -> None:
+    governed_contract = {"etf_beta": build_default_etf_beta_contract(enabled=True)}
+    summary = build_etf_beta_phase1_summary(
+        governed_contract=governed_contract,
+        universe_meta={
+            "preset_id": "cn_etf_research_shadow_pool_v1",
+            "etf_batch": "cn_etf_research_shadow_pool_v1",
+            "pool_version": "cn_etf_research_shadow_pool_v1",
+            "research_only": True,
+            "etf_symbols": ["510880.SH", "588000.SH", "159845.SZ"],
+            "etf_internal_symbols": ["sh510880", "sh588000", "sz159845"],
+            "formal_scope_symbols": [],
+            "shadow_symbols": ["510880.SH", "588000.SH", "159845.SZ"],
+            "shadow_role_map": {
+                "510880.SH": "shadow_value_dividend",
+                "588000.SH": "shadow_technology_growth_star50",
+                "159845.SZ": "shadow_csi1000_replacement_for_512100",
+            },
+            "promotion_gate_by_symbol": {
+                "510880.SH": {
+                    "formal_eligible": False,
+                    "promotion_gate_status": "pending_shadow_validation",
+                    "reject_reason": "not_evaluated",
+                },
+                "588000.SH": {
+                    "formal_eligible": False,
+                    "promotion_gate_status": "blocked",
+                    "reject_reason": "short_history",
+                },
+            },
+            "formal_eligibility_by_symbol": {"510880.SH": False, "588000.SH": False},
+            "research_classification_by_symbol": {
+                "510880.SH": "shadow",
+                "588000.SH": "shadow",
+                "159845.SZ": "shadow",
+            },
+            "coverage_start": "2020-11-16",
+            "coverage_end": "2026-05-08",
+            "daily_table": "pams_cn_etf_daily",
+        },
+        governor_snapshot={
+            "regime_effective_state": "BULL",
+            "total_exposure_cap": 0.5,
+            "sleeve_budgets": {"cn_etf_beta": {"slot_cap": 3, "target_exposure": 0.5}},
+        },
+    )
+
+    assert summary is not None
+    assert summary["pool_version"] == "cn_etf_research_shadow_pool_v1"
+    assert summary["research_only"] is True
+    assert summary["shadow_symbols"] == ["510880.SH", "588000.SH", "159845.SZ"]
+    assert summary["shadow_role_map"]["510880.SH"] == "shadow_value_dividend"
+    assert summary["promotion_gate_by_symbol"]["588000.SH"]["reject_reason"] == "short_history"
+    assert summary["formal_eligibility_by_symbol"]["510880.SH"] is False
+
+
 def test_resolve_etf_beta_exposure_semantics_standalone_mainline_trans_up_uses_live_target_deploy() -> None:
     contract = normalize_etf_beta_contract(
         {

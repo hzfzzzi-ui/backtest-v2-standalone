@@ -16,6 +16,7 @@
     { id: 'config_workspace', role: 'config_editor' },
     { id: 'run_orchestration', role: 'run_loader_save_hydrate' },
     { id: 'results_workspace', role: 'results_display' },
+    { id: 'study_journal_workspace', role: 'research_journal_display' },
     { id: 'status_center', role: 'status_summary_only' },
   ]);
 

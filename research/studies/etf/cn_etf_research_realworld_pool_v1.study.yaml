@@ -1,0 +1,298 @@
+study_id: etf/cn_etf_research_realworld_pool_v1
+title: CN ETF Research Realworld Pool V1
+asset_scope: cn_etf
+baseline_id: baseline_V10_1
+hypothesis: Research-only ETF pool that approximates a real-world CN ETF opportunity set across broad beta, style, defensive, sector/theme, and cross-border ETFs without changing the formal ETF pool.
+change_scope:
+  modules_modified:
+    - research_entry.cn_etf.realworld_pool_v1
+    - audit.cn_etf.shadow_pool_metadata
+variants:
+  - name: REALWORLD_POOL_V1
+    description: Wider research-only ETF pool preset using the standalone rotation contract and 510300.SH benchmark.
+    request_overrides:
+      benchmark: 510300.SH
+    config_patches:
+      - path: asset_scope
+        value: cn_etf
+      - path: universe_mode
+        value: CUSTOM
+      - path: industries
+        value: []
+      - path: universe.benchmark
+        value: 510300.SH
+      - path: universe.symbols
+        value:
+          - cn_etf_research_realworld_pool_v1
+      - path: universe.membership_mode
+        value: ""
+      - path: universe.price_adj
+        value: none
+      - path: universe.filters
+        value:
+          price_min: 0.0
+          price_max: 99999.0
+          atr_pct_range: "0,100"
+          limit_rule: ignore
+      - path: universe_filter.min_price
+        value: 0.0
+      - path: data_source.stocks_table
+        value: pams_cn_etf_daily
+      - path: data_source.data_role
+        value: v1
+      - path: governed_a_share.etf_beta.research_rule_family
+        value: broad_based_rotation_template_a
+      - path: governed_a_share.etf_beta.template_id
+        value: cn_etf_research_realworld_pool_v1
+      - path: governed_a_share.etf_beta.template_asset_pool_version
+        value: cn_etf_research_realworld_pool_v1
+      - path: governed_a_share.etf_beta.template_role_map
+        value:
+          510050.SH: realworld_broad_sse50_large
+          510180.SH: realworld_broad_sse180_large_overlap
+          510300.SH: realworld_broad_hs300_core
+          510500.SH: realworld_broad_csi500_mid
+          512100.SH: realworld_broad_csi1000_first_wave
+          159845.SZ: realworld_broad_csi1000_alt_short_history
+          159901.SZ: realworld_broad_sz100
+          159915.SZ: realworld_growth_chinext
+          159949.SZ: realworld_growth_chinext50_short_history
+          588000.SH: realworld_growth_star50_short_history
+          510880.SH: realworld_style_dividend
+          512890.SH: realworld_style_dividend_low_vol_short_history
+          518880.SH: realworld_defense_gold
+          511010.SH: realworld_defense_treasury_5y
+          511260.SH: realworld_defense_treasury_10y_duration_layer
+          511880.SH: realworld_defense_money_etf_cash_equivalent
+          512000.SH: realworld_sector_broker
+          512800.SH: realworld_sector_bank
+          159928.SZ: realworld_sector_consumer
+          512690.SH: realworld_sector_liquor
+          512010.SH: realworld_sector_medicine
+          512170.SH: realworld_sector_medical
+          512480.SH: realworld_sector_semiconductor
+          512760.SH: realworld_sector_chip
+          515030.SH: realworld_sector_new_energy_vehicle
+          515790.SH: realworld_sector_photovoltaic
+          515220.SH: realworld_sector_coal
+          512400.SH: realworld_sector_nonferrous_metals
+          513100.SH: realworld_cross_border_nasdaq_qdii
+          513500.SH: realworld_cross_border_sp500_qdii
+          159920.SZ: realworld_cross_border_hang_seng
+          513180.SH: realworld_cross_border_hang_seng_tech_short_history
+          513050.SH: realworld_cross_border_china_internet
+      - path: governed_a_share.etf_beta.template_target_formal_symbols
+        value:
+          - 510050.SH
+          - 510180.SH
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 159845.SZ
+          - 159901.SZ
+          - 159915.SZ
+          - 159949.SZ
+          - 588000.SH
+          - 510880.SH
+          - 512890.SH
+          - 512000.SH
+          - 512800.SH
+          - 159928.SZ
+          - 512690.SH
+          - 512010.SH
+          - 512170.SH
+          - 512480.SH
+          - 512760.SH
+          - 515030.SH
+          - 515790.SH
+          - 515220.SH
+          - 512400.SH
+          - 513100.SH
+          - 513500.SH
+          - 159920.SZ
+          - 513180.SH
+          - 513050.SH
+      - path: governed_a_share.etf_beta.core_slot_symbols
+        value:
+          - 510050.SH
+          - 510180.SH
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 159845.SZ
+          - 159901.SZ
+          - 510880.SH
+          - 512890.SH
+      - path: governed_a_share.etf_beta.growth_slot_symbols
+        value:
+          - 159915.SZ
+          - 159949.SZ
+          - 588000.SH
+          - 512000.SH
+          - 512800.SH
+          - 159928.SZ
+          - 512690.SH
+          - 512010.SH
+          - 512170.SH
+          - 512480.SH
+          - 512760.SH
+          - 515030.SH
+          - 515790.SH
+          - 515220.SH
+          - 512400.SH
+          - 513100.SH
+          - 513500.SH
+          - 159920.SZ
+          - 513180.SH
+          - 513050.SH
+      - path: governed_a_share.etf_beta.growth_seat_symbol
+        value: 159915.SZ
+      - path: governed_a_share.etf_beta.core_beta_symbols
+        value:
+          - 510050.SH
+          - 510180.SH
+          - 510300.SH
+          - 510500.SH
+          - 512100.SH
+          - 159845.SZ
+          - 159901.SZ
+          - 159915.SZ
+          - 159949.SZ
+          - 588000.SH
+          - 510880.SH
+          - 512890.SH
+          - 512000.SH
+          - 512800.SH
+          - 159928.SZ
+          - 512690.SH
+          - 512010.SH
+          - 512170.SH
+          - 512480.SH
+          - 512760.SH
+          - 515030.SH
+          - 515790.SH
+          - 515220.SH
+          - 512400.SH
+          - 513100.SH
+          - 513500.SH
+          - 159920.SZ
+          - 513180.SH
+          - 513050.SH
+      - path: governed_a_share.etf_beta.limited_defense_candidates
+        value:
+          - 518880.SH
+          - 511010.SH
+          - 511260.SH
+          - 511880.SH
+      - path: governed_a_share.etf_beta.defense_asset_weights
+        value:
+          518880.SH: 0.35
+          511010.SH: 0.25
+          511260.SH: 0.25
+          511880.SH: 0.15
+      - path: governed_a_share.etf_beta.strategy_role
+        value: governed_broad_based_standalone_mainline
+      - path: governed_a_share.etf_beta.source_entry_type
+        value: cn_etf_broad_based_standalone_mainline_entry
+      - path: governed_a_share.etf_beta.governor_boundary_mode
+        value: consume_governor_state_and_budget
+      - path: governed_a_share.etf_beta.local_policy_mode
+        value: broad_based_rotation_mainline
+      - path: governed_a_share.etf_beta.controlled_accumulation_mode
+        value: light_and_controlled_trans_down
+      - path: governed_a_share.etf_beta.exposure_policy_family
+        value: broad_based_standalone_mainline_v1
+      - path: governed_a_share.etf_beta.policy_scope
+        value: general
+      - path: governed_a_share.etf_beta.broad_based_only
+        value: false
+      - path: governed_a_share.etf_beta.rebalance_frequency
+        value: monthly
+      - path: governed_a_share.etf_beta.absolute_filter_mode
+        value: ma150_and_positive_12m
+      - path: governed_a_share.etf_beta.selection_chain_profile
+        value: core_growth_slot
+      - path: governed_a_share.etf_beta.fallback_mode
+        value: single_symbol
+      - path: governed_a_share.etf_beta.fallback_symbol
+        value: 511880.SH
+      - path: governed_a_share.etf_beta.relative_strength_fast_window
+        value: 63
+      - path: governed_a_share.etf_beta.relative_strength_mid_window
+        value: 126
+      - path: governed_a_share.etf_beta.relative_strength_slow_window
+        value: 252
+      - path: governed_a_share.etf_beta.relative_strength_fast_weight
+        value: 0.2
+      - path: governed_a_share.etf_beta.relative_strength_mid_weight
+        value: 0.3
+      - path: governed_a_share.etf_beta.relative_strength_slow_weight
+        value: 0.5
+      - path: governed_a_share.etf_beta.max_selected_symbols
+        value: 2
+      - path: governed_a_share.etf_beta.target_exposure_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 0.9
+          TRANS_DOWN: 0.4
+          RISK_OFF: 0.15
+      - path: governed_a_share.etf_beta.min_deployable_exposure_by_state_5
+        value:
+          BULL: 0.45
+          TRANS_UP: 0.35
+          TRANS_DOWN: 0.1
+          RISK_OFF: 0.05
+      - path: governed_a_share.etf_beta.target_selected_count_by_state_5
+        value:
+          BULL: 2
+          TRANS_UP: 2
+          TRANS_DOWN: 1
+          RISK_OFF: 1
+      - path: governed_a_share.etf_beta.fallback_allowed_by_state_5
+        value:
+          BULL: true
+          TRANS_UP: true
+          TRANS_DOWN: true
+          RISK_OFF: true
+      - path: governed_a_share.etf_beta.equity_core_bucket_by_state_5
+        value:
+          BULL: 1.0
+          TRANS_UP: 0.8
+          TRANS_DOWN: 0.4
+          RISK_OFF: 0.15
+      - path: governed_a_share.etf_beta.defense_tilt_bucket_by_state_5
+        value:
+          BULL: 0.0
+          TRANS_UP: 0.1
+          TRANS_DOWN: 0.35
+          RISK_OFF: 0.45
+      - path: governed_a_share.etf_beta.cash_buffer_bucket_by_state_5
+        value:
+          BULL: 0.0
+          TRANS_UP: 0.1
+          TRANS_DOWN: 0.25
+          RISK_OFF: 0.4
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-04"
+    end: "2026-05-08"
+  - key: "1217"
+    role: hard_gate
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-08"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+request_template:
+  config_path: outputs/baselines/baseline_V10_1/config.json
+  fast_mode: true
+metadata:
+  materialize_config_json: true
+  research_only: true
+  pool_version: cn_etf_research_realworld_pool_v1

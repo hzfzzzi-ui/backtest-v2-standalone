@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <title>研究日志</title>
+  <link rel="icon" href="assets/icons/trading-assistant.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="assets/css/study-journal.css?v=20260510_04" />
+</head>
+<body>
+  <header class="sj-topbar">
+    <div class="sj-brand">
+      <a href="/" class="sj-link">工作台</a>
+      <h1>研究日志</h1>
+    </div>
+    <div class="sj-top-actions">
+      <button id="sjRefreshBtn" type="button" class="sj-btn">刷新</button>
+      <button id="sjNewBtn" type="button" class="sj-btn sj-btn-primary">新建轮次</button>
+    </div>
+  </header>
+
+  <main class="sj-shell">
+    <aside class="sj-list-panel">
+      <div class="sj-panel-head">
+        <strong>轮次</strong>
+        <span id="sjRoundCount" class="sj-count">0</span>
+      </div>
+      <input id="sjFilter" class="sj-input" type="search" placeholder="过滤标题 / study / 标签" />
+      <div id="sjRoundList" class="sj-round-list"></div>
+    </aside>
+
+    <section class="sj-detail-panel">
+      <form id="sjRoundForm" class="sj-form">
+        <div class="sj-form-head">
+          <div>
+            <div id="sjRoundId" class="sj-kicker">未选择</div>
+            <input id="sjTitle" class="sj-title-input" placeholder="研究轮次标题" />
+          </div>
+          <div class="sj-inline-actions">
+            <button id="sjRefreshSummaryBtn" type="button" class="sj-btn">刷新总结</button>
+            <button type="submit" class="sj-btn sj-btn-primary">保存</button>
+          </div>
+        </div>
+
+        <section class="sj-summary-band">
+          <div class="sj-summary-main">
+            <div class="sj-kicker">auto_summary</div>
+            <h2 id="sjSummaryHeadline">-</h2>
+            <p id="sjSummaryDraft">-</p>
+          </div>
+          <div class="sj-summary-meta">
+            <span id="sjReliability" class="sj-badge">low</span>
+            <span id="sjGeneratedAt" class="sj-muted">-</span>
+          </div>
+        </section>
+
+        <div class="sj-grid">
+          <label>
+            <span>状态</span>
+            <select id="sjStatus" class="sj-input">
+              <option value="draft">draft</option>
+              <option value="running">running</option>
+              <option value="auditing">auditing</option>
+              <option value="decided">decided</option>
+              <option value="archived">archived</option>
+            </select>
+          </label>
+          <label>
+            <span>资产范围</span>
+            <input id="sjAssetScope" class="sj-input" placeholder="cn_stock_etf" />
+          </label>
+          <label>
+            <span>study_id</span>
+            <input id="sjStudyId" class="sj-input sj-mono" placeholder="cn_stock_etf/..." />
+          </label>
+          <label>
+            <span>baseline_id</span>
+            <input id="sjBaselineId" class="sj-input sj-mono" placeholder="CN_STOCK_ETF_COMBO_BASELINE_V4" />
+          </label>
+        </div>
+
+        <label class="sj-full">
+          <span>研究问题</span>
+          <textarea id="sjQuestion" class="sj-textarea" rows="2"></textarea>
+        </label>
+
+        <div class="sj-grid sj-grid-two">
+          <label>
+            <span>主变量</span>
+            <input id="sjPrimaryVariable" class="sj-input" />
+          </label>
+          <label>
+            <span>标签</span>
+            <input id="sjTags" class="sj-input" placeholder="ETF, combo, defense" />
+          </label>
+          <label>
+            <span>窗口</span>
+            <input id="sjWindows" class="sj-input sj-mono" placeholder="1626,1217,1226" />
+          </label>
+          <label>
+            <span>variant</span>
+            <input id="sjVariants" class="sj-input sj-mono" />
+          </label>
+        </div>
+
+        <label class="sj-full sj-assumptions-field" hidden>
+          <span>固定假设</span>
+          <textarea id="sjAssumptions" class="sj-textarea" rows="3"></textarea>
+        </label>
+
+        <label class="sj-full">
+          <span>重点发现</span>
+          <textarea id="sjFindings" class="sj-textarea" rows="3"></textarea>
+        </label>
+
+        <div class="sj-summary-columns">
+          <section>
+            <h3>事实</h3>
+            <ul id="sjFacts" class="sj-list"></ul>
+          </section>
+          <section>
+            <h3>风险</h3>
+            <ul id="sjRisks" class="sj-list"></ul>
+          </section>
+          <section>
+            <h3>下一步</h3>
+            <ul id="sjNextActions" class="sj-list"></ul>
+          </section>
+        </div>
+
+        <section>
+          <div class="sj-section-head">
+            <h3>指标摘要</h3>
+          </div>
+          <div id="sjMetricTable" class="sj-table"></div>
+        </section>
+      </form>
+    </section>
+
+    <aside class="sj-side-panel">
+      <section class="sj-box">
+        <h3>审计项</h3>
+        <label class="sj-check"><input id="sjAuditSameWindow" type="checkbox" /> same-window compare</label>
+        <label class="sj-check"><input id="sjAuditConfig" type="checkbox" /> config truth</label>
+        <label class="sj-check"><input id="sjAuditNav" type="checkbox" /> NAV/account lineage</label>
+        <label class="sj-check"><input id="sjAuditDocker" type="checkbox" /> Docker run checked</label>
+      </section>
+
+      <section class="sj-box">
+        <h3>决策</h3>
+        <select id="sjDecisionStatus" class="sj-input">
+          <option value="draft">draft</option>
+          <option value="continue">continue</option>
+          <option value="hold">hold</option>
+          <option value="reject">reject</option>
+          <option value="promote_candidate">promote_candidate</option>
+        </select>
+        <textarea id="sjDecisionReason" class="sj-textarea" rows="4" placeholder="决策原因"></textarea>
+      </section>
+
+      <section class="sj-box">
+        <h3>证据</h3>
+        <div id="sjEvidenceList" class="sj-evidence-list"></div>
+        <div class="sj-mini-form">
+          <input id="sjLinkExpId" class="sj-input sj-mono" placeholder="exp_id" />
+          <input id="sjLinkWindow" class="sj-input sj-mono" placeholder="window_key" />
+          <input id="sjLinkVariant" class="sj-input sj-mono" placeholder="variant_name" />
+          <button id="sjLinkExpBtn" type="button" class="sj-btn">关联实验</button>
+        </div>
+      </section>
+
+      <section class="sj-box">
+        <h3>备注</h3>
+        <div id="sjNotes" class="sj-notes"></div>
+        <textarea id="sjNewNote" class="sj-textarea" rows="3" placeholder="追加备注"></textarea>
+        <button id="sjAddNoteBtn" type="button" class="sj-btn">追加备注</button>
+      </section>
+
+      <section class="sj-box">
+        <div class="sj-section-head">
+          <div>
+            <h3>可关联证据</h3>
+            <div id="sjConclusionScope" class="sj-row-meta">默认只显示当前 study</div>
+          </div>
+          <div class="sj-conclusion-toolbar">
+            <label class="sj-check sj-check-inline"><input id="sjShowAllConclusions" type="checkbox" /> 显示全部</label>
+            <button id="sjReloadConclusionsBtn" type="button" class="sj-btn sj-btn-small">刷新</button>
+          </div>
+        </div>
+        <div id="sjConclusionList" class="sj-conclusion-list"></div>
+      </section>
+    </aside>
+  </main>
+
+  <div id="sjToast" class="sj-toast" hidden></div>
+  <script defer src="assets/js/study-journal.js?v=20260510_01"></script>
+</body>
+</html>

@@ -103,11 +103,159 @@ def _extract_allow_low_fidelity_history(cfg_merged: dict[str, Any]) -> bool:
         return False
 
 
-def _index_code_for_dynamic_membership(universe_mode: str) -> str | None:
+def _extract_runtime_optimization(cfg_merged: dict[str, Any]) -> dict[str, Any]:
+    raw = cfg_merged.get("runtime_optimization")
+    if not isinstance(raw, dict):
+        raw = cfg_merged.get("runtime_optimizations")
+    return dict(raw or {}) if isinstance(raw, dict) else {}
+
+
+def _pit_interval_pushdown_config(cfg_merged: dict[str, Any]) -> dict[str, Any]:
+    opt = _extract_runtime_optimization(cfg_merged)
+    raw = opt.get("pit_interval_pushdown")
+    cfg = dict(raw or {}) if isinstance(raw, dict) else {}
+    universe = cfg_merged.get("universe") if isinstance(cfg_merged.get("universe"), dict) else {}
+    if "enabled" not in cfg and universe.get("pit_interval_pushdown_enabled") is not None:
+        cfg["enabled"] = bool(universe.get("pit_interval_pushdown_enabled"))
+    return cfg
+
+
+def _infer_pit_pushdown_warmup_days(cfg_merged: dict[str, Any], explicit: Any = None) -> int:
+    candidates = [260]
+    if explicit is not None:
+        try:
+            candidates.append(int(explicit))
+        except Exception:
+            pass
+    universe = cfg_merged.get("universe") if isinstance(cfg_merged.get("universe"), dict) else {}
+    filters = universe.get("filters") if isinstance(universe.get("filters"), dict) else {}
+    strategy = cfg_merged.get("strategy") if isinstance(cfg_merged.get("strategy"), dict) else {}
+    params = strategy.get("params") if isinstance(strategy.get("params"), dict) else {}
+    benchmark_regime = cfg_merged.get("benchmark_regime") if isinstance(cfg_merged.get("benchmark_regime"), dict) else {}
+    for value in (
+        filters.get("min_list_days"),
+        params.get("breakout_window"),
+        params.get("breakout_window_short"),
+        params.get("breakout_window_long"),
+        params.get("dual_breakout_gate_ma_window"),
+        params.get("residual_window"),
+        params.get("residual_window_fallback"),
+        params.get("v2_trend_long_ma"),
+        benchmark_regime.get("slow_period"),
+    ):
+        try:
+            if value is not None:
+                candidates.append(int(value))
+        except Exception:
+            continue
+    return max(0, max(candidates))
+
+
+def _prune_history_to_membership_intervals(
+    history: pd.DataFrame,
+    membership_history: pd.DataFrame,
+    trading_days: list[date],
+    *,
+    warmup_trading_days: int,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    before_rows = int(len(history.index))
+    empty_audit = {
+        "pit_interval_pushdown_enabled": False,
+        "pit_interval_pushdown_rows_before": before_rows,
+        "pit_interval_pushdown_rows_after": before_rows,
+        "pit_interval_pushdown_rows_dropped": 0,
+        "pit_interval_pushdown_warmup_trading_days": int(warmup_trading_days),
+        "pit_interval_pushdown_membership_interval_count": 0,
+        "pit_interval_pushdown_symbols_with_intervals": 0,
+    }
+    if history.empty or membership_history.empty or "symbol" not in history.columns or "date" not in history.columns:
+        return history, empty_audit
+    if not trading_days:
+        return history, empty_audit
+
+    calendar = pd.DatetimeIndex(pd.to_datetime([pd.Timestamp(day).normalize() for day in trading_days]))
+    if calendar.empty:
+        return history, empty_audit
+
+    mh = membership_history.copy()
+    mh["symbol"] = mh["symbol"].astype(str).str.lower()
+    mh["start_date"] = pd.to_datetime(mh["start_date"], errors="coerce").dt.normalize()
+    mh["end_date"] = pd.to_datetime(mh.get("end_date"), errors="coerce").dt.normalize()
+    mh = mh.dropna(subset=["symbol", "start_date"])
+    if mh.empty:
+        return history, empty_audit
+
+    window_end_exclusive = calendar[-1] + pd.Timedelta(days=1)
+    intervals_by_symbol: dict[str, list[tuple[pd.Timestamp, pd.Timestamp]]] = {}
+    warmup = max(0, int(warmup_trading_days))
+    for row in mh.itertuples(index=False):
+        symbol = str(getattr(row, "symbol", "") or "").strip().lower()
+        if not symbol:
+            continue
+        start_ts = pd.Timestamp(getattr(row, "start_date")).normalize()
+        end_raw = getattr(row, "end_date", pd.NaT)
+        end_ts = pd.Timestamp(end_raw).normalize() if pd.notna(end_raw) else window_end_exclusive
+        if end_ts <= calendar[0] or start_ts > calendar[-1]:
+            continue
+        start_idx = int(calendar.searchsorted(start_ts, side="left"))
+        warm_idx = max(0, start_idx - warmup)
+        warm_start = pd.Timestamp(calendar[warm_idx]).normalize()
+        effective_end = min(end_ts, window_end_exclusive)
+        if effective_end <= warm_start:
+            continue
+        intervals_by_symbol.setdefault(symbol, []).append((warm_start, effective_end))
+
+    if not intervals_by_symbol:
+        audit = dict(empty_audit)
+        audit["pit_interval_pushdown_enabled"] = True
+        return history.iloc[0:0].copy(), audit
+
+    normalized = history.copy()
+    normalized["_pit_pushdown_symbol"] = normalized["symbol"].astype(str).str.lower()
+    normalized["_pit_pushdown_date"] = pd.to_datetime(normalized["date"], errors="coerce").dt.normalize()
+    keep_indices: list[pd.Index] = []
+    for symbol, group in normalized.groupby("_pit_pushdown_symbol", sort=False):
+        intervals = intervals_by_symbol.get(str(symbol))
+        if not intervals:
+            continue
+        dates = group["_pit_pushdown_date"]
+        keep = pd.Series(False, index=group.index)
+        for start_ts, end_ts in intervals:
+            keep |= dates.ge(start_ts) & dates.lt(end_ts)
+        if bool(keep.any()):
+            keep_indices.append(group.index[keep])
+
+    if keep_indices:
+        keep_index = keep_indices[0].append(keep_indices[1:]) if len(keep_indices) > 1 else keep_indices[0]
+        pruned = normalized.loc[keep_index].drop(
+            columns=["_pit_pushdown_symbol", "_pit_pushdown_date"],
+            errors="ignore",
+        ).sort_values(["date", "symbol"], kind="stable").reset_index(drop=True)
+    else:
+        pruned = normalized.iloc[0:0].drop(
+            columns=["_pit_pushdown_symbol", "_pit_pushdown_date"],
+            errors="ignore",
+        ).copy()
+
+    after_rows = int(len(pruned.index))
+    audit = {
+        "pit_interval_pushdown_enabled": True,
+        "pit_interval_pushdown_rows_before": before_rows,
+        "pit_interval_pushdown_rows_after": after_rows,
+        "pit_interval_pushdown_rows_dropped": int(before_rows - after_rows),
+        "pit_interval_pushdown_warmup_trading_days": int(warmup),
+        "pit_interval_pushdown_membership_interval_count": int(sum(len(v) for v in intervals_by_symbol.values())),
+        "pit_interval_pushdown_symbols_with_intervals": int(len(intervals_by_symbol)),
+    }
+    return pruned, audit
+
+
+def _index_codes_for_dynamic_membership(universe_mode: str) -> tuple[str, ...]:
     return {
-        "HS300_ZZ500": "000906.SH",
-        "CSI1000": "000852.SH",
-    }.get(str(universe_mode or "").strip().upper())
+        "HS300_ZZ500": ("000906.SH",),
+        "CSI1000": ("000852.SH",),
+        "HS300_ZZ500_CSI1000": ("000906.SH", "000852.SH"),
+    }.get(str(universe_mode or "").strip().upper(), ())
 
 
 def _load_dynamic_index_membership_bundle(
@@ -118,24 +266,34 @@ def _load_dynamic_index_membership_bundle(
     end: date,
     universe_limit: int | None,
 ) -> tuple[list[str], pd.DataFrame, dict[str, Any]]:
-    index_code = _index_code_for_dynamic_membership(universe_mode)
-    if not index_code:
+    index_codes = _index_codes_for_dynamic_membership(universe_mode)
+    if not index_codes:
         raise ValueError(f"membership_mode PIT_DYNAMIC not supported for universe_mode={universe_mode}")
 
-    membership_history = provider.load_index_constituent_history(index_code, start, end)
-    if membership_history is None or membership_history.empty:
-        raise ValueError(
-            f"pit dynamic universe requires historical constituent rows: mode={universe_mode}, index_code={index_code}"
-        )
+    frames: list[pd.DataFrame] = []
+    per_index_history_rows: dict[str, int] = {}
+    for index_code in index_codes:
+        frame = provider.load_index_constituent_history(index_code, start, end)
+        if frame is None or frame.empty:
+            raise ValueError(
+                "pit dynamic universe requires historical constituent rows: "
+                f"mode={universe_mode}, index_code={index_code}"
+            )
+        frame = frame.copy()
+        frame["index_code"] = str(index_code).strip().upper()
+        per_index_history_rows[index_code] = int(len(frame))
+        frames.append(frame)
 
-    membership_history = membership_history.copy()
+    membership_history = pd.concat(frames, ignore_index=True, sort=False)
     membership_history["symbol"] = membership_history["symbol"].astype(str).str.lower()
+    membership_history["index_code"] = membership_history["index_code"].astype(str).str.upper()
     membership_history["start_date"] = pd.to_datetime(membership_history["start_date"], errors="coerce").dt.normalize()
     membership_history["end_date"] = pd.to_datetime(membership_history["end_date"], errors="coerce").dt.normalize()
     membership_history = membership_history.dropna(subset=["symbol", "start_date"]).reset_index(drop=True)
     if membership_history.empty:
         raise ValueError(
-            f"pit dynamic universe has no valid membership rows after normalization: mode={universe_mode}, index_code={index_code}"
+            "pit dynamic universe has no valid membership rows after normalization: "
+            f"mode={universe_mode}, index_codes={'+'.join(index_codes)}"
         )
 
     overlap_mask = membership_history["start_date"].le(pd.Timestamp(end))
@@ -143,7 +301,8 @@ def _load_dynamic_index_membership_bundle(
     membership_history = membership_history.loc[overlap_mask].reset_index(drop=True)
     if membership_history.empty:
         raise ValueError(
-            f"pit dynamic universe has no rows overlapping backtest window: mode={universe_mode}, index_code={index_code}"
+            "pit dynamic universe has no rows overlapping backtest window: "
+            f"mode={universe_mode}, index_codes={'+'.join(index_codes)}"
         )
 
     symbols = sorted(membership_history["symbol"].dropna().astype(str).unique().tolist())
@@ -154,14 +313,17 @@ def _load_dynamic_index_membership_bundle(
         ].reset_index(drop=True)
     if not symbols:
         raise ValueError(
-            f"pit dynamic universe produced zero union symbols: mode={universe_mode}, index_code={index_code}"
+            "pit dynamic universe produced zero union symbols: "
+            f"mode={universe_mode}, index_codes={'+'.join(index_codes)}"
         )
 
     return symbols, membership_history, {
         "universe_mode": universe_mode,
         "symbols_source": "pit_index_constituents",
         "load_table": "pit_index_constituents",
-        "index_code": index_code,
+        "index_code": "+".join(index_codes),
+        "index_codes": list(index_codes),
+        "per_index_history_rows": per_index_history_rows,
         "membership_mode": "PIT_DYNAMIC",
         "membership_history_mode": "PIT_DYNAMIC",
         "historical_membership_dynamic": True,
@@ -245,8 +407,17 @@ def _build_data_bundle_summary(
         "membership_mode": str(universe_meta.get("membership_mode") or "SNAPSHOT"),
         "historical_membership_dynamic": bool(universe_meta.get("historical_membership_dynamic")),
         "membership_history_rows": int(len(membership_history)),
+        "index_code": universe_meta.get("index_code"),
+        "index_codes": universe_meta.get("index_codes"),
+        "per_index_history_rows": universe_meta.get("per_index_history_rows"),
         "membership_source": str(universe_meta.get("membership_source") or "unknown"),
         "membership_data_quality": str(universe_meta.get("membership_data_quality") or "unknown"),
+        "csi1000_membership_data_quality": universe_meta.get("csi1000_membership_data_quality"),
+        "csi1000_audit_status": universe_meta.get("csi1000_audit_status"),
+        "csi1000_audit_reason": universe_meta.get("csi1000_audit_reason"),
+        "csi1000_provider_floor_date": universe_meta.get("csi1000_provider_floor_date"),
+        "csi1000_refresh_event_count": universe_meta.get("csi1000_refresh_event_count"),
+        "csi1000_covered_refresh_event_count": universe_meta.get("csi1000_covered_refresh_event_count"),
         "audit_status": str(universe_meta.get("audit_status") or ""),
         "audit_reason": str(universe_meta.get("audit_reason") or ""),
         "distinct_start_dates": int(universe_meta.get("distinct_start_dates") or 0),
@@ -259,6 +430,19 @@ def _build_data_bundle_summary(
         "rebalance_calendar_generated_at": universe_meta.get("rebalance_calendar_generated_at"),
         "history_date_start": history_date_min,
         "history_date_end": history_date_max,
+        "pit_interval_pushdown_enabled": bool(universe_meta.get("pit_interval_pushdown_enabled", False)),
+        "pit_interval_pushdown_rows_before": int(universe_meta.get("pit_interval_pushdown_rows_before") or 0),
+        "pit_interval_pushdown_rows_after": int(universe_meta.get("pit_interval_pushdown_rows_after") or 0),
+        "pit_interval_pushdown_rows_dropped": int(universe_meta.get("pit_interval_pushdown_rows_dropped") or 0),
+        "pit_interval_pushdown_warmup_trading_days": int(
+            universe_meta.get("pit_interval_pushdown_warmup_trading_days") or 0
+        ),
+        "pit_interval_pushdown_membership_interval_count": int(
+            universe_meta.get("pit_interval_pushdown_membership_interval_count") or 0
+        ),
+        "pit_interval_pushdown_symbols_with_intervals": int(
+            universe_meta.get("pit_interval_pushdown_symbols_with_intervals") or 0
+        ),
         "benchmark_date_start": benchmark_date_min,
         "benchmark_date_end": benchmark_date_max,
         "calendar_start": calendar_start,
@@ -464,33 +648,57 @@ def build_data_bundle(
         universe_meta["as_of"] = "dynamic_history_range"
         universe_meta["filter_mode"] = "dynamic_membership_gate"
         universe_meta["allow_low_fidelity_history"] = bool(allow_low_fidelity_history)
-        refresh_membership = pd.DataFrame()
-        if str(universe_mode or "").strip().upper() == "CSI1000":
-            refresh_membership = provider.load_index_constituent_refresh_membership(
-                str(universe_meta.get("index_code") or "")
-            )
+        index_codes = [str(item).strip().upper() for item in list(universe_meta.get("index_codes") or [])]
+        has_csi1000 = "000852.SH" in set(index_codes)
+        csi1000_refresh_membership = pd.DataFrame()
+        if has_csi1000:
+            csi1000_refresh_membership = provider.load_index_constituent_refresh_membership("000852.SH")
         membership_audit = audit_membership_history(
             membership_history,
-            refresh_membership=refresh_membership,
+            refresh_membership=csi1000_refresh_membership if universe_mode == "CSI1000" else pd.DataFrame(),
             required_start=cfg_obj.universe.start,
             required_end=cfg_obj.universe.end,
             require_calendar_metadata=bool(universe_mode == "CSI1000"),
         )
         universe_meta.update(membership_audit)
+        block_audit = membership_audit
+        if has_csi1000 and universe_mode != "CSI1000":
+            csi1000_history = membership_history.loc[
+                membership_history["index_code"].astype(str).str.upper() == "000852.SH"
+            ].reset_index(drop=True)
+            csi1000_audit = audit_membership_history(
+                csi1000_history,
+                refresh_membership=csi1000_refresh_membership,
+                required_start=cfg_obj.universe.start,
+                required_end=cfg_obj.universe.end,
+                require_calendar_metadata=True,
+            )
+            universe_meta["csi1000_membership_audit"] = csi1000_audit
+            universe_meta["csi1000_membership_data_quality"] = str(
+                csi1000_audit.get("membership_data_quality") or ""
+            )
+            universe_meta["csi1000_audit_status"] = str(csi1000_audit.get("audit_status") or "")
+            universe_meta["csi1000_audit_reason"] = str(csi1000_audit.get("audit_reason") or "")
+            universe_meta["csi1000_provider_floor_date"] = csi1000_audit.get("provider_floor_date")
+            universe_meta["csi1000_refresh_event_count"] = int(csi1000_audit.get("refresh_event_count") or 0)
+            universe_meta["csi1000_covered_refresh_event_count"] = int(
+                csi1000_audit.get("covered_refresh_event_count") or 0
+            )
+            block_audit = csi1000_audit
         if should_block_static_fallback(
-            universe_mode=universe_mode,
+            universe_mode="CSI1000" if has_csi1000 else universe_mode,
             membership_mode=membership_mode,
-            membership_data_quality=str(membership_audit.get("membership_data_quality") or ""),
+            membership_data_quality=str(block_audit.get("membership_data_quality") or ""),
             allow_low_fidelity_history=bool(allow_low_fidelity_history),
         ):
             raise ValueError(
                 "csi1000 PIT_DYNAMIC membership history was classified as static_fallback; "
-                f"audit_reason={membership_audit.get('audit_reason')} "
-                f"distinct_start_dates={membership_audit.get('distinct_start_dates')} "
-                f"open_rows={membership_audit.get('open_rows')} "
-                f"covers_required_start={membership_audit.get('covers_required_start')} "
-                f"covers_required_end={membership_audit.get('covers_required_end')} "
-                f"rebalance_calendar_version={membership_audit.get('rebalance_calendar_version')} "
+                f"audit_reason={block_audit.get('audit_reason')} "
+                f"distinct_start_dates={block_audit.get('distinct_start_dates')} "
+                f"open_rows={block_audit.get('open_rows')} "
+                f"covers_required_start={block_audit.get('covers_required_start')} "
+                f"covers_required_end={block_audit.get('covers_required_end')} "
+                f"rebalance_calendar_version={block_audit.get('rebalance_calendar_version')} "
                 "set universe.allow_low_fidelity_history=true only for explicit low-fidelity research"
             )
     elif asset_scope == "cn_etf":
@@ -668,6 +876,32 @@ def build_data_bundle(
     benchmark = provider.load_benchmark_daily(benchmark_symbol, cfg_obj.universe.start, cfg_obj.universe.end)
     calendar = provider.load_trading_calendar_cn(cfg_obj.universe.start, cfg_obj.universe.end)
     trading_days = [d.date() for d in calendar]
+
+    pushdown_cfg = _pit_interval_pushdown_config(cfg_merged)
+    if dynamic_membership_entry and bool(pushdown_cfg.get("enabled", False)):
+        warmup_days = _infer_pit_pushdown_warmup_days(
+            cfg_merged,
+            explicit=pushdown_cfg.get("warmup_trading_days"),
+        )
+        history, pushdown_audit = _prune_history_to_membership_intervals(
+            history,
+            membership_history,
+            trading_days,
+            warmup_trading_days=warmup_days,
+        )
+        universe_meta.update(pushdown_audit)
+    else:
+        universe_meta.update(
+            {
+                "pit_interval_pushdown_enabled": False,
+                "pit_interval_pushdown_rows_before": int(len(history.index)),
+                "pit_interval_pushdown_rows_after": int(len(history.index)),
+                "pit_interval_pushdown_rows_dropped": 0,
+                "pit_interval_pushdown_warmup_trading_days": 0,
+                "pit_interval_pushdown_membership_interval_count": 0,
+                "pit_interval_pushdown_symbols_with_intervals": 0,
+            }
+        )
 
     default_price_adj = "none" if asset_scope == "cn_etf" else "hfq"
     price_adj_mode = str(overrides.get("price_adj", default_price_adj)).strip().lower()

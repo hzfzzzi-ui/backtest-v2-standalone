@@ -11,6 +11,7 @@ from backend.scripts.update_pams_ohlcv_daily import (
     _compute_limit_prices,
     _load_cn_index_daily_tushare,
     _limit_pct_for_symbol,
+    _merge_index_symbols,
     _normalize_cn_a_rows,
     _normalize_cn_index_rows,
     _normalize_daily_basic_frame,
@@ -103,6 +104,28 @@ def test_load_cn_index_daily_tushare_adapts_to_existing_normalizer_shape() -> No
     assert normalized.loc[0, "trade_date"].isoformat() == "2026-03-13"
     assert int(normalized.loc[0, "volume"]) == 79205476400
     assert float(normalized.loc[0, "turnover"]) == 0.0
+
+
+def test_merge_index_symbols_accepts_explicit_new_cn_index_symbol() -> None:
+    assert _merge_index_symbols(["sh000300", "sh000905"], ["000852.SH", "sh000905"]) == [
+        "sh000300",
+        "sh000852",
+        "sh000905",
+    ]
+
+
+def test_build_update_args_supports_index_only_extra_symbol() -> None:
+    args = build_update_args(
+        start="2026-01-01",
+        end="2026-05-12",
+        apply=False,
+        only_cn_index=True,
+        extra_index_symbols=["sh000852"],
+    )
+
+    assert args.only_cn_index is True
+    assert args.extra_index_symbols == ["sh000852"]
+    assert args.apply is False
 
 
 def test_normalize_cn_a_rows_builds_suspended_rows_from_adj_only_symbol() -> None:

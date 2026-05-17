@@ -1,11 +1,11 @@
 /* desktop-shell/app-shell.js: formal desktop page shell owner for init, navigation, and UI bridge wiring. */
 (function initDesktopAppShellModule(globalScope) {
-  const DEFAULT_BOOTSTRAP_BASELINE_ID = 'CN_STOCK_ETF_FORMAL_V1';
+  const DEFAULT_BOOTSTRAP_BASELINE_ID = 'CN_STOCK_ETF_COMBO_BASELINE_V4';
   const MAX_FRONTEND_EXPERIMENT_LOAD_ITEMS = 12;
   const DEFAULT_BOOTSTRAP_SOURCE = {
     kind: 'baseline',
     id: DEFAULT_BOOTSTRAP_BASELINE_ID,
-    label: 'Baseline CN_STOCK_ETF_FORMAL_V1',
+    label: 'Baseline CN_STOCK_ETF_COMBO_BASELINE_V4',
   };
   const FALLBACK_BOOTSTRAP_SOURCE = {
     kind: 'baseline',
@@ -196,6 +196,7 @@
       ['section[data-module="json"] details:first-of-type summary', '配置草稿'],
       ['section[data-module="json"] details:last-of-type summary', '校验与差异'],
       ['section[data-module="history"] strong', '实验历史'],
+      ['section[data-module="research"] strong', '研究日志'],
       ['#wbHistoryClear', '清空'],
       ['#wbStatusPanel strong', '状态中心'],
     ].forEach(([selector, text]) => {
@@ -209,10 +210,12 @@
     setSelectorTitle('#wbDrawerToggle', '收起抽屉 (Ctrl+B)');
     setSelectorTitle('.wb-rail-btn[data-panel="json"]', '配置 JSON');
     setSelectorTitle('.wb-rail-btn[data-panel="history"]', '实验历史');
+    setSelectorTitle('.wb-rail-btn[data-panel="research"]', '研究日志');
     setSelectorTitle('#wbStatusClose', '关闭');
 
     setSelectorText('.wb-rail-btn[data-panel="json"] .wb-rail-label', '配置');
     setSelectorText('.wb-rail-btn[data-panel="history"] .wb-rail-label', '历史');
+    setSelectorText('.wb-rail-btn[data-panel="research"] .wb-rail-label', '研究');
 
     setSelectorText('#wbGlobalRegimeCard summary', '查看 Regime 详情');
     setSelectorText('#wbGlobalGovernorCard summary', '查看 Governor 详情');

@@ -1,0 +1,138 @@
+{
+  "primary_question": "剔除跨境/QDII/港股/美股/中概 ETF 后，是否能修复 V2 stock+ETF 组合的回撤问题？",
+  "windows": [
+    "1626",
+    "1217",
+    "1226"
+  ],
+  "status": "auditing",
+  "next_actions": [
+    "补跑 2012-2017 硬门槛窗口。",
+    "补跑 2012-2026 全周期审计窗口。",
+    "审计 baseline linked experiment 是否和 candidate 为同窗口可比。",
+    "若三窗口仍成立，再进入 DOMESTIC_DEFENSE_TIGHT 弱状态防守收紧研究。"
+  ],
+  "fixed_assumptions": [
+    "stock sleeve fixed from CN_STOCK_ETF_FORMAL_V1 combo template",
+    "combo runtime fixed; only ETF source compile input replaced",
+    "DOMESTIC_POOL_BASE removes cross-border ETFs while keeping exposure, timing, ranking, defense, and portfolio construction aligned with STYLE_SMART_BETA_POOL_V2",
+    "research-only; do not promote baseline from this single-window result"
+  ],
+  "study_id": "cn_stock_etf/cn_stock_etf_domestic_defense_boundary_v1",
+  "variants": [
+    "DOMESTIC_POOL_BASE"
+  ],
+  "evidence": [
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_013931013_f536",
+      "study_id": "cn_stock_etf/cn_stock_etf_domestic_defense_boundary_v1",
+      "window_key": "1626",
+      "variant_name": "DOMESTIC_POOL_BASE",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_domestic_defense_boundary_v1",
+      "note": "combo exp; stock exp exp_20260510_013518798_15bf; ETF exp exp_20260510_013836859_066f",
+      "linked_at": "",
+      "etf_exp_id": "exp_20260510_013836859_066f",
+      "etf_source_study_id": "etf/cn_etf_domestic_defense_boundary_v1",
+      "stock_exp_id": "exp_20260510_013518798_15bf",
+      "etf_pool_version": "cn_etf_research_domestic_pool_base_v1"
+    }
+  ],
+  "key_findings": [
+    "主窗口 2016-2026 已有正向证据：CAGR、Sharpe、Calmar 改善，MaxDD 从 -35.19% 改善到 -25.05%。",
+    "当前只证明跨境 ETF 剔除方向值得继续，不足以升级 baseline。",
+    "硬门槛 2012-2017 和全周期 2012-2026 尚未完成。"
+  ],
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V2",
+  "audit": {
+    "same_window_compare": false,
+    "docker_run_checked": true,
+    "config_truth_checked": false,
+    "nav_lineage_checked": false
+  },
+  "asset_scope": "cn_stock_etf",
+  "decision": {
+    "status": "continue",
+    "reason": "主窗口回撤修复明显，但只有 1626 一条证据；继续补 1217/1226，并审计 same-window compare、config truth 和 NAV lineage。"
+  },
+  "primary_variable": "ETF pool: remove cross-border ETFs only",
+  "tags": [
+    "ETF",
+    "domestic-only",
+    "cross-border-removed",
+    "combo",
+    "drawdown-repair",
+    "research-only"
+  ],
+  "title": "ETF池剔除海外资产：DOMESTIC_POOL_BASE",
+  "round_id": "sr_20260510_domestic_etf_pool_base",
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-10T10:33:41+08:00",
+  "updated_at": "2026-05-10T10:33:41+08:00",
+  "notes": [],
+  "auto_summary": {
+    "schema_version": "openclaw_study_auto_summary@1",
+    "generated_at": "2026-05-10T10:33:41+08:00",
+    "headline": "ETF池剔除海外资产：DOMESTIC_POOL_BASE：主变量=ETF pool: remove cross-border ETFs only",
+    "conclusion_draft": "已有正向证据，但仍需补齐风险、窗口或审计项后再判断。",
+    "reliability": "partial",
+    "facts": [
+      "已关联 1 条证据。",
+      "匹配到 1 条 study conclusion registry 记录。",
+      "窗口覆盖：2016-2026。",
+      "verdict 分布：PASS=1。"
+    ],
+    "risks": [
+      "三窗口证据尚不完整，不能作为 baseline 升级依据。",
+      "尚未确认 same-window compare。",
+      "尚未确认 config truth。",
+      "尚未确认 NAV/account lineage。"
+    ],
+    "next_actions": [
+      "补跑 2012-2017 硬门槛窗口。",
+      "补跑 2012-2026 全周期审计窗口。",
+      "审计 baseline linked experiment 是否和 candidate 为同窗口可比。",
+      "若三窗口仍成立，再进入 DOMESTIC_DEFENSE_TIGHT 弱状态防守收紧研究。",
+      "补齐 2016-2026、2012-2017、2012-2026 三窗口证据。",
+      "补做 config truth 与 NAV lineage 审计。"
+    ],
+    "evidence_counts": {
+      "linked": 1,
+      "matched_conclusions": 1
+    },
+    "window_coverage": [
+      "2016-2026"
+    ],
+    "verdict_counts": {
+      "PASS": 1
+    },
+    "metric_highlights": [
+      {
+        "exp_id": "exp_20260510_013931013_f536",
+        "window_key": "1626",
+        "variant_name": "DOMESTIC_POOL_BASE",
+        "cagr": {
+          "candidate": 0.1616919715024947,
+          "baseline": 0.14333707978339105,
+          "delta": 0.01835489171910365
+        },
+        "sharpe": {
+          "candidate": 0.8857802852823151,
+          "baseline": 0.7809460283926393,
+          "delta": 0.10483425688967585
+        },
+        "max_drawdown": {
+          "candidate": -0.25048717804305054,
+          "baseline": -0.3519328032535972,
+          "delta": 0.10144562521054667
+        },
+        "calmar": {
+          "candidate": 0.6455099728685719,
+          "baseline": 0.4072853637349191,
+          "delta": 0.23822460913365284
+        }
+      }
+    ]
+  },
+  "reliability": "partial"
+}

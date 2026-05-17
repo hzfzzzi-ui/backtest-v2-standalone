@@ -431,6 +431,42 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
             profit_decay_exit_profit_pct=float(params.get("profit_decay_exit_profit_pct", 0.15)),
             profit_decay_exit_min_hold_bars=int(params.get("profit_decay_exit_min_hold_bars", 10)),
             profit_decay_exit_residual_score_threshold=float(params.get("profit_decay_exit_residual_score_threshold", 0.35)),
+            enable_peak_giveback_ma20_exit=bool(params.get("enable_peak_giveback_ma20_exit", False)),
+            peak_giveback_ma20_min_peak_profit_pct=float(
+                params.get("peak_giveback_ma20_min_peak_profit_pct", 0.20)
+            ),
+            peak_giveback_ma20_min_giveback_pct=float(params.get("peak_giveback_ma20_min_giveback_pct", 0.25)),
+            peak_giveback_ma20_min_hold_bars=int(params.get("peak_giveback_ma20_min_hold_bars", 10)),
+            peak_giveback_ma20_exit_pct=float(params.get("peak_giveback_ma20_exit_pct", 0.5)),
+            enable_mfe_mae_confirmation_exit=bool(params.get("enable_mfe_mae_confirmation_exit", False)),
+            mfe_mae_confirmation_lookahead_bars=int(params.get("mfe_mae_confirmation_lookahead_bars", 3)),
+            mfe_mae_confirmation_min_mfe_pct=float(params.get("mfe_mae_confirmation_min_mfe_pct", 0.02)),
+            mfe_mae_confirmation_max_mae_pct=float(params.get("mfe_mae_confirmation_max_mae_pct", -0.05)),
+            mfe_mae_confirmation_exit_pct=float(params.get("mfe_mae_confirmation_exit_pct", 0.5)),
+            mfe_mae_confirmation_scope=str(params.get("mfe_mae_confirmation_scope", "all") or "all").strip().lower(),
+            mfe_mae_confirmation_action=str(params.get("mfe_mae_confirmation_action", "exit") or "exit").strip().lower(),
+            mfe_mae_high_chase_min_core_flags=int(params.get("mfe_mae_high_chase_min_core_flags", 2)),
+            mfe_mae_high_chase_ret5_pct=float(params.get("mfe_mae_high_chase_ret5_pct", 0.20)),
+            mfe_mae_high_chase_ret10_pct=float(params.get("mfe_mae_high_chase_ret10_pct", 0.30)),
+            mfe_mae_high_chase_ret20_pct=float(params.get("mfe_mae_high_chase_ret20_pct", 0.45)),
+            mfe_mae_high_chase_ma20_extension_pct=float(params.get("mfe_mae_high_chase_ma20_extension_pct", 0.27)),
+            mfe_mae_high_chase_ma60_extension_pct=float(params.get("mfe_mae_high_chase_ma60_extension_pct", 0.45)),
+            mfe_mae_high_chase_atr_extension=float(params.get("mfe_mae_high_chase_atr_extension", 4.5)),
+            mfe_mae_high_chase_breakout_margin_pct=float(params.get("mfe_mae_high_chase_breakout_margin_pct", 0.05)),
+            mfe_mae_high_chase_open_gap_pct=float(params.get("mfe_mae_high_chase_open_gap_pct", 0.024)),
+            mfe_mae_high_chase_fade_pct=float(params.get("mfe_mae_high_chase_fade_pct", 0.025)),
+            mfe_mae_high_chase_breakout_quality_max=float(params.get("mfe_mae_high_chase_breakout_quality_max", 0.46)),
+            mfe_mae_high_chase_volume_price_quality_max=float(params.get("mfe_mae_high_chase_volume_price_quality_max", 0.08)),
+            mfe_mae_watch_review_bars=int(params.get("mfe_mae_watch_review_bars", 10)),
+            mfe_mae_watch_review_min_mfe_pct=float(params.get("mfe_mae_watch_review_min_mfe_pct", 0.02)),
+            mfe_mae_watch_review_max_current_return_pct=float(params.get("mfe_mae_watch_review_max_current_return_pct", 0.0)),
+            mfe_mae_watch_review_max_mae_pct=float(params.get("mfe_mae_watch_review_max_mae_pct", -0.05)),
+            mfe_mae_watch_deep_mae_immediate_pct=float(params.get("mfe_mae_watch_deep_mae_immediate_pct", -0.08)),
+            enable_mfe_mae_restore_candidate=bool(params.get("enable_mfe_mae_restore_candidate", False)),
+            mfe_mae_restore_candidate_scope=str(params.get("mfe_mae_restore_candidate_scope", "high_chase") or "high_chase").strip().lower(),
+            mfe_mae_restore_candidate_max_bars=int(params.get("mfe_mae_restore_candidate_max_bars", 40)),
+            mfe_mae_restore_candidate_target_basis=str(params.get("mfe_mae_restore_candidate_target_basis", "original_target") or "original_target").strip().lower(),
+            mfe_mae_restore_candidate_clear_on_fill=bool(params.get("mfe_mae_restore_candidate_clear_on_fill", True)),
             enable_take_profit=bool(params.get("enable_take_profit", False)),
             take_profit_mode=str(params.get("take_profit_mode", "pct")),
             take_profit_pct=float(params.get("take_profit_pct", 0.10)),
@@ -490,6 +526,43 @@ def build_strategy(cfg: StrategyConfig) -> Strategy:
               ),
               bull_breakout_quality_veto_min_breakout_margin_score=float(
                   params.get("bull_breakout_quality_veto_min_breakout_margin_score", 0.0)
+              ),
+              bad_breakout_quality_veto_enabled=bool(params.get("bad_breakout_quality_veto_enabled", False)),
+              bad_breakout_quality_ret5_rank_min=float(
+                  params.get("bad_breakout_quality_ret5_rank_min", 0.80)
+              ),
+              bad_breakout_quality_r2_60_rank_max=float(
+                  params.get("bad_breakout_quality_r2_60_rank_max", 0.20)
+              ),
+              trend_quality_soft_score_enabled=bool(params.get("trend_quality_soft_score_enabled", False)),
+              trend_quality_soft_score_weight=float(params.get("trend_quality_soft_score_weight", 0.30)),
+              trend_quality_r2_60_weight=float(params.get("trend_quality_r2_60_weight", 0.45)),
+              trend_quality_slope60_weight=float(params.get("trend_quality_slope60_weight", 0.25)),
+              trend_quality_ret60_vol_adj_weight=float(params.get("trend_quality_ret60_vol_adj_weight", 0.15)),
+              trend_quality_ret60_dd_adj_weight=float(params.get("trend_quality_ret60_dd_adj_weight", 0.15)),
+              risk_archetype_soft_deprioritize_enabled=bool(
+                  params.get("risk_archetype_soft_deprioritize_enabled", False)
+              ),
+              risk_archetype_soft_deprioritize_quantile=float(
+                  params.get("risk_archetype_soft_deprioritize_quantile", 0.80)
+              ),
+              risk_archetype_hot_crowded_penalty=float(
+                  params.get("risk_archetype_hot_crowded_penalty", 0.20)
+              ),
+              risk_archetype_high_volatility_penalty=float(
+                  params.get("risk_archetype_high_volatility_penalty", 0.15)
+              ),
+              entry_risk_position_sizing_enabled=bool(
+                  params.get("entry_risk_position_sizing_enabled", False)
+              ),
+              entry_risk_position_watch_scale=float(
+                  params.get("entry_risk_position_watch_scale", 0.80)
+              ),
+              entry_risk_position_high_scale=float(
+                  params.get("entry_risk_position_high_scale", 0.50)
+              ),
+              entry_risk_position_extreme_scale=float(
+                  params.get("entry_risk_position_extreme_scale", 1.0 / 3.0)
               ),
               residual_window_regime_mode=str(params.get("residual_window_regime_mode", "off")),
               residual_window_fallback=int(params.get("residual_window_fallback", params.get("residual_window", 60))),

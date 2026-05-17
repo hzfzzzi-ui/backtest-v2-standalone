@@ -144,6 +144,59 @@ def _resolve_formal_reason_codes(
     return [code] if code else []
 
 
+def _allow_existing_holding_top_up(meta: dict[str, Any] | None) -> bool:
+    payload = dict(meta or {})
+    owner_system = str(payload.get("owner_system", "") or "").strip().lower()
+    target_weight_basis = str(payload.get("target_weight_basis", "") or "").strip().lower()
+    if (
+        bool(payload.get("restore_candidate", False))
+        and target_weight_basis == "delta_restore_gap"
+        and owner_system == "cn_stock_trend_alpha_core"
+    ):
+        return True
+    if bool(payload.get("trans_up_recovery_confirmed_scale_up_active", False)):
+        return True
+    sleeve_id = str(payload.get("sleeve_id", "") or "").strip().lower()
+    alpha_id = str(payload.get("alpha_id", "") or "").strip().lower()
+    strategy_role = str(payload.get("strategy_role", "") or "").strip().lower()
+    execution_path = str(payload.get("execution_path", "") or "").strip().lower()
+    if sleeve_id != "cn_etf_beta" and alpha_id != "cn_etf_beta":
+        return False
+    if strategy_role != "governed_broad_based_standalone_mainline":
+        return False
+    if target_weight_basis != "delta_deploy_gap":
+        return False
+    return execution_path in {
+        "bull_inter_rebalance_deploy",
+        "trans_up_inter_rebalance_deploy",
+        "risk_off_core_accumulation_deploy",
+        "riskoff_cash_drip_topup",
+        "riskoff_account_budget_materialization",
+        "weak_state_inter_rebalance_defense_redeploy",
+        "shared_risk_on_to_defensive_transition_defense_establish",
+    }
+
+
+def _restore_delta_qty(
+    *,
+    meta: dict[str, Any] | None,
+    future_positions: dict[str, int],
+    symbol: str,
+    qty: int,
+    lot_size: int,
+) -> int:
+    payload = dict(meta or {})
+    if not (
+        bool(payload.get("restore_candidate", False))
+        and str(payload.get("target_weight_basis", "") or "").strip().lower() == "delta_restore_gap"
+    ):
+        return int(qty)
+    held = int(future_positions.get(str(symbol).lower(), 0) or 0)
+    delta = max(0, int(qty) - held)
+    lot = max(1, int(lot_size))
+    return int(delta // lot * lot)
+
+
 def _source_only_sell_allowed(
     *,
     signal_meta: dict[str, Any] | None,
@@ -173,6 +226,60 @@ def _source_only_sell_allowed(
     return bool(signal_owner_candidates & holding_owner_candidates)
 
 
+def _is_rotation_replace_sell(signal: Any) -> bool:
+    reason_code = str(
+        getattr(signal, "reason_code", "") or getattr(signal, "reason", "") or ""
+    ).strip().upper()
+    meta = dict(getattr(signal, "meta", {}) or {})
+    return bool(reason_code == "ROTATION_REPLACE" or meta.get("rotation_replace"))
+
+
+def _rotation_candidate_symbol(signal: Any) -> str:
+    meta = dict(getattr(signal, "meta", {}) or {})
+    return str(meta.get("rotation_candidate_symbol", "") or "").strip().lower()
+
+
+def _rotation_pair_audit_payload(
+    *,
+    candidate_symbol: str,
+    sell_signal: Any | None,
+    reason: str,
+) -> dict[str, Any]:
+    meta = dict(getattr(sell_signal, "meta", {}) or {}) if sell_signal is not None else {}
+    held_symbol = str(
+        getattr(sell_signal, "symbol", "") if sell_signal is not None else meta.get("rotation_held_symbol", "")
+    ).strip().lower()
+    return {
+        "candidate_symbol": str(candidate_symbol or meta.get("rotation_candidate_symbol", "") or "").lower(),
+        "held_symbol": held_symbol,
+        "reason": str(reason or ""),
+        "score_gap": _safe_float_or_none(meta.get("rotation_score_gap")),
+        "candidate_score": _safe_float_or_none(meta.get("rotation_candidate_score")),
+        "held_score": _safe_float_or_none(meta.get("rotation_held_score")),
+        "held_days": meta.get("rotation_held_days"),
+    }
+
+
+def _estimate_sell_fill_net_proceeds(
+    *,
+    price: float,
+    qty: int,
+    slip_bps: float,
+    comm_rate: float,
+    comm_min: float,
+    stamp_rate: float,
+) -> float:
+    shares = max(int(qty), 0)
+    px = max(float(price), 0.0)
+    if shares <= 0 or px <= 0.0:
+        return 0.0
+    fill_px = float(px) * (1.0 - float(slip_bps))
+    gross = float(shares) * float(fill_px)
+    commission = max(float(comm_min), float(gross) * float(comm_rate))
+    stamp_tax = float(gross) * max(float(stamp_rate), 0.0)
+    return float(gross - commission - stamp_tax)
+
+
 def build_execution_orders_from_candidate_plan(
     *,
     positions: dict[str, int],
@@ -194,6 +301,7 @@ def build_execution_orders_from_candidate_plan(
     slip_bps: float = 0.0,
     comm_rate: float = 0.0,
     comm_min: float = 0.0,
+    stamp_rate: float = 0.0,
     base_order_value: float = 0.0,
     risk_amount: float = 0.0,
     atr_stop_k: float = 2.0,
@@ -208,12 +316,30 @@ def build_execution_orders_from_candidate_plan(
     decision_date_s = decision_date.isoformat() if isinstance(decision_date, date) else ""
     reject_reason_counts: dict[str, int] = {}
     source_only_rejected_sells: list[dict[str, Any]] = []
+    pending_rotation_sells_by_candidate: dict[str, Any] = {}
+    pending_rotation_sell_order: list[str] = []
+    executed_rotation_pairs: list[dict[str, Any]] = []
+    cancelled_rotation_pairs: list[dict[str, Any]] = []
     normalized_holding_sources = {
         str(symbol).lower(): dict(source or {})
         for symbol, source in dict(holding_sources or {}).items()
     }
 
     for raw_signal in list(sell_signals or ()):
+        if _is_rotation_replace_sell(raw_signal):
+            candidate_symbol = _rotation_candidate_symbol(raw_signal)
+            if candidate_symbol:
+                pending_rotation_sells_by_candidate[candidate_symbol] = raw_signal
+                pending_rotation_sell_order.append(candidate_symbol)
+            else:
+                cancelled_rotation_pairs.append(
+                    _rotation_pair_audit_payload(
+                        candidate_symbol="",
+                        sell_signal=raw_signal,
+                        reason="ROTATION_REPLACE_CANCELLED_MISSING_CANDIDATE",
+                    )
+                )
+            continue
         sym = str(getattr(raw_signal, "symbol", "") or "").lower()
         held = int(future_positions.get(sym, 0))
         if held <= 0:
@@ -294,10 +420,83 @@ def build_execution_orders_from_candidate_plan(
         if pre_reject_reason:
             item["reject_reason"] = pre_reject_reason
             reject_reason_counts[pre_reject_reason] = int(reject_reason_counts.get(pre_reject_reason, 0)) + 1
+            rotation_pair = dict(item.get("rotation_pair") or {}) if isinstance(item.get("rotation_pair"), dict) else {}
+            if rotation_pair:
+                cancel_reason = f"ROTATION_REPLACE_CANCELLED_{pre_reject_reason}"
+                item["rotation_atomic_cancel_reason"] = cancel_reason
+                rotation_sell_signal = pending_rotation_sells_by_candidate.pop(sym, None)
+                cancelled_rotation_pairs.append(
+                    _rotation_pair_audit_payload(
+                        candidate_symbol=sym,
+                        sell_signal=rotation_sell_signal,
+                        reason=cancel_reason,
+                    )
+                )
             annotated_items.append(item)
             continue
 
-        if selected_n >= int(slots):
+        rotation_pair = dict(item.get("rotation_pair") or {}) if isinstance(item.get("rotation_pair"), dict) else {}
+        is_rotation_candidate = bool(rotation_pair)
+        is_restore_top_up_candidate = (
+            not bool(is_rotation_candidate)
+            and sym in future_positions
+            and int(future_positions.get(sym, 0) or 0) > 0
+            and _allow_existing_holding_top_up(signal_meta)
+        )
+        rotation_sell_signal = None
+        rotation_held_symbol = str(rotation_pair.get("rotation_held_symbol", "") or "").strip().lower()
+        rotation_sell_qty = 0
+        rotation_sell_px = 0.0
+        rotation_sell_net = 0.0
+        rotation_cash_available = float(est_cash)
+        if is_rotation_candidate:
+            rotation_sell_signal = pending_rotation_sells_by_candidate.get(sym)
+            if rotation_sell_signal is None:
+                reject_reason = "ROTATION_REPLACE_CANCELLED_MISSING_SELL"
+                item["reject_reason"] = reject_reason
+                item["rotation_atomic_cancel_reason"] = reject_reason
+                reject_reason_counts[reject_reason] = int(reject_reason_counts.get(reject_reason, 0)) + 1
+                cancelled_rotation_pairs.append(
+                    _rotation_pair_audit_payload(
+                        candidate_symbol=sym,
+                        sell_signal=None,
+                        reason=reject_reason,
+                    )
+                )
+                annotated_items.append(item)
+                continue
+            rotation_held_symbol = str(getattr(rotation_sell_signal, "symbol", "") or rotation_held_symbol).lower()
+            rotation_sell_qty = int(future_positions.get(rotation_held_symbol, 0))
+            sig_qty = int(getattr(rotation_sell_signal, "qty", 0) or 0)
+            if sig_qty > 0:
+                rotation_sell_qty = min(rotation_sell_qty, sig_qty)
+            rotation_sell_px = float(next_open.get(rotation_held_symbol, 0.0) or 0.0)
+            if rotation_sell_qty <= 0 or rotation_sell_px <= 0.0:
+                reject_reason = "ROTATION_REPLACE_CANCELLED_SELL_NOT_EXECUTABLE"
+                item["reject_reason"] = reject_reason
+                item["rotation_atomic_cancel_reason"] = reject_reason
+                reject_reason_counts[reject_reason] = int(reject_reason_counts.get(reject_reason, 0)) + 1
+                cancelled_rotation_pairs.append(
+                    _rotation_pair_audit_payload(
+                        candidate_symbol=sym,
+                        sell_signal=rotation_sell_signal,
+                        reason=reject_reason,
+                    )
+                )
+                pending_rotation_sells_by_candidate.pop(sym, None)
+                annotated_items.append(item)
+                continue
+            rotation_sell_net = _estimate_sell_fill_net_proceeds(
+                price=float(rotation_sell_px),
+                qty=int(rotation_sell_qty),
+                slip_bps=float(slip_bps),
+                comm_rate=float(comm_rate),
+                comm_min=float(comm_min),
+                stamp_rate=float(stamp_rate),
+            )
+            rotation_cash_available = float(est_cash) + float(rotation_sell_net)
+
+        if not is_rotation_candidate and not is_restore_top_up_candidate and selected_n >= int(slots):
             insufficient_history = bool(item.get("strength") is None) or (
                 item.get("mf_rank") is not None and item.get("mf_score") is None
             )
@@ -323,12 +522,36 @@ def build_execution_orders_from_candidate_plan(
         )
         target_amount_scaled = float(sizing["target_amount_scaled"])
         qty = int(sizing["qty"])
+        qty = _restore_delta_qty(
+            meta=signal_meta,
+            future_positions=future_positions,
+            symbol=sym,
+            qty=int(qty),
+            lot_size=int(lot_size),
+        )
         if qty < int(lot_size):
-            item["reject_reason"] = "SKIP_QTY_ZERO"
-            reject_reason_counts["SKIP_QTY_ZERO"] = int(reject_reason_counts.get("SKIP_QTY_ZERO", 0)) + 1
+            reject_reason = (
+                "ROTATION_REPLACE_CANCELLED_BUY_NOT_EXECUTABLE"
+                if is_rotation_candidate
+                else ("SKIP_RESTORE_DELTA_ZERO" if bool(signal_meta.get("restore_candidate", False)) else "SKIP_QTY_ZERO")
+            )
+            item["reject_reason"] = reject_reason
+            if is_rotation_candidate:
+                item["rotation_atomic_cancel_reason"] = reject_reason
+                cancelled_rotation_pairs.append(
+                    _rotation_pair_audit_payload(
+                        candidate_symbol=sym,
+                        sell_signal=rotation_sell_signal,
+                        reason=reject_reason,
+                    )
+                )
+                pending_rotation_sells_by_candidate.pop(sym, None)
+            reject_reason_counts[reject_reason] = int(reject_reason_counts.get(reject_reason, 0)) + 1
             annotated_items.append(item)
             continue
 
+        if bool(signal_meta.get("restore_candidate", False)):
+            target_amount_scaled = min(float(target_amount_scaled), float(qty) * float(px))
         cost = float(
             estimate_buy_fill_net_cost(
                 price=float(px),
@@ -338,13 +561,14 @@ def build_execution_orders_from_candidate_plan(
                 comm_min=float(comm_min),
             )
         )
-        if cost > float(est_cash):
+        cash_available_for_buy = float(rotation_cash_available if is_rotation_candidate else est_cash)
+        if cost > float(cash_available_for_buy):
             affordable_qty = int(
                 resolve_affordable_buy_qty(
                     price=float(px),
                     requested_qty=int(qty),
                     lot_size=int(lot_size),
-                    cash_available=float(est_cash),
+                    cash_available=float(cash_available_for_buy),
                     slip_bps=float(slip_bps),
                     comm_rate=float(comm_rate),
                     comm_min=float(comm_min),
@@ -367,16 +591,64 @@ def build_execution_orders_from_candidate_plan(
         item["estimated_qty"] = int(qty)
         item["estimated_amount"] = float(cost)
         item["estimated_price"] = float(px)
-        if cost > float(est_cash):
-            item["reject_reason"] = "SKIP_NO_CASH"
-            item["cash_available"] = float(est_cash)
+        if cost > float(cash_available_for_buy):
+            reject_reason = "ROTATION_REPLACE_CANCELLED_BUY_NOT_EXECUTABLE" if is_rotation_candidate else "SKIP_NO_CASH"
+            item["reject_reason"] = reject_reason
+            item["cash_available"] = float(cash_available_for_buy)
             item["cash_blocked_flag"] = True
             item["cash_blocked_reason"] = "SKIP_NO_CASH"
-            reject_reason_counts["SKIP_NO_CASH"] = int(reject_reason_counts.get("SKIP_NO_CASH", 0)) + 1
+            if is_rotation_candidate:
+                item["rotation_atomic_cancel_reason"] = reject_reason
+                cancelled_rotation_pairs.append(
+                    _rotation_pair_audit_payload(
+                        candidate_symbol=sym,
+                        sell_signal=rotation_sell_signal,
+                        reason=reject_reason,
+                    )
+                )
+                pending_rotation_sells_by_candidate.pop(sym, None)
+            reject_reason_counts[reject_reason] = int(reject_reason_counts.get(reject_reason, 0)) + 1
             annotated_items.append(item)
             continue
 
         cash_lot_pass_symbols.append(sym)
+        if is_rotation_candidate:
+            rotation_meta = dict(getattr(rotation_sell_signal, "meta", {}) or {})
+            orders.append(
+                PortfolioOrder(
+                    side=Side.SELL,
+                    symbol=rotation_held_symbol,
+                    qty=int(rotation_sell_qty),
+                    reason_code=str(
+                        getattr(rotation_sell_signal, "reason_code", "")
+                        or getattr(rotation_sell_signal, "reason", "")
+                        or "ROTATION_REPLACE"
+                    ),
+                    meta=(rotation_meta or None),
+                )
+            )
+            remain = int(future_positions.get(rotation_held_symbol, 0)) - int(rotation_sell_qty)
+            if remain > 0:
+                future_positions[rotation_held_symbol] = int(remain)
+            else:
+                future_positions.pop(rotation_held_symbol, None)
+            est_cash += float(rotation_sell_net)
+            executed_rotation_pairs.append(
+                {
+                    "candidate_symbol": sym,
+                    "held_symbol": rotation_held_symbol,
+                    "sell_qty": int(rotation_sell_qty),
+                    "sell_price": float(rotation_sell_px),
+                    "sell_net_proceeds": float(rotation_sell_net),
+                    "buy_qty": int(qty),
+                    "buy_price": float(px),
+                    "score_gap": _safe_float_or_none(rotation_meta.get("rotation_score_gap")),
+                    "candidate_score": _safe_float_or_none(rotation_meta.get("rotation_candidate_score")),
+                    "held_score": _safe_float_or_none(rotation_meta.get("rotation_held_score")),
+                    "held_days": rotation_meta.get("rotation_held_days"),
+                }
+            )
+            pending_rotation_sells_by_candidate.pop(sym, None)
         mf_score = item.get("mf_score")
         mf_rank = item.get("mf_rank")
         final_score_value = item.get("final_score_value", mf_score)
@@ -390,6 +662,24 @@ def build_execution_orders_from_candidate_plan(
         score_weight_raw_scale = float(item.get("score_weight_raw_scale", item.get("score_weight_scale", 1.0)) or 1.0)
         score_weight_scale = float(item.get("score_weight_scale", 1.0) or 1.0)
         rotation_pair = dict(item.get("rotation_pair") or {}) if isinstance(item.get("rotation_pair"), dict) else {}
+        high_chase_a2_meta = {
+            key: item.get(key)
+            for key in (
+                "high_chase_a2_size_down_enabled",
+                "high_chase_a2_size_down_triggered",
+                "high_chase_a2_owner_system",
+                "high_chase_a2_owner_ok",
+                "high_chase_a2_size_down_scale",
+                "high_chase_a2_applied_scale",
+                "high_chase_a2_pre_ret_20d",
+                "high_chase_a2_avg_turnover_rate_f_20d",
+                "high_chase_a2_volume_20d_vs_60d",
+                "high_chase_a2_pre20_ret_threshold",
+                "high_chase_a2_turnover_rate_f20_threshold",
+                "high_chase_a2_volume_20d_vs_60d_threshold",
+            )
+            if key in item
+        }
         meta = {
             **signal_meta,
             "requested_target_weight": _safe_float_or_none(signal_meta.get("target_weight")),
@@ -423,6 +713,7 @@ def build_execution_orders_from_candidate_plan(
                 sig_meta=signal_meta,
                 reason_code=str(getattr(signal, "reason_code", "") or getattr(signal, "reason", "") or "BUY"),
             ),
+            **high_chase_a2_meta,
             **rotation_pair,
         }
         orders.append(
@@ -439,9 +730,10 @@ def build_execution_orders_from_candidate_plan(
         )
         est_cash -= float(cost)
         future_positions[sym] = int(future_positions.get(sym, 0)) + int(qty)
-        selected_n += 1
+        if not is_restore_top_up_candidate:
+            selected_n += 1
         item["selected"] = True
-        item["selected_rank"] = int(selected_n)
+        item["selected_rank"] = int(selected_n) if int(selected_n) > 0 else None
         buy_exec_plan.append(
             {
                 "symbol": sym,
@@ -460,6 +752,8 @@ def build_execution_orders_from_candidate_plan(
                 "score_weight_score": None if score_weight_score is None else float(score_weight_score),
                 "score_weight_raw_scale": float(score_weight_raw_scale),
                 "score_weight_scale": float(score_weight_scale),
+                "high_chase_a2_size_down_triggered": bool(item.get("high_chase_a2_size_down_triggered", False)),
+                "high_chase_a2_applied_scale": _safe_float_or_none(item.get("high_chase_a2_applied_scale")),
             }
         )
         annotated_items.append(item)
@@ -472,36 +766,59 @@ def build_execution_orders_from_candidate_plan(
             effective_overlay_mode = str(item.get("overlay_mode", overlay_mode) or "off")
             effective_overlay_observation_date = item.get("overlay_observation_date", overlay_observation_date)
             effective_overlay_score_source = str(item.get("overlay_score_source", overlay_score_source) or "")
-            candidate_audit.append(
-                _build_candidate_audit_row(
-                    decision_date_s=decision_date_s,
-                    symbol=str(item.get("symbol", "")).lower(),
-                    strength=(None if item.get("strength") is None else float(item.get("strength"))),
-                    strength_ma=int(strength_ma),
-                    selected=bool(item.get("selected", False)),
-                    selected_rank=item.get("selected_rank"),
-                    reject_reason=str(item.get("reject_reason", "") or ""),
-                    meta=signal_meta,
-                    final_score_value=_safe_float_or_none(item.get("final_score_value")),
-                    final_score_rank=(int(item["final_score_rank"]) if item.get("final_score_rank") is not None else None),
-                    mf_score=_safe_float_or_none(item.get("mf_score")),
-                    mf_rank=(int(item["mf_rank"]) if item.get("mf_rank") is not None else None),
-                    overlay_score=_safe_float_or_none(item.get("overlay_score")),
-                    overlay_gate_on=bool(effective_overlay_gate_on),
-                    overlay_mode=str(effective_overlay_mode),
-                    overlay_observation_date=effective_overlay_observation_date,
-                    overlay_score_source=effective_overlay_score_source,
-                    cash_available=_safe_float_or_none(item.get("cash_available")),
-                    estimated_qty=(int(item["estimated_qty"]) if item.get("estimated_qty") is not None else None),
-                    estimated_amount=_safe_float_or_none(item.get("estimated_amount")),
-                    estimated_price=_safe_float_or_none(item.get("estimated_price")),
-                    cash_blocked_flag=bool(item.get("cash_blocked_flag", False)),
-                    cash_blocked_reason=str(item.get("cash_blocked_reason", "") or ""),
-                    decision_layer="execution_kernel",
-                )
+            row = _build_candidate_audit_row(
+                decision_date_s=decision_date_s,
+                symbol=str(item.get("symbol", "")).lower(),
+                strength=(None if item.get("strength") is None else float(item.get("strength"))),
+                strength_ma=int(strength_ma),
+                selected=bool(item.get("selected", False)),
+                selected_rank=item.get("selected_rank"),
+                reject_reason=str(item.get("reject_reason", "") or ""),
+                meta=signal_meta,
+                final_score_value=_safe_float_or_none(item.get("final_score_value")),
+                final_score_rank=(int(item["final_score_rank"]) if item.get("final_score_rank") is not None else None),
+                mf_score=_safe_float_or_none(item.get("mf_score")),
+                mf_rank=(int(item["mf_rank"]) if item.get("mf_rank") is not None else None),
+                overlay_score=_safe_float_or_none(item.get("overlay_score")),
+                overlay_gate_on=bool(effective_overlay_gate_on),
+                overlay_mode=str(effective_overlay_mode),
+                overlay_observation_date=effective_overlay_observation_date,
+                overlay_score_source=effective_overlay_score_source,
+                cash_available=_safe_float_or_none(item.get("cash_available")),
+                estimated_qty=(int(item["estimated_qty"]) if item.get("estimated_qty") is not None else None),
+                estimated_amount=_safe_float_or_none(item.get("estimated_amount")),
+                estimated_price=_safe_float_or_none(item.get("estimated_price")),
+                cash_blocked_flag=bool(item.get("cash_blocked_flag", False)),
+                cash_blocked_reason=str(item.get("cash_blocked_reason", "") or ""),
+                decision_layer="execution_kernel",
             )
+            rotation_pair = dict(item.get("rotation_pair") or {}) if isinstance(item.get("rotation_pair"), dict) else {}
+            if rotation_pair or item.get("rotation_atomic_cancel_reason"):
+                row.update(
+                    {
+                        "rotation_replace": bool(rotation_pair),
+                        "rotation_atomic_cancel_reason": str(item.get("rotation_atomic_cancel_reason", "") or ""),
+                        "rotation_candidate_symbol": str(rotation_pair.get("rotation_candidate_symbol", str(item.get("symbol", "")).lower()) or "").lower(),
+                        "rotation_held_symbol": str(rotation_pair.get("rotation_held_symbol", "") or "").lower(),
+                        "rotation_score_gap": _safe_float_or_none(rotation_pair.get("rotation_score_gap")),
+                    }
+                )
+            candidate_audit.append(row)
+
+    for candidate_symbol in list(pending_rotation_sell_order):
+        if candidate_symbol not in pending_rotation_sells_by_candidate:
+            continue
+        sell_signal = pending_rotation_sells_by_candidate.pop(candidate_symbol, None)
+        cancelled_rotation_pairs.append(
+            _rotation_pair_audit_payload(
+                candidate_symbol=candidate_symbol,
+                sell_signal=sell_signal,
+                reason="ROTATION_REPLACE_CANCELLED_BUY_NOT_PLANNED",
+            )
+        )
 
     if debug_plan is not None:
+        planned_rotation_pairs = list(debug_plan.get("rotation_replace_pairs", []) or [])
         debug_plan.setdefault("buy_candidates_count", int(len(list(planned_items or ()))))
         debug_plan["buy_slots"] = int(slots)
         debug_plan["selected_symbols"] = [str(item.get("symbol", "")).lower() for item in annotated_items if bool(item.get("selected"))]
@@ -516,5 +833,13 @@ def build_execution_orders_from_candidate_plan(
         debug_plan["selected_order_value_scales"] = [float(item.get("order_value_scale", 1.0) or 1.0) for item in buy_exec_plan]
         debug_plan["execution_kernel_reject_count"] = int(sum(int(v or 0) for v in reject_reason_counts.values()))
         debug_plan["execution_kernel_selected_symbols"] = [str(item.get("symbol", "")).lower() for item in annotated_items if bool(item.get("selected"))]
+        debug_plan["rotation_replace_atomic_contract"] = True
+        debug_plan["rotation_replace_planned_count"] = int(len(planned_rotation_pairs) or len(pending_rotation_sell_order))
+        debug_plan["rotation_replace_planned_pairs"] = planned_rotation_pairs
+        debug_plan["rotation_replace_executed_pair_count"] = int(len(executed_rotation_pairs))
+        debug_plan["rotation_replace_cancelled_count"] = int(len(cancelled_rotation_pairs))
+        debug_plan["rotation_replace_cancelled_pairs"] = [dict(item) for item in cancelled_rotation_pairs]
+        debug_plan["rotation_replace_pairs"] = [dict(item) for item in executed_rotation_pairs]
+        debug_plan["rotation_replace_count"] = int(len(executed_rotation_pairs))
 
     return orders

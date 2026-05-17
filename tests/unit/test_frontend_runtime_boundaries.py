@@ -82,7 +82,7 @@ def test_runtime_surface_owns_shared_runtime_helpers() -> None:
 
 def test_app_shell_bootstraps_formal_baseline_and_bridge_wiring() -> None:
     source = _read("frontend", "assets", "js", "desktop-shell", "app-shell.js")
-    assert "CN_STOCK_ETF_FORMAL_V1" in source
+    assert "CN_STOCK_ETF_COMBO_BASELINE_V4" in source
     assert "baseline_V10_1" in source
     assert "syncResultsWorkbenchSurface" in source
     assert "syncAssetAwareShell" in source

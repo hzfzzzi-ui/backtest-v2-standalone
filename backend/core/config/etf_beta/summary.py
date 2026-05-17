@@ -303,6 +303,22 @@ def build_etf_beta_phase1_summary(
     input_etfs = _normalize_symbol_list(universe_obj.get("etf_symbols") or [])
     if not input_etfs:
         return None
+    pool_version = _normalize_text(universe_obj.get("pool_version")) or _normalize_text(universe_obj.get("etf_batch"))
+    shadow_symbols = _normalize_symbol_list(universe_obj.get("shadow_symbols") or [])
+    shadow_role_map = _normalize_symbol_map(universe_obj.get("shadow_role_map"))
+    deferred_symbols = _normalize_symbol_list(universe_obj.get("deferred_symbols") or [])
+    deferred_reason_codes = _normalize_symbol_reason_map(universe_obj.get("deferred_reason_codes"))
+    promotion_gate_by_symbol = sanitize_json(dict(universe_obj.get("promotion_gate_by_symbol") or {}))
+    formal_eligibility_by_symbol = {
+        str(symbol).strip().upper(): bool(value)
+        for symbol, value in dict(universe_obj.get("formal_eligibility_by_symbol") or {}).items()
+        if str(symbol).strip()
+    }
+    research_classification_by_symbol = {
+        str(symbol).strip().upper(): str(value or "").strip()
+        for symbol, value in dict(universe_obj.get("research_classification_by_symbol") or {}).items()
+        if str(symbol).strip() and str(value or "").strip()
+    }
 
     runtime_selection_obj = dict(runtime_selection_summary or {})
     eligible_etfs = _normalize_symbol_list(runtime_selection_obj.get("eligible_etfs") or [])
@@ -442,12 +458,24 @@ def build_etf_beta_phase1_summary(
         "sleeve_id": etf_beta.get("sleeve_id"),
         "system_role": etf_beta.get("system_role"),
         "source_entry_type": summary_source_entry_type,
+        "source_preset_id": universe_obj.get("preset_id"),
+        "source_batch_id": universe_obj.get("etf_batch"),
         "preset_id": universe_obj.get("preset_id"),
         "etf_batch": universe_obj.get("etf_batch"),
+        "pool_version": pool_version,
+        "research_only": bool(universe_obj.get("research_only", False)),
         "input_etfs": input_etfs,
         "eligible_etfs": eligible_etfs,
         "selected_etfs": selected_etfs,
         "out_of_scope_etfs": out_of_scope_etfs,
+        "formal_scope_symbols": _normalize_symbol_list(universe_obj.get("formal_scope_symbols") or []),
+        "shadow_symbols": shadow_symbols,
+        "shadow_role_map": shadow_role_map,
+        "deferred_symbols": deferred_symbols,
+        "deferred_reason_codes": deferred_reason_codes,
+        "research_classification_by_symbol": research_classification_by_symbol,
+        "promotion_gate_by_symbol": promotion_gate_by_symbol,
+        "formal_eligibility_by_symbol": formal_eligibility_by_symbol,
         "formal_core_beta_symbols": list(_normalize_symbol_list(etf_beta.get("core_beta_symbols"))),
         "limited_defense_candidates": list(_normalize_symbol_list(etf_beta.get("limited_defense_candidates"))),
         "selection_reason_codes": selection_reason_codes,

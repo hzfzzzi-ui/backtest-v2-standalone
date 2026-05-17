@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
+from backend.core.algorithms.topk import stable_topk
 from backend.core.config.cn_a_governed_mainline import (
     CN_ETF_BETA_BUDGET_SEMANTICS,
     CN_ETF_BETA_SLEEVE_ID,
@@ -419,14 +420,17 @@ def build_candidate_boundary_result(
     candidate_rows: list[dict[str, Any]] = []
     selected_signals: list[Any] = []
     for sleeve in sorted(grouped):
-        ranked = sorted(grouped[sleeve], key=_signal_rank_key)
         allowed = int(available_slots.get(sleeve, 0))
-        selected = ranked[:allowed] if allowed > 0 else []
+        sleeve_signals = list(grouped[sleeve])
+        selected = stable_topk(sleeve_signals, allowed, key=_signal_rank_key) if allowed > 0 else []
+        selected_ids = {id(signal) for signal in selected}
         for chosen in selected:
             filtered_ids.add(id(chosen))
             selected_signals.append(chosen)
         selected_counts[sleeve] = int(len(selected))
-        for rejected in ranked[allowed:]:
+        for rejected in sleeve_signals:
+            if id(rejected) in selected_ids:
+                continue
             reject_counts["SLEEVE_BUDGET_EXCEEDED"] = int(reject_counts.get("SLEEVE_BUDGET_EXCEEDED", 0)) + 1
             candidate_rows.append(
                 _build_candidate_reject_row(

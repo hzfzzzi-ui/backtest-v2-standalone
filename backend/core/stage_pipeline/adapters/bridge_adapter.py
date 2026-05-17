@@ -8,8 +8,10 @@ stage pipeline contract.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from backend.core.config.models import (
@@ -82,6 +84,7 @@ class StagePipelineBridgeRequest:
     regime_engine_cfg: RegimeEngineConfig | None = None
     asset_context: Mapping[str, Any] = field(default_factory=dict)
     governed_a_share: Mapping[str, Any] = field(default_factory=dict)
+    runtime_optimization: Mapping[str, Any] = field(default_factory=dict)
     disabled_stages: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -105,6 +108,83 @@ class StagePipelineBridgeRequest:
         )
         object.__setattr__(self, "asset_context", dict(self.asset_context or {}))
         object.__setattr__(self, "governed_a_share", dict(self.governed_a_share or {}))
+        object.__setattr__(self, "runtime_optimization", dict(self.runtime_optimization or {}))
+
+
+def _bridge_frame_row_count(frame: Any) -> int:
+    try:
+        return int(len(frame.index))
+    except Exception:
+        try:
+            return int(len(frame))
+        except Exception:
+            return 0
+
+
+def _bridge_matrix_estimate(symbols_count: int, trading_days: int) -> dict[str, Any]:
+    cells = int(max(symbols_count, 0) * max(trading_days, 0))
+    mib = 1024.0 * 1024.0
+    return {
+        "matrix_cells_tn": int(cells),
+        "float64_matrix_mib": float((cells * 8) / mib) if cells > 0 else 0.0,
+        "ten_float64_matrices_mib": float((cells * 8 * 10) / mib) if cells > 0 else 0.0,
+    }
+
+
+def _write_provider_precompute_checkpoint(
+    request: "StagePipelineBridgeRequest",
+    *,
+    phase: str,
+    provider: Any | None = None,
+    extra: Mapping[str, Any] | None = None,
+) -> None:
+    context = getattr(request.strategy, "context", {}) if request.strategy is not None else {}
+    results_dir_raw = context.get("results_dir") if isinstance(context, Mapping) else None
+    if not results_dir_raw:
+        return
+    path = Path(str(results_dir_raw)) / "run_profile_checkpoint.json"
+    bundle = request.data_bundle
+    symbols_count = int(len(getattr(bundle, "symbols", []) or []))
+    trading_days = int(len(getattr(bundle, "trading_days", []) or []))
+    event = {
+        "phase": str(phase),
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "symbols_count": symbols_count,
+        "trading_days": trading_days,
+        "raw_history_rows": _bridge_frame_row_count(getattr(bundle, "raw_history", None)),
+        "signal_history_rows": _bridge_frame_row_count(getattr(bundle, "signal_history", None)),
+        "membership_history_rows": _bridge_frame_row_count(getattr(bundle, "membership_history", None)),
+        "matrix_estimate": _bridge_matrix_estimate(symbols_count, trading_days),
+        "runtime_optimization": dict(request.runtime_optimization or {}),
+    }
+    if provider is not None:
+        event["provider_route"] = provider.__class__.__name__
+        event["provider_precompute_seconds"] = float(getattr(provider, "precompute_seconds", 0.0) or 0.0)
+        event["wide_runtime_optimization_notes"] = list(getattr(provider, "_wide_runtime_optimization_notes", []) or [])
+        event["deferred_residual_score_enabled"] = bool(
+            getattr(provider, "_deferred_residual_score_enabled", False)
+        )
+    if isinstance(extra, Mapping):
+        event.update(dict(extra))
+    payload: dict[str, Any] = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                payload = loaded
+        except Exception:
+            payload = {}
+    events = list(payload.get("events") or [])
+    events.append(event)
+    payload.update(
+        {
+            "schema_version": "openclaw_run_profile_checkpoint@1",
+            "last_phase": str(phase),
+            "updated_at_utc": event["timestamp_utc"],
+            "events": events[-50:],
+        }
+    )
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 @dataclass(frozen=True, slots=True)
@@ -682,6 +762,11 @@ class StagePipelineBridgeRuntime:
         return build_portfolio_backtest_result(self)
 
     def _provider_precompute(self) -> None:
+        _write_provider_precompute_checkpoint(
+            self.request,
+            phase="provider_precompute_start",
+            provider=self.provider,
+        )
         precompute_signal_provider(
             self.provider,
             data_bundle=self.request.data_bundle,
@@ -699,6 +784,12 @@ class StagePipelineBridgeRuntime:
             sizing_cfg=self.request.sizing_cfg,
             risk_budget_cfg=self.request.risk_budget_cfg,
             governed_a_share=self.request.governed_a_share,
+            runtime_optimization=self.request.runtime_optimization,
+        )
+        _write_provider_precompute_checkpoint(
+            self.request,
+            phase="provider_precompute_completed",
+            provider=self.provider,
         )
 
     def _apply_open_fills(self, day: date, fills_today: Sequence[Any]) -> None:

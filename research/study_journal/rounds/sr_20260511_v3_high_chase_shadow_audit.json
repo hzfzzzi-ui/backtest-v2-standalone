@@ -1,0 +1,80 @@
+{
+  "round_id": "sr_20260511_v3_high_chase_shadow_audit",
+  "title": "V3 High Chase 追高标签 Shadow Audit",
+  "status": "audited",
+  "study_id": "cn_stock_etf/v3_high_chase_shadow_audit_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "追高标签是否能解释 V3 个股腿盈利 TOP30、亏损 TOP30 和全部已闭合买入样本的差异？",
+  "primary_variable": "read-only high_chase labels over closed stock trades",
+  "fixed_assumptions": [
+    "CN_STOCK_ETF_COMBO_BASELINE_V3 fixed",
+    "D0 closed stock trade reconstruction fixed",
+    "D5 3D shadow output fixed for confirmation-failure cross split",
+    "no runtime, NAV, signal, ranking, execution, exit, pool, stock, or ETF changes",
+    "global quantile labels are post-hoc diagnostics and not deployable live thresholds"
+  ],
+  "windows": [
+    "2012-2026"
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "study_id": "cn_stock_etf/v3_high_chase_shadow_audit_v1",
+      "window_key": "1226",
+      "variant_name": "HIGH_CHASE_SHADOW_AUDIT",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_high_chase_shadow_audit\\human\\high_chase_shadow_audit.md",
+      "note": "human high chase shadow audit report",
+      "linked_at": "2026-05-11T07:41:48+08:00"
+    },
+    {
+      "kind": "table",
+      "study_id": "cn_stock_etf/v3_high_chase_shadow_audit_v1",
+      "window_key": "1226",
+      "variant_name": "HIGH_CHASE_SHADOW_AUDIT",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_high_chase_shadow_audit\\machine\\high_chase_trade_detail.csv",
+      "note": "per-trade high chase label detail",
+      "linked_at": "2026-05-11T07:41:48+08:00"
+    }
+  ],
+  "key_findings": [
+    "High chase alone is not a clean loss cause: loss TOP30 high_chase share=0.6000, profit TOP30 high_chase share=0.5667.",
+    "High chase plus D5 3D confirmation failure is more discriminative: loss TOP30 count=9, profit TOP30 count=2.",
+    "Do not use high_chase as a hard no-buy filter; study position sizing/watch/delayed confirmation instead."
+  ],
+  "audit": {
+    "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "source_d0_detail": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_d0_trade_path_morphology_audit\\machine\\d0_trade_path_detail.csv",
+    "source_d5_detail": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_d5_mfe_mae_confirmation_shadow\\machine\\d5_trade_detail.csv",
+    "closed_stock_trades": 388,
+    "symbols": 320,
+    "profit_top30_rows": 30,
+    "loss_top30_rows": 30,
+    "d5_trade_keys_matched": 388,
+    "d5_rows_with_eval_return": 283,
+    "label_threshold_policy": "global closed-trade quantile, diagnostic-only",
+    "high_chase_definition": "at least two of short_heat, extension_heat, breakout_stretch",
+    "extreme_chase_definition": "all three high-chase families, or high_chase with weak breakout quality",
+    "read_only_audit": true
+  },
+  "decision": {
+    "status": "continue",
+    "reason": "追高不是单独主因，但追高叠加入场后确认失败值得进入下一轮 AB 设计。"
+  },
+  "next_actions": [
+    "Design a High Chase + D5 failure watch/size-down AB, not a hard no-buy rule.",
+    "Keep high_chase labels read-only until rolling/live-safe thresholds are specified."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "high-chase",
+    "shadow-audit",
+    "profit-top30",
+    "loss-top30",
+    "research-only"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T07:41:48+08:00",
+  "updated_at": "2026-05-11T07:41:48+08:00"
+}

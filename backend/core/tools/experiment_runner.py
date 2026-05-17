@@ -4,7 +4,8 @@ import argparse
 import json
 import math
 import os
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
@@ -19,6 +20,7 @@ from backend.core.engine_runtime.foundation_shell import (
 )
 from backend.core.strategies.registry import build_strategy
 from backend.core.tools.data_bundle_builder import build_data_bundle
+from backend.core.tools.run_context import RunContext
 
 
 DEFAULT_EXPERIMENT_SYMBOLS = ["600000.SH", "000001.SZ", "600519.SH"]
@@ -174,6 +176,113 @@ STANDARD_CASH_EVENT_COLUMNS = [
     "ex_date",
     "pay_date",
 ]
+
+
+def _extract_runtime_optimization_cfg(cfg_merged: dict[str, Any]) -> dict[str, Any]:
+    raw = cfg_merged.get("runtime_optimization")
+    if not isinstance(raw, dict):
+        raw = cfg_merged.get("runtime_optimizations")
+    return dict(raw or {}) if isinstance(raw, dict) else {}
+
+
+def _frame_row_count(frame: Any) -> int:
+    try:
+        return int(len(frame.index))
+    except Exception:
+        try:
+            return int(len(frame))
+        except Exception:
+            return 0
+
+
+def _matrix_estimate(symbols_count: int, trading_days: int) -> dict[str, Any]:
+    cells = int(max(symbols_count, 0) * max(trading_days, 0))
+    mib = 1024.0 * 1024.0
+    return {
+        "matrix_cells_tn": int(cells),
+        "float64_matrix_mib": float((cells * 8) / mib) if cells > 0 else 0.0,
+        "bool_matrix_mib": float(cells / mib) if cells > 0 else 0.0,
+        "ten_float64_matrices_mib": float((cells * 8 * 10) / mib) if cells > 0 else 0.0,
+    }
+
+
+def _bundle_profile_summary(bundle: Any | None) -> dict[str, Any]:
+    if bundle is None:
+        return {}
+    symbols_count = int(len(getattr(bundle, "symbols", []) or []))
+    trading_days = int(len(getattr(bundle, "trading_days", []) or []))
+    raw_rows = _frame_row_count(getattr(bundle, "raw_history", None))
+    signal_rows = _frame_row_count(getattr(bundle, "signal_history", None))
+    membership_rows = _frame_row_count(getattr(bundle, "membership_history", None))
+    summary = getattr(bundle, "summary", {}) if isinstance(getattr(bundle, "summary", {}), dict) else {}
+    return {
+        "symbols_count": symbols_count,
+        "trading_days": trading_days,
+        "raw_history_rows": raw_rows,
+        "signal_history_rows": signal_rows,
+        "membership_history_rows": membership_rows,
+        "matrix_estimate": _matrix_estimate(symbols_count, trading_days),
+        "data_bundle": {
+            key: summary.get(key)
+            for key in (
+                "asset_scope",
+                "universe_mode",
+                "membership_mode",
+                "historical_membership_dynamic",
+                "index_code",
+                "index_codes",
+                "history_date_start",
+                "history_date_end",
+                "pit_interval_pushdown_enabled",
+                "pit_interval_pushdown_rows_before",
+                "pit_interval_pushdown_rows_after",
+                "pit_interval_pushdown_rows_dropped",
+            )
+            if key in summary
+        },
+    }
+
+
+def _write_run_profile_checkpoint(
+    *,
+    results_dir: Path,
+    phase: str,
+    run_context: RunContext,
+    cfg_merged: dict[str, Any],
+    bundle: Any | None = None,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    path = results_dir / "run_profile_checkpoint.json"
+    event = {
+        "phase": str(phase),
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "elapsed_wall_seconds": float(time.perf_counter() - run_context._wall_t0),
+        "active_stage": str(run_context._stage_name or ""),
+        "stage_seconds": dict(run_context.stage_seconds),
+        "runtime_optimization": _extract_runtime_optimization_cfg(cfg_merged),
+    }
+    event.update(_bundle_profile_summary(bundle))
+    if isinstance(extra, dict):
+        event.update(extra)
+    payload: dict[str, Any] = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                payload = loaded
+        except Exception:
+            payload = {}
+    events = list(payload.get("events") or [])
+    events.append(event)
+    payload.update(
+        {
+            "schema_version": "openclaw_run_profile_checkpoint@1",
+            "last_phase": str(phase),
+            "updated_at_utc": event["timestamp_utc"],
+            "events": events[-50:],
+        }
+    )
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 HOLDING_EXIT_FRAGILITY_AUDIT_FILENAME = "holding_exit_fragility_audit.csv"
 
 
@@ -251,6 +360,22 @@ def _emit_progress(progress_hook: Callable[[int, str], None] | None, pct: int, m
         progress_hook(int(max(0, min(100, pct))), str(message))
     except Exception:
         pass
+
+
+def _summarize_run_profile(profile: dict[str, Any], profile_path: Path) -> dict[str, Any]:
+    stage_seconds = profile.get("stage_seconds") if isinstance(profile.get("stage_seconds"), dict) else {}
+    return {
+        "run_profile_path": str(profile_path),
+        "total_wall_seconds": float(profile.get("total_wall_seconds", 0.0) or 0.0),
+        "stage_seconds": {str(k): float(v or 0.0) for k, v in stage_seconds.items()},
+        "symbols_count": int(profile.get("symbols_count", 0) or 0),
+        "trading_days": int(profile.get("trading_days", 0) or 0),
+        "row_count": int(profile.get("row_count", 0) or 0),
+        "rows_per_second": float(profile.get("rows_per_second", 0.0) or 0.0),
+        "bottleneck_stage": str(profile.get("bottleneck_stage") or ""),
+        "bottleneck_label": str(profile.get("bottleneck_label") or "BOTTLENECK_UNKNOWN"),
+        "perf": dict(profile.get("perf") or {}) if isinstance(profile.get("perf"), dict) else {},
+    }
 
 
 def _coerce_bool_series(series: pd.Series) -> pd.Series:
@@ -585,6 +710,9 @@ def _apply_overrides(raw_cfg: dict[str, Any], overrides: dict[str, Any]) -> dict
             out.setdefault("universe", {})
             out.setdefault("execution", {})
             out.setdefault("sizing", {})
+            wb_uni = out.get("universe") if isinstance(out.get("universe"), dict) else {}
+            if "benchmark" in wb_uni and wb_uni.get("benchmark") is not None:
+                benchmark_written = True
         else:
             wb_uni = wb_cfg.get("universe") if isinstance(wb_cfg.get("universe"), dict) else {}
             if wb_uni.get("symbols"):
@@ -627,6 +755,12 @@ def run_experiment(
     overrides: dict[str, Any] | None = None,
     progress_hook: Callable[[int, str], None] | None = None,
 ) -> dict[str, Any]:
+    run_context = RunContext(
+        preset=str(preset or "single"),
+        base_config_path=str(base_cfg_path),
+        overrides=dict(overrides or {}),
+    )
+    run_context.start_stage("config_load")
     _emit_progress(progress_hook, 5, "开始单次回测")
     ov = dict(overrides or {})
 
@@ -652,7 +786,15 @@ def run_experiment(
 
     tmp_cfg = results_dir / "run_config.json"
     tmp_cfg.write_text(json.dumps(cfg_merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_run_profile_checkpoint(
+        results_dir=results_dir,
+        phase="config_written",
+        run_context=run_context,
+        cfg_merged=cfg_merged,
+    )
 
+    run_context.end_stage("config_load")
+    run_context.start_stage("data_load")
     cfg_obj, _ = load_config(str(tmp_cfg))
     bundle = build_data_bundle(
         cfg_obj=cfg_obj,
@@ -662,8 +804,24 @@ def run_experiment(
         progress_hook=progress_hook,
         default_experiment_symbols=DEFAULT_EXPERIMENT_SYMBOLS,
     )
+    run_context.end_stage("data_load")
+    _write_run_profile_checkpoint(
+        results_dir=results_dir,
+        phase="data_load_completed",
+        run_context=run_context,
+        cfg_merged=cfg_merged,
+        bundle=bundle,
+    )
 
     _emit_progress(progress_hook, 55, "执行组合回测")
+    _write_run_profile_checkpoint(
+        results_dir=results_dir,
+        phase="simulation_start",
+        run_context=run_context,
+        cfg_merged=cfg_merged,
+        bundle=bundle,
+    )
+    run_context.start_stage("simulation")
     strategy = build_strategy(cfg_obj.strategy)
     strategy.set_context({"run_id": exp_id, "results_dir": str(results_dir)})
     strategy.state["universe_filters"] = {
@@ -673,6 +831,7 @@ def run_experiment(
         "min_avg_turnover_rate_20d": float(bundle.universe_filters_raw.get("min_avg_turnover_rate_20d", 0.0) or 0.0),
         "turnover_rate_field": str(bundle.universe_filters_raw.get("turnover_rate_field", "turnover_rate_f") or "turnover_rate_f"),
         "exclude_star_market": bool(bundle.universe_filters_raw.get("exclude_star_market", False)),
+        "csi1000_new_min_circ_mv_yi": float(bundle.universe_filters_raw.get("csi1000_new_min_circ_mv_yi", 0.0) or 0.0),
         "dynamic_all_a_entry": bool(bundle.dynamic_all_a_entry),
     }
     strategy.state["membership_history"] = bundle.membership_history
@@ -688,7 +847,16 @@ def run_experiment(
             strategy=strategy,
         )
     )
+    run_context.end_stage("simulation")
+    _write_run_profile_checkpoint(
+        results_dir=results_dir,
+        phase="simulation_completed",
+        run_context=run_context,
+        cfg_merged=cfg_merged,
+        bundle=bundle,
+    )
 
+    run_context.start_stage("output_write")
     daily_projected = _project_daily_csv_schema(bt_result.daily)
     trade_projected = _project_trade_csv_schema(bt_result.trades)
     cash_event_projected = _project_cash_event_csv_schema(getattr(bt_result, "cash_events", None))
@@ -708,7 +876,9 @@ def run_experiment(
         trade_projected,
     )
     st_buy_violation_count = _compute_st_buy_violations(bt_result.trades, bundle.st_history)
+    run_context.end_stage("output_write")
 
+    run_context.start_stage("metrics_finalize")
     m = dict(bt_result.metrics or {})
     perf_override = _recompute_perf_from_daily(
         daily_projected,
@@ -721,6 +891,57 @@ def run_experiment(
         for key in ("audit", "stage_summary", "stage_pipeline")
         if isinstance(m.get(key), dict)
     }
+    provider = getattr(bundle, "provider", None)
+    query_audit = list(getattr(provider, "query_audit", []) or [])
+    cache_events = [
+        dict(item)
+        for item in query_audit
+        if isinstance(item, dict) and str(item.get("provider") or "") == "ohlcv_cache"
+    ]
+    cache_hits = sum(1 for item in cache_events if bool(item.get("cache_hit")))
+    cache_hit_rate = float(cache_hits / len(cache_events)) if cache_events else 0.0
+    run_context.end_stage("metrics_finalize")
+    stage_seconds = dict(run_context.stage_seconds)
+    run_profile_path = results_dir / "run_profile.json"
+    run_profile = run_context.to_profile(
+        results_dir=str(results_dir),
+        extras={
+            **_bundle_profile_summary(bundle),
+            "runtime_optimization": _extract_runtime_optimization_cfg(cfg_merged),
+            "symbols_count": len(bundle.symbols),
+            "trading_days": len(bundle.trading_days),
+            "row_count": int(
+                len(bundle.raw_history.index)
+                + len(bundle.signal_history.index)
+                + len(daily_projected.index)
+                + len(bt_result.candidates.index)
+            ),
+            "perf": {
+                "db_load_seconds": float(stage_seconds.get("data_load", 0.0) or 0.0),
+                "precompute_seconds": float(stage_seconds.get("config_load", 0.0) or 0.0),
+                "simulation_seconds": float(stage_seconds.get("simulation", 0.0) or 0.0),
+                "io_write_seconds": float(stage_seconds.get("output_write", 0.0) or 0.0),
+                "db_queries": sum(
+                    1
+                    for item in query_audit
+                    if isinstance(item, dict) and str(item.get("provider") or "") == "postgres"
+                ),
+                "cache_events": len(cache_events),
+                "cache_hits": int(cache_hits),
+                "cache_hit_rate": cache_hit_rate,
+            },
+        },
+    )
+    run_profile_path.write_text(json.dumps(run_profile, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_run_profile_checkpoint(
+        results_dir=results_dir,
+        phase="completed",
+        run_context=run_context,
+        cfg_merged=cfg_merged,
+        bundle=bundle,
+        extra={"run_profile_path": str(run_profile_path)},
+    )
+    runtime_profile_summary = _summarize_run_profile(run_profile, run_profile_path)
     _emit_progress(progress_hook, 100, "单次回测完成")
     return {
         "exp_id": exp_id,
@@ -769,7 +990,10 @@ def run_experiment(
             "engine_mode": "VECTOR_FAST_STRICT",
             "symbols_count": len(bundle.symbols),
             "trading_days": len(bundle.trading_days),
+            **runtime_profile_summary,
         },
+        "run_profile": run_profile,
+        "runtime_profile": runtime_profile_summary,
         "universe_meta": bundle.universe_meta,
         "price_adj_mode": bundle.price_adj_mode,
         "adj_factor_stats": bundle.adj_factor_stats,

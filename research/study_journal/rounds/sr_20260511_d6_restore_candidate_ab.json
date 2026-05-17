@@ -1,0 +1,100 @@
+{
+  "schema_version": "openclaw_study_round@1",
+  "round_id": "sr_20260511_d6_restore_candidate_ab",
+  "created_at": "2026-05-11T10:20:00+08:00",
+  "updated_at": "2026-05-11T17:53:04+08:00",
+  "title": "V3 D6 restore_candidate AB",
+  "status": "audited",
+  "study_id": "cn_stock_etf/cn_stock_etf_d6_restore_candidate_ab_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "D5 ????????????????????????? restore_candidate ?????",
+  "primary_variable": "D5 restore_candidate delta top-up after partial exit fill",
+  "fixed_assumptions": [
+    "CN_STOCK_ETF_COMBO_BASELINE_V3 fixed",
+    "stock leg only; ETF leg is fixed validation shell",
+    "same unified runtime combo NAV; precomputed component results not allowed",
+    "ranking, entry rules, pool, execution clock, costs, account allocator fixed",
+    "restore candidate only arms after real partial D5 sell fill and is capped to original target delta"
+  ],
+  "windows": [
+    "1626",
+    "1217",
+    "1226"
+  ],
+  "variants": [
+    "B0_COMBO_V3_REPLAY",
+    "HC_D5_IMMEDIATE_COMBO",
+    "HC_D5_IMMEDIATE_RESTORE_COMBO"
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "study_id": "cn_stock_etf/cn_stock_etf_d6_restore_candidate_ab_v1",
+      "window_key": "1226",
+      "variant_name": "HC_D5_IMMEDIATE_RESTORE_COMBO",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_d6_restore_candidate_ab_v1/human/d6_restore_candidate_ab_analysis.md",
+      "note": "D6 restore_candidate AB detailed audit report",
+      "linked_at": "2026-05-11T17:53:04+08:00"
+    },
+    {
+      "kind": "table",
+      "study_id": "cn_stock_etf/cn_stock_etf_d6_restore_candidate_ab_v1",
+      "window_key": "1226",
+      "variant_name": "HC_D5_IMMEDIATE_RESTORE_COMBO",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_d6_restore_candidate_ab_v1/machine/d6_restore_candidate_ab_analysis.json",
+      "note": "machine-readable D6 restore_candidate AB analysis",
+      "linked_at": "2026-05-11T17:53:04+08:00"
+    },
+    {
+      "kind": "matrix",
+      "study_id": "cn_stock_etf/cn_stock_etf_d6_restore_candidate_ab_v1",
+      "window_key": "all",
+      "variant_name": "all",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_d6_restore_candidate_ab_v1/machine/stock_rule_combo_ab_matrix.json",
+      "note": "same-window combo AB matrix",
+      "linked_at": "2026-05-11T17:53:04+08:00"
+    }
+  ],
+  "key_findings": [
+    "Restore candidate underperforms D5 immediate in all three stock-leg same-window comparisons.",
+    "Restore buy count is small: 1217=1, 1626=4, 1226=3; sample size is too small for threshold tuning but sufficient to reject this runtime rule as a baseline candidate.",
+    "D5 immediate still improves stock-leg same-run B0 replay; this AB rejects restore_candidate, not D5 immediate itself.",
+    "No baseline promotion: keep result as negative evidence and audit artifact."
+  ],
+  "audit": {
+    "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "docker_required": true,
+    "docker_main_window_log": "outputs/logs/d6_restore_candidate_1626_docker_run.log",
+    "docker_guardrail_full_log": "outputs/logs/d6_restore_candidate_1217_1226_docker_run.log",
+    "machine_summary": "outputs/studies/cn_stock_etf/cn_stock_etf_d6_restore_candidate_ab_v1/machine/d6_restore_candidate_ab_analysis.json",
+    "human_summary": "outputs/studies/cn_stock_etf/cn_stock_etf_d6_restore_candidate_ab_v1/human/d6_restore_candidate_ab_analysis.md",
+    "nav_truth": "unified_runtime_combo_nav",
+    "precomputed_component_results_allowed": false,
+    "restore_buy_counts": {
+      "1217": 1,
+      "1626": 4,
+      "1226": 3
+    }
+  },
+  "decision": {
+    "status": "reject",
+    "reason": "Restore candidate loses to D5 immediate on stock leg across 1217, 1626, and 1226, with no reliable drawdown improvement."
+  },
+  "next_actions": [
+    "Do not promote D6 restore_candidate to V4 or live baseline.",
+    "If continuing D5 research, separate D5 immediate baseline audit from any restore/top-up behavior.",
+    "Study fully-exit natural re-entry or stricter residual-holding conditions instead of restoring half-held names."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "D6",
+    "restore-candidate",
+    "D5",
+    "AB",
+    "docker",
+    "rejected",
+    "research-only"
+  ]
+}

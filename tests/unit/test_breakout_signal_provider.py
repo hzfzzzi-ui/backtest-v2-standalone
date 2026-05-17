@@ -10,6 +10,7 @@ from backend.core.config.models import ExitConfig
 from backend.core.config.models import LegacyTurnWeakOverlayConfig
 from backend.core.config.models import MarketFilterConfig
 from backend.core.config.models import RegimeEngineConfig
+from backend.core.config.models import SizingConfig
 from backend.core.config.models import StrategyConfig
 from backend.core.config.models import WeeklyFiveStateRegimeConfig
 from backend.core.engine_vector.breakout_signal_provider import (
@@ -269,6 +270,7 @@ def _make_conditional_tiebreak_fixture() -> tuple[pd.DataFrame, pd.DataFrame, pd
 def _run_provider(
     strategy: BreakoutTrendStrategy,
     fixture_builder=_make_breakout_fixture,
+    runtime_optimization: dict[str, object] | None = None,
 ):
     fixture = fixture_builder()
     if len(fixture) == 4:
@@ -277,6 +279,8 @@ def _run_provider(
         history, benchmark, trading_days = fixture
         raw_history = None
     provider = BreakoutTrendProvider()
+    if runtime_optimization is not None:
+        provider._runtime_optimization = dict(runtime_optimization)
     provider.precompute(
         history=history,
         benchmark=benchmark,
@@ -330,6 +334,36 @@ def test_breakout_provider_allows_buy_without_entry_filters() -> None:
     assert len(signals.buy_signals) == 1
     assert provider.entry_above_slow_ma_block_count == 0
     assert provider.entry_slope_block_count == 0
+
+
+def test_breakout_provider_emits_high_chase_a2_features_when_sizing_enabled() -> None:
+    history, benchmark, raw_history, trading_days = _make_conditional_tiebreak_fixture()
+    strategy = BreakoutTrendStrategy(
+        breakout_window=20,
+        enable_v2_trend_filter=False,
+    )
+    provider = BreakoutTrendProvider()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=raw_history,
+        trading_days=trading_days,
+        strategy=strategy,
+        exit_cfg=ExitConfig(),
+        sizing_cfg=SizingConfig(high_chase_a2_size_down_enabled=True),
+    )
+
+    signals = provider.day_signals(
+        trading_days[-1],
+        len(trading_days) - 1,
+        _build_day_context(),
+    )
+
+    assert len(signals.buy_signals) == 1
+    meta = signals.buy_signals[0].meta or {}
+    assert meta["high_chase_a2_pre_ret_20d"] == pytest.approx(10.2 / 9.6 - 1.0)
+    assert meta["high_chase_a2_avg_turnover_rate_f_20d"] == pytest.approx(2.5)
+    assert meta["high_chase_a2_volume_20d_vs_60d"] == pytest.approx(1.0)
 
 
 def test_breakout_provider_preserves_bull_breakout_quality_veto_params() -> None:
@@ -515,6 +549,116 @@ def test_breakout_provider_bull_quality_veto_skips_pullback_only_candidates() ->
     assert signals.buy_signals[0].meta["alpha_source"] == "pullback_only"
     assert signals.buy_signals[0].meta["bull_breakout_quality_veto_applied"] is False
     assert provider.bull_breakout_quality_veto_block_count == 0
+
+
+def test_breakout_provider_bad_quality_veto_default_disabled_keeps_signal() -> None:
+    provider, signals = _run_provider(
+        BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+        )
+    )
+
+    assert len(signals.buy_signals) == 1
+    assert provider.bad_breakout_quality_veto_block_count == 0
+
+
+def test_breakout_provider_bad_quality_veto_blocks_ranked_breakout() -> None:
+    provider, signals = _run_provider(
+        BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+            bad_breakout_quality_veto_enabled=True,
+            bad_breakout_quality_ret5_rank_min=0.0,
+            bad_breakout_quality_r2_60_rank_max=1.0,
+        )
+    )
+
+    assert signals.buy_signals == []
+    assert provider.bad_breakout_quality_veto_block_count == 1
+    assert provider.diag_reason_counts["BAD_BREAKOUT_QUALITY_VETO"] == 1
+
+
+def test_breakout_provider_emits_trend_quality_soft_score_meta() -> None:
+    provider, signals = _run_provider(
+        BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+            enable_residual_ranking=True,
+            ranking_mode="residual_only",
+            trend_quality_soft_score_enabled=True,
+            trend_quality_soft_score_weight=0.3,
+        )
+    )
+
+    assert len(signals.buy_signals) == 1
+    assert "apply_trend_quality_soft_score" in provider._wide_runtime_optimization_notes
+    meta = signals.buy_signals[0].meta or {}
+    assert meta["trend_quality_soft_score_enabled"] is True
+    assert meta["trend_quality_soft_score_weight"] == pytest.approx(0.3)
+    assert meta["trend_quality_soft_score"] == pytest.approx(0.5)
+    assert meta["trend_quality_r2_60_rank"] == pytest.approx(0.5)
+    assert meta["trend_quality_slope60_rank"] == pytest.approx(0.5)
+    assert meta["trend_quality_ret60_vol_adj_rank"] == pytest.approx(0.5)
+    assert meta["trend_quality_ret60_dd_adj_rank"] == pytest.approx(0.5)
+
+
+def test_breakout_provider_emits_risk_archetype_soft_deprioritize_meta() -> None:
+    provider, signals = _run_provider(
+        BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+            enable_residual_ranking=True,
+            ranking_mode="residual_only",
+            risk_archetype_soft_deprioritize_enabled=True,
+            risk_archetype_soft_deprioritize_quantile=0.80,
+            risk_archetype_hot_crowded_penalty=0.20,
+            risk_archetype_high_volatility_penalty=0.15,
+        ),
+        fixture_builder=_make_conditional_tiebreak_fixture,
+    )
+
+    assert len(signals.buy_signals) == 1
+    assert any(note.startswith("apply_risk_archetype_soft_deprioritize") for note in provider._wide_runtime_optimization_notes)
+    meta = signals.buy_signals[0].meta or {}
+    assert meta["risk_archetype_soft_deprioritize_enabled"] is True
+    assert meta["risk_archetype_soft_deprioritize_quantile"] == pytest.approx(0.80)
+    assert meta["risk_archetype_score_scale"] == pytest.approx(1.0)
+    assert meta["risk_archetype_hot_crowded"] is False
+    assert meta["risk_archetype_high_volatility_chase"] is False
+    assert meta["risk_archetype_flag_count"] == 0
+    assert meta["risk_archetype_pre_ret20_rank"] == pytest.approx(0.5)
+    assert meta["risk_archetype_turnover20_rank"] == pytest.approx(0.5)
+
+
+def test_breakout_provider_entry_risk_position_sizing_emits_meta_without_direct_target() -> None:
+    provider, _signals = _run_provider(
+        BreakoutTrendStrategy(
+            breakout_window=20,
+            enable_v2_trend_filter=False,
+            entry_risk_position_sizing_enabled=True,
+            entry_risk_position_watch_scale=0.80,
+            entry_risk_position_high_scale=0.50,
+            entry_risk_position_extreme_scale=1.0 / 3.0,
+        ),
+        fixture_builder=_make_conditional_tiebreak_fixture,
+    )
+    provider._risk_archetype_flag_count[-1, 0] = 2
+
+    signals = provider.day_signals(
+        provider._mx.dates[-1],
+        len(provider._mx.dates) - 1,
+        _build_day_context(),
+    )
+
+    assert len(signals.buy_signals) == 1
+    meta = signals.buy_signals[0].meta or {}
+    assert meta["entry_risk_position_sizing_enabled"] is True
+    assert meta["entry_risk_position_tier"] == "2_high"
+    assert meta["entry_risk_position_flag_count"] == 2
+    assert meta["entry_risk_position_multiplier"] == pytest.approx(0.5)
+    assert "target_weight" not in meta
+    assert "final_target_weight" not in meta
 
 
 def test_breakout_provider_blocks_entry_above_slow_ma() -> None:
@@ -1103,6 +1247,47 @@ def test_breakout_provider_emits_residual_split_meta_fields() -> None:
     assert "sector_beta_tailwind_raw" in signal.meta
 
 
+def test_breakout_provider_deferred_residual_score_preserves_signal_scores() -> None:
+    base_strategy = BreakoutTrendStrategy(
+        breakout_window=20,
+        enable_v2_trend_filter=False,
+        enable_residual_ranking=True,
+        ranking_mode="residual_only",
+        residual_window=40,
+        residual_benchmark_weight=1.0,
+        residual_industry_weight=0.0,
+    )
+    opt_strategy = BreakoutTrendStrategy(
+        breakout_window=20,
+        enable_v2_trend_filter=False,
+        enable_residual_ranking=True,
+        ranking_mode="residual_only",
+        residual_window=40,
+        residual_benchmark_weight=1.0,
+        residual_industry_weight=0.0,
+    )
+    _, base_signals = _run_provider(
+        base_strategy,
+        fixture_builder=_make_long_benchmark_breakout_fixture,
+    )
+    opt_provider, opt_signals = _run_provider(
+        opt_strategy,
+        fixture_builder=_make_long_benchmark_breakout_fixture,
+        runtime_optimization={"active_set_sparse_scoring": {"enabled": True}},
+    )
+
+    assert opt_provider._deferred_residual_score_enabled is True
+    assert opt_provider._residual_strength_score.size == 0
+    assert opt_provider._final_score.size == 0
+    assert len(base_signals.buy_signals) == len(opt_signals.buy_signals) == 1
+    assert opt_signals.buy_signals[0].meta["residual_strength_score"] == pytest.approx(
+        base_signals.buy_signals[0].meta["residual_strength_score"]
+    )
+    assert opt_signals.buy_signals[0].meta["final_score"] == pytest.approx(
+        base_signals.buy_signals[0].meta["final_score"]
+    )
+
+
 def test_breakout_provider_switches_residual_weights_outside_strong_risk_on_regime() -> None:
     _, signals = _run_provider(
         BreakoutTrendStrategy(
@@ -1558,6 +1743,306 @@ def test_breakout_provider_skips_profit_decay_exit_when_residual_strength_still_
 
     assert signals.sell_signals == []
     assert signals.exit_counts.profit_decay_exit == 0
+
+
+def test_breakout_provider_emits_mfe_mae_confirmation_half_exit_on_exact_lookahead_bar() -> None:
+    history, benchmark, trading_days = _make_price_fixture([10.0, 10.1, 9.95, 9.49])
+    provider = BreakoutTrendProvider()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=2,
+            enable_v2_trend_filter=False,
+            enable_mfe_mae_confirmation_exit=True,
+            mfe_mae_confirmation_lookahead_bars=3,
+            mfe_mae_confirmation_min_mfe_pct=0.02,
+            mfe_mae_confirmation_max_mae_pct=-0.05,
+            mfe_mae_confirmation_exit_pct=0.5,
+        ),
+        exit_cfg=ExitConfig(),
+    )
+    provider.entry_day["sh600000"] = trading_days[0]
+    provider.entry_bar_index["sh600000"] = 0
+
+    signals = provider.day_signals(
+        trading_days[3],
+        3,
+        DayContext(
+            positions={"sh600000": 1000},
+            position_avg_cost={"sh600000": 10.0},
+            cash=1_000_000.0,
+            nav=1_000_000.0,
+            base_order_value=100_000.0,
+            max_positions=10,
+            close_idx={(trading_days[3], "sh600000"): 9.49},
+            open_idx={},
+            next_day=None,
+        ),
+    )
+
+    assert len(signals.sell_signals) == 1
+    signal = signals.sell_signals[0]
+    assert signal.reason_code == "MFE_MAE_CONFIRMATION_EXIT"
+    assert signal.qty == 500
+    assert signal.meta["partial_exit"] is True
+    assert signal.meta["close_mfe_pct"] == pytest.approx(0.01)
+    assert signal.meta["close_mae_pct"] == pytest.approx(-0.051)
+    assert signal.meta["mfe_mae_confirmation_lookahead_bars"] == 3
+    assert signals.exit_counts.mfe_mae_confirmation_exit == 1
+
+
+def _make_high_chase_confirmation_fixture(extra_closes: list[float] | None = None) -> tuple[pd.DataFrame, pd.DataFrame, list[date]]:
+    pre_entry = [10.0] * 4 + [10.3 + (0.30 * i) for i in range(20)]
+    closes = pre_entry + [16.0, 15.8, 15.7, 15.1]
+    if extra_closes:
+        closes.extend(extra_closes)
+    return _make_price_fixture(closes)
+
+
+def _prepare_high_chase_provider(*, action: str = "exit", thresholds_disabled: bool = False) -> tuple[BreakoutTrendProvider, list[date]]:
+    history, benchmark, trading_days = _make_high_chase_confirmation_fixture()
+    provider = BreakoutTrendProvider()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=2,
+            enable_v2_trend_filter=False,
+            enable_mfe_mae_confirmation_exit=True,
+            mfe_mae_confirmation_scope="high_chase",
+            mfe_mae_confirmation_action=action,
+            mfe_mae_confirmation_lookahead_bars=3,
+            mfe_mae_confirmation_min_mfe_pct=0.02,
+            mfe_mae_confirmation_max_mae_pct=-0.05,
+            mfe_mae_confirmation_exit_pct=0.5,
+            mfe_mae_high_chase_ret20_pct=9.0 if thresholds_disabled else 0.45,
+            mfe_mae_high_chase_breakout_margin_pct=9.0 if thresholds_disabled else 0.05,
+        ),
+        exit_cfg=ExitConfig(),
+    )
+    provider._breakout_margin_raw[23, 0] = 0.06
+    provider.entry_day["sh600000"] = trading_days[24]
+    provider.entry_bar_index["sh600000"] = 24
+    return provider, trading_days
+
+
+def test_breakout_provider_high_chase_scope_emits_d5_only_for_high_chase_entry() -> None:
+    provider, trading_days = _prepare_high_chase_provider()
+
+    signals = provider.day_signals(
+        trading_days[27],
+        27,
+        DayContext(
+            positions={"sh600000": 1000},
+            position_avg_cost={"sh600000": 16.0},
+            cash=1_000_000.0,
+            nav=1_000_000.0,
+            base_order_value=100_000.0,
+            max_positions=10,
+            close_idx={(trading_days[27], "sh600000"): 15.1},
+            open_idx={},
+            next_day=None,
+        ),
+    )
+
+    assert len(signals.sell_signals) == 1
+    signal = signals.sell_signals[0]
+    assert signal.reason_code == "MFE_MAE_CONFIRMATION_EXIT"
+    assert signal.qty == 500
+    assert signal.meta["high_chase_bool"] is True
+    assert signal.meta["high_chase_core_count"] >= 2
+    assert signal.meta["mfe_mae_confirmation_scope"] == "high_chase"
+
+
+def test_breakout_provider_mfe_mae_restore_arm_meta_on_partial_exit() -> None:
+    history, benchmark, trading_days = _make_high_chase_confirmation_fixture()
+    provider = BreakoutTrendProvider()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=2,
+            enable_v2_trend_filter=False,
+            enable_mfe_mae_confirmation_exit=True,
+            mfe_mae_confirmation_scope="high_chase",
+            mfe_mae_confirmation_action="exit",
+            mfe_mae_confirmation_lookahead_bars=3,
+            mfe_mae_confirmation_min_mfe_pct=0.02,
+            mfe_mae_confirmation_max_mae_pct=-0.05,
+            mfe_mae_confirmation_exit_pct=0.5,
+            enable_mfe_mae_restore_candidate=True,
+            mfe_mae_restore_candidate_scope="high_chase",
+            mfe_mae_restore_candidate_max_bars=40,
+        ),
+        exit_cfg=ExitConfig(),
+    )
+    provider._breakout_margin_raw[23, 0] = 0.06
+    provider.entry_day["sh600000"] = trading_days[24]
+    provider.entry_bar_index["sh600000"] = 24
+
+    signals = provider.day_signals(
+        trading_days[27],
+        27,
+        DayContext(
+            positions={"sh600000": 1000},
+            position_avg_cost={"sh600000": 16.0},
+            cash=1_000_000.0,
+            nav=1_000_000.0,
+            base_order_value=100_000.0,
+            max_positions=10,
+            close_idx={(trading_days[27], "sh600000"): 15.1},
+            open_idx={},
+            next_day=None,
+        ),
+    )
+
+    signal = signals.sell_signals[0]
+    assert signal.qty == 500
+    assert signal.meta["mfe_mae_restore_candidate_arm_on_fill"] is True
+    assert signal.meta["mfe_mae_restore_candidate_source_reason_code"] == "MFE_MAE_CONFIRMATION_EXIT"
+    assert signal.meta["mfe_mae_restore_candidate_scope"] == "high_chase"
+
+
+def test_breakout_provider_restore_candidate_allows_held_symbol_reentry() -> None:
+    history, benchmark, trading_days = _make_high_chase_confirmation_fixture([15.4])
+    provider = BreakoutTrendProvider()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=2,
+            enable_v2_trend_filter=False,
+            enable_mfe_mae_confirmation_exit=True,
+            mfe_mae_confirmation_scope="high_chase",
+            mfe_mae_confirmation_action="exit",
+            mfe_mae_confirmation_lookahead_bars=3,
+            mfe_mae_confirmation_min_mfe_pct=0.02,
+            mfe_mae_confirmation_max_mae_pct=-0.05,
+            mfe_mae_confirmation_exit_pct=0.5,
+            enable_mfe_mae_restore_candidate=True,
+            mfe_mae_restore_candidate_scope="high_chase",
+            mfe_mae_restore_candidate_max_bars=40,
+        ),
+        exit_cfg=ExitConfig(),
+    )
+    day_idx = 28
+    provider._cand_idx[day_idx] = np.array([0], dtype=int)
+    provider._breakout_buy[day_idx, 0] = True
+    provider._pullback_buy[day_idx, 0] = False
+    provider._pullback_overlap[day_idx, 0] = False
+    provider._mfe_mae_restore_state["sh600000"] = {
+        "armed_date": trading_days[27].isoformat(),
+        "armed_bar_index": 27,
+        "source_reason_code": "MFE_MAE_CONFIRMATION_EXIT",
+        "scope": "high_chase",
+        "high_chase_bool": True,
+    }
+
+    signals = provider.day_signals(
+        trading_days[day_idx],
+        day_idx,
+        DayContext(
+            positions={"sh600000": 500},
+            position_avg_cost={"sh600000": 16.0},
+            cash=1_000_000.0,
+            nav=1_000_000.0,
+            base_order_value=100_000.0,
+            max_positions=10,
+            close_idx={(trading_days[day_idx], "sh600000"): 15.4},
+            open_idx={},
+            next_day=None,
+        ),
+    )
+
+    assert len(signals.buy_signals) == 1
+    signal = signals.buy_signals[0]
+    assert signal.reason_code == "MFE_MAE_RESTORE_CANDIDATE"
+    assert signal.meta["restore_candidate"] is True
+    assert signal.meta["target_weight_basis"] == "delta_restore_gap"
+    assert signal.meta["restore_candidate_original_reason_code"] == "BREAKOUT_HIGH"
+
+
+def test_breakout_provider_high_chase_scope_skips_non_high_chase_entry() -> None:
+    provider, trading_days = _prepare_high_chase_provider(thresholds_disabled=True)
+
+    signals = provider.day_signals(
+        trading_days[27],
+        27,
+        DayContext(
+            positions={"sh600000": 1000},
+            position_avg_cost={"sh600000": 16.0},
+            cash=1_000_000.0,
+            nav=1_000_000.0,
+            base_order_value=100_000.0,
+            max_positions=10,
+            close_idx={(trading_days[27], "sh600000"): 15.1},
+            open_idx={},
+            next_day=None,
+        ),
+    )
+
+    assert signals.sell_signals == []
+    assert signals.exit_counts.mfe_mae_confirmation_exit == 0
+
+
+def test_breakout_provider_high_chase_watch_exits_on_unrepaired_review_bar() -> None:
+    history, benchmark, trading_days = _make_high_chase_confirmation_fixture([15.2, 15.1, 15.05, 15.0, 15.0, 15.0, 15.0])
+    provider = BreakoutTrendProvider()
+    provider.precompute(
+        history=history,
+        benchmark=benchmark,
+        raw_history=None,
+        trading_days=trading_days,
+        strategy=BreakoutTrendStrategy(
+            breakout_window=2,
+            enable_v2_trend_filter=False,
+            enable_mfe_mae_confirmation_exit=True,
+            mfe_mae_confirmation_scope="high_chase",
+            mfe_mae_confirmation_action="watch_day10",
+            mfe_mae_confirmation_lookahead_bars=3,
+            mfe_mae_confirmation_min_mfe_pct=0.02,
+            mfe_mae_confirmation_max_mae_pct=-0.05,
+            mfe_mae_confirmation_exit_pct=0.5,
+            mfe_mae_watch_review_bars=10,
+            mfe_mae_watch_deep_mae_immediate_pct=-0.08,
+        ),
+        exit_cfg=ExitConfig(),
+    )
+    provider._breakout_margin_raw[23, 0] = 0.06
+    provider.entry_day["sh600000"] = trading_days[24]
+    provider.entry_bar_index["sh600000"] = 24
+    ctx = DayContext(
+        positions={"sh600000": 1000},
+        position_avg_cost={"sh600000": 16.0},
+        cash=1_000_000.0,
+        nav=1_000_000.0,
+        base_order_value=100_000.0,
+        max_positions=10,
+        close_idx={},
+        open_idx={},
+        next_day=None,
+    )
+
+    day3 = provider.day_signals(trading_days[27], 27, ctx)
+    assert day3.sell_signals == []
+    assert "sh600000" in provider._mfe_mae_confirmation_watch_state
+
+    day10 = provider.day_signals(trading_days[34], 34, ctx)
+    assert len(day10.sell_signals) == 1
+    signal = day10.sell_signals[0]
+    assert signal.reason_code == "MFE_MAE_CONFIRMATION_WATCH_EXIT"
+    assert signal.qty == 500
+    assert signal.meta["mfe_mae_watch_unrepaired"] is True
+    assert "sh600000" not in provider._mfe_mae_confirmation_watch_state
 
 
 def test_breakout_provider_emits_formal_regime_arrays() -> None:

@@ -1,0 +1,41 @@
+study_id: cn_stock/v4_fundamental_quality_shadow_v1
+title: V4 stock fundamental quality shadow v1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  Basic PIT-safe fundamental quality may help explain which V4 stock-leg
+  breakout entries deserve concentration, but the first step is to verify data
+  coverage and lineage before any trading rule is tested.
+change_scope:
+  modules_modified:
+    - backend.research.v4_fundamental_quality_shadow
+variants:
+  - name: DATA_COVERAGE_SHADOW
+    request_overrides:
+      run_params:
+        source_dir: outputs/baselines/baseline_V10_1
+        output_dir: outputs/studies/cn_stock/v4_fundamental_quality_shadow_v1
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-03-20"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: audit
+    start: "2012-01-04"
+    end: "2026-03-20"
+required_outputs:
+  - coverage_audit
+  - human_summary
+request_template:
+  source_dir: outputs/baselines/baseline_V10_1
+  output_dir: outputs/studies/cn_stock/v4_fundamental_quality_shadow_v1
+metadata:
+  runner_mode: standalone_script
+  script: backend.research.v4_fundamental_quality_shadow
+  primary_variable: fundamental_quality_coverage_and_bucket
+  research_only: true

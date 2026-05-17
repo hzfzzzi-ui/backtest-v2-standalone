@@ -1,0 +1,143 @@
+study_id: cn_stock/v4_fundamental_quality_strong_ab_v2
+title: V4 fundamental quality strong overlay AB v2
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  PIT-safe fundamental quality has enough explanatory power to test stronger
+  candidate compression and sizing assistance, while keeping V4 stock trend
+  entry/exit/runtime semantics fixed.
+change_scope:
+  modules_modified:
+    - runtime_config_json.asset_context.moneyflow_overlay
+    - runtime_config_json.sizing.weight_mode
+  fixed_modules:
+    - universe.universe_mode
+    - universe.membership_mode
+    - strategy.entry_rules
+    - strategy.exit_rules
+    - market_state
+    - execution
+    - costs
+    - base_candidate_generation
+variants:
+  - name: B0_V4_STOCK_REPLAY
+    description: Same-runtime V4 stock-leg replay without quality overlay.
+  - name: Q_BAND_RERANK_20
+    description: Quality reranks the top 20 same-day candidates after original final_score ranking.
+    request_overrides:
+      runtime_config_json:
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            source_kind: daily_factor_snapshot
+            factor_snapshot_path: outputs/studies/cn_stock/v4_fundamental_quality_ranking_ab_v1/snapshots/fundamental_quality_daily_snapshot.csv
+            factor_id: fundamental_quality_v1
+            score_field: quality_score
+            lower_is_better: false
+            date_column: date
+            symbol_column: symbol
+            available_column: available
+            mode: band_rerank
+            band_limit: 20
+            factor_role: rank
+            apply_layer: ranking
+            score_source: fundamental_quality_v1
+  - name: Q_VETO_BOTTOM25
+    description: Veto the bottom 25 percent available-quality candidates in the same-day candidate set.
+    request_overrides:
+      runtime_config_json:
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            source_kind: daily_factor_snapshot
+            factor_snapshot_path: outputs/studies/cn_stock/v4_fundamental_quality_ranking_ab_v1/snapshots/fundamental_quality_daily_snapshot.csv
+            factor_id: fundamental_quality_v1
+            score_field: quality_score
+            lower_is_better: false
+            date_column: date
+            symbol_column: symbol
+            available_column: available
+            mode: veto_bottom25
+            factor_role: veto
+            apply_layer: candidate
+            score_source: fundamental_quality_v1
+  - name: Q_VETO_BOTTOM50_STRESS
+    description: Aggressive stress test that vetoes the bottom 50 percent available-quality candidates.
+    request_overrides:
+      runtime_config_json:
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            source_kind: daily_factor_snapshot
+            factor_snapshot_path: outputs/studies/cn_stock/v4_fundamental_quality_ranking_ab_v1/snapshots/fundamental_quality_daily_snapshot.csv
+            factor_id: fundamental_quality_v1
+            score_field: quality_score
+            lower_is_better: false
+            date_column: date
+            symbol_column: symbol
+            available_column: available
+            mode: veto_bottom50
+            factor_role: veto
+            apply_layer: candidate
+            score_source: fundamental_quality_v1
+  - name: Q_SOFT_WEIGHT_70_130
+    description: Keep candidate ordering but tilt selected order sizing from 0.70x to 1.30x by quality.
+    request_overrides:
+      runtime_config_json:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.70
+          score_weight_max_scale: 1.30
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            source_kind: daily_factor_snapshot
+            factor_snapshot_path: outputs/studies/cn_stock/v4_fundamental_quality_ranking_ab_v1/snapshots/fundamental_quality_daily_snapshot.csv
+            factor_id: fundamental_quality_v1
+            score_field: quality_score
+            lower_is_better: false
+            date_column: date
+            symbol_column: symbol
+            available_column: available
+            mode: soft_weight
+            factor_role: context
+            apply_layer: candidate
+            score_source: fundamental_quality_v1
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-03-20"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-03-20"
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  runtime_config_path: outputs/baselines/baseline_V10_1/run_config.json
+  fast_mode: true
+  initial_capital: 1000000
+  enable_multifactor_rank: true
+  momentum_top_pct: 0.0
+  universe_mode: HS300_ZZ500
+  price_adj: hfq
+metadata:
+  research_only: true
+  primary_variable: fundamental_quality_stronger_candidate_assistance
+  docker_required: true
+  stock_only: true
+  etf_or_combo_inputs: false
+  industry_or_theme_inputs: false
+  source_baseline_id: baseline_V10_1
+  source_shadow_study_id: cn_stock/v4_quality_q0_q1_audit_v1
+  source_snapshot_audit: outputs/studies/cn_stock/v4_fundamental_quality_ranking_ab_v1/snapshots/fundamental_quality_daily_snapshot_audit.json

@@ -10,11 +10,13 @@ import pandas as pd
 
 from backend.core.data.price_limits import round_price_to_tick
 from backend.core.config.etf_beta_contract import (
+    CN_ETF_FORMAL_PHASE1_POOL_VERSION,
     _is_formal_stabilizer_role,
     build_etf_beta_formal_view,
     build_etf_beta_phase1_summary as build_cn_etf_beta_phase1_summary,
     build_etf_beta_research_view,
 )
+from backend.core.data.cn_etf_catalog import CN_ETF_RESEARCH_SHADOW_POOL_V1_SYMBOLS
 from backend.core.data.provider_factory import build_scoped_postgres_provider
 from backend.core.tools.runtime_data_access import load_runtime_data_access
 from backend.core.universe.lineage import get_universe_lineage, normalize_universe_mode
@@ -1398,6 +1400,21 @@ def evaluate_etf_beta_sleeve(
         if str(code).strip()
     ]
     formal_alignment_evidence = dict(summary_obj.get("formal_alignment_evidence") or {})
+    formal_pool_version = str(
+        summary_obj.get("formal_etf_pool_version")
+        or formal_alignment_evidence.get("formal_etf_pool_version")
+        or ""
+    ).strip()
+    research_only_pool = _coerce_bool(summary_obj.get("research_only") or research_view.get("research_only"))
+    declared_shadow_symbols = {
+        str(item).strip().upper()
+        for item in list(summary_obj.get("shadow_symbols") or research_view.get("shadow_symbols") or ())
+        if str(item).strip()
+    }
+    shadow_symbol_scope = set(CN_ETF_RESEARCH_SHADOW_POOL_V1_SYMBOLS) | declared_shadow_symbols
+    shadow_promotion_violations = []
+    if formal_pool_version == CN_ETF_FORMAL_PHASE1_POOL_VERSION and not research_only_pool:
+        shadow_promotion_violations = [symbol for symbol in selected_etfs if symbol in shadow_symbol_scope]
     counters = dict(run_meta_obj.get("counters") or {})
     order_count = _safe_int(counters.get("orders"))
     trade_count = _safe_int(counters.get("closed_trades"))
@@ -2177,6 +2194,9 @@ def evaluate_etf_beta_sleeve(
     if source_entry_type not in standalone_entry_types:
         status = "FAIL"
         reason = "ETF beta sleeve source entry type is not a supported cn_etf research entry."
+    elif shadow_promotion_violations:
+        status = "FAIL"
+        reason = "ETF beta sleeve selected research-only shadow symbols under formal_etf_pool_v1."
     elif formal_alignment_status == "do_not_promote":
         status = "FAIL"
         reason = "ETF beta sleeve is explicitly classified as do_not_promote against the formal Phase 1 mainline."
@@ -2252,6 +2272,18 @@ def evaluate_etf_beta_sleeve(
         "tactical_satellite_symbols": list(summary_obj.get("tactical_satellite_symbols") or []),
         "limited_defense_candidates": list(summary_obj.get("limited_defense_candidates") or []),
         "symbol_role_map": dict(summary_obj.get("symbol_role_map") or {}),
+        "pool_version": summary_obj.get("pool_version"),
+        "research_only": bool(research_only_pool),
+        "formal_pool_version": formal_pool_version or None,
+        "formal_scope_symbols": list(summary_obj.get("formal_scope_symbols") or []),
+        "shadow_symbols": list(summary_obj.get("shadow_symbols") or []),
+        "shadow_role_map": dict(summary_obj.get("shadow_role_map") or {}),
+        "deferred_symbols": list(summary_obj.get("deferred_symbols") or []),
+        "deferred_reason_codes": dict(summary_obj.get("deferred_reason_codes") or {}),
+        "research_classification_by_symbol": dict(summary_obj.get("research_classification_by_symbol") or {}),
+        "promotion_gate_by_symbol": dict(summary_obj.get("promotion_gate_by_symbol") or {}),
+        "formal_eligibility_by_symbol": dict(summary_obj.get("formal_eligibility_by_symbol") or {}),
+        "shadow_promotion_violations": shadow_promotion_violations,
         "formal_alignment_reference": formal_alignment_reference,
         "formal_alignment_status": formal_alignment_status,
         "formal_mainline_compatible": formal_mainline_compatible,
@@ -2343,6 +2375,7 @@ def evaluate_etf_beta_sleeve(
         "formal_mainline_compatible": formal_mainline_compatible,
         "formal_alignment_status": formal_alignment_status,
         "formal_alignment_reason_count": len(formal_alignment_reason_codes),
+        "shadow_promotion_violation_count": len(shadow_promotion_violations),
         "order_count": order_count,
         "trade_count": trade_count,
         "requested_budget": requested_budget,

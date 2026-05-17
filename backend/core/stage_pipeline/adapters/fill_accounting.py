@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 
 from backend.core.core.types import Side
 from backend.core.data.price_limits import round_price_to_tick
+from backend.core.engine_vector.atomic_rotation import filter_atomic_rotation_pending_orders
 from backend.core.stage_pipeline.adapters.lineage import record_fill_outcome
 from backend.core.stage_pipeline.contracts import AccountingSnapshot
 
@@ -29,6 +30,77 @@ def normalize_order_payload(raw_order: Any) -> dict[str, Any]:
         "reason_code": str(payload.get("reason_code", "") or ""),
         "meta": dict(payload.get("meta") or {}),
     }
+
+
+def _runtime_day_index(runtime: Any, day: date) -> int:
+    data_bundle = getattr(getattr(runtime, "request", None), "data_bundle", None)
+    trading_days = list(getattr(data_bundle, "trading_days", []) or [])
+    try:
+        return int(trading_days.index(day))
+    except Exception:
+        return -1
+
+
+def _arm_mfe_mae_restore_state_on_fill(
+    runtime: Any,
+    *,
+    symbol: str,
+    day: date,
+    remaining_qty: int,
+    meta: Mapping[str, Any],
+) -> None:
+    if not bool(dict(meta or {}).get("mfe_mae_restore_candidate_arm_on_fill", False)):
+        return
+    if int(remaining_qty) <= 0:
+        return
+    provider = getattr(runtime, "provider", None)
+    if provider is None:
+        return
+    state = getattr(provider, "_mfe_mae_restore_state", None)
+    if not isinstance(state, dict):
+        state = {}
+        provider._mfe_mae_restore_state = state
+    meta_payload = dict(meta or {})
+    payload_keys = {
+        "high_chase_bool",
+        "high_chase_core_count",
+        "high_chase_reasons",
+        "close_mfe_pct",
+        "close_mae_pct",
+        "current_return_pct",
+        "entry_bar_index",
+        "held_qty_before_exit",
+    }
+    payload = {key: meta_payload.get(key) for key in payload_keys if key in meta_payload}
+    payload.update(
+        {
+            "armed_date": day.isoformat(),
+            "armed_bar_index": int(_runtime_day_index(runtime, day)),
+            "remaining_qty_after_exit": int(remaining_qty),
+            "source_reason_code": str(
+                meta_payload.get("mfe_mae_restore_candidate_source_reason_code")
+                or meta_payload.get("triggered_rule")
+                or ""
+            ),
+            "source": str(meta_payload.get("mfe_mae_restore_candidate_source") or "mfe_mae_confirmation_exit"),
+            "scope": str(meta_payload.get("mfe_mae_restore_candidate_scope") or "high_chase").strip().lower(),
+            "arm_decision_date": str(meta_payload.get("mfe_mae_restore_candidate_arm_decision_date") or ""),
+            "arm_decision_bar_index": meta_payload.get("mfe_mae_restore_candidate_arm_decision_bar_index"),
+        }
+    )
+    state[str(symbol).lower()] = payload
+
+
+def _clear_mfe_mae_restore_state_on_buy(runtime: Any, *, symbol: str, meta: Mapping[str, Any]) -> None:
+    meta_payload = dict(meta or {})
+    if not bool(meta_payload.get("restore_candidate", False)):
+        return
+    if not bool(meta_payload.get("restore_clear_on_fill", True)):
+        return
+    provider = getattr(runtime, "provider", None)
+    state = getattr(provider, "_mfe_mae_restore_state", None) if provider is not None else None
+    if isinstance(state, dict):
+        state.pop(str(symbol).lower(), None)
 
 
 def _resolve_slippage_mode(runtime: Any) -> str:
@@ -470,7 +542,34 @@ def apply_open_fills(runtime: Any, day: date, fills_today: Sequence[Any]) -> Non
         cumulative_fill_reject_reason_counts = {}
         setattr(runtime, "fill_reject_reason_counts", cumulative_fill_reject_reason_counts)
     slippage_mode = _resolve_slippage_mode(runtime)
-    for raw_order in list(fills_today or ()):
+    normalized_fills_today = [normalize_order_payload(raw_order) for raw_order in list(fills_today or ())]
+    buy_blocked_symbols: set[str] = set()
+    sell_blocked_symbols: set[str] = set()
+    for order in normalized_fills_today:
+        symbol = str(order["symbol"]).lower()
+        px = float(runtime.open_idx.get((day, symbol), 0.0) or 0.0)
+        if px <= 0 or _bar_is_untradable(runtime, day, symbol, order["side"], px):
+            side_text = str(order["side"] or "").strip().upper()
+            if order["side"] == Side.SELL or side_text.endswith("SELL"):
+                sell_blocked_symbols.add(symbol)
+            elif order["side"] == Side.BUY or side_text.endswith("BUY"):
+                buy_blocked_symbols.add(symbol)
+    filtered_fills_today = filter_atomic_rotation_pending_orders(
+        orders=normalized_fills_today,
+        day=day,
+        cash=float(getattr(runtime, "cash", 0.0) or 0.0),
+        positions=dict(getattr(runtime, "positions", {}) or {}),
+        open_idx=getattr(runtime, "open_idx", {}),
+        slip_bps=float(getattr(runtime, "_slip_bps", 0.0) or 0.0),
+        comm_rate=float(getattr(runtime, "_comm_rate", 0.0) or 0.0),
+        comm_min=float(getattr(runtime, "_comm_min", 0.0) or 0.0),
+        stamp_rate=float(getattr(runtime, "_stamp_rate", 0.0) or 0.0),
+        min_trade_price=float(getattr(runtime, "_min_trade_price", 0.0) or 0.0),
+        position_cap=_resolve_pending_buy_position_cap(runtime),
+        buy_blocked_symbols=buy_blocked_symbols,
+        sell_blocked_symbols=sell_blocked_symbols,
+    )
+    for raw_order in filtered_fills_today:
         order = normalize_order_payload(raw_order)
         symbol = str(order["symbol"]).lower()
         px = float(runtime.open_idx.get((day, symbol), 0.0) or 0.0)
@@ -534,8 +633,16 @@ def apply_open_fills(runtime: Any, day: date, fills_today: Sequence[Any]) -> Non
                 for clear_dict in list(getattr(runtime.provider, "extra_clear_dicts", []) or []):
                     clear_dict.pop(symbol, None)
                 getattr(runtime.provider, "entry_day", {}).pop(symbol, None)
-            elif bool((order["meta"] or {}).get("risk_off_partial_mark_on_fill", False)) and isinstance(risk_off_partial_state, dict):
-                risk_off_partial_state[symbol] = True
+            else:
+                _arm_mfe_mae_restore_state_on_fill(
+                    runtime,
+                    symbol=symbol,
+                    day=day,
+                    remaining_qty=int(runtime.positions.get(symbol, 0) or 0),
+                    meta=dict(order["meta"] or {}),
+                )
+                if bool((order["meta"] or {}).get("risk_off_partial_mark_on_fill", False)) and isinstance(risk_off_partial_state, dict):
+                    risk_off_partial_state[symbol] = True
             trade_row = {
                 "date": day.isoformat(),
                 "symbol": symbol,
@@ -603,7 +710,8 @@ def apply_open_fills(runtime: Any, day: date, fills_today: Sequence[Any]) -> Non
             side=Side.BUY,
             slippage_mode=slippage_mode,
         )
-        if qty <= 0 or net > runtime.cash:
+        atomic_fill_approved = bool((order.get("meta") or {}).get("rotation_atomic_fill_approved", False))
+        if qty <= 0 or (net > runtime.cash and not atomic_fill_approved):
             reject_reason = "INSUFFICIENT_CASH"
             record_fill_outcome(runtime, day=day, order=order, status="rejected", reason=reject_reason)
             fill_reject_reason_counts_today[reject_reason] = int(fill_reject_reason_counts_today.get(reject_reason, 0)) + 1
@@ -650,6 +758,11 @@ def apply_open_fills(runtime: Any, day: date, fills_today: Sequence[Any]) -> Non
         if getattr(runtime.provider, "peak_state_on_buy", None) is not None:
             raw_close = float(runtime.close_idx.get((day, symbol), px) or px)
             runtime.provider.peak_state_on_buy.setdefault(symbol, raw_close)
+        _clear_mfe_mae_restore_state_on_buy(
+            runtime,
+            symbol=symbol,
+            meta=dict(order["meta"] or {}),
+        )
         holding_source = {
             "entry_alpha_id": str(meta.get("entry_alpha_id", meta.get("alpha_id", "")) or ""),
             "entry_sleeve_id": str(meta.get("entry_sleeve_id", meta.get("sleeve_id", "")) or ""),

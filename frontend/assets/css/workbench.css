@@ -2121,6 +2121,58 @@ input[type="checkbox"] {
   display: none !important;
 }
 
+.wb-study-journal-embed {
+  width: 100%;
+  min-width: 0;
+  min-height: calc(100vh - var(--wb-cmd-h) - 22px);
+  flex: 1 1 auto;
+  border: 1px solid var(--wb-line-dim);
+  border-radius: var(--wb-radius-xs);
+  overflow: hidden;
+  background: #f4f6f8;
+}
+
+.wb-study-journal-embed[hidden] {
+  display: none !important;
+}
+
+.wb-study-journal-embed iframe {
+  width: 100%;
+  height: calc(100vh - var(--wb-cmd-h) - 24px);
+  min-height: 720px;
+  display: block;
+  border: 0;
+  background: #f4f6f8;
+}
+
+.wb-main-content.wb-study-journal-active {
+  padding: 12px;
+}
+
+.wb-app.wb-research-mode .wb-body {
+  grid-template-columns: var(--wb-rail-w) 0 minmax(0, 1fr);
+}
+
+.wb-app.wb-research-mode .wb-drawer {
+  display: none;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-right: 0;
+}
+
+.wb-app.wb-research-mode .wb-main {
+  grid-column: 2 / 4;
+}
+
+.wb-research-drawer-card {
+  padding: 12px;
+  border: 1px solid var(--wb-line-dim);
+  border-radius: var(--wb-radius-xs);
+  background: var(--wb-surface-2);
+}
+
 /* Result workbench polish */
 .wb-command {
   min-height: 52px;

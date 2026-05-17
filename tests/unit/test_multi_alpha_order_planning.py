@@ -8,6 +8,7 @@ import pytest
 from backend.core.core.models import Signal
 from backend.core.core.types import Side
 from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
+from backend.core.engine_vector.atomic_rotation import filter_atomic_rotation_pending_orders
 from backend.core.engine_vector.signal_provider import DaySignals, ExitCounts
 from backend.core.stage_pipeline.adapters.fill_accounting import apply_open_fills
 from backend.core.stage_pipeline.adapters.bridge_adapter import apply_s7_order_stage_side_effects
@@ -1048,6 +1049,284 @@ def test_build_rebalance_orders_rotation_replace_swaps_weakest_held_when_full() 
     assert debug_plan["rotation_replace_pairs"][0]["candidate_symbol"] == "sh600803"
 
 
+def test_build_rebalance_orders_rotation_replace_cancels_sell_when_buy_not_executable() -> None:
+    buy_signal = _signal("sh600813", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.97)
+    candidate_audit: list[dict] = []
+    debug_plan: dict[str, object] = {}
+
+    orders = build_rebalance_orders(
+        positions={"sh600811": 100, "sh600812": 100},
+        cash_available=0.0,
+        nav_close=3000.0,
+        max_positions=2,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        next_open={"sh600811": 1.0, "sh600812": 1.0, "sh600813": 10.0},
+        enable_multifactor_rank=True,
+        mf_gate_on_today=True,
+        mf_topk=10,
+        mf_score_map={
+            "sh600811": 0.40,
+            "sh600812": 0.60,
+            "sh600813": 0.92,
+        },
+        strength_map={
+            "sh600811": 0.40,
+            "sh600812": 0.60,
+            "sh600813": 0.92,
+        },
+        decision_date=date(2026, 3, 2),
+        candidate_audit=candidate_audit,
+        debug_plan=debug_plan,
+        strong_risk_on_today=True,
+        rotation_replace_enabled=True,
+        rotation_replace_only_strong_risk_on=True,
+        rotation_replace_max_swaps_per_day=1,
+        rotation_replace_candidate_top_n=3,
+        rotation_replace_min_score_gap=0.15,
+        holding_entry_dates={
+            "sh600811": date(2026, 2, 20),
+            "sh600812": date(2026, 2, 20),
+        },
+        min_positions=2,
+        rotation_min_hold_days=5,
+    )
+
+    assert orders == []
+    assert debug_plan["rotation_replace_planned_count"] == 1
+    assert debug_plan["rotation_replace_executed_pair_count"] == 0
+    assert debug_plan["rotation_replace_cancelled_count"] == 1
+    assert debug_plan["rotation_replace_count"] == 0
+    assert debug_plan["rotation_replace_cancelled_pairs"][0]["held_symbol"] == "sh600811"
+    assert debug_plan["rotation_replace_cancelled_pairs"][0]["candidate_symbol"] == "sh600813"
+    assert debug_plan["rotation_replace_cancelled_pairs"][0]["reason"] == "ROTATION_REPLACE_CANCELLED_BUY_NOT_EXECUTABLE"
+    row = next(row for row in candidate_audit if row["symbol"] == "sh600813" and row["decision_layer"] == "execution_kernel")
+    assert row["reject_reason"] == "ROTATION_REPLACE_CANCELLED_BUY_NOT_EXECUTABLE"
+    assert row["rotation_atomic_cancel_reason"] == "ROTATION_REPLACE_CANCELLED_BUY_NOT_EXECUTABLE"
+
+
+def test_build_rebalance_orders_rotation_replace_disabled_does_not_create_swap() -> None:
+    buy_signal = _signal("sh600823", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.97)
+    debug_plan: dict[str, object] = {}
+
+    orders = build_rebalance_orders(
+        positions={"sh600821": 100, "sh600822": 100},
+        cash_available=1000.0,
+        nav_close=3000.0,
+        max_positions=2,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        next_open={"sh600821": 10.0, "sh600822": 10.0, "sh600823": 10.0},
+        enable_multifactor_rank=True,
+        mf_gate_on_today=True,
+        mf_topk=10,
+        mf_score_map={
+            "sh600821": 0.40,
+            "sh600822": 0.60,
+            "sh600823": 0.92,
+        },
+        strength_map={
+            "sh600821": 0.40,
+            "sh600822": 0.60,
+            "sh600823": 0.92,
+        },
+        decision_date=date(2026, 3, 2),
+        debug_plan=debug_plan,
+        strong_risk_on_today=True,
+        rotation_replace_enabled=False,
+        rotation_replace_only_strong_risk_on=True,
+        rotation_replace_max_swaps_per_day=1,
+        rotation_replace_candidate_top_n=3,
+        rotation_replace_min_score_gap=0.15,
+        min_positions=2,
+    )
+
+    assert orders == []
+    assert debug_plan["rotation_replace_active"] is False
+    assert debug_plan["rotation_replace_count"] == 0
+    assert debug_plan["rotation_replace_executed_pair_count"] == 0
+
+
+def test_build_rebalance_orders_rotation_replace_uses_net_sell_proceeds_for_affordability() -> None:
+    buy_signal = _signal("sh600833", sleeve_id="trend", alpha_id="breakout_55", compose_score=0.97)
+    debug_plan: dict[str, object] = {}
+
+    orders = build_rebalance_orders(
+        positions={"sh600831": 100, "sh600832": 100},
+        cash_available=0.0,
+        nav_close=3000.0,
+        max_positions=2,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=[buy_signal],
+        next_open={"sh600831": 10.0, "sh600832": 10.0, "sh600833": 9.5},
+        enable_multifactor_rank=True,
+        mf_gate_on_today=True,
+        mf_topk=10,
+        mf_score_map={
+            "sh600831": 0.40,
+            "sh600832": 0.60,
+            "sh600833": 0.92,
+        },
+        strength_map={
+            "sh600831": 0.40,
+            "sh600832": 0.60,
+            "sh600833": 0.92,
+        },
+        decision_date=date(2026, 3, 2),
+        debug_plan=debug_plan,
+        strong_risk_on_today=True,
+        rotation_replace_enabled=True,
+        rotation_replace_only_strong_risk_on=True,
+        rotation_replace_max_swaps_per_day=1,
+        rotation_replace_candidate_top_n=3,
+        rotation_replace_min_score_gap=0.15,
+        holding_entry_dates={
+            "sh600831": date(2026, 2, 20),
+            "sh600832": date(2026, 2, 20),
+        },
+        min_positions=2,
+        rotation_min_hold_days=5,
+        stamp_rate=0.1,
+    )
+
+    assert orders == []
+    assert debug_plan["rotation_replace_planned_count"] == 1
+    assert debug_plan["rotation_replace_executed_pair_count"] == 0
+    assert debug_plan["rotation_replace_cancelled_count"] == 1
+    assert debug_plan["rotation_replace_cancelled_pairs"][0]["reason"] == "ROTATION_REPLACE_CANCELLED_BUY_NOT_EXECUTABLE"
+
+
+def test_atomic_rotation_pending_filter_removes_pair_when_fill_cash_would_fail() -> None:
+    day = date(2026, 3, 3)
+    orders = [
+        {
+            "side": Side.SELL,
+            "symbol": "sh600841",
+            "qty": 100,
+            "reason_code": "ROTATION_REPLACE",
+            "meta": {
+                "rotation_replace": True,
+                "rotation_candidate_symbol": "sh600842",
+                "rotation_held_symbol": "sh600841",
+            },
+        },
+        {
+            "side": Side.BUY,
+            "symbol": "sh600842",
+            "qty": 100,
+            "reason_code": "ENTRY",
+            "meta": {
+                "rotation_replace": True,
+                "rotation_candidate_symbol": "sh600842",
+                "rotation_held_symbol": "sh600841",
+            },
+        },
+    ]
+
+    filtered = filter_atomic_rotation_pending_orders(
+        orders=orders,
+        day=day,
+        cash=0.0,
+        positions={"sh600841": 100},
+        open_idx={(day, "sh600841"): 10.0, (day, "sh600842"): 9.5},
+        slip_bps=0.0,
+        comm_rate=0.0,
+        comm_min=0.0,
+        stamp_rate=0.1,
+    )
+
+    assert filtered == []
+
+
+def test_atomic_rotation_pending_filter_removes_pair_when_position_cap_would_fail() -> None:
+    day = date(2026, 3, 3)
+    orders = [
+        {
+            "side": Side.SELL,
+            "symbol": "sh600851",
+            "qty": 100,
+            "reason_code": "ROTATION_REPLACE",
+            "meta": {
+                "rotation_replace": True,
+                "rotation_candidate_symbol": "sh600853",
+                "rotation_held_symbol": "sh600851",
+            },
+        },
+        {
+            "side": Side.BUY,
+            "symbol": "sh600853",
+            "qty": 100,
+            "reason_code": "ENTRY",
+            "meta": {
+                "rotation_replace": True,
+                "rotation_candidate_symbol": "sh600853",
+                "rotation_held_symbol": "sh600851",
+            },
+        },
+    ]
+
+    filtered = filter_atomic_rotation_pending_orders(
+        orders=orders,
+        day=day,
+        cash=10_000.0,
+        positions={"sh600851": 100, "sh600852": 100},
+        open_idx={(day, "sh600851"): 10.0, (day, "sh600853"): 10.0},
+        slip_bps=0.0,
+        comm_rate=0.0,
+        comm_min=0.0,
+        stamp_rate=0.0,
+        position_cap=1,
+    )
+
+    assert filtered == []
+
+
+def test_atomic_rotation_pending_filter_removes_pair_when_buy_is_blocked() -> None:
+    day = date(2026, 3, 3)
+    orders = [
+        {
+            "side": Side.SELL,
+            "symbol": "sh600861",
+            "qty": 100,
+            "reason_code": "ROTATION_REPLACE",
+            "meta": {
+                "rotation_replace": True,
+                "rotation_candidate_symbol": "sh600862",
+                "rotation_held_symbol": "sh600861",
+            },
+        },
+        {
+            "side": Side.BUY,
+            "symbol": "sh600862",
+            "qty": 100,
+            "reason_code": "ENTRY",
+            "meta": {
+                "rotation_replace": True,
+                "rotation_candidate_symbol": "sh600862",
+                "rotation_held_symbol": "sh600861",
+            },
+        },
+    ]
+
+    filtered = filter_atomic_rotation_pending_orders(
+        orders=orders,
+        day=day,
+        cash=10_000.0,
+        positions={"sh600861": 100},
+        open_idx={(day, "sh600861"): 10.0, (day, "sh600862"): 10.0},
+        slip_bps=0.0,
+        comm_rate=0.0,
+        comm_min=0.0,
+        stamp_rate=0.0,
+        buy_blocked_symbols={"sh600862"},
+    )
+
+    assert filtered == []
+
+
 def test_build_rebalance_orders_industry_second_stage_tiebreak_only_reorders_equal_strength_candidates() -> None:
     sig_a = Signal(
         signal_date=date(2026, 3, 2),
@@ -1600,6 +1879,319 @@ def test_build_execution_orders_from_candidate_plan_recomputes_formal_sizing() -
     assert len(buy_orders) == 1
     assert int(buy_orders[0].qty) == 5000
     assert float((buy_orders[0].meta or {}).get("target_weight")) == pytest.approx(0.5)
+
+
+def test_restore_candidate_top_up_uses_delta_qty_and_does_not_need_open_slot() -> None:
+    signal = Signal(
+        signal_date=date(2026, 3, 2),
+        symbol="sh600000",
+        side=Side.BUY,
+        qty=1000,
+        reason="MFE_MAE_RESTORE_CANDIDATE",
+        reason_code="MFE_MAE_RESTORE_CANDIDATE",
+        meta={
+            "owner_system": "cn_stock_trend_alpha_core",
+            "restore_candidate": True,
+            "target_weight_basis": "delta_restore_gap",
+            "target_weight": 0.5,
+            "formal_reason_codes": ["MFE_MAE_RESTORE_CANDIDATE", "BREAKOUT_HIGH"],
+        },
+    )
+    plan = build_candidate_plan(
+        positions={"sh600000": 300},
+        cash_available=10_000.0,
+        nav_close=10_000.0,
+        max_positions=1,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=[signal],
+        next_open={"sh600000": 10.0},
+        decision_date=date(2026, 3, 2),
+    )
+
+    assert plan["reject_reason_counts"] == {}
+    assert len(plan["planned_items"]) == 1
+    assert plan["planned_items"][0]["candidate_qty"] == 200
+
+    debug_plan: dict[str, object] = {}
+    orders = build_execution_orders_from_candidate_plan(
+        positions={"sh600000": 300},
+        cash_available=10_000.0,
+        nav_close=10_000.0,
+        max_positions=1,
+        lot_size=100,
+        sell_signals=[],
+        planned_items=list(plan["planned_items"]),
+        next_open={"sh600000": 10.0},
+        decision_date=date(2026, 3, 2),
+        debug_plan=debug_plan,
+    )
+
+    assert len(orders) == 1
+    assert orders[0].symbol == "sh600000"
+    assert orders[0].qty == 200
+    assert orders[0].reason_code == "MFE_MAE_RESTORE_CANDIDATE"
+    assert orders[0].meta["formal_reason_codes"] == ["MFE_MAE_RESTORE_CANDIDATE", "BREAKOUT_HIGH"]
+    assert debug_plan["selected_count"] == 0
+
+
+def test_high_chase_a2_size_down_halves_stock_buy_candidate() -> None:
+    signal = Signal(
+        signal_date=date(2026, 3, 2),
+        symbol="sh600000",
+        side=Side.BUY,
+        qty=1000,
+        reason="BREAKOUT_HIGH",
+        reason_code="BREAKOUT_HIGH",
+        meta={
+            "owner_system": "cn_stock_trend_alpha_core",
+            "close": 10.0,
+            "slow_ma": 8.0,
+            "pre_ret_20d": 0.55,
+            "avg_turnover_rate_f_20d": 8.2,
+            "volume_20d_vs_60d": 1.6,
+        },
+    )
+
+    plan = build_candidate_plan(
+        positions={},
+        cash_available=100_000.0,
+        nav_close=100_000.0,
+        max_positions=10,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=[signal],
+        next_open={"sh600000": 10.0},
+        decision_date=date(2026, 3, 2),
+        base_order_value=10_000.0,
+        high_chase_a2_size_down_enabled=True,
+        high_chase_a2_size_down_scale=0.5,
+    )
+
+    assert len(plan["planned_items"]) == 1
+    item = plan["planned_items"][0]
+    assert item["high_chase_a2_size_down_triggered"] is True
+    assert item["order_value_scale"] == pytest.approx(0.5)
+    assert item["candidate_qty"] == 500
+    assert plan["debug_plan"]["high_chase_a2_trigger_count"] == 1
+    assert plan["debug_plan"]["high_chase_a2_selected_trigger_count"] == 1
+
+    orders = build_execution_orders_from_candidate_plan(
+        positions={},
+        cash_available=100_000.0,
+        nav_close=100_000.0,
+        max_positions=10,
+        lot_size=100,
+        sell_signals=[],
+        planned_items=list(plan["planned_items"]),
+        next_open={"sh600000": 10.0},
+        decision_date=date(2026, 3, 2),
+        base_order_value=10_000.0,
+    )
+
+    assert len(orders) == 1
+    assert orders[0].qty == 500
+    assert orders[0].order_value_scale == pytest.approx(0.5)
+    assert orders[0].meta["high_chase_a2_size_down_triggered"] is True
+    assert orders[0].meta["high_chase_a2_applied_scale"] == pytest.approx(0.5)
+
+
+def test_high_chase_a2_size_down_default_off_preserves_candidate_size() -> None:
+    signal = Signal(
+        signal_date=date(2026, 3, 2),
+        symbol="sh600000",
+        side=Side.BUY,
+        qty=1000,
+        reason="BREAKOUT_HIGH",
+        reason_code="BREAKOUT_HIGH",
+        meta={
+            "owner_system": "cn_stock_trend_alpha_core",
+            "close": 10.0,
+            "slow_ma": 8.0,
+            "pre_ret_20d": 0.55,
+            "avg_turnover_rate_f_20d": 8.2,
+            "volume_20d_vs_60d": 1.6,
+        },
+    )
+
+    plan = build_candidate_plan(
+        positions={},
+        cash_available=100_000.0,
+        nav_close=100_000.0,
+        max_positions=10,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=[signal],
+        next_open={"sh600000": 10.0},
+        decision_date=date(2026, 3, 2),
+        base_order_value=10_000.0,
+    )
+
+    assert len(plan["planned_items"]) == 1
+    assert plan["planned_items"][0]["order_value_scale"] == pytest.approx(1.0)
+    assert plan["planned_items"][0]["candidate_qty"] == 1000
+    assert "high_chase_a2_size_down_triggered" not in signal.meta
+    assert plan["debug_plan"]["high_chase_a2_trigger_count"] == 0
+
+
+def test_hot_amount_turnover_size_down_applies_to_hot_stock_candidate_only() -> None:
+    signals = [
+        Signal(
+            signal_date=date(2026, 3, 2),
+            symbol="sh600000",
+            side=Side.BUY,
+            qty=1000,
+            reason="BREAKOUT_HIGH",
+            reason_code="BREAKOUT_HIGH",
+            meta={
+                "owner_system": "cn_stock_trend_alpha_core",
+                "close": 10.0,
+                "slow_ma": 8.0,
+                "amount20": 300.0,
+                "turnover_rate20": 12.0,
+            },
+        ),
+        Signal(
+            signal_date=date(2026, 3, 2),
+            symbol="sh600001",
+            side=Side.BUY,
+            qty=1000,
+            reason="BREAKOUT_HIGH",
+            reason_code="BREAKOUT_HIGH",
+            meta={
+                "owner_system": "cn_stock_trend_alpha_core",
+                "close": 10.0,
+                "slow_ma": 8.0,
+                "amount20": 200.0,
+                "turnover_rate20": 1.0,
+            },
+        ),
+        Signal(
+            signal_date=date(2026, 3, 2),
+            symbol="sh600002",
+            side=Side.BUY,
+            qty=1000,
+            reason="BREAKOUT_HIGH",
+            reason_code="BREAKOUT_HIGH",
+            meta={
+                "owner_system": "cn_stock_trend_alpha_core",
+                "close": 10.0,
+                "slow_ma": 8.0,
+                "amount20": 100.0,
+                "turnover_rate20": 2.0,
+            },
+        ),
+    ]
+
+    plan = build_candidate_plan(
+        positions={},
+        cash_available=100_000.0,
+        nav_close=100_000.0,
+        max_positions=10,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=signals,
+        next_open={"sh600000": 10.0, "sh600001": 10.0, "sh600002": 10.0},
+        decision_date=date(2026, 3, 2),
+        base_order_value=10_000.0,
+        hot_amount_turnover_size_down_enabled=True,
+        hot_amount_turnover_size_down_scale=0.8,
+        hot_amount_turnover_amount_pct_threshold=0.8,
+        hot_amount_turnover_turnover_pct_threshold=0.8,
+    )
+
+    planned_by_symbol = {str(item["symbol"]): item for item in plan["planned_items"]}
+    hot_item = planned_by_symbol["sh600000"]
+    assert hot_item["hot_amount_turnover_size_down_triggered"] is True
+    assert hot_item["hot_amount_turnover_amount20_pct"] == pytest.approx(1.0)
+    assert hot_item["hot_amount_turnover_turnover_rate20_pct"] == pytest.approx(1.0)
+    assert hot_item["order_value_scale"] == pytest.approx(0.8)
+    assert hot_item["candidate_qty"] == 800
+    assert planned_by_symbol["sh600001"]["hot_amount_turnover_size_down_triggered"] is False
+    assert planned_by_symbol["sh600002"]["hot_amount_turnover_size_down_triggered"] is False
+    assert plan["debug_plan"]["hot_amount_turnover_trigger_count"] == 1
+    assert plan["debug_plan"]["hot_amount_turnover_selected_trigger_count"] == 1
+
+    orders = build_execution_orders_from_candidate_plan(
+        positions={},
+        cash_available=100_000.0,
+        nav_close=100_000.0,
+        max_positions=10,
+        lot_size=100,
+        sell_signals=[],
+        planned_items=list(plan["planned_items"]),
+        next_open={"sh600000": 10.0, "sh600001": 10.0, "sh600002": 10.0},
+        decision_date=date(2026, 3, 2),
+        base_order_value=10_000.0,
+    )
+
+    order_by_symbol = {order.symbol: order for order in orders}
+    assert order_by_symbol["sh600000"].qty == 800
+    assert order_by_symbol["sh600000"].order_value_scale == pytest.approx(0.8)
+    assert order_by_symbol["sh600000"].meta["hot_amount_turnover_size_down_triggered"] is True
+
+
+def test_entry_risk_position_sizing_halves_stock_buy_candidate() -> None:
+    signal = Signal(
+        signal_date=date(2026, 3, 2),
+        symbol="sh600000",
+        side=Side.BUY,
+        qty=1000,
+        reason="BREAKOUT_HIGH",
+        reason_code="BREAKOUT_HIGH",
+        meta={
+            "owner_system": "cn_stock_trend_alpha_core",
+            "close": 10.0,
+            "slow_ma": 8.0,
+            "entry_risk_position_sizing_enabled": True,
+            "entry_risk_position_tier": "2_high",
+            "entry_risk_position_flag_count": 2,
+            "entry_risk_position_multiplier": 0.5,
+        },
+    )
+
+    plan = build_candidate_plan(
+        positions={},
+        cash_available=100_000.0,
+        nav_close=100_000.0,
+        max_positions=10,
+        lot_size=100,
+        sell_signals=[],
+        buy_signals=[signal],
+        next_open={"sh600000": 10.0},
+        decision_date=date(2026, 3, 2),
+        base_order_value=10_000.0,
+    )
+
+    assert len(plan["planned_items"]) == 1
+    item = plan["planned_items"][0]
+    assert item["entry_risk_position_sizing_applied"] is True
+    assert item["entry_risk_position_applied_scale"] == pytest.approx(0.5)
+    assert item["entry_risk_position_order_value_scale_before"] == pytest.approx(1.0)
+    assert item["entry_risk_position_order_value_scale_after"] == pytest.approx(0.5)
+    assert item["order_value_scale"] == pytest.approx(0.5)
+    assert item["candidate_qty"] == 500
+    assert plan["debug_plan"]["entry_risk_position_trigger_count"] == 1
+    assert plan["debug_plan"]["entry_risk_position_selected_trigger_count"] == 1
+
+    orders = build_execution_orders_from_candidate_plan(
+        positions={},
+        cash_available=100_000.0,
+        nav_close=100_000.0,
+        max_positions=10,
+        lot_size=100,
+        sell_signals=[],
+        planned_items=list(plan["planned_items"]),
+        next_open={"sh600000": 10.0},
+        decision_date=date(2026, 3, 2),
+        base_order_value=10_000.0,
+    )
+
+    assert len(orders) == 1
+    assert orders[0].qty == 500
+    assert orders[0].order_value_scale == pytest.approx(0.5)
+    assert orders[0].meta["entry_risk_position_tier"] == "2_high"
+    assert orders[0].meta["entry_risk_position_applied_scale"] == pytest.approx(0.5)
 
 
 def test_build_action_intent_payloads_nets_same_symbol_dual_side_to_single_delta() -> None:

@@ -1,0 +1,189 @@
+{
+  "round_id": "sr_20260511_b1_runtime_replacement_ab_v1",
+  "title": "B1 Runtime Replacement Control AB",
+  "status": "auditing",
+  "asset_scope": "cn_a_equity",
+  "study_id": "cn_stock_etf/cn_stock_etf_b1_runtime_replacement_ab_v1",
+  "baseline_id": "baseline_V10_1",
+  "primary_question": "Can runtime score-gap replacement improve the stock leg versus the V3 stock replay while preserving same NAV/account execution truth?",
+  "primary_variable": "B1_RUNTIME_REPLACE_CONTROL: sizing.rotation_replace_* only",
+  "tags": [
+    "V3",
+    "stock-leg",
+    "B1",
+    "runtime-ab",
+    "docker",
+    "replacement-control"
+  ],
+  "windows": [
+    "1626",
+    "1217",
+    "1226"
+  ],
+  "variants": [
+    "B0_V3_STOCK_REPLAY",
+    "B1_RUNTIME_REPLACE_CONTROL"
+  ],
+  "fixed_assumptions": [
+    "runtime source fixed at outputs/experiments/exp_20260510_033603951_8649/run_config.json",
+    "stock pool fixed at HS300_ZZ500 PIT",
+    "ranking, entry, exit, execution timing, costs, and ETF sleeve unchanged",
+    "B1 only changes sizing.rotation_replace_* fields",
+    "all acceptance runs executed inside Docker container backtest-v2-standalone",
+    "same-window B0 vs B1 is the decision evidence; baseline_V10_1 registry compare is secondary"
+  ],
+  "key_findings": [
+    "1626 main window is mixed: B1 CAGR -0.47pct versus B0, Sharpe +0.003, MaxDD improves 3.62pct, Calmar +0.066, trades +208.",
+    "1217 guardrail fails: B1 CAGR 1.72% versus B0 14.55%, Sharpe 0.188 versus 0.826, MaxDD worsens to -41.86%.",
+    "1226 full audit fails: B1 CAGR 8.29% versus B0 16.72%, Sharpe 0.452 versus 0.788, MaxDD worsens to -45.52%.",
+    "B1 reduces 1626 cash skip count from 7875 to 7509, but increases turnover from 0.0228 to 0.0284.",
+    "Replacement execution is not atomic enough: 1626 has 89 rotation sells but only 50 same-day paired candidate buys; 1226 has 185 rotation sells and 114 same-day paired buys.",
+    "Conclusion: reject this score-gap B1 control for promotion; do not extend it as-is into combo baseline."
+  ],
+  "next_actions": [
+    "Do not promote B1_RUNTIME_REPLACE_CONTROL.",
+    "Before another B1, add an atomic replacement contract: sell only if the replacement buy is executable in the same runtime pass, or cancel both.",
+    "For exact theme-protected B1, first add governed runtime inputs for stock theme tags, ETF theme proxy strength, protected holding tags, and replacement cap.",
+    "Retest on 1626 only after the atomic replacement contract is in place; do not rerun 1217/1226 until 1626 is no longer structurally flawed."
+  ],
+  "audit": {
+    "same_window_compare": true,
+    "docker_run_checked": true,
+    "config_truth_checked": true,
+    "nav_lineage_checked": true,
+    "runtime_config_json_used": true,
+    "precomputed_shadow_plan_used": false,
+    "single_variable_patch_checked": true,
+    "non_atomic_replacement_risk": true,
+    "three_window_complete": true,
+    "conclusion_registry_written": true
+  },
+  "decision": {
+    "status": "reject_b1_control",
+    "reason": "B1 control is a real Docker runtime AB, but it fails 1217 and 1226 and has sell-first replacement events that are not paired with same-day candidate buys."
+  },
+  "evidence": [
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_162834664_4e5c",
+      "study_id": "cn_stock_etf/cn_stock_etf_b1_runtime_replacement_ab_v1",
+      "window_key": "1626",
+      "variant_name": "B0_V3_STOCK_REPLAY",
+      "path": "outputs/experiments/exp_20260510_162834664_4e5c",
+      "note": "1626 B0 stock replay.",
+      "linked_at": ""
+    },
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_163126825_d48d",
+      "study_id": "cn_stock_etf/cn_stock_etf_b1_runtime_replacement_ab_v1",
+      "window_key": "1626",
+      "variant_name": "B1_RUNTIME_REPLACE_CONTROL",
+      "path": "outputs/experiments/exp_20260510_163126825_d48d",
+      "note": "1626 B1 runtime replacement control.",
+      "linked_at": ""
+    },
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_163609952_6986",
+      "study_id": "cn_stock_etf/cn_stock_etf_b1_runtime_replacement_ab_v1",
+      "window_key": "1217",
+      "variant_name": "B0_V3_STOCK_REPLAY",
+      "path": "outputs/experiments/exp_20260510_163609952_6986",
+      "note": "1217 B0 guardrail.",
+      "linked_at": ""
+    },
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_163707044_9429",
+      "study_id": "cn_stock_etf/cn_stock_etf_b1_runtime_replacement_ab_v1",
+      "window_key": "1217",
+      "variant_name": "B1_RUNTIME_REPLACE_CONTROL",
+      "path": "outputs/experiments/exp_20260510_163707044_9429",
+      "note": "1217 B1 guardrail.",
+      "linked_at": ""
+    },
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_163805532_ced4",
+      "study_id": "cn_stock_etf/cn_stock_etf_b1_runtime_replacement_ab_v1",
+      "window_key": "1226",
+      "variant_name": "B0_V3_STOCK_REPLAY",
+      "path": "outputs/experiments/exp_20260510_163805532_ced4",
+      "note": "1226 B0 full audit.",
+      "linked_at": ""
+    },
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_164138384_f994",
+      "study_id": "cn_stock_etf/cn_stock_etf_b1_runtime_replacement_ab_v1",
+      "window_key": "1226",
+      "variant_name": "B1_RUNTIME_REPLACE_CONTROL",
+      "path": "outputs/experiments/exp_20260510_164138384_f994",
+      "note": "1226 B1 full audit.",
+      "linked_at": ""
+    },
+    {
+      "kind": "study_output",
+      "exp_id": "",
+      "study_id": "cn_stock_etf/cn_stock_etf_b1_runtime_replacement_ab_v1",
+      "window_key": "all",
+      "variant_name": "AB_SUMMARY",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_b1_runtime_replacement_ab_v1/human/ab_summary.md",
+      "note": "Same-window AB matrix and conclusion.",
+      "linked_at": ""
+    }
+  ],
+  "notes": [
+    {
+      "note_id": "note_20260511_b1_control_rejected",
+      "kind": "decision",
+      "body": "Docker AB completed on 1626, 1217, and 1226. B1 control is rejected for promotion because the full audit is worse and replacement execution is not atomic enough.",
+      "created_at": "2026-05-11T00:50:00+08:00"
+    }
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T00:46:57+08:00",
+  "updated_at": "2026-05-11T00:48:59+08:00",
+  "auto_summary": {
+    "schema_version": "openclaw_study_auto_summary@1",
+    "generated_at": "2026-05-11T00:48:59+08:00",
+    "headline": "B1 Runtime Replacement Control AB: reject for promotion",
+    "conclusion_draft": "B1 is a real Docker runtime AB, but it fails the 1217 guardrail and 1226 full audit. It also exposes non-atomic replacement behavior, so it should not be promoted or merged into the combo baseline.",
+    "reliability": "reviewable",
+    "facts": [
+      "Docker runs completed for 1626, 1217, and 1226.",
+      "B1 only changes sizing.rotation_replace_* fields via runtime_config_json.",
+      "1626 is mixed: drawdown and Calmar improve, but CAGR falls and turnover rises.",
+      "1217 and 1226 are both worse than same-window B0.",
+      "Replacement execution is not atomic enough: many rotation sells are not paired with same-day candidate buys."
+    ],
+    "risks": [
+      "Current runtime replacement may sell first without guaranteed same-day replacement buy.",
+      "Exact theme-protected B1 still needs governed runtime theme inputs before implementation."
+    ],
+    "next_actions": [
+      "Do not promote B1_RUNTIME_REPLACE_CONTROL.",
+      "Before another B1, add an atomic replacement contract: sell only if the replacement buy is executable in the same runtime pass, or cancel both.",
+      "For exact theme-protected B1, first add governed runtime inputs for stock theme tags, ETF theme proxy strength, protected holding tags, and replacement cap.",
+      "Retest on 1626 only after the atomic replacement contract is in place; do not rerun 1217/1226 until 1626 is no longer structurally flawed."
+    ],
+    "evidence_counts": {
+      "linked": 7,
+      "matched_conclusions": 6
+    },
+    "window_coverage": [
+      "2016-2026",
+      "2012-2017",
+      "2012-2026"
+    ],
+    "verdict_counts": {
+      "mixed": 1,
+      "reject": 2
+    },
+    "gate_status_counts": {
+      "PASS": 6
+    }
+  },
+  "reliability": "reviewable"
+}

@@ -1,0 +1,265 @@
+{
+  "round_id": "sr_20260510_hs300_zz500_csi1000_pit_pool_expansion",
+  "title": "HS300 + ZZ500 + CSI1000 PIT 股票池扩展",
+  "status": "rejected_main_window",
+  "asset_scope": "cn_a_equity",
+  "study_id": "v10/hs300_zz500_csi1000_pit_pool_expansion_v1",
+  "baseline_id": "baseline_V10_1",
+  "primary_question": "在不改变排序因子、择时、退出、组合构建和 ETF 腿的前提下，把股票池从 HS300+ZZ500 扩展到 HS300+ZZ500+CSI1000，是否能改善 A 股个股腿表现，并且保持 PIT 可审计？",
+  "primary_variable": "stock universe: HS300_ZZ500 -> HS300_ZZ500_CSI1000, PIT_DYNAMIC only",
+  "tags": [
+    "stock-pool",
+    "CSI1000",
+    "PIT",
+    "universe-expansion",
+    "stock-only",
+    "research-only",
+    "runtime-resolved",
+    "main-window-rejected"
+  ],
+  "windows": [
+    "1626",
+    "1217",
+    "1226"
+  ],
+  "variants": [
+    "B0_HS300_ZZ500",
+    "A1_HS300_ZZ500_CSI1000"
+  ],
+  "fixed_assumptions": [
+    "single primary variable is stock pool expansion only",
+    "baseline variant keeps HS300_ZZ500 with PIT_DYNAMIC membership",
+    "candidate variant uses HS300_ZZ500_CSI1000 with PIT_DYNAMIC membership",
+    "no ranking factor, timing, fill rule, exit rule, risk budget, ETF leg, or portfolio construction change",
+    "stock-only research first; do not combine into stock+ETF portfolio until stock leg is auditable",
+    "CSI1000 provider floor and refresh coverage must be exposed before any performance conclusion"
+  ],
+  "key_findings": [
+    "OpenSpec、universe resolver、lineage、data bundle builder、study yaml 和生成脚本已经落地；Docker dry-run 已确认 A1 payload 使用 HS300_ZZ500_CSI1000 + PIT_DYNAMIC。",
+    "静态审计显示 CSI1000 PIT provider floor 为 2015-07-31；因此 2012-2017 与 2012-2026 的 CSI1000 段必须标记为 partial provider floor，不能当作完整 2012 起点 CSI1000 PIT。",
+    "1626 主窗口静态池规模：CSI800 1491 只，CSI1000 2632 只，union 3318 只，overlap 805 只，CSI1000 新增 1827 只。",
+    "1626 OHLCV 覆盖：union 3318 只中 3316 只有行情，2 只缺行情；窗口内 OHLCV 行数约 704.4 万，missing close 为 0。",
+    "B0_HS300_ZZ500 在 1626 已跑通：exp_20260510_045702549_01ea，CAGR 14.31%，Sharpe 0.663，MaxDD -35.42%，Calmar 0.404，trades 750。",
+    "A1_HS300_ZZ500_CSI1000 在 1626 全量运行被 OOM/exit 137 中断，只产出 run_config.json，没有 perf/run_meta；当前不能形成扩池收益结论。",
+    "按 1-4 顺序完成算法优化验收：PIT interval 行级裁剪因 B0 parity 漂移被否决并关闭；top-k partial selection 与跳过未使用昂贵评分矩阵通过 B0 parity，B0 总耗时从 199.967s 降至 118.227s。",
+    "安全等价优化后 A1 1626 仍 OOM/exit 137，说明阻塞点已经从普通排序/未使用评分转向宽股票池 dense matrix / simulation 容量问题。",
+    "新增 active-set sparse scoring、失败前 checkpoint profile，并跳过未启用的 pullback 候选矩阵后，B0 1626 parity 继续完全一致：exp_20260510_063251764_5c36，CAGR 14.31%，Sharpe 0.663，MaxDD -35.42%，trades 750。",
+    "A1_HS300_ZZ500_CSI1000 在 1626 已跑通：exp_20260510_063616187_0245，CAGR -1.64%，Sharpe 0.073，MaxDD -56.95%，Calmar -0.029，trades 699；同窗明显弱于 B0。",
+    "A1 与 B0 的 effective_execution_start_date 都是 2016-07-08，主窗口同窗比较有效；但 CSI1000 membership_data_quality 仍为 approximate，provider floor 为 2015-07-31，跨 2012 窗口仍需 partial 标记。"
+  ],
+  "next_actions": [
+    "不建议按当前口径继续推进 HS300+ZZ500+CSI1000 直接扩池，也不升级 baseline，不接入组合腿。",
+    "下一阶段如果继续研究个股腿，应先做扩池负贡献归因：新增 CSI1000 标的成交、行业、市值/流动性、入选排名与亏损集中分析。",
+    "如需继续三窗口，只能作为失败归因审计，不作为候选升级路径；1217/1226 必须继续标记 CSI1000 provider floor partial。"
+  ],
+  "audit": {
+    "same_window_compare": true,
+    "docker_run_checked": true,
+    "config_truth_checked": true,
+    "nav_lineage_checked": true,
+    "pit_lineage_checked": true,
+    "static_audit_checked": true,
+    "runtime_capacity_checked": true
+  },
+  "decision": {
+    "status": "rejected_main_window",
+    "reason": "运行阻塞已经解除，A1 主窗口已产生可审计 perf；同窗比较显示 A1 CAGR -1.64%、Sharpe 0.073、MaxDD -56.95%，显著弱于 B0 CAGR 14.31%、Sharpe 0.663、MaxDD -35.42%。因此当前直接扩入 CSI1000 的股票池方案不建议推进。"
+  },
+  "evidence": [
+    {
+      "kind": "static_audit",
+      "exp_id": "",
+      "study_id": "v10/hs300_zz500_csi1000_pit_pool_expansion_v1",
+      "window_key": "all",
+      "variant_name": "HS300_ZZ500_CSI1000",
+      "path": "outputs/studies/v10/hs300_zz500_csi1000_pit_pool_expansion_v1/static_audit.json",
+      "note": "PIT index history, provider floor, symbol counts, OHLCV coverage, ST/delist/listing and industry coverage audit.",
+      "linked_at": "2026-05-10T13:35:00+08:00"
+    },
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_045702549_01ea",
+      "study_id": "v10/hs300_zz500_csi1000_pit_pool_expansion_v1",
+      "window_key": "1626",
+      "variant_name": "B0_HS300_ZZ500",
+      "path": "outputs/experiments/exp_20260510_045702549_01ea",
+      "note": "Successful baseline stock-only run. CAGR 14.31%, Sharpe 0.663, MaxDD -35.42%, Calmar 0.404.",
+      "linked_at": "2026-05-10T13:35:00+08:00"
+    },
+    {
+      "kind": "failed_experiment",
+      "exp_id": "exp_20260510_051114631_7055",
+      "study_id": "v10/hs300_zz500_csi1000_pit_pool_expansion_v1",
+      "window_key": "1626",
+      "variant_name": "A1_HS300_ZZ500_CSI1000",
+      "path": "outputs/experiments/exp_20260510_051114631_7055",
+      "note": "Docker run exited 137 with OOMKilled=true; only run_config.json exists, no perf.json or run_meta.json.",
+      "linked_at": "2026-05-10T13:35:00+08:00",
+      "log_path": "outputs/logs/hs300_zz500_csi1000_pit_pool_1626_A1_20260510_131110.log"
+    },
+    {
+      "kind": "runtime_optimization_parity",
+      "exp_id": "exp_20260510_054904100_3634",
+      "study_id": "v10/hs300_zz500_csi1000_pit_pool_expansion_v1",
+      "window_key": "1626",
+      "variant_name": "B0_HS300_ZZ500",
+      "path": "outputs/experiments/exp_20260510_054904100_3634",
+      "note": "Safe optimizations accepted for B0 parity: CAGR/Sharpe/MaxDD/Calmar/trades/turnover unchanged versus exp_20260510_045702549_01ea; total runtime improved from 199.967s to 118.227s.",
+      "linked_at": "2026-05-10T13:59:38+08:00",
+      "log_path": "outputs/logs/wide_pit_runtime_B0_1626_no_pushdown_20260510_134900.log"
+    },
+    {
+      "kind": "failed_experiment",
+      "exp_id": "exp_20260510_055220963_7bfd",
+      "study_id": "v10/hs300_zz500_csi1000_pit_pool_expansion_v1",
+      "window_key": "1626",
+      "variant_name": "A1_HS300_ZZ500_CSI1000",
+      "path": "outputs/experiments/exp_20260510_055220963_7bfd",
+      "note": "A1 was rerun after safe B0-parity optimizations and still exited 137/OOM before perf, run_meta, or run_profile were produced.",
+      "linked_at": "2026-05-10T13:59:38+08:00",
+      "log_path": "outputs/logs/wide_pit_runtime_A1_1626_safe_opt_20260510_135217.log"
+    },
+    {
+      "kind": "runtime_optimization_parity",
+      "exp_id": "exp_20260510_063251764_5c36",
+      "study_id": "v10/hs300_zz500_csi1000_pit_pool_expansion_v1",
+      "window_key": "1626",
+      "variant_name": "B0_HS300_ZZ500",
+      "path": "outputs/experiments/exp_20260510_063251764_5c36",
+      "note": "B0 parity after active-set sparse scoring and skip-pullback optimization. Metrics unchanged versus exp_20260510_054904100_3634; total runtime 132.58s, provider precompute 10.90s.",
+      "linked_at": "2026-05-10T14:45:00+08:00",
+      "log_path": "outputs/logs/wide_pit_runtime_B0_1626_active_sparse_skip_pullback_20260510_143247.log"
+    },
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_063616187_0245",
+      "study_id": "v10/hs300_zz500_csi1000_pit_pool_expansion_v1",
+      "window_key": "1626",
+      "variant_name": "A1_HS300_ZZ500_CSI1000",
+      "path": "outputs/experiments/exp_20260510_063616187_0245",
+      "note": "A1 main-window run completed after runtime optimization. Same effective execution start as B0: 2016-07-08. CAGR -1.64%, Sharpe 0.073, MaxDD -56.95%, Calmar -0.029.",
+      "linked_at": "2026-05-10T14:45:00+08:00",
+      "log_path": "outputs/logs/wide_pit_runtime_A1_1626_active_sparse_skip_pullback_20260510_143611.log"
+    }
+  ],
+  "notes": [
+    {
+      "note_id": "note_20260510_static_audit",
+      "kind": "audit",
+      "body": "CSI1000 000852.SH has 3129 membership rows, 2690 distinct symbols, provider floor 2015-07-31, source tushare_csi1000_calendar, calendar version provisional-20260311-exact1000. CSI800 000906.SH has 5213 rows and 1996 distinct symbols.",
+      "created_at": "2026-05-10T13:35:00+08:00"
+    },
+    {
+      "note_id": "note_20260510_runtime_blocker",
+      "kind": "runtime",
+      "body": "B0 1626 profile: total 199.97s, symbols 1491, rows 6550634, data_load 79.36s, simulation 118.81s. A1 1626 exceeded container memory and was OOM killed before metrics.",
+      "created_at": "2026-05-10T13:35:00+08:00"
+    },
+    {
+      "note_id": "note_20260510_runtime_optimization_1_to_4",
+      "kind": "runtime_optimization",
+      "body": "Step 1 PIT interval row pushdown was rejected because B0 parity drifted. Steps 2 and 3 were accepted: stable top-k and skipping unused expensive scoring kept B0 metrics unchanged while reducing total wall time from 199.967s to 118.227s. Step 4 streaming rolling state remains a parity-gated helper, not a formal path replacement. A1 still OOM after safe optimizations.",
+      "created_at": "2026-05-10T13:59:38+08:00"
+    },
+    {
+      "note_id": "note_20260510_active_sparse_result",
+      "kind": "result",
+      "body": "Active-set sparse scoring plus skip unused pullback matrices resolved the A1 runtime blocker. B0 parity remained exact. A1 1626 completed but materially underperformed B0: CAGR -1.64% vs 14.31%, Sharpe 0.073 vs 0.663, MaxDD -56.95% vs -35.42%. Current CSI1000 direct pool expansion is rejected at main-window stage.",
+      "created_at": "2026-05-10T14:45:00+08:00"
+    }
+  ],
+  "auto_summary": {
+    "schema_version": "openclaw_study_auto_summary@1",
+    "generated_at": "2026-05-10T14:45:00+08:00",
+    "headline": "HS300 + ZZ500 + CSI1000 PIT 股票池扩展：主变量=stock universe: HS300_ZZ500 -> HS300_ZZ500_CSI1000",
+    "conclusion_draft": "运行阻塞已解除，A1 主窗口已完成同窗对比，但直接扩入 CSI1000 后收益和风险显著恶化；当前结论是不建议推进该扩池方案，不升级 baseline，不接入组合腿。",
+    "reliability": "medium",
+    "facts": [
+      "已关联 7 条证据。",
+      "B0 主窗口已经产生可审计 perf。",
+      "A1 主窗口已经产生可审计 perf。",
+      "CSI1000 provider floor 为 2015-07-31。",
+      "1626 union 股票池为 3318 只，较 B0 引入 1827 只 CSI1000 新增标的。",
+      "安全等价优化已通过 B0 parity，B0 总耗时从 199.967s 降至 118.227s。",
+      "PIT interval 行级裁剪未通过 B0 parity，已关闭。",
+      "Active-set sparse scoring 与跳过未启用 pullback 矩阵后，A1 1626 跑通。",
+      "A1 1626：CAGR -1.64%，Sharpe 0.073，MaxDD -56.95%，trades 699。"
+    ],
+    "risks": [
+      "主窗口同窗已经失败，不建议为了扩池继续直接跑升级链路。",
+      "CSI1000 新增标的明显拉低收益并放大回撤，需先做负贡献归因。",
+      "不能接受 naive PIT row pruning；它会破坏当前口径下的持仓估值或指标 warmup 语义。",
+      "1217/1226 涉及 CSI1000 2012-2015 provider floor 缺口，必须按 partial 处理。",
+      "宽股票池产物和内存规模可能污染后续全周期实验稳定性。"
+    ],
+    "next_actions": [
+      "停止将当前 A1 作为 baseline 候选。",
+      "如继续研究，先做新增 CSI1000 标的负贡献归因。",
+      "1217/1226 只作为失败归因审计，不作为升级路径。"
+    ],
+    "evidence_counts": {
+      "linked": 7,
+      "matched_conclusions": 0
+    },
+    "window_coverage": [
+      "2016-2026"
+    ],
+    "verdict_counts": {},
+    "metric_highlights": [
+      {
+          "exp_id": "exp_20260510_063251764_5c36",
+          "window_key": "1626",
+          "variant_name": "B0_HS300_ZZ500",
+        "cagr": {
+          "candidate": 0.143131,
+          "baseline": null,
+          "delta": null
+        },
+        "sharpe": {
+          "candidate": 0.6628,
+          "baseline": null,
+          "delta": null
+        },
+        "max_drawdown": {
+          "candidate": -0.354193,
+          "baseline": null,
+          "delta": null
+        },
+        "calmar": {
+          "candidate": 0.4041,
+          "baseline": null,
+          "delta": null
+        }
+      },
+      {
+        "exp_id": "exp_20260510_063616187_0245",
+        "window_key": "1626",
+        "variant_name": "A1_HS300_ZZ500_CSI1000",
+        "cagr": {
+          "candidate": -0.01642,
+          "baseline": 0.143131,
+          "delta": -0.159551
+        },
+        "sharpe": {
+          "candidate": 0.0727,
+          "baseline": 0.6628,
+          "delta": -0.5901
+        },
+        "max_drawdown": {
+          "candidate": -0.569479,
+          "baseline": -0.354193,
+          "delta": -0.215286
+        },
+        "calmar": {
+          "candidate": -0.0288,
+          "baseline": 0.4041,
+          "delta": -0.4329
+        }
+      }
+    ]
+  },
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-10T13:35:00+08:00",
+  "updated_at": "2026-05-10T14:45:00+08:00",
+  "reliability": "medium"
+}

@@ -43,6 +43,36 @@ def return_series(values: np.ndarray, window: int) -> np.ndarray:
     return out
 
 
+def rolling_log_trend_r2_matrix(values: np.ndarray, window: int) -> np.ndarray:
+    shape = values.shape
+    out = np.full(shape, np.nan, dtype=float)
+    w = int(window)
+    if w < 3 or shape[0] < w:
+        return out
+
+    safe_values = np.where(values > 1e-8, values, np.nan)
+    y = np.log(safe_values)
+    y2 = y * y
+    row_idx = np.arange(shape[0], dtype=float).reshape(-1, 1)
+    jy = y * row_idx
+
+    sum_y = pd.DataFrame(y).rolling(w, min_periods=w).sum().to_numpy(dtype=float)
+    sum_y2 = pd.DataFrame(y2).rolling(w, min_periods=w).sum().to_numpy(dtype=float)
+    sum_jy = pd.DataFrame(jy).rolling(w, min_periods=w).sum().to_numpy(dtype=float)
+
+    local_x_sum = float(w * (w - 1) / 2.0)
+    local_x2_sum = float(w * (w - 1) * (2 * w - 1) / 6.0)
+    ss_x = local_x2_sum - (local_x_sum * local_x_sum / float(w))
+    window_start = (np.arange(shape[0], dtype=float) - float(w - 1)).reshape(-1, 1)
+    sum_xy = sum_jy - window_start * sum_y
+    cov_xy = sum_xy - (local_x_sum * sum_y / float(w))
+    ss_y = sum_y2 - (sum_y * sum_y / float(w))
+
+    valid = np.isfinite(cov_xy) & np.isfinite(ss_y) & (ss_y > 1e-16) & (ss_x > 1e-16)
+    out[valid] = np.clip((cov_xy[valid] * cov_xy[valid]) / (ss_x * ss_y[valid]), 0.0, 1.0)
+    return out
+
+
 def row_rank_pct(values: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
     out = np.full(values.shape, np.nan, dtype=float)
     row_count = int(values.shape[0])
@@ -120,18 +150,24 @@ def build_industry_assignment_matrices(
     sector_data: dict[str, pd.DataFrame] | None,
     symbols: list[str],
     dates: np.ndarray,
+    need_name_matrix: bool = True,
+    need_index_code_matrix: bool = True,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
     if not symbols or len(dates) == 0:
         return None, None
     if not industry_map and (industry_history is None or industry_history.empty):
         return None, None
+    if not bool(need_name_matrix) and not bool(need_index_code_matrix):
+        return None, None
 
     row_count = int(len(dates))
     col_count = int(len(symbols))
-    name_matrix = np.empty((row_count, col_count), dtype=object)
-    name_matrix[:, :] = None
-    index_code_matrix = np.empty((row_count, col_count), dtype=object)
-    index_code_matrix[:, :] = None
+    name_matrix = np.empty((row_count, col_count), dtype=object) if bool(need_name_matrix) else None
+    if name_matrix is not None:
+        name_matrix[:, :] = None
+    index_code_matrix = np.empty((row_count, col_count), dtype=object) if bool(need_index_code_matrix) else None
+    if index_code_matrix is not None:
+        index_code_matrix[:, :] = None
 
     symbol_to_col = {str(sym).lower(): idx for idx, sym in enumerate(symbols)}
 
@@ -146,9 +182,10 @@ def build_industry_assignment_matrices(
             if col_idx is None or industry_name is None:
                 continue
             sector_name = str(industry_name)
-            name_matrix[:, col_idx] = sector_name
-            code = SW_L1_INDEX_MAP.get(sector_name)
-            if code is not None:
+            if name_matrix is not None:
+                name_matrix[:, col_idx] = sector_name
+            code = SW_L1_INDEX_MAP.get(sector_name) if index_code_matrix is not None else None
+            if code is not None and index_code_matrix is not None:
                 index_code_matrix[:, col_idx] = code
         return name_matrix, index_code_matrix
 
@@ -189,9 +226,14 @@ def build_industry_assignment_matrices(
             end_idx = int(date_index.searchsorted(end_ts, side="left")) if end_ts is not None else row_count
             if start_idx >= row_count or start_idx >= end_idx:
                 continue
-            name_matrix[start_idx:end_idx, col_idx] = str(getattr(row, "industry_l1"))
+            if name_matrix is not None:
+                name_matrix[start_idx:end_idx, col_idx] = str(getattr(row, "industry_l1"))
 
-            primary_code = resolve_sw_index_code_from_industry_code(getattr(row, "industry_l2", ""))
+            primary_code = (
+                resolve_sw_index_code_from_industry_code(getattr(row, "industry_l2", ""))
+                if index_code_matrix is not None
+                else None
+            )
             if primary_code is None:
                 continue
             primary_code = str(primary_code).upper()
@@ -199,15 +241,16 @@ def build_industry_assignment_matrices(
 
             if available_start_idx is None:
                 if prev_code is not None:
-                    index_code_matrix[start_idx:end_idx, col_idx] = prev_code
+                    if index_code_matrix is not None:
+                        index_code_matrix[start_idx:end_idx, col_idx] = prev_code
                 prev_code = primary_code
                 continue
 
             bridge_end_idx = min(end_idx, max(start_idx, int(available_start_idx)))
-            if bridge_end_idx > start_idx and prev_code is not None:
+            if bridge_end_idx > start_idx and prev_code is not None and index_code_matrix is not None:
                 index_code_matrix[start_idx:bridge_end_idx, col_idx] = prev_code
             fill_start_idx = max(start_idx, int(available_start_idx))
-            if fill_start_idx < end_idx:
+            if fill_start_idx < end_idx and index_code_matrix is not None:
                 index_code_matrix[fill_start_idx:end_idx, col_idx] = primary_code
             prev_code = primary_code
     return name_matrix, index_code_matrix
@@ -558,10 +601,15 @@ def _build_sector_feature_matrices(
     dates: np.ndarray,
     short_window: int,
     long_window: int,
+    need_short: bool = True,
+    need_long: bool = True,
+    need_trend: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    sector_ret_short = np.full((len(dates), len(symbols)), np.nan, dtype=float)
-    sector_ret_long = np.full((len(dates), len(symbols)), np.nan, dtype=float)
-    sector_trend = np.full((len(dates), len(symbols)), np.nan, dtype=float)
+    shape = (len(dates), len(symbols))
+    empty = np.array([], dtype=float)
+    sector_ret_short = np.full(shape, np.nan, dtype=float) if bool(need_short) else empty
+    sector_ret_long = np.full(shape, np.nan, dtype=float) if bool(need_long) else empty
+    sector_trend = np.full(shape, np.nan, dtype=float) if bool(need_trend) else empty
     if not sector_data or not symbols or (
         industry_name_matrix is None and industry_index_code_matrix is None and not industry_map
     ):
@@ -596,15 +644,18 @@ def _build_sector_feature_matrices(
             except Exception:
                 continue
 
-    sector_ret_short_raw = _return_matrix(sector_close, int(short_window))
-    sector_ret_long_raw = _return_matrix(sector_close, int(long_window))
-    sector_ma20 = pd.DataFrame(sector_close).rolling(20, min_periods=20).mean().to_numpy(dtype=float)
-    sector_ma60 = pd.DataFrame(sector_close).rolling(60, min_periods=60).mean().to_numpy(dtype=float)
-    sector_trend_raw = np.where(
-        (~np.isnan(sector_close)) & (~np.isnan(sector_ma20)) & (~np.isnan(sector_ma60)),
-        ((sector_close > sector_ma20).astype(float) + (sector_ma20 > sector_ma60).astype(float)) / 2.0,
-        np.nan,
-    )
+    sector_ret_short_raw = _return_matrix(sector_close, int(short_window)) if bool(need_short) else empty
+    sector_ret_long_raw = _return_matrix(sector_close, int(long_window)) if bool(need_long) else empty
+    if bool(need_trend):
+        sector_ma20 = pd.DataFrame(sector_close).rolling(20, min_periods=20).mean().to_numpy(dtype=float)
+        sector_ma60 = pd.DataFrame(sector_close).rolling(60, min_periods=60).mean().to_numpy(dtype=float)
+        sector_trend_raw = np.where(
+            (~np.isnan(sector_close)) & (~np.isnan(sector_ma20)) & (~np.isnan(sector_ma60)),
+            ((sector_close > sector_ma20).astype(float) + (sector_ma20 > sector_ma60).astype(float)) / 2.0,
+            np.nan,
+        )
+    else:
+        sector_trend_raw = empty
 
     if industry_index_code_matrix is not None:
         sector_col_matrix = np.full(industry_index_code_matrix.shape, -1, dtype=int)
@@ -619,9 +670,12 @@ def _build_sector_feature_matrices(
         if np.any(valid):
             row_idx, sym_idx = np.where(valid)
             sector_cols = sector_col_matrix[valid]
-            sector_ret_short[valid] = sector_ret_short_raw[row_idx, sector_cols]
-            sector_ret_long[valid] = sector_ret_long_raw[row_idx, sector_cols]
-            sector_trend[valid] = sector_trend_raw[row_idx, sector_cols]
+            if bool(need_short):
+                sector_ret_short[valid] = sector_ret_short_raw[row_idx, sector_cols]
+            if bool(need_long):
+                sector_ret_long[valid] = sector_ret_long_raw[row_idx, sector_cols]
+            if bool(need_trend):
+                sector_trend[valid] = sector_trend_raw[row_idx, sector_cols]
         return sector_ret_short, sector_ret_long, sector_trend
 
     if industry_name_matrix is not None:
@@ -637,9 +691,12 @@ def _build_sector_feature_matrices(
         if np.any(valid):
             row_idx, sym_idx = np.where(valid)
             sector_cols = sector_col_matrix[valid]
-            sector_ret_short[valid] = sector_ret_short_raw[row_idx, sector_cols]
-            sector_ret_long[valid] = sector_ret_long_raw[row_idx, sector_cols]
-            sector_trend[valid] = sector_trend_raw[row_idx, sector_cols]
+            if bool(need_short):
+                sector_ret_short[valid] = sector_ret_short_raw[row_idx, sector_cols]
+            if bool(need_long):
+                sector_ret_long[valid] = sector_ret_long_raw[row_idx, sector_cols]
+            if bool(need_trend):
+                sector_trend[valid] = sector_trend_raw[row_idx, sector_cols]
         return sector_ret_short, sector_ret_long, sector_trend
 
     sym_to_sector_col: dict[str, int] = {}
@@ -656,9 +713,12 @@ def _build_sector_feature_matrices(
         sector_col = sym_to_sector_col.get(str(sym))
         if sector_col is None:
             continue
-        sector_ret_short[:, sym_idx] = sector_ret_short_raw[:, sector_col]
-        sector_ret_long[:, sym_idx] = sector_ret_long_raw[:, sector_col]
-        sector_trend[:, sym_idx] = sector_trend_raw[:, sector_col]
+        if bool(need_short):
+            sector_ret_short[:, sym_idx] = sector_ret_short_raw[:, sector_col]
+        if bool(need_long):
+            sector_ret_long[:, sym_idx] = sector_ret_long_raw[:, sector_col]
+        if bool(need_trend):
+            sector_trend[:, sym_idx] = sector_trend_raw[:, sector_col]
     return sector_ret_short, sector_ret_long, sector_trend
 
 
@@ -783,38 +843,76 @@ def _compute_residual_ranking_matrices(
     sector_strength_window_short: int,
     sector_strength_window_long: int,
     industry_relative_mode: str = "sector_proxy",
+    materialize_residual_score: bool = True,
+    materialize_diagnostics: bool = True,
+    need_sector_quality_components: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     stock_ret = _return_matrix(close, int(residual_window))
     bench_ret = _return_series(bench_close, int(residual_window))
-    bench_ret_m = np.repeat(bench_ret.reshape(-1, 1), close.shape[1], axis=1)
+    empty = np.array([], dtype=float)
+    industry_mode = str(industry_relative_mode or "sector_proxy").strip().lower()
+    needs_benchmark_component = (
+        float(residual_benchmark_weight) > 1e-12
+        or bool(materialize_diagnostics)
+        or industry_mode == "industry_rank_pct"
+    )
+    needs_sector_features = (
+        industry_mode == "sector_proxy"
+        or bool(need_sector_quality_components)
+        or bool(materialize_diagnostics)
+    )
+    needs_industry_median = industry_mode == "industry_excess_median" or bool(materialize_diagnostics)
+    needs_industry_name_matrix = (
+        industry_mode in {"industry_rank_pct", "industry_excess_median"}
+        or bool(materialize_diagnostics)
+        or not needs_sector_features
+    )
+    needs_industry_index_matrix = bool(needs_sector_features)
     industry_name_matrix, industry_index_code_matrix = _build_industry_assignment_matrices(
         industry_map=industry_map if isinstance(industry_map, dict) else None,
         industry_history=industry_history if isinstance(industry_history, pd.DataFrame) else None,
         sector_data=sector_data if isinstance(sector_data, dict) else None,
         symbols=symbols,
         dates=dates,
+        need_name_matrix=bool(needs_industry_name_matrix),
+        need_index_code_matrix=bool(needs_industry_index_matrix),
     )
-    sector_ret_short, sector_ret_long, sector_trend = _build_sector_feature_matrices(
-        sector_data=sector_data,
-        industry_map=industry_map,
-        industry_name_matrix=industry_name_matrix,
-        industry_index_code_matrix=industry_index_code_matrix,
-        symbols=symbols,
-        dates=dates,
-        short_window=int(sector_strength_window_short),
-        long_window=int(max(sector_strength_window_long, residual_window)),
+    if needs_sector_features:
+        sector_ret_short, sector_ret_long, sector_trend = _build_sector_feature_matrices(
+            sector_data=sector_data,
+            industry_map=industry_map,
+            industry_name_matrix=industry_name_matrix,
+            industry_index_code_matrix=industry_index_code_matrix,
+            symbols=symbols,
+            dates=dates,
+            short_window=int(sector_strength_window_short),
+            long_window=int(max(sector_strength_window_long, residual_window)),
+            need_short=bool(need_sector_quality_components or materialize_diagnostics),
+            need_long=True,
+            need_trend=bool(need_sector_quality_components or materialize_diagnostics),
+        )
+    else:
+        sector_ret_short = empty
+        sector_ret_long = empty
+        sector_trend = empty
+    residual_vs_bench = stock_ret - bench_ret.reshape(-1, 1) if needs_benchmark_component else empty
+    sector_proxy_residual = stock_ret - sector_ret_long if sector_ret_long.size else empty
+    industry_excess_median = (
+        _compute_industry_excess_to_median_matrix(
+            stock_ret=stock_ret,
+            tradable=tradable,
+            industry_map=industry_map if isinstance(industry_map, dict) else None,
+            industry_name_matrix=industry_name_matrix,
+            symbols=symbols,
+        )
+        if needs_industry_median
+        else empty
     )
-    residual_vs_bench = stock_ret - bench_ret_m
-    sector_proxy_residual = stock_ret - sector_ret_long
-    industry_excess_median = _compute_industry_excess_to_median_matrix(
-        stock_ret=stock_ret,
-        tradable=tradable,
-        industry_map=industry_map if isinstance(industry_map, dict) else None,
-        industry_name_matrix=industry_name_matrix,
-        symbols=symbols,
+    sector_beta_tailwind = (
+        sector_ret_long - bench_ret.reshape(-1, 1)
+        if bool(materialize_diagnostics) and sector_ret_long.size
+        else empty
     )
-    sector_beta_tailwind = sector_ret_long - bench_ret_m
-    industry_mode = str(industry_relative_mode or "sector_proxy").strip().lower()
     if industry_mode == "industry_rank_pct":
         strict_industry_rank_pct = _compute_industry_rank_pct_matrix(
             stock_ret=stock_ret,
@@ -866,6 +964,8 @@ def _compute_residual_ranking_matrices(
             shape=close.shape,
         )
         residual_score = _row_rank_pct(residual_raw, tradable)
+    if not bool(materialize_residual_score):
+        residual_score = empty
     return (
         residual_raw,
         residual_score,

@@ -1,0 +1,160 @@
+{
+  "round_id": "sr_20260511_theme_health_shadow_v1",
+  "title": "C1 ??????? shadow",
+  "status": "audited",
+  "study_id": "cn_stock_etf/cn_stock_etf_theme_health_shadow_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "??????????? risk-off ????????????",
+  "primary_variable": "theme_health_label from proxy trend, proxy rank, candidate pressure, and held exposure pressure",
+  "fixed_assumptions": [
+    "CN_STOCK_ETF_COMBO_BASELINE_V3 ??",
+    "??? V3 ??/??????",
+    "??? NAV?????????? runtime"
+  ],
+  "windows": [
+    "1626",
+    "2020_2026",
+    "2024_2026",
+    "2025_2026",
+    "2025_12_2026_04",
+    "2026_03"
+  ],
+  "variants": [
+    "C1_THEME_HEALTH_SHADOW"
+  ],
+  "evidence": [
+    {
+      "kind": "study",
+      "exp_id": "",
+      "study_id": "cn_stock_etf/cn_stock_etf_theme_health_shadow_v1",
+      "window_key": "1626",
+      "variant_name": "C1_THEME_HEALTH_SHADOW",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_theme_health_shadow_v1/1626/C1_THEME_HEALTH_SHADOW/machine/summary.json",
+      "note": "C1 theme health shadow summary; research-only, no NAV backtest.",
+      "linked_at": ""
+    },
+    {
+      "kind": "study",
+      "exp_id": "",
+      "study_id": "cn_stock_etf/cn_stock_etf_theme_health_shadow_v1",
+      "window_key": "2020_2026",
+      "variant_name": "C1_THEME_HEALTH_SHADOW",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_theme_health_shadow_v1/2020_2026/C1_THEME_HEALTH_SHADOW/machine/summary.json",
+      "note": "C1 theme health shadow summary; research-only, no NAV backtest.",
+      "linked_at": ""
+    },
+    {
+      "kind": "study",
+      "exp_id": "",
+      "study_id": "cn_stock_etf/cn_stock_etf_theme_health_shadow_v1",
+      "window_key": "2024_2026",
+      "variant_name": "C1_THEME_HEALTH_SHADOW",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_theme_health_shadow_v1/2024_2026/C1_THEME_HEALTH_SHADOW/machine/summary.json",
+      "note": "C1 theme health shadow summary; research-only, no NAV backtest.",
+      "linked_at": ""
+    },
+    {
+      "kind": "study",
+      "exp_id": "",
+      "study_id": "cn_stock_etf/cn_stock_etf_theme_health_shadow_v1",
+      "window_key": "2025_2026",
+      "variant_name": "C1_THEME_HEALTH_SHADOW",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_theme_health_shadow_v1/2025_2026/C1_THEME_HEALTH_SHADOW/machine/summary.json",
+      "note": "C1 theme health shadow summary; research-only, no NAV backtest.",
+      "linked_at": ""
+    },
+    {
+      "kind": "study",
+      "exp_id": "",
+      "study_id": "cn_stock_etf/cn_stock_etf_theme_health_shadow_v1",
+      "window_key": "2025_12_2026_04",
+      "variant_name": "C1_THEME_HEALTH_SHADOW",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_theme_health_shadow_v1/2025_12_2026_04/C1_THEME_HEALTH_SHADOW/machine/summary.json",
+      "note": "C1 theme health shadow summary; research-only, no NAV backtest.",
+      "linked_at": ""
+    },
+    {
+      "kind": "study",
+      "exp_id": "",
+      "study_id": "cn_stock_etf/cn_stock_etf_theme_health_shadow_v1",
+      "window_key": "2026_03",
+      "variant_name": "C1_THEME_HEALTH_SHADOW",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_theme_health_shadow_v1/2026_03/C1_THEME_HEALTH_SHADOW/machine/summary.json",
+      "note": "C1 theme health shadow summary; research-only, no NAV backtest.",
+      "linked_at": ""
+    }
+  ],
+  "key_findings": [
+    "2016-2026 ????? 3769?watch 1022?confirmed_weak 700?ETF ?????? 78.85%",
+    "2025-2026 ????? 947?watch 267?confirmed_weak 189????? 100%",
+    "2026.03 ????? 39?confirmed_weak 12?????? CPO/?????????",
+    "??????? AB ??????????? baseline ??"
+  ],
+  "audit": {
+    "same_window_compare": false,
+    "config_truth_checked": true,
+    "nav_lineage_checked": true,
+    "docker_run_checked": false,
+    "source_artifact_checked": true
+  },
+  "decision": {
+    "status": "continue",
+    "reason": "C1 ???????????????????????????? runtime AB ???"
+  },
+  "next_actions": [
+    "? C1 ???????? AB ????????/???????????????????",
+    "? 2025.12-2026.04 ? 2026.03 ???????????",
+    "?? candidate_collapse ???????????"
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "theme-health",
+    "shadow",
+    "V3",
+    "research-only"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T03:26:46+08:00",
+  "updated_at": "2026-05-11T03:26:46+08:00",
+  "notes": [],
+  "auto_summary": {
+    "schema_version": "openclaw_study_auto_summary@1",
+    "generated_at": "2026-05-11T03:26:46+08:00",
+    "headline": "C1 ??????? shadow：主变量=theme_health_label from proxy trend, proxy rank, candidate pressure, and held exposure pressure",
+    "conclusion_draft": "已有正向证据，但仍需补齐风险、窗口或审计项后再判断。",
+    "reliability": "partial",
+    "facts": [
+      "已关联 6 条证据。",
+      "匹配到 6 条 study conclusion registry 记录。",
+      "窗口覆盖：2016-2026。",
+      "verdict 分布：CONFIRMED=6。",
+      "gate status distribution: UNKNOWN=6."
+    ],
+    "risks": [
+      "三窗口证据尚不完整，不能作为 baseline 升级依据。",
+      "尚未确认 same-window compare。"
+    ],
+    "next_actions": [
+      "? C1 ???????? AB ????????/???????????????????",
+      "? 2025.12-2026.04 ? 2026.03 ???????????",
+      "?? candidate_collapse ???????????",
+      "补齐 2016-2026、2012-2017、2012-2026 三窗口证据。"
+    ],
+    "evidence_counts": {
+      "linked": 6,
+      "matched_conclusions": 6
+    },
+    "window_coverage": [
+      "2016-2026"
+    ],
+    "verdict_counts": {
+      "CONFIRMED": 6
+    },
+    "gate_status_counts": {
+      "UNKNOWN": 6
+    },
+    "metric_highlights": []
+  },
+  "reliability": "partial"
+}

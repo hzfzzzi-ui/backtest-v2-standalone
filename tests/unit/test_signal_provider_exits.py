@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
+
+import numpy as np
 
 from backend.core.config.models import ExitConfig, StrategyConfig
+from backend.core.engine_vector.breakout_provider_day_signals import evaluate_peak_giveback_ma20_exits
 from backend.core.engine_vector.signal_provider import evaluate_engine_exits as _evaluate_engine_exits
 from backend.core.strategies.registry import build_strategy
 
@@ -69,6 +73,134 @@ def test_build_strategy_preserves_profit_decay_exit_fields() -> None:
     assert getattr(strategy, "profit_decay_exit_residual_score_threshold", 0.0) == 0.35
 
 
+def test_build_strategy_preserves_peak_giveback_ma20_exit_fields() -> None:
+    default_strategy = build_strategy(StrategyConfig(name="breakout_trend", params={}))
+    assert getattr(default_strategy, "enable_peak_giveback_ma20_exit", True) is False
+
+    strategy = build_strategy(
+        StrategyConfig(
+            name="breakout_trend",
+            params={
+                "enable_peak_giveback_ma20_exit": True,
+                "peak_giveback_ma20_min_peak_profit_pct": 0.22,
+                "peak_giveback_ma20_min_giveback_pct": 0.28,
+                "peak_giveback_ma20_min_hold_bars": 12,
+                "peak_giveback_ma20_exit_pct": 0.5,
+            },
+        )
+    )
+
+    assert getattr(strategy, "enable_peak_giveback_ma20_exit", False) is True
+    assert getattr(strategy, "peak_giveback_ma20_min_peak_profit_pct", 0.0) == 0.22
+    assert getattr(strategy, "peak_giveback_ma20_min_giveback_pct", 0.0) == 0.28
+    assert getattr(strategy, "peak_giveback_ma20_min_hold_bars", 0) == 12
+    assert getattr(strategy, "peak_giveback_ma20_exit_pct", 0.0) == 0.5
+
+
+def test_build_strategy_preserves_mfe_mae_confirmation_exit_fields() -> None:
+    default_strategy = build_strategy(StrategyConfig(name="breakout_trend", params={}))
+    assert getattr(default_strategy, "enable_mfe_mae_confirmation_exit", True) is False
+    assert getattr(default_strategy, "enable_mfe_mae_restore_candidate", True) is False
+
+    strategy = build_strategy(
+        StrategyConfig(
+            name="breakout_trend",
+            params={
+                "enable_mfe_mae_confirmation_exit": True,
+                "mfe_mae_confirmation_lookahead_bars": 3,
+                "mfe_mae_confirmation_min_mfe_pct": 0.02,
+                "mfe_mae_confirmation_max_mae_pct": -0.05,
+                "mfe_mae_confirmation_exit_pct": 0.5,
+                "mfe_mae_confirmation_scope": "high_chase",
+                "mfe_mae_confirmation_action": "watch_day10",
+                "mfe_mae_high_chase_min_core_flags": 2,
+                "mfe_mae_high_chase_ret5_pct": 0.20,
+                "mfe_mae_watch_review_bars": 10,
+                "enable_mfe_mae_restore_candidate": True,
+                "mfe_mae_restore_candidate_scope": "high_chase",
+                "mfe_mae_restore_candidate_max_bars": 40,
+                "mfe_mae_restore_candidate_target_basis": "original_target",
+                "mfe_mae_restore_candidate_clear_on_fill": True,
+            },
+        )
+    )
+
+    assert getattr(strategy, "enable_mfe_mae_confirmation_exit", False) is True
+    assert getattr(strategy, "mfe_mae_confirmation_lookahead_bars", 0) == 3
+    assert getattr(strategy, "mfe_mae_confirmation_min_mfe_pct", 0.0) == 0.02
+    assert getattr(strategy, "mfe_mae_confirmation_max_mae_pct", 0.0) == -0.05
+    assert getattr(strategy, "mfe_mae_confirmation_exit_pct", 0.0) == 0.5
+    assert getattr(strategy, "mfe_mae_confirmation_scope", "") == "high_chase"
+    assert getattr(strategy, "mfe_mae_confirmation_action", "") == "watch_day10"
+    assert getattr(strategy, "mfe_mae_high_chase_min_core_flags", 0) == 2
+    assert getattr(strategy, "mfe_mae_high_chase_ret5_pct", 0.0) == 0.20
+    assert getattr(strategy, "mfe_mae_watch_review_bars", 0) == 10
+    assert getattr(strategy, "enable_mfe_mae_restore_candidate", False) is True
+    assert getattr(strategy, "mfe_mae_restore_candidate_scope", "") == "high_chase"
+    assert getattr(strategy, "mfe_mae_restore_candidate_max_bars", 0) == 40
+    assert getattr(strategy, "mfe_mae_restore_candidate_target_basis", "") == "original_target"
+    assert getattr(strategy, "mfe_mae_restore_candidate_clear_on_fill", False) is True
+
+
+def test_peak_giveback_ma20_exit_emits_partial_sell_after_profit_giveback() -> None:
+    provider = SimpleNamespace(
+        _enable_peak_giveback_ma20_exit=True,
+        _peak_giveback_ma20_min_peak_profit_pct=0.20,
+        _peak_giveback_ma20_min_giveback_pct=0.25,
+        _peak_giveback_ma20_min_hold_bars=10,
+        _peak_giveback_ma20_exit_pct=0.5,
+        _sym_to_col={"sh600000": 0},
+        _peak_close_state={"sh600000": 13.0},
+        entry_bar_index={"sh600000": 0},
+        _mx=SimpleNamespace(close=np.array([[9.5]] * 13, dtype=float)),
+        _feats=SimpleNamespace(sma20=np.array([[10.0]] * 13, dtype=float)),
+    )
+
+    exit_syms: set[str] = set()
+    exits = evaluate_peak_giveback_ma20_exits(
+        provider,
+        day=date(2026, 3, 2),
+        day_idx=12,
+        positions={"sh600000": 1000},
+        position_avg_cost={"sh600000": 10.0},
+        close_idx={(date(2026, 3, 2), "sh600000"): 9.5},
+        exit_syms=exit_syms,
+    )
+
+    assert len(exits) == 1
+    assert exits[0].reason_code == "PEAK_GIVEBACK_MA20_EXIT"
+    assert exits[0].qty == 500
+    assert exits[0].meta["partial_exit"] is True
+    assert "sh600000" in exit_syms
+
+
+def test_peak_giveback_ma20_exit_waits_for_ma20_break() -> None:
+    provider = SimpleNamespace(
+        _enable_peak_giveback_ma20_exit=True,
+        _peak_giveback_ma20_min_peak_profit_pct=0.20,
+        _peak_giveback_ma20_min_giveback_pct=0.25,
+        _peak_giveback_ma20_min_hold_bars=10,
+        _peak_giveback_ma20_exit_pct=0.5,
+        _sym_to_col={"sh600000": 0},
+        _peak_close_state={"sh600000": 13.0},
+        entry_bar_index={"sh600000": 0},
+        _mx=SimpleNamespace(close=np.array([[10.5]] * 13, dtype=float)),
+        _feats=SimpleNamespace(sma20=np.array([[10.0]] * 13, dtype=float)),
+    )
+
+    exits = evaluate_peak_giveback_ma20_exits(
+        provider,
+        day=date(2026, 3, 2),
+        day_idx=12,
+        positions={"sh600000": 1000},
+        position_avg_cost={"sh600000": 10.0},
+        close_idx={(date(2026, 3, 2), "sh600000"): 9.5},
+        exit_syms=set(),
+    )
+
+    assert exits == []
+
+
 def test_build_strategy_preserves_entry_gap_guard_fields() -> None:
     strategy = build_strategy(
         StrategyConfig(
@@ -82,6 +214,96 @@ def test_build_strategy_preserves_entry_gap_guard_fields() -> None:
 
     assert getattr(strategy, "enable_entry_gap_guard", False) is True
     assert getattr(strategy, "entry_gap_guard_pct", 0.0) == 0.04
+
+
+def test_build_strategy_preserves_bad_breakout_quality_veto_fields() -> None:
+    default_strategy = build_strategy(StrategyConfig(name="breakout_trend", params={}))
+    assert getattr(default_strategy, "bad_breakout_quality_veto_enabled", True) is False
+
+    strategy = build_strategy(
+        StrategyConfig(
+            name="breakout_trend",
+            params={
+                "bad_breakout_quality_veto_enabled": True,
+                "bad_breakout_quality_ret5_rank_min": 0.75,
+                "bad_breakout_quality_r2_60_rank_max": 0.25,
+            },
+        )
+    )
+
+    assert getattr(strategy, "bad_breakout_quality_veto_enabled", False) is True
+    assert getattr(strategy, "bad_breakout_quality_ret5_rank_min", 0.0) == 0.75
+    assert getattr(strategy, "bad_breakout_quality_r2_60_rank_max", 0.0) == 0.25
+
+
+def test_build_strategy_preserves_trend_quality_soft_score_fields() -> None:
+    default_strategy = build_strategy(StrategyConfig(name="breakout_trend", params={}))
+    assert getattr(default_strategy, "trend_quality_soft_score_enabled", True) is False
+
+    strategy = build_strategy(
+        StrategyConfig(
+            name="breakout_trend",
+            params={
+                "trend_quality_soft_score_enabled": True,
+                "trend_quality_soft_score_weight": 0.4,
+                "trend_quality_r2_60_weight": 0.5,
+                "trend_quality_slope60_weight": 0.2,
+                "trend_quality_ret60_vol_adj_weight": 0.2,
+                "trend_quality_ret60_dd_adj_weight": 0.1,
+            },
+        )
+    )
+
+    assert getattr(strategy, "trend_quality_soft_score_enabled", False) is True
+    assert getattr(strategy, "trend_quality_soft_score_weight", 0.0) == 0.4
+    assert getattr(strategy, "trend_quality_r2_60_weight", 0.0) == 0.5
+    assert getattr(strategy, "trend_quality_slope60_weight", 0.0) == 0.2
+    assert getattr(strategy, "trend_quality_ret60_vol_adj_weight", 0.0) == 0.2
+    assert getattr(strategy, "trend_quality_ret60_dd_adj_weight", 0.0) == 0.1
+
+
+def test_build_strategy_preserves_risk_archetype_soft_deprioritize_fields() -> None:
+    default_strategy = build_strategy(StrategyConfig(name="breakout_trend", params={}))
+    assert getattr(default_strategy, "risk_archetype_soft_deprioritize_enabled", True) is False
+
+    strategy = build_strategy(
+        StrategyConfig(
+            name="breakout_trend",
+            params={
+                "risk_archetype_soft_deprioritize_enabled": True,
+                "risk_archetype_soft_deprioritize_quantile": 0.82,
+                "risk_archetype_hot_crowded_penalty": 0.18,
+                "risk_archetype_high_volatility_penalty": 0.12,
+            },
+        )
+    )
+
+    assert getattr(strategy, "risk_archetype_soft_deprioritize_enabled", False) is True
+    assert getattr(strategy, "risk_archetype_soft_deprioritize_quantile", 0.0) == 0.82
+    assert getattr(strategy, "risk_archetype_hot_crowded_penalty", 0.0) == 0.18
+    assert getattr(strategy, "risk_archetype_high_volatility_penalty", 0.0) == 0.12
+
+
+def test_build_strategy_preserves_entry_risk_position_sizing_fields() -> None:
+    default_strategy = build_strategy(StrategyConfig(name="breakout_trend", params={}))
+    assert getattr(default_strategy, "entry_risk_position_sizing_enabled", True) is False
+
+    strategy = build_strategy(
+        StrategyConfig(
+            name="breakout_trend",
+            params={
+                "entry_risk_position_sizing_enabled": True,
+                "entry_risk_position_watch_scale": 0.75,
+                "entry_risk_position_high_scale": 0.45,
+                "entry_risk_position_extreme_scale": 0.25,
+            },
+        )
+    )
+
+    assert getattr(strategy, "entry_risk_position_sizing_enabled", False) is True
+    assert getattr(strategy, "entry_risk_position_watch_scale", 0.0) == 0.75
+    assert getattr(strategy, "entry_risk_position_high_scale", 0.0) == 0.45
+    assert getattr(strategy, "entry_risk_position_extreme_scale", 0.0) == 0.25
 
 
 def test_evaluate_engine_exits_bear_only_waits_for_bear_state() -> None:

@@ -1,0 +1,87 @@
+{
+  "round_id": "sr_20260511_v3_loss_top30_exit_reason_audit",
+  "title": "V3 亏损 TOP30 卖出原因审计",
+  "status": "audited",
+  "study_id": "cn_stock_etf/v3_loss_top30_exit_reason_audit_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "V3 股票腿亏损 TOP30 主要来自突破失败止损，还是大盘风向变化触发的风险退出；卖出后表现是否证明卖出合理？",
+  "primary_variable": "read-only realized-loss attribution by exit reason, market index, SW L1 industry index, and post-sell returns",
+  "fixed_assumptions": [
+    "CN_STOCK_ETF_COMBO_BASELINE_V3 fixed",
+    "stock_alpha_core closed trades only; ETF sleeve excluded",
+    "no runtime, NAV, signal, pool, execution, ranking, or exit-rule changes",
+    "closed trades reconstructed with FIFO matched cashflows; unmatched partial sell lots reported separately"
+  ],
+  "windows": [
+    "2012-2026"
+  ],
+  "variants": [
+    "V3_LOSS_TOP30_EXIT_REASON_AUDIT"
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "study_id": "cn_stock_etf/v3_loss_top30_exit_reason_audit_v1",
+      "window_key": "1226",
+      "variant_name": "V3_LOSS_TOP30_EXIT_REASON_AUDIT",
+      "path": "outputs/studies/cn_stock_etf/sr_20260511_v3_loss_top30_exit_reason_audit/human/v3_loss_top30_exit_reason_audit.md",
+      "note": "human report for V3 stock-leg loss TOP30 exit reason audit",
+      "linked_at": "2026-05-11T04:08:14+08:00"
+    },
+    {
+      "kind": "summary",
+      "study_id": "cn_stock_etf/v3_loss_top30_exit_reason_audit_v1",
+      "window_key": "1226",
+      "variant_name": "V3_LOSS_TOP30_EXIT_REASON_AUDIT",
+      "path": "outputs/studies/cn_stock_etf/sr_20260511_v3_loss_top30_exit_reason_audit/machine/summary.json",
+      "note": "machine summary with cause buckets, industry summary, and sell judgment summary",
+      "linked_at": "2026-05-11T04:08:14+08:00"
+    },
+    {
+      "kind": "table",
+      "study_id": "cn_stock_etf/v3_loss_top30_exit_reason_audit_v1",
+      "window_key": "1226",
+      "variant_name": "V3_LOSS_TOP30_EXIT_REASON_AUDIT",
+      "path": "outputs/studies/cn_stock_etf/sr_20260511_v3_loss_top30_exit_reason_audit/machine/top30_loss_trades.csv",
+      "note": "per-trade loss TOP30 detail with market, industry, and post-sell returns",
+      "linked_at": "2026-05-11T04:08:14+08:00"
+    }
+  ],
+  "key_findings": [
+    "TOP30 loss is primarily risk-off forced exits: 20/30 trades, CNY 1.551M loss, 59.0% of TOP30 loss.",
+    "Breakout failure/stop exits are the secondary source: 10/30 trades, CNY 1.080M loss, 41.0% of TOP30 loss.",
+    "Risk-off exits averaged -17.13% realized return with same-holding-window SSE -1.75% and SW L1 industry -6.23%.",
+    "Stop/failure exits averaged -21.84% realized return; same-holding-window SSE was +0.32%, pointing more to single-name/industry failure than broad market collapse.",
+    "Post-sell evidence is mixed: 18/30 continued weak or limited impact, 11/30 rebounded clearly, and 1/30 was conservative with later repair."
+  ],
+  "audit": {
+    "same_window_compare": false,
+    "config_truth_checked": true,
+    "nav_lineage_checked": true,
+    "docker_run_checked": false,
+    "source_artifact_checked": true,
+    "db_price_lineage_checked": true,
+    "fifo_unmatched_partial_sell_lots": 6
+  },
+  "decision": {
+    "status": "continue",
+    "reason": "The evidence supports continuing with theme-aware risk-off diagnostics before changing sell rules; do not simply loosen RISK_OFF_EXIT."
+  },
+  "next_actions": [
+    "Design a shadow layer that separates broad-market weak, industry weak, and held-theme weak at risk-off sell dates.",
+    "For whipsaw cases, test whether theme strength would have justified delaying forced exit.",
+    "For stop/failure cases, audit entry chase level, breakout quality, and post-entry confirmation discipline."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "loss-top30",
+    "exit-reason",
+    "industry-index",
+    "research-only"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T04:08:14+08:00",
+  "updated_at": "2026-05-11T04:08:14+08:00"
+}

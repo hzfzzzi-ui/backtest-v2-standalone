@@ -1,0 +1,154 @@
+study_id: cn_stock/v4_quality_sizing_ladder_ab_v1
+title: V4 fundamental quality sizing ladder AB v1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  PIT-safe fundamental quality is more useful as a concentration/sizing
+  assistant than as a hard filter. Test whether quality sizing improvement is
+  robust across conservative, medium, and wide sizing bands.
+change_scope:
+  modules_modified:
+    - runtime_config_json.sizing.weight_mode
+    - runtime_config_json.asset_context.moneyflow_overlay
+  fixed_modules:
+    - universe.universe_mode
+    - universe.membership_mode
+    - strategy.entry_rules
+    - strategy.exit_rules
+    - candidate_ordering
+    - market_state
+    - execution
+    - costs
+variants:
+  - name: B0_V4_STOCK_REPLAY
+    description: Same-runtime V4 stock-leg replay without quality sizing.
+  - name: Q_SOFT_WEIGHT_85_115
+    description: Keep candidate ordering and tilt selected order sizing from 0.85x to 1.15x by quality.
+    request_overrides:
+      runtime_config_json:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.85
+          score_weight_max_scale: 1.15
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            source_kind: daily_factor_snapshot
+            factor_snapshot_path: outputs/studies/cn_stock/v4_fundamental_quality_ranking_ab_v1/snapshots/fundamental_quality_daily_snapshot.csv
+            factor_id: fundamental_quality_v1
+            score_field: quality_score
+            lower_is_better: false
+            date_column: date
+            symbol_column: symbol
+            available_column: available
+            mode: soft_weight
+            factor_role: context
+            apply_layer: candidate
+            score_source: fundamental_quality_v1
+  - name: Q_SOFT_WEIGHT_80_120
+    description: Keep candidate ordering and tilt selected order sizing from 0.80x to 1.20x by quality.
+    request_overrides:
+      runtime_config_json:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.80
+          score_weight_max_scale: 1.20
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            source_kind: daily_factor_snapshot
+            factor_snapshot_path: outputs/studies/cn_stock/v4_fundamental_quality_ranking_ab_v1/snapshots/fundamental_quality_daily_snapshot.csv
+            factor_id: fundamental_quality_v1
+            score_field: quality_score
+            lower_is_better: false
+            date_column: date
+            symbol_column: symbol
+            available_column: available
+            mode: soft_weight
+            factor_role: context
+            apply_layer: candidate
+            score_source: fundamental_quality_v1
+  - name: Q_SOFT_WEIGHT_70_130
+    description: Keep candidate ordering and tilt selected order sizing from 0.70x to 1.30x by quality.
+    request_overrides:
+      runtime_config_json:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.70
+          score_weight_max_scale: 1.30
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            source_kind: daily_factor_snapshot
+            factor_snapshot_path: outputs/studies/cn_stock/v4_fundamental_quality_ranking_ab_v1/snapshots/fundamental_quality_daily_snapshot.csv
+            factor_id: fundamental_quality_v1
+            score_field: quality_score
+            lower_is_better: false
+            date_column: date
+            symbol_column: symbol
+            available_column: available
+            mode: soft_weight
+            factor_role: context
+            apply_layer: candidate
+            score_source: fundamental_quality_v1
+  - name: Q_SOFT_WEIGHT_50_150
+    description: Keep candidate ordering and aggressively tilt selected order sizing from 0.50x to 1.50x by quality.
+    request_overrides:
+      runtime_config_json:
+        sizing:
+          weight_mode: score_weighted
+          score_weight_min_scale: 0.50
+          score_weight_max_scale: 1.50
+        asset_context:
+          moneyflow_overlay:
+            enabled: true
+            source_kind: daily_factor_snapshot
+            factor_snapshot_path: outputs/studies/cn_stock/v4_fundamental_quality_ranking_ab_v1/snapshots/fundamental_quality_daily_snapshot.csv
+            factor_id: fundamental_quality_v1
+            score_field: quality_score
+            lower_is_better: false
+            date_column: date
+            symbol_column: symbol
+            available_column: available
+            mode: soft_weight
+            factor_role: context
+            apply_layer: candidate
+            score_source: fundamental_quality_v1
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-03-20"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-03-20"
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  runtime_config_path: outputs/baselines/baseline_V10_1/run_config.json
+  fast_mode: true
+  initial_capital: 1000000
+  enable_multifactor_rank: true
+  momentum_top_pct: 0.0
+  universe_mode: HS300_ZZ500
+  price_adj: hfq
+metadata:
+  research_only: true
+  primary_variable: fundamental_quality_soft_sizing_band
+  docker_required: true
+  stock_only: true
+  etf_or_combo_inputs: false
+  industry_or_theme_inputs: false
+  source_baseline_id: baseline_V10_1
+  source_quality_audit: outputs/studies/cn_stock/v4_quality_q0_q1_audit_v1/report.md
+  source_snapshot_audit: outputs/studies/cn_stock/v4_fundamental_quality_ranking_ab_v1/snapshots/fundamental_quality_daily_snapshot_audit.json

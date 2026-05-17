@@ -1,0 +1,141 @@
+{
+  "schema_version": "openclaw_study_round@1",
+  "round_id": "sr_20260517_v4_quality_q0_q1_audit",
+  "updated_at": "2026-05-17T06:16:38+08:00",
+  "title": "V4 质量辅助选股 Q0/Q1 审计",
+  "status": "audited",
+  "study_id": "cn_stock/v4_quality_q0_q1_audit_v1",
+  "asset_scope": "cn_stock",
+  "baseline_id": "baseline_V10_1",
+  "primary_question": "基本面质量是否适合作为 V4 个股腿的候选压缩/同分打破辅助，而不是硬过滤或主排序？",
+  "primary_variable": "read-only Q0 PIT quality contract audit + Q1 trade quality attribution",
+  "fixed_assumptions": [
+    "baseline_V10_1 fixed; no strategy or baseline mutation",
+    "quality uses public.pit_stock_fundamental_quality only with ann_date <= signal_date",
+    "residual trend entry/exit/risk switch unchanged",
+    "quality is evaluated as an auxiliary selector, not as a standalone signal"
+  ],
+  "windows": [
+    "2016-2026 main window",
+    "2026 YTD diagnostic",
+    "TOP30 profit/loss diagnostic",
+    "strong-winner diagnostic"
+  ],
+  "variants": [
+    "Q0_CONTRACT_AUDIT",
+    "Q1_QUALITY_ATTRIBUTION"
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "exp_id": "",
+      "study_id": "cn_stock/v4_quality_q0_q1_audit_v1",
+      "window_key": "all",
+      "variant_name": "Q0_Q1",
+      "path": "outputs/studies/cn_stock/v4_quality_q0_q1_audit_v1/report.md",
+      "note": "Q0/Q1 human report",
+      "linked_at": "2026-05-17T06:16:38+08:00"
+    },
+    {
+      "kind": "table",
+      "exp_id": "",
+      "study_id": "cn_stock/v4_quality_q0_q1_audit_v1",
+      "window_key": "all",
+      "variant_name": "Q0",
+      "path": "outputs/studies/cn_stock/v4_quality_q0_q1_audit_v1/q0_contract_audit.json",
+      "note": "PIT contract and coverage audit",
+      "linked_at": "2026-05-17T06:16:38+08:00"
+    },
+    {
+      "kind": "table",
+      "exp_id": "",
+      "study_id": "cn_stock/v4_quality_q0_q1_audit_v1",
+      "window_key": "all",
+      "variant_name": "Q1",
+      "path": "outputs/studies/cn_stock/v4_quality_q0_q1_audit_v1/bucket_summary.csv",
+      "note": "quality bucket trade attribution",
+      "linked_at": "2026-05-17T06:16:38+08:00"
+    },
+    {
+      "kind": "table",
+      "exp_id": "",
+      "study_id": "cn_stock/v4_quality_q0_q1_audit_v1",
+      "window_key": "2026",
+      "variant_name": "Q1_RECENT",
+      "path": "outputs/studies/cn_stock/v4_quality_q0_q1_audit_v1/recent_2026_buys_quality.csv",
+      "note": "2026 buy lots with quality labels",
+      "linked_at": "2026-05-17T06:16:38+08:00"
+    }
+  ],
+  "key_findings": [
+    "Quality table is usable for PIT research when enforcing ann_date <= signal_date.",
+    "Main-window coverage is 288/335 lots, 85.97%; 2026 coverage is 34/44 lots, 77.27%.",
+    "q4_high quality bucket has strongest profile: avg_return 11.96%, median_return 2.41%, win_rate 58.54%.",
+    "Loss TOP30 is concentrated away from q4_high: q4 appears only once in loss TOP30.",
+    "Low/mid quality buckets still contain strong winners, so hard low-quality veto is not safe."
+  ],
+  "audit": {
+    "same_window_compare": false,
+    "config_truth_checked": true,
+    "nav_lineage_checked": true,
+    "docker_run_checked": true,
+    "baseline_mutation": false,
+    "source_report": "outputs/studies/cn_stock/v4_quality_q0_q1_audit_v1/report.md",
+    "pit_rule": "latest row with ann_date <= signal_date"
+  },
+  "decision": {
+    "status": "continue_to_q2_ab_design",
+    "baseline_promotion": false,
+    "reason": "Q0/Q1 supports quality as auxiliary selector, but not as hard filter or main ranking factor; next step should be minimal Q2 AB under near-tie/candidate-crowding only."
+  },
+  "next_actions": [
+    "Design Q2 AB: B0 vs Q_TIEBREAK vs Q_CROWDED_RERANK with stock V4 fixed.",
+    "Do not test hard low-quality veto before proving strong-winner miss risk is controlled.",
+    "Use three-window validation only if Q2 main-window behavior is interpretable."
+  ],
+  "tags": [
+    "cn_stock",
+    "V4",
+    "quality",
+    "fundamental",
+    "Q0",
+    "Q1",
+    "audit",
+    "research-only"
+  ],
+  "created_at": "2026-05-17T06:16:38+08:00",
+  "notes": [],
+  "auto_summary": {
+    "schema_version": "openclaw_study_auto_summary@1",
+    "generated_at": "2026-05-17T06:16:38+08:00",
+    "headline": "V4 质量辅助选股 Q0/Q1 审计",
+    "conclusion_draft": "Q0/Q1 支持继续推进质量辅助选股，但只建议作为候选拥挤或趋势分接近时的二级选择器，不建议做低质量硬过滤。",
+    "reliability": "partial",
+    "facts": [
+      "质量表 pit_stock_fundamental_quality 可在 ann_date <= signal_date 约束下做 PIT 研究。",
+      "主窗口覆盖 288/335 笔，2026 覆盖 34/44 笔。",
+      "q4_high 分组胜率 58.54%，中位收益 2.41%，表现最稳。",
+      "低/中质量组仍有强趋势大赢家，硬过滤风险较高。"
+    ],
+    "risks": [
+      "尚未进行 Q2 真实 AB，不能作为 baseline 升级依据。"
+    ],
+    "next_actions": [
+      "设计 Q2 AB：B0 vs Q_TIEBREAK vs Q_CROWDED_RERANK。"
+    ],
+    "evidence_counts": {
+      "linked": 4,
+      "matched_conclusions": 0
+    },
+    "window_coverage": [
+      "2016-2026",
+      "2026 YTD",
+      "TOP30",
+      "strong-winner"
+    ],
+    "verdict_counts": {},
+    "gate_status_counts": {},
+    "metric_highlights": []
+  },
+  "reliability": "partial"
+}

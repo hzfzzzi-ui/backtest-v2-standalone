@@ -2463,3 +2463,45 @@ def test_build_research_audit_reuses_evidence_refs_instead_of_embedding_payload(
     assert "stage_summary" not in audit
 
 
+def test_evaluate_etf_beta_sleeve_fails_when_shadow_symbol_is_selected_under_formal_pool() -> None:
+    gate = evaluate_etf_beta_sleeve(
+        run_meta={
+            "data": {"asset_scope": "cn_etf"},
+            "counters": {"orders": 1, "closed_trades": 1},
+            "etf_beta": {
+                "source_entry_type": "cn_etf_phase1_allocation_entry",
+                "strategy_role": "strategic_beta_stabilizer",
+                "governor_boundary_mode": "consume_governor_sleeve_budget",
+                "local_policy_mode": "phase1_bucket_allocation",
+                "boundary_policy_mode": "formal_phase1_document_aligned_v1",
+                "formal_etf_pool_version": "formal_etf_pool_v1",
+                "research_only": False,
+                "input_etfs": ["510300.SH", "510880.SH"],
+                "eligible_etfs": ["510300.SH", "510880.SH"],
+                "selected_etfs": ["510880.SH"],
+                "selection_reason_codes": {"510880.SH": ["TEST_SELECTED"]},
+                "formal_core_beta_symbols": ["510300.SH", "510500.SH", "510050.SH", "512100.SH"],
+                "limited_defense_candidates": ["511010.SH"],
+                "shadow_symbols": ["510880.SH"],
+                "shadow_role_map": {"510880.SH": "shadow_value_dividend"},
+                "formal_alignment_status": "formal_mainline",
+                "formal_mainline_compatible": True,
+                "formal_alignment_reason_codes": [],
+                "formal_alignment_evidence": {"formal_etf_pool_version": "formal_etf_pool_v1"},
+                "target_exposure": 0.5,
+                "min_deployable_exposure": 0.1,
+                "targets": {"510880.SH": 0.5},
+                "governor_boundary": {"boundary_policy_mode": "formal_phase1_document_aligned_v1"},
+                "local_policy_decision": {"allocation_engine_mode": "phase1_three_bucket_v1"},
+                "research_view": {"under_deploy_reason_codes": []},
+            },
+        },
+    )
+
+    assert gate is not None
+    assert gate["status"] == "FAIL"
+    assert gate["reason"] == "ETF beta sleeve selected research-only shadow symbols under formal_etf_pool_v1."
+    assert gate["evidence"]["shadow_promotion_violations"] == ["510880.SH"]
+    assert gate["metrics"]["shadow_promotion_violation_count"] == 1
+
+

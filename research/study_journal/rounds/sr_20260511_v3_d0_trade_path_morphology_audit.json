@@ -1,0 +1,72 @@
+{
+  "round_id": "sr_20260511_v3_d0_trade_path_morphology_audit",
+  "title": "V3 D0 盈亏 TOP30 路径形态审计",
+  "status": "audited",
+  "study_id": "cn_stock_etf/v3_d0_trade_path_morphology_audit_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "抛开主题/行业指数，盈利 TOP30 与亏损 TOP30 在买入过热、持仓 MFE/MAE、回吐、均线破坏和排名痕迹上有什么差异？",
+  "primary_variable": "read-only per-trade price path morphology over V3 stock closed trades",
+  "fixed_assumptions": [
+    "CN_STOCK_ETF_COMBO_BASELINE_V3 fixed",
+    "stock_alpha_core closed trades only; ETF sleeve excluded",
+    "no runtime, NAV, signal, pool, ranking, execution, or exit-rule changes",
+    "theme and industry indices are not used as triggers in D0"
+  ],
+  "windows": [
+    "2012-2026"
+  ],
+  "variants": [
+    "D0_TRADE_PATH_MORPHOLOGY_AUDIT"
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "study_id": "cn_stock_etf/v3_d0_trade_path_morphology_audit_v1",
+      "window_key": "1226",
+      "variant_name": "D0_TRADE_PATH_MORPHOLOGY_AUDIT",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_d0_trade_path_morphology_audit\\human\\d0_trade_path_morphology_audit.md",
+      "note": "human report for D0 trade path morphology audit",
+      "linked_at": "2026-05-11T05:34:03+08:00"
+    },
+    {
+      "kind": "table",
+      "study_id": "cn_stock_etf/v3_d0_trade_path_morphology_audit_v1",
+      "window_key": "1226",
+      "variant_name": "D0_TRADE_PATH_MORPHOLOGY_AUDIT",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_d0_trade_path_morphology_audit\\machine\\d0_trade_path_detail.csv",
+      "note": "per-trade price path metrics for all closed stock trades",
+      "linked_at": "2026-05-11T05:34:03+08:00"
+    }
+  ],
+  "key_findings": [
+    "Closed stock trades audited: 388; path available: 388.",
+    "Profit TOP30 avg MFE/giveback: 97.92%/31.02%; Loss TOP30 avg MFE/giveback: 8.13%/26.83%.",
+    "Profit TOP30 avg pre-entry 20d / loss TOP30 avg pre-entry 20d: 39.25%/54.49%."
+  ],
+  "audit": {
+    "source_artifact_checked": true,
+    "db_price_lineage_checked": true,
+    "read_only_shadow": true
+  },
+  "decision": {
+    "status": "continue",
+    "reason": "Use D0 morphology to decide whether next research should target entry confirmation, profit giveback, or risk-off timing."
+  },
+  "next_actions": [
+    "Separate loss TOP30 into never-worked vs gave-back-winners.",
+    "Check whether sell warnings appeared many days before exit.",
+    "Design one follow-up shadow only after the dominant failure mode is clear."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "D0",
+    "path-morphology",
+    "profit-loss-top30",
+    "research-only"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T05:34:03+08:00",
+  "updated_at": "2026-05-11T05:34:03+08:00"
+}

@@ -67,6 +67,37 @@ def _build_membership_lookup(
     return lookup
 
 
+def _build_index_membership_mask(
+    membership_df: pd.DataFrame,
+    sym_to_col: dict[str, int],
+    dates: pd.DatetimeIndex,
+    *,
+    index_code: str,
+) -> np.ndarray:
+    mask = np.zeros((len(dates), len(sym_to_col)), dtype=bool)
+    if membership_df.empty or "index_code" not in membership_df.columns:
+        return mask
+    target = str(index_code or "").strip().upper()
+    if not target:
+        return mask
+    for row in membership_df.itertuples(index=False):
+        if str(getattr(row, "index_code", "") or "").strip().upper() != target:
+            continue
+        internal = _normalize_symbol_like(getattr(row, "symbol", ""))
+        c = sym_to_col.get(internal)
+        if c is None:
+            continue
+        s_date = pd.Timestamp(getattr(row, "start_date"))
+        e_val = getattr(row, "end_date", None)
+        e_date = pd.Timestamp(e_val) if pd.notna(e_val) else None
+        if e_date is None:
+            row_mask = dates >= s_date
+        else:
+            row_mask = (dates >= s_date) & (dates < e_date)
+        mask[row_mask, c] = True
+    return mask
+
+
 def build_ohlc_matrices_from_history(
     history: pd.DataFrame,
     trading_days: list[date],
@@ -75,6 +106,7 @@ def build_ohlc_matrices_from_history(
     min_price: float = 0.0,
     min_list_days: int = 0,
     min_avg_turnover_20d: float = 0.0,
+    csi1000_new_min_circ_mv_yi: float = 0.0,
 ) -> OhlcMatrices:
     hist = history.copy()
     hist["date"] = pd.to_datetime(hist["date"])
@@ -94,6 +126,7 @@ def build_ohlc_matrices_from_history(
     close_m = np.full((t, n), np.nan, dtype=float)
     volume_m = np.full((t, n), np.nan, dtype=float)
     amount_m = np.full((t, n), np.nan, dtype=float)
+    circ_mv_m = np.full((t, n), np.nan, dtype=float)
     tradable = np.zeros((t, n), dtype=bool)
 
     has_suspended = "is_suspended" in hist.columns
@@ -123,6 +156,8 @@ def build_ohlc_matrices_from_history(
         amount_m[r_arr, c_arr] = pd.to_numeric(v["turnover"], errors="coerce").to_numpy(dtype=float)
     else:
         amount_m[r_arr, c_arr] = close_m[r_arr, c_arr] * volume_m[r_arr, c_arr]
+    if "circ_mv" in v.columns:
+        circ_mv_m[r_arr, c_arr] = pd.to_numeric(v["circ_mv"], errors="coerce").to_numpy(dtype=float)
 
     ok_price = (
         ~np.isnan(close_m[r_arr, c_arr]) & (close_m[r_arr, c_arr] > 0)
@@ -186,6 +221,30 @@ def build_ohlc_matrices_from_history(
                 col_mask |= row_mask
             membership_mask[:, col_idx] = col_mask
         tradable &= membership_mask
+
+    try:
+        min_csi1000_new_circ_mv_yi = float(csi1000_new_min_circ_mv_yi or 0.0)
+    except Exception:
+        min_csi1000_new_circ_mv_yi = 0.0
+    if min_csi1000_new_circ_mv_yi > 0 and membership_history is not None and not membership_history.empty:
+        csi800_mask = _build_index_membership_mask(
+            membership_history,
+            sym_to_col,
+            dates,
+            index_code="000906.SH",
+        )
+        csi1000_mask = _build_index_membership_mask(
+            membership_history,
+            sym_to_col,
+            dates,
+            index_code="000852.SH",
+        )
+        csi1000_new_mask = csi1000_mask & ~csi800_mask
+        if bool(csi1000_new_mask.any()):
+            # circ_mv uses the Tushare daily_basic convention: 10k CNY.
+            threshold_wan_cny = float(min_csi1000_new_circ_mv_yi) * 10000.0
+            low_or_missing_mcap = np.isnan(circ_mv_m) | (circ_mv_m < threshold_wan_cny)
+            tradable[csi1000_new_mask & low_or_missing_mcap] = False
 
     hist.drop(columns=["_row", "_col"], inplace=True)
 

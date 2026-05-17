@@ -515,6 +515,42 @@ class MultiAlphaSignalProvider:
             profit_decay_exit_residual_score_threshold=float(
                 params.get("profit_decay_exit_residual_score_threshold", 0.35)
             ),
+            enable_peak_giveback_ma20_exit=bool(params.get("enable_peak_giveback_ma20_exit", False)),
+            peak_giveback_ma20_min_peak_profit_pct=float(
+                params.get("peak_giveback_ma20_min_peak_profit_pct", 0.20)
+            ),
+            peak_giveback_ma20_min_giveback_pct=float(params.get("peak_giveback_ma20_min_giveback_pct", 0.25)),
+            peak_giveback_ma20_min_hold_bars=int(params.get("peak_giveback_ma20_min_hold_bars", 10)),
+            peak_giveback_ma20_exit_pct=float(params.get("peak_giveback_ma20_exit_pct", 0.5)),
+            enable_mfe_mae_confirmation_exit=bool(params.get("enable_mfe_mae_confirmation_exit", False)),
+            mfe_mae_confirmation_lookahead_bars=int(params.get("mfe_mae_confirmation_lookahead_bars", 3)),
+            mfe_mae_confirmation_min_mfe_pct=float(params.get("mfe_mae_confirmation_min_mfe_pct", 0.02)),
+            mfe_mae_confirmation_max_mae_pct=float(params.get("mfe_mae_confirmation_max_mae_pct", -0.05)),
+            mfe_mae_confirmation_exit_pct=float(params.get("mfe_mae_confirmation_exit_pct", 0.5)),
+            mfe_mae_confirmation_scope=str(params.get("mfe_mae_confirmation_scope", "all") or "all").strip().lower(),
+            mfe_mae_confirmation_action=str(params.get("mfe_mae_confirmation_action", "exit") or "exit").strip().lower(),
+            mfe_mae_high_chase_min_core_flags=int(params.get("mfe_mae_high_chase_min_core_flags", 2)),
+            mfe_mae_high_chase_ret5_pct=float(params.get("mfe_mae_high_chase_ret5_pct", 0.20)),
+            mfe_mae_high_chase_ret10_pct=float(params.get("mfe_mae_high_chase_ret10_pct", 0.30)),
+            mfe_mae_high_chase_ret20_pct=float(params.get("mfe_mae_high_chase_ret20_pct", 0.45)),
+            mfe_mae_high_chase_ma20_extension_pct=float(params.get("mfe_mae_high_chase_ma20_extension_pct", 0.27)),
+            mfe_mae_high_chase_ma60_extension_pct=float(params.get("mfe_mae_high_chase_ma60_extension_pct", 0.45)),
+            mfe_mae_high_chase_atr_extension=float(params.get("mfe_mae_high_chase_atr_extension", 4.5)),
+            mfe_mae_high_chase_breakout_margin_pct=float(params.get("mfe_mae_high_chase_breakout_margin_pct", 0.05)),
+            mfe_mae_high_chase_open_gap_pct=float(params.get("mfe_mae_high_chase_open_gap_pct", 0.024)),
+            mfe_mae_high_chase_fade_pct=float(params.get("mfe_mae_high_chase_fade_pct", 0.025)),
+            mfe_mae_high_chase_breakout_quality_max=float(params.get("mfe_mae_high_chase_breakout_quality_max", 0.46)),
+            mfe_mae_high_chase_volume_price_quality_max=float(params.get("mfe_mae_high_chase_volume_price_quality_max", 0.08)),
+            mfe_mae_watch_review_bars=int(params.get("mfe_mae_watch_review_bars", 10)),
+            mfe_mae_watch_review_min_mfe_pct=float(params.get("mfe_mae_watch_review_min_mfe_pct", 0.02)),
+            mfe_mae_watch_review_max_current_return_pct=float(params.get("mfe_mae_watch_review_max_current_return_pct", 0.0)),
+            mfe_mae_watch_review_max_mae_pct=float(params.get("mfe_mae_watch_review_max_mae_pct", -0.05)),
+            mfe_mae_watch_deep_mae_immediate_pct=float(params.get("mfe_mae_watch_deep_mae_immediate_pct", -0.08)),
+            enable_mfe_mae_restore_candidate=bool(params.get("enable_mfe_mae_restore_candidate", False)),
+            mfe_mae_restore_candidate_scope=str(params.get("mfe_mae_restore_candidate_scope", "high_chase") or "high_chase").strip().lower(),
+            mfe_mae_restore_candidate_max_bars=int(params.get("mfe_mae_restore_candidate_max_bars", 40)),
+            mfe_mae_restore_candidate_target_basis=str(params.get("mfe_mae_restore_candidate_target_basis", "original_target") or "original_target").strip().lower(),
+            mfe_mae_restore_candidate_clear_on_fill=bool(params.get("mfe_mae_restore_candidate_clear_on_fill", True)),
             enable_take_profit=bool(params.get("enable_take_profit", False)),
             take_profit_mode=str(params.get("take_profit_mode", "pct")),
             take_profit_pct=float(params.get("take_profit_pct", 0.10)),
@@ -1100,3 +1136,4 @@ class MultiAlphaSignalProvider:
         dst.ma20_exit += int(src.ma20_exit)
         dst.low10_exit += int(src.low10_exit)
         dst.profit_decay_exit += int(src.profit_decay_exit)
+        dst.mfe_mae_confirmation_exit += int(src.mfe_mae_confirmation_exit)

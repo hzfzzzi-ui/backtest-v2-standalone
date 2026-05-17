@@ -460,6 +460,26 @@ def _load_index_symbols(table: str) -> list[str]:
             return [str(row[0]).lower() for row in cur.fetchall()]
 
 
+def _merge_index_symbols(base_symbols: list[str], extra_symbols: list[str] | None) -> list[str]:
+    symbols: list[str] = []
+    seen: set[str] = set()
+    for value in [*(base_symbols or []), *(extra_symbols or [])]:
+        text = str(value or "").strip().lower()
+        if not text:
+            continue
+        if "." in text:
+            text = normalize_index_symbol(text).lower()
+            code, exch = text.split(".", 1)
+            text = f"{exch}{code}"
+        if not text.startswith(("sh", "sz")) or len(text) != 8:
+            raise ValueError(f"unsupported CN_INDEX symbol: {value}")
+        if text in seen:
+            continue
+        seen.add(text)
+        symbols.append(text)
+    return sorted(symbols)
+
+
 def _get_latest_trade_date(table: str, market: str) -> date | None:
     table_name = _safe_ident(table)
     query = f"SELECT MAX(trade_date) FROM public.{table_name} WHERE market = %s"
@@ -722,6 +742,7 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
         "apply": bool(args.apply),
         "table": str(args.table),
         "repair_null_adj_factor": repair_null_adj_factor,
+        "only_cn_index": bool(getattr(args, "only_cn_index", False)),
         "date_range": {"start": start.isoformat(), "end": end.isoformat()},
         "latest_cn_a_before": latest_cn_a.isoformat() if latest_cn_a else None,
         "latest_cn_index_before": latest_cn_index.isoformat() if latest_cn_index else None,
@@ -776,43 +797,55 @@ def run_update(args: argparse.Namespace) -> dict[str, Any]:
     daily_basic_enabled = True
 
     stock_frames: list[pd.DataFrame] = []
-    for trade_date in target_trade_dates:
-        daily_raw = pro.daily(
-            trade_date=trade_date.strftime("%Y%m%d"),
-            fields="ts_code,trade_date,open,high,low,close,pre_close,vol,amount",
-        )
-        adj_raw = pro.adj_factor(
-            trade_date=trade_date.strftime("%Y%m%d"),
-            fields="ts_code,trade_date,adj_factor",
-        )
-        basic_raw = pd.DataFrame()
-        if daily_basic_enabled:
-            basic_raw, basic_error = _fetch_daily_basic_safe(pro, trade_date)
-            if basic_error:
-                daily_basic_enabled = False
-                summary["daily_basic_status"] = {"available": False, "message": basic_error}
-                summary["notes"].append("daily_basic unavailable; turnover_rate/volume_ratio/circ_mv fields are left null.")
-                basic_raw = pd.DataFrame()
-        normalized, per_day = _normalize_cn_a_rows(
-            trade_date=trade_date,
-            daily_raw=daily_raw,
-            adj_raw=adj_raw,
-            basic_raw=basic_raw,
-            st_periods=st_periods,
-            prev_close_map=prev_close_map,
-        )
-        if normalized.empty:
-            continue
-        stock_frames.append(normalized)
-        summary["open_trade_dates"].append(trade_date.isoformat())
-        summary["per_trade_date"].append(per_day)
-        summary["cn_a_rows"] += int(len(normalized))
+    if bool(getattr(args, "only_cn_index", False)):
+        summary["notes"].append("only_cn_index skips CN_A daily/adj_factor/daily_basic refresh for this run.")
+    else:
+        for trade_date in target_trade_dates:
+            daily_raw = pro.daily(
+                trade_date=trade_date.strftime("%Y%m%d"),
+                fields="ts_code,trade_date,open,high,low,close,pre_close,vol,amount",
+            )
+            adj_raw = pro.adj_factor(
+                trade_date=trade_date.strftime("%Y%m%d"),
+                fields="ts_code,trade_date,adj_factor",
+            )
+            basic_raw = pd.DataFrame()
+            if daily_basic_enabled:
+                basic_raw, basic_error = _fetch_daily_basic_safe(pro, trade_date)
+                if basic_error:
+                    daily_basic_enabled = False
+                    summary["daily_basic_status"] = {"available": False, "message": basic_error}
+                    summary["notes"].append("daily_basic unavailable; turnover_rate/volume_ratio/circ_mv fields are left null.")
+                    basic_raw = pd.DataFrame()
+            normalized, per_day = _normalize_cn_a_rows(
+                trade_date=trade_date,
+                daily_raw=daily_raw,
+                adj_raw=adj_raw,
+                basic_raw=basic_raw,
+                st_periods=st_periods,
+                prev_close_map=prev_close_map,
+            )
+            if normalized.empty:
+                continue
+            stock_frames.append(normalized)
+            summary["open_trade_dates"].append(trade_date.isoformat())
+            summary["per_trade_date"].append(per_day)
+            summary["cn_a_rows"] += int(len(normalized))
 
     index_frames: list[pd.DataFrame] = []
     if repair_null_adj_factor:
         summary["notes"].append("CN_INDEX refresh is skipped in repair_null_adj_factor mode.")
     else:
-        for symbol in _load_index_symbols(str(args.table)):
+        index_symbols = _merge_index_symbols(
+            _load_index_symbols(str(args.table)),
+            list(getattr(args, "extra_index_symbols", []) or []),
+        )
+        summary["index_symbols_requested"] = list(index_symbols)
+        if getattr(args, "extra_index_symbols", None):
+            summary["notes"].append(
+                "extra_index_symbols explicitly extends the CN_INDEX refresh set for source-data backfill."
+            )
+        for symbol in index_symbols:
             try:
                 raw = _load_cn_index_daily_tushare(pro, symbol, start=start, end=end)
                 normalized, per_symbol = _normalize_cn_index_rows(symbol, raw, start=start, end=end)
@@ -882,6 +915,8 @@ def build_update_args(
     output_dir: str = "",
     apply: bool = True,
     repair_null_adj_factor: bool = False,
+    extra_index_symbols: list[str] | None = None,
+    only_cn_index: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         start=str(start or ""),
@@ -892,6 +927,8 @@ def build_update_args(
         output_dir=str(output_dir or ""),
         apply=bool(apply),
         repair_null_adj_factor=bool(repair_null_adj_factor),
+        extra_index_symbols=list(extra_index_symbols or []),
+        only_cn_index=bool(only_cn_index),
     )
 
 
@@ -905,6 +942,8 @@ def run_update_to_target(
     output_dir: str = "",
     apply: bool = True,
     repair_null_adj_factor: bool = False,
+    extra_index_symbols: list[str] | None = None,
+    only_cn_index: bool = False,
 ) -> dict[str, Any]:
     return run_update(
         build_update_args(
@@ -916,6 +955,8 @@ def run_update_to_target(
             output_dir=output_dir,
             apply=apply,
             repair_null_adj_factor=repair_null_adj_factor,
+            extra_index_symbols=extra_index_symbols,
+            only_cn_index=only_cn_index,
         )
     )
 
@@ -929,6 +970,18 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=5000, help="DB upsert batch size")
     parser.add_argument("--output-dir", default="", help="output directory for summary/sample artifacts")
     parser.add_argument("--apply", action="store_true", help="commit DB writes; default is dry-run rollback")
+    parser.add_argument(
+        "--extra-index-symbol",
+        action="append",
+        dest="extra_index_symbols",
+        default=[],
+        help="Explicitly add a CN_INDEX symbol such as sh000852 or 000852.SH to this refresh run.",
+    )
+    parser.add_argument(
+        "--only-cn-index",
+        action="store_true",
+        help="Refresh CN_INDEX rows only; skip CN_A daily/adj_factor/daily_basic calls.",
+    )
     parser.add_argument(
         "--repair-null-adj-factor",
         action="store_true",

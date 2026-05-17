@@ -1,0 +1,100 @@
+{
+  "round_id": "sr_20260511_d5_runner_protection_exploratory",
+  "title": "D5 3日版 Runner Protection 探索",
+  "status": "audited",
+  "study_id": "cn_stock_etf/d5_runner_protection_exploratory_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "D5 3日 MFE/MAE 半卖是否可以通过保护高质量 runner，减少误伤强趋势票？",
+  "primary_variable": "read-only protection predicates over D5 runtime AB events",
+  "fixed_assumptions": [
+    "no runtime change",
+    "no new backtest",
+    "uses D5 3D runtime AB outputs only",
+    "same-window B0 vs D5 symbol PnL delta is used as exploratory label",
+    "entry BUY meta is joined by symbol and entry_date"
+  ],
+  "windows": [
+    "2016-2026",
+    "2012-2017",
+    "2012-2026"
+  ],
+  "evidence": [
+    {
+      "kind": "experiment_pair",
+      "window_key": "1626",
+      "b0_exp_id": "exp_20260510_222327896_2106",
+      "d5_exp_id": "exp_20260510_222708549_6e2e"
+    },
+    {
+      "kind": "experiment_pair",
+      "window_key": "1217",
+      "b0_exp_id": "exp_20260510_223408484_7b2c",
+      "d5_exp_id": "exp_20260510_223524690_1830"
+    },
+    {
+      "kind": "experiment_pair",
+      "window_key": "1226",
+      "b0_exp_id": "exp_20260510_223654280_9ef2",
+      "d5_exp_id": "exp_20260510_224156828_5ad0"
+    }
+  ],
+  "key_findings": [
+    "Entry final_score/residual_score cannot cleanly separate D5误伤票和有效减损票；两组买入时分数都很高。",
+    "If protecting final_score>=0.90, it protects 95 D5 events across three windows, nearly disables D5; this is not a precise runner-protection rule.",
+    "D5 signal date candidate-list protection has zero coverage: D5-triggered symbols were not in score_diagnostics candidate list on D5 signal date.",
+    "Mild-MAE protection is more robust: protecting MAE>-8% has positive first-order effect in all three windows, but still does not rescue full-cycle D5 into a promotable rule."
+  ],
+  "protection_rule_scores": [
+    {
+      "rule": "protect_final_score_ge_0.90",
+      "positive_windows": 3,
+      "sum_first_order_net": 592027.13,
+      "max_protected_events": 47,
+      "interpretation": "Too broad; mostly disables D5 because most D5 events entered with high score."
+    },
+    {
+      "rule": "protect_final_score_ge_0.98",
+      "positive_windows": 3,
+      "sum_first_order_net": 509369.37,
+      "max_protected_events": 28,
+      "interpretation": "More selective, but still score-only and leaves full-cycle D5 event-symbol delta negative."
+    },
+    {
+      "rule": "protect_mae_gt_minus_8pct",
+      "positive_windows": 3,
+      "sum_first_order_net": 295384.48,
+      "max_protected_events": 29,
+      "interpretation": "Most robust simple protection; protects shallower early drawdown as possible runner volatility."
+    },
+    {
+      "rule": "protect_signal_date_candidate",
+      "positive_windows": 0,
+      "sum_first_order_net": 0.0,
+      "max_protected_events": 0,
+      "interpretation": "No coverage; D5-triggered holdings were not candidate-list symbols on the D5 signal date."
+    }
+  ],
+  "decision": {
+    "status": "continue_with_modified_design",
+    "reason": "Runner protection should not be based on entry score alone. A safer next design is D5 3D watch-state: do not sell mild MAE cases immediately; require deeper MAE or 5/10D non-recovery before half sell."
+  },
+  "next_actions": [
+    "Design D5 runner-protection AB as a runtime watch-state, not a simple entry-score exemption.",
+    "Candidate rule: at day3, if MAE is between -5% and -8%, mark watch and do not sell; sell only if day5/day10 still has MFE不足 and MAE未修复.",
+    "Keep industry/theme out of this version."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "D5",
+    "runner-protection",
+    "mfe",
+    "mae",
+    "read-only",
+    "exploratory"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T07:05:00+08:00",
+  "updated_at": "2026-05-11T07:05:00+08:00"
+}

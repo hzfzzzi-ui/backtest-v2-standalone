@@ -408,6 +408,20 @@ def _apply_sizing_cfg(cfg: dict[str, Any], wb_cfg: dict[str, Any]) -> None:
         sizing["rotation_replace_candidate_top_n"] = int(sizing_wb.get("rotation_replace_candidate_top_n"))
     if sizing_wb.get("rotation_replace_min_score_gap") is not None:
         sizing["rotation_replace_min_score_gap"] = float(sizing_wb.get("rotation_replace_min_score_gap"))
+    if sizing_wb.get("hot_amount_turnover_size_down_enabled") is not None:
+        sizing["hot_amount_turnover_size_down_enabled"] = bool(
+            sizing_wb.get("hot_amount_turnover_size_down_enabled")
+        )
+    if sizing_wb.get("hot_amount_turnover_size_down_scale") is not None:
+        sizing["hot_amount_turnover_size_down_scale"] = float(sizing_wb.get("hot_amount_turnover_size_down_scale"))
+    if sizing_wb.get("hot_amount_turnover_amount_pct_threshold") is not None:
+        sizing["hot_amount_turnover_amount_pct_threshold"] = float(
+            sizing_wb.get("hot_amount_turnover_amount_pct_threshold")
+        )
+    if sizing_wb.get("hot_amount_turnover_turnover_pct_threshold") is not None:
+        sizing["hot_amount_turnover_turnover_pct_threshold"] = float(
+            sizing_wb.get("hot_amount_turnover_turnover_pct_threshold")
+        )
 
 
 def _apply_cost_cfg(cfg: dict[str, Any], wb_cfg: dict[str, Any]) -> None:

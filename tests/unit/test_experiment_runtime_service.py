@@ -88,6 +88,43 @@ def test_config_json_position_risk_max_positions_becomes_execution_override(monk
     assert result["experiment_id"] == "exp_test"
 
 
+def test_config_json_cn_etf_benchmark_becomes_execution_override(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_experiment(base_cfg_path, preset="single", overrides=None, progress_hook=None):
+        captured["overrides"] = dict(overrides or {})
+        return {
+            "exp_id": "exp_test_cn_etf_benchmark",
+            "results_dir": "",
+            "status": "OK",
+        }
+
+    monkeypatch.setattr(runner, "run_experiment", _fake_run_experiment)
+    monkeypatch.setattr(runner_impl, "_attach_run_profile_summary", lambda result: None)
+    monkeypatch.setattr(runner_impl, "_write_config_snapshots", lambda **kwargs: None)
+    monkeypatch.setattr(service, "stabilize_experiment_output", lambda **kwargs: dict(kwargs["result"]))
+
+    payload = _breakout_config()
+    payload["asset_scope"] = "cn_etf"
+    payload["asset_context"] = {"asset_scope": "cn_etf"}
+    payload["universe_mode"] = "CUSTOM"
+    payload["universe"]["benchmark"] = "510880.SH"
+    payload["universe"]["symbols"] = ["159845.SZ", "510880.SH"]
+
+    body = runner_impl.BacktestV2ExperimentRequest(
+        config_json=payload,
+        fast_mode=True,
+    )
+    result = service.run_experiment_request_body(body)
+
+    overrides = dict(captured["overrides"] or {})
+    assert overrides["asset_scope"] == "cn_etf"
+    assert overrides["benchmark"] == "510880.SH"
+    assert overrides["fast_mode"] is True
+    assert result["exp_id"] == "exp_test_cn_etf_benchmark"
+    assert result["experiment_id"] == "exp_test_cn_etf_benchmark"
+
+
 def test_config_json_ranking_fields_become_execution_overrides(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

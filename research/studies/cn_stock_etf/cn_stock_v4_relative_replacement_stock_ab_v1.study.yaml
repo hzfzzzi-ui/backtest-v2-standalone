@@ -1,0 +1,77 @@
+study_id: cn_stock_etf/cn_stock_v4_relative_replacement_stock_ab_v1
+title: CN Stock V4 Relative Replacement Stock AB V1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  The promoted V4 stock leg may lag during state switches because stale holdings occupy
+  slots while stronger current candidates cannot be deployed. A minimal atomic
+  relative-replacement runtime AB tests whether selling the weakest held stock for a
+  stronger current candidate improves the stock leg without changing signals, pool,
+  ranking, exits, or execution timing.
+change_scope:
+  modules_modified:
+    - sizing.rotation_replace_enabled
+    - sizing.rotation_replace_only_strong_risk_on
+    - sizing.rotation_replace_max_swaps_per_day
+    - sizing.rotation_replace_candidate_top_n
+    - sizing.rotation_replace_min_score_gap
+  fixed_modules:
+    - universe.universe_mode
+    - universe.membership_mode
+    - strategy.params
+    - ranking
+    - entry_rules
+    - exit_rules
+    - execution
+    - costs
+    - etf_sleeve
+variants:
+  - name: B0_V4_STOCK_REPLAY
+    description: Same-runtime stock-leg replay from the promoted baseline_V10_1 runtime config.
+  - name: REL_REPLACE_GAP005_TOP5
+    description: Enable atomic held-vs-candidate relative replacement with a 0.05 score gap and top-5 candidate search.
+    request_overrides:
+      runtime_config_json:
+        sizing:
+          rotation_replace_enabled: true
+          rotation_replace_only_strong_risk_on: false
+          rotation_replace_max_swaps_per_day: 1
+          rotation_replace_candidate_top_n: 5
+          rotation_replace_min_score_gap: 0.05
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-05-11"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-11"
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  runtime_config_path: outputs/baselines/baseline_V10_1/run_config.json
+  fast_mode: true
+  initial_capital: 1000000
+  enable_multifactor_rank: true
+  momentum_top_pct: 0.0
+  universe_mode: HS300_ZZ500
+  price_adj: hfq
+metadata:
+  research_only: true
+  primary_variable: v4_stock_relative_replacement
+  docker_required: true
+  source_stock_baseline_id: baseline_V10_1
+  source_combo_baseline_id: CN_STOCK_ETF_COMBO_BASELINE_V4
+  same_window_compare_required: true
+  stock_only: true
+  not_combo: true

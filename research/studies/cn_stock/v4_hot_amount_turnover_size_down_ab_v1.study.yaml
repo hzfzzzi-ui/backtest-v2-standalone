@@ -1,0 +1,71 @@
+study_id: cn_stock/v4_hot_amount_turnover_size_down_ab_v1
+title: V4 hot amount plus turnover light size-down AB v1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  BUY candidates with both 20-day average traded amount and 20-day average
+  turnover rate in the top 20% of that day's candidate pool are more likely to
+  be crowded/liquidity-heated losers. A light 0.8x size-down may reduce
+  drawdown without changing entry, exit, ranking, or candidate veto logic.
+change_scope:
+  modules_modified:
+    - runtime_config_json.sizing.hot_amount_turnover_size_down_enabled
+    - runtime_config_json.sizing.hot_amount_turnover_size_down_scale
+  fixed_modules:
+    - universe.universe_mode
+    - universe.membership_mode
+    - strategy.entry_rules
+    - strategy.exit_rules
+    - candidate_ordering
+    - market_state
+    - execution
+    - costs
+variants:
+  - name: B0_V4_STOCK_REPLAY
+    description: Same-runtime V4 stock-leg replay without hot amount/turnover sizing.
+  - name: HOT_AMOUNT_TURNOVER_SIZE_DOWN_80
+    description: Keep candidate ordering and reduce selected hot amount/turnover stock orders to 0.8x.
+    request_overrides:
+      runtime_config_json:
+        sizing:
+          hot_amount_turnover_size_down_enabled: true
+          hot_amount_turnover_size_down_scale: 0.80
+          hot_amount_turnover_amount_pct_threshold: 0.80
+          hot_amount_turnover_turnover_pct_threshold: 0.80
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-03-20"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-03-20"
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  runtime_config_path: outputs/baselines/baseline_V10_1/run_config.json
+  fast_mode: true
+  initial_capital: 1000000
+  enable_multifactor_rank: true
+  momentum_top_pct: 0.0
+  universe_mode: HS300_ZZ500
+  price_adj: hfq
+metadata:
+  research_only: true
+  primary_variable: hot_amount_turnover_light_size_down
+  docker_required: true
+  stock_only: true
+  etf_or_combo_inputs: false
+  industry_or_theme_inputs: false
+  source_baseline_id: baseline_V10_1
+  source_shadow_report: outputs/analysis/v4_liquidity_turnover_crowding_shadow_20260517_complete/report.md

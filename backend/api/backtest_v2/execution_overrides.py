@@ -134,6 +134,20 @@ def semantic_sizing_execution_overrides(wb_cfg: dict[str, Any] | None) -> dict[s
         overrides["rotation_replace_candidate_top_n"] = int(sizing.get("rotation_replace_candidate_top_n"))
     if sizing.get("rotation_replace_min_score_gap") is not None:
         overrides["rotation_replace_min_score_gap"] = float(sizing.get("rotation_replace_min_score_gap"))
+    if sizing.get("hot_amount_turnover_size_down_enabled") is not None:
+        overrides["hot_amount_turnover_size_down_enabled"] = bool(
+            sizing.get("hot_amount_turnover_size_down_enabled")
+        )
+    if sizing.get("hot_amount_turnover_size_down_scale") is not None:
+        overrides["hot_amount_turnover_size_down_scale"] = float(sizing.get("hot_amount_turnover_size_down_scale"))
+    if sizing.get("hot_amount_turnover_amount_pct_threshold") is not None:
+        overrides["hot_amount_turnover_amount_pct_threshold"] = float(
+            sizing.get("hot_amount_turnover_amount_pct_threshold")
+        )
+    if sizing.get("hot_amount_turnover_turnover_pct_threshold") is not None:
+        overrides["hot_amount_turnover_turnover_pct_threshold"] = float(
+            sizing.get("hot_amount_turnover_turnover_pct_threshold")
+        )
     return sanitize_json(overrides)
 
 

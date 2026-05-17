@@ -1,0 +1,97 @@
+{
+  "schema_version": "openclaw_study_round@1",
+  "round_id": "sr_20260512_d7_d5_immediate_independent_acceptance",
+  "created_at": "2026-05-12T11:04:30+08:00",
+  "updated_at": "2026-05-12T11:04:30+08:00",
+  "title": "D7 D5 immediate ????",
+  "status": "audited",
+  "study_id": "cn_stock_etf/d7_d5_immediate_independent_acceptance_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "D5 immediate ?????? V4 ????????????? AB ????",
+  "primary_variable": "stock sleeve high-chase D5 immediate half-exit acceptance audit",
+  "fixed_assumptions": [
+    "CN_STOCK_ETF_COMBO_BASELINE_V3 fixed",
+    "reuse completed Docker unified-runtime AB artifacts from cn_stock_etf_high_chase_d5_combo_ab_v1",
+    "stock pool, ETF sleeve, ranking, entry, execution, costs, account allocator fixed",
+    "no restore_candidate, no industry/theme, no watch variant in decision variable",
+    "no precomputed_component_results; account_allocator combo NAV truth"
+  ],
+  "windows": [
+    "1217",
+    "1626",
+    "1226",
+    "2025-2026 recent diagnostic"
+  ],
+  "variants": [
+    "B0_COMBO_V3_REPLAY",
+    "HC_D5_IMMEDIATE_COMBO"
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "study_id": "cn_stock_etf/d7_d5_immediate_independent_acceptance_v1",
+      "window_key": "all",
+      "variant_name": "D7_ACCEPTANCE",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260512_d7_d5_immediate_independent_acceptance\\human\\d7_d5_independent_acceptance.md",
+      "note": "D7 independent D5 immediate acceptance report",
+      "linked_at": "2026-05-12T11:04:30+08:00"
+    },
+    {
+      "kind": "table",
+      "study_id": "cn_stock_etf/d7_d5_immediate_independent_acceptance_v1",
+      "window_key": "all",
+      "variant_name": "D7_ACCEPTANCE",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260512_d7_d5_immediate_independent_acceptance\\machine\\d7_d5_independent_acceptance_summary.json",
+      "note": "machine D7 acceptance summary",
+      "linked_at": "2026-05-12T11:04:30+08:00"
+    },
+    {
+      "kind": "source",
+      "study_id": "cn_stock_etf/cn_stock_etf_high_chase_d5_combo_ab_v1",
+      "window_key": "all",
+      "variant_name": "AB_MATRIX",
+      "path": "outputs\\studies\\cn_stock_etf\\cn_stock_etf_high_chase_d5_combo_ab_v1\\machine\\stock_rule_combo_ab_matrix.json",
+      "note": "source same-window matrix",
+      "linked_at": "2026-05-12T11:04:30+08:00"
+    }
+  ],
+  "key_findings": [
+    "D5 immediate improves stock-leg CAGR, MaxDD, Sharpe, and Calmar in all three windows.",
+    "Combo-level full-cycle uplift is small: 1226 CAGR +0.057pp and Sharpe +0.009.",
+    "27 real full-cycle D5 exits: 15 effective drawdown prevention, 5 churn, 3 mixed, 4 small neutral.",
+    "2025-2026 recent effect is negative: stock -6.57pp, combo -1.55pp versus B0.",
+    "Decision is conditional pass / hold; not baseline promotion."
+  ],
+  "audit": {
+    "source_study_id": "cn_stock_etf/cn_stock_etf_high_chase_d5_combo_ab_v1",
+    "source_matrix": "outputs\\studies\\cn_stock_etf\\cn_stock_etf_high_chase_d5_combo_ab_v1\\machine\\stock_rule_combo_ab_matrix.json",
+    "source_contract_audit": "outputs\\studies\\cn_stock_etf\\cn_stock_etf_high_chase_d5_combo_ab_v1\\human\\combo_contract_audit.md",
+    "source_exit_trade_audit": "outputs\\studies\\cn_stock_etf\\cn_stock_etf_high_chase_d5_combo_ab_v1\\human\\d5_exit_trade_audit.md",
+    "source_recent_effect_diagnosis": "outputs\\studies\\cn_stock_etf\\cn_stock_etf_high_chase_d5_combo_ab_v1\\human\\d5_recent_effect_diagnosis.md",
+    "machine_summary": "outputs\\studies\\cn_stock_etf\\sr_20260512_d7_d5_immediate_independent_acceptance\\machine\\d7_d5_independent_acceptance_summary.json",
+    "human_summary": "outputs\\studies\\cn_stock_etf\\sr_20260512_d7_d5_immediate_independent_acceptance\\human\\d7_d5_independent_acceptance.md",
+    "nav_truth": "account_allocator unified combo runtime",
+    "precomputed_component_results_allowed": false
+  },
+  "decision": {
+    "status": "conditional_pass_hold",
+    "baseline_promotion": false,
+    "v4_candidate": "hold_for_next_ab",
+    "reason": "D5 immediate passes independent three-window and drawdown-quality validation, but full-cycle combo uplift is small, real D5 sample count is limited, and 2025-2026 recent drag blocks promotion."
+  },
+  "next_actions": [
+    "Run D8 delayed confirmation/watch AB as the next research step.",
+    "Do not promote D5 immediate to V4 before recent drag and churn/mixed cases are resolved."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "D7",
+    "D5",
+    "independent-acceptance",
+    "drawdown",
+    "research-only",
+    "hold"
+  ]
+}

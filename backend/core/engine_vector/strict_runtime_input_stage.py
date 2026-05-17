@@ -43,6 +43,7 @@ def prepare_default_runtime_inputs(
     _min_trade_price = float(_min_price)
     _min_list_days = int(_uf.get("min_list_days", 0) or 0)
     _min_avg_turnover_20d = float(_uf.get("min_avg_turnover_20d", 0.0) or 0.0)
+    _csi1000_new_min_circ_mv_yi = float(_uf.get("csi1000_new_min_circ_mv_yi", 0.0) or 0.0)
     _membership_history = getattr(strategy, "state", {}).get("membership_history")
     mx = build_ohlc_matrices_from_history(
         hist,
@@ -52,6 +53,7 @@ def prepare_default_runtime_inputs(
         min_price=_min_price,
         min_list_days=_min_list_days,
         min_avg_turnover_20d=_min_avg_turnover_20d,
+        csi1000_new_min_circ_mv_yi=_csi1000_new_min_circ_mv_yi,
     )
     t, n = mx.close.shape
     if n == 0:
@@ -116,6 +118,15 @@ def prepare_default_runtime_inputs(
     rotation_replace_max_swaps_per_day = int(_sc.rotation_replace_max_swaps_per_day)
     rotation_replace_candidate_top_n = int(_sc.rotation_replace_candidate_top_n)
     rotation_replace_min_score_gap = float(_sc.rotation_replace_min_score_gap)
+    high_chase_a2_size_down_enabled = bool(_sc.high_chase_a2_size_down_enabled)
+    high_chase_a2_size_down_scale = float(_sc.high_chase_a2_size_down_scale)
+    high_chase_a2_pre20_ret_threshold = float(_sc.high_chase_a2_pre20_ret_threshold)
+    high_chase_a2_turnover_rate_f20_threshold = float(_sc.high_chase_a2_turnover_rate_f20_threshold)
+    high_chase_a2_volume_20d_vs_60d_threshold = float(_sc.high_chase_a2_volume_20d_vs_60d_threshold)
+    hot_amount_turnover_size_down_enabled = bool(_sc.hot_amount_turnover_size_down_enabled)
+    hot_amount_turnover_size_down_scale = float(_sc.hot_amount_turnover_size_down_scale)
+    hot_amount_turnover_amount_pct_threshold = float(_sc.hot_amount_turnover_amount_pct_threshold)
+    hot_amount_turnover_turnover_pct_threshold = float(_sc.hot_amount_turnover_turnover_pct_threshold)
 
     feats = compute_feature_matrices(
         close=mx.close,
@@ -191,6 +202,15 @@ def prepare_default_runtime_inputs(
             "rotation_replace_max_swaps_per_day": rotation_replace_max_swaps_per_day,
             "rotation_replace_candidate_top_n": rotation_replace_candidate_top_n,
             "rotation_replace_min_score_gap": rotation_replace_min_score_gap,
+            "high_chase_a2_size_down_enabled": high_chase_a2_size_down_enabled,
+            "high_chase_a2_size_down_scale": high_chase_a2_size_down_scale,
+            "high_chase_a2_pre20_ret_threshold": high_chase_a2_pre20_ret_threshold,
+            "high_chase_a2_turnover_rate_f20_threshold": high_chase_a2_turnover_rate_f20_threshold,
+            "high_chase_a2_volume_20d_vs_60d_threshold": high_chase_a2_volume_20d_vs_60d_threshold,
+            "hot_amount_turnover_size_down_enabled": hot_amount_turnover_size_down_enabled,
+            "hot_amount_turnover_size_down_scale": hot_amount_turnover_size_down_scale,
+            "hot_amount_turnover_amount_pct_threshold": hot_amount_turnover_amount_pct_threshold,
+            "hot_amount_turnover_turnover_pct_threshold": hot_amount_turnover_turnover_pct_threshold,
             "enable_sector_gate": bool(getattr(strategy, "enable_sector_gate", False)),
             "sector_rank_window": int(getattr(strategy, "sector_rank_window", 60)),
             "sector_top_pct": float(getattr(strategy, "sector_top_pct", 0.30)),

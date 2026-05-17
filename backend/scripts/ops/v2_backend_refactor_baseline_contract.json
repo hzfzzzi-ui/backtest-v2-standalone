@@ -1,13 +1,39 @@
 {
   "contract_name": "v2_backend_refactor_foundation",
   "version": "1.2",
-  "baseline_exp_id": "exp_20260426_005716047_8650",
-  "anchor_policy": "current_formal_reanchor_due_missing_historical_artifact",
+  "baseline_exp_id": "exp_20260511_073506050_3d22",
+  "anchor_policy": "current_combo_baseline_v4_d7_deep_only_override",
   "current_anchor": {
-    "baseline_id": "CN_STOCK_ETF_FORMAL_V1",
-    "exp_id": "exp_20260426_005716047_8650",
-    "reason": "Current complete formal stock+ETF linked experiment is available locally and replaces the missing historical foundation artifact as the active regression anchor."
+    "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V4",
+    "exp_id": "exp_20260511_073506050_3d22",
+    "reason": "User-approved override promotion to combo baseline V4 from sr_20260511_high_chase_d5_deep_mae_combo_ab; full-period HC_D5_DEEP_ONLY_IMMEDIATE_COMBO aligned with D7 stock baseline."
   },
+  "superseded_anchors": [
+    {
+      "exp_id": "exp_20260510_034302669_7790",
+      "role": "previous_combo_baseline_v3_anchor",
+      "status": "superseded",
+      "reason": "Superseded by CN_STOCK_ETF_COMBO_BASELINE_V4 on 2026-05-12."
+    },
+    {
+      "exp_id": "exp_20260509_074944369_5f6c",
+      "role": "previous_combo_baseline_v2_anchor",
+      "status": "superseded",
+      "reason": "Superseded by CN_STOCK_ETF_COMBO_BASELINE_V3 on 2026-05-10."
+    },
+    {
+      "exp_id": "exp_20260508_124555553_fabd",
+      "role": "previous_formal_stock_etf_anchor",
+      "status": "superseded",
+      "reason": "Superseded by CN_STOCK_ETF_COMBO_BASELINE_V3 on 2026-05-10."
+    },
+    {
+      "exp_id": "exp_20260426_005716047_8650",
+      "role": "previous_formal_stock_etf_anchor",
+      "status": "replay_anchor",
+      "reason": "Superseded by explicit ETF dividend cashflow baseline semantics accepted on 2026-05-09."
+    }
+  ],
   "historical_missing_anchors": [
     {
       "exp_id": "exp_20260314_144548534_7db9",

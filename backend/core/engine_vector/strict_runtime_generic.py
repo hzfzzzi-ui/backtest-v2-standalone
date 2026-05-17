@@ -17,6 +17,7 @@ from backend.core.core.models import Position
 from backend.core.core.models import Signal
 from backend.core.core.types import Side
 from backend.core.engine_vector.candidate_index import build_daily_candidate_index
+from backend.core.engine_vector.atomic_rotation import filter_atomic_rotation_pending_orders
 from backend.core.engine_vector.data_matrix import build_ohlc_matrices_from_history
 from backend.core.engine_vector.features import compute_feature_matrices
 from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
@@ -71,6 +72,20 @@ def _run_vector_portfolio_backtest_generic_signals(
         raise ValueError("trading_days is empty")
     _uf_g = dict(getattr(strategy, "state", {}).get("universe_filters") or {})
     _min_trade_price = float(_uf_g.get("min_price", getattr(strategy, "min_price", 0.0)) or 0.0)
+    _sc_g = _kwargs.get("sizing_cfg")
+    high_chase_a2_size_down_enabled = bool(getattr(_sc_g, "high_chase_a2_size_down_enabled", False))
+    high_chase_a2_size_down_scale = float(getattr(_sc_g, "high_chase_a2_size_down_scale", 0.5) or 0.5)
+    high_chase_a2_pre20_ret_threshold = float(getattr(_sc_g, "high_chase_a2_pre20_ret_threshold", 0.50) or 0.50)
+    high_chase_a2_turnover_rate_f20_threshold = float(getattr(_sc_g, "high_chase_a2_turnover_rate_f20_threshold", 8.0) or 8.0)
+    high_chase_a2_volume_20d_vs_60d_threshold = float(getattr(_sc_g, "high_chase_a2_volume_20d_vs_60d_threshold", 1.5) or 1.5)
+    hot_amount_turnover_size_down_enabled = bool(getattr(_sc_g, "hot_amount_turnover_size_down_enabled", False))
+    hot_amount_turnover_size_down_scale = float(getattr(_sc_g, "hot_amount_turnover_size_down_scale", 0.8) or 0.8)
+    hot_amount_turnover_amount_pct_threshold = float(
+        getattr(_sc_g, "hot_amount_turnover_amount_pct_threshold", 0.8) or 0.8
+    )
+    hot_amount_turnover_turnover_pct_threshold = float(
+        getattr(_sc_g, "hot_amount_turnover_turnover_pct_threshold", 0.8) or 0.8
+    )
 
     hist = history.copy()
     hist["date"] = pd.to_datetime(hist["date"])
@@ -175,7 +190,19 @@ def _run_vector_portfolio_backtest_generic_signals(
 
     for i, day in enumerate(day_list):
         traded_value = 0.0
-        for od in pending.pop(day, []):
+        day_pending_orders = filter_atomic_rotation_pending_orders(
+            orders=list(pending.pop(day, []) or []),
+            day=day,
+            cash=float(cash),
+            positions=positions,
+            open_idx=open_idx,
+            slip_bps=float(_slip_bps2),
+            comm_rate=float(_comm_rate2),
+            comm_min=float(_comm_min2),
+            stamp_rate=float(_stamp_rate2),
+            min_trade_price=float(_min_trade_price),
+        )
+        for od in day_pending_orders:
             px = float(open_idx.get((day, od["symbol"]), 0.0) or 0.0)
             if px <= 0:
                 continue
@@ -223,7 +250,8 @@ def _run_vector_portfolio_backtest_generic_signals(
                 gross = qty * fill_px
                 comm = max(_comm_min2, gross * _comm_rate2)
                 net = gross + comm
-                if qty <= 0 or net > cash:
+                atomic_fill_approved = bool((od.get("meta") or {}).get("rotation_atomic_fill_approved", False))
+                if qty <= 0 or (net > cash and not atomic_fill_approved):
                     continue
                 cash -= net
                 traded_value += gross
@@ -420,6 +448,19 @@ def _run_vector_portfolio_backtest_generic_signals(
             rotation_replace_candidate_top_n=rotation_replace_candidate_top_n,
             rotation_replace_min_score_gap=rotation_replace_min_score_gap,
             rotation_min_hold_days=int(getattr(strategy, "min_hold_days", 0) or 0),
+            high_chase_a2_size_down_enabled=high_chase_a2_size_down_enabled,
+            high_chase_a2_size_down_scale=high_chase_a2_size_down_scale,
+            high_chase_a2_pre20_ret_threshold=high_chase_a2_pre20_ret_threshold,
+            high_chase_a2_turnover_rate_f20_threshold=high_chase_a2_turnover_rate_f20_threshold,
+            high_chase_a2_volume_20d_vs_60d_threshold=high_chase_a2_volume_20d_vs_60d_threshold,
+            hot_amount_turnover_size_down_enabled=hot_amount_turnover_size_down_enabled,
+            hot_amount_turnover_size_down_scale=hot_amount_turnover_size_down_scale,
+            hot_amount_turnover_amount_pct_threshold=hot_amount_turnover_amount_pct_threshold,
+            hot_amount_turnover_turnover_pct_threshold=hot_amount_turnover_turnover_pct_threshold,
+            slip_bps=float(_slip_bps2),
+            comm_rate=float(_comm_rate2),
+            comm_min=float(_comm_min2),
+            stamp_rate=float(_stamp_rate2),
         )
         if not bool(fast_mode):
             candidate_rows.extend(day_candidate_rows)

@@ -573,6 +573,10 @@ class SizingConfig(StrictModel):
     rotation_replace_max_swaps_per_day: int | None = None
     rotation_replace_candidate_top_n: int | None = None
     rotation_replace_min_score_gap: float | None = None
+    hot_amount_turnover_size_down_enabled: bool | None = None
+    hot_amount_turnover_size_down_scale: float | None = None
+    hot_amount_turnover_amount_pct_threshold: float | None = None
+    hot_amount_turnover_turnover_pct_threshold: float | None = None
 
 
 class FlowScriptConfig(StrictModel):

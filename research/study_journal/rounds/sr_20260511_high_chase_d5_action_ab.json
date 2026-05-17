@@ -1,0 +1,134 @@
+{
+  "round_id": "sr_20260511_high_chase_d5_action_ab",
+  "title": "High Chase + D5 failure 降仓 / watch / 延迟确认 AB",
+  "status": "audited",
+  "study_id": "cn_stock_etf/cn_stock_etf_high_chase_d5_action_ab_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "High Chase + D5 confirmation failure 之后，应该立即降仓、进入 watch 后复核，还是延迟到 day5 再确认？",
+  "primary_variable": "D5 action for high-chase entries: immediate half-exit vs watch_day10 vs delayed day5 confirmation",
+  "fixed_assumptions": [
+    "Same V3 stock component runtime config fixed",
+    "Stock pool, ranking, entry, execution, costs, and ETF sleeve fixed",
+    "No industry/theme inputs used in runtime",
+    "High Chase computed from entry-time own-stock data only",
+    "Same-window B0 stock replay is the AB decision anchor"
+  ],
+  "windows": [
+    "2016-2026",
+    "2012-2017",
+    "2012-2026"
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "study_id": "cn_stock_etf/cn_stock_etf_high_chase_d5_action_ab_v1",
+      "window_key": "all",
+      "variant_name": "AB_MATRIX",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_high_chase_d5_action_ab\\human\\high_chase_d5_action_ab.md",
+      "note": "human AB report",
+      "linked_at": "2026-05-11T08:55:15+08:00"
+    },
+    {
+      "kind": "table",
+      "study_id": "cn_stock_etf/cn_stock_etf_high_chase_d5_action_ab_v1",
+      "window_key": "all",
+      "variant_name": "AB_MATRIX",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_high_chase_d5_action_ab\\machine\\high_chase_d5_action_ab_summary.csv",
+      "note": "same-window metrics, trigger counts, and runtime summary",
+      "linked_at": "2026-05-11T08:55:15+08:00"
+    },
+    {
+      "kind": "registry",
+      "study_id": "cn_stock_etf/cn_stock_etf_high_chase_d5_action_ab_v1",
+      "window_key": "all",
+      "variant_name": "all",
+      "path": "outputs/studies/conclusions/cn_stock_etf/cn_stock_etf_high_chase_d5_action_ab_v1/registry.jsonl",
+      "note": "study conclusion registry with 15 entries",
+      "linked_at": "2026-05-11T08:55:15+08:00"
+    },
+    {
+      "kind": "log",
+      "study_id": "cn_stock_etf/cn_stock_etf_high_chase_d5_action_ab_v1",
+      "window_key": "all",
+      "variant_name": "docker_run",
+      "path": "outputs/logs/high_chase_d5_ab_3w_20260511_080005.out.log",
+      "note": "Docker full study stdout",
+      "linked_at": "2026-05-11T08:55:15+08:00"
+    }
+  ],
+  "key_findings": [
+    "High Chase scoped immediate half-exit is the most balanced candidate: 2016-2026 CAGR +0.67pp, Sharpe +0.043, MaxDD +3.03pp vs B0.",
+    "Watch day10 is best on 2012-2026 and 2012-2017, but not convincing on 2016-2026; keep as follow-up, do not promote directly.",
+    "Delayed day5 confirmation is rejected for now: main window CAGR and MaxDD both worse than B0.",
+    "All-scope D5 is too broad: full-cycle CAGR falls despite improved drawdown and higher churn."
+  ],
+  "audit": {
+    "runtime_config_path": "outputs/experiments/exp_20260510_033603951_8649/run_config.json",
+    "source_combo_baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "study_yaml": "research/studies/cn_stock_etf/cn_stock_etf_high_chase_d5_action_ab_v1.study.yaml",
+    "docker_run": true,
+    "variant_count": 5,
+    "window_count": 3,
+    "experiment_count": 15,
+    "control_variant": "B0_V3_STOCK_REPLAY",
+    "registry_compared_baseline_id": "baseline_V10_1",
+    "decision_anchor": "same-window B0 stock replay, not baseline_V10_1 registry compare",
+    "exp_ids_by_window_variant": {
+      "1626": {
+        "B0_V3_STOCK_REPLAY": "exp_20260511_000009046_76e1",
+        "D5_ALL_3D_IMMEDIATE_HALF_EXIT": "exp_20260511_000300088_8366",
+        "HC_D5_IMMEDIATE_HALF_EXIT": "exp_20260511_000556809_3f71",
+        "HC_D5_WATCH_DAY10_HALF_EXIT": "exp_20260511_000826508_ee27",
+        "HC_D5_DELAYED_5D_HALF_EXIT": "exp_20260511_001112631_88e2"
+      },
+      "1217": {
+        "B0_V3_STOCK_REPLAY": "exp_20260511_001352445_91fe",
+        "D5_ALL_3D_IMMEDIATE_HALF_EXIT": "exp_20260511_001507150_74fd",
+        "HC_D5_IMMEDIATE_HALF_EXIT": "exp_20260511_001618619_7e37",
+        "HC_D5_WATCH_DAY10_HALF_EXIT": "exp_20260511_001733718_e9a4",
+        "HC_D5_DELAYED_5D_HALF_EXIT": "exp_20260511_001845771_435b"
+      },
+      "1226": {
+        "B0_V3_STOCK_REPLAY": "exp_20260511_001954888_4083",
+        "D5_ALL_3D_IMMEDIATE_HALF_EXIT": "exp_20260511_002424101_a920",
+        "HC_D5_IMMEDIATE_HALF_EXIT": "exp_20260511_002908649_f3e4",
+        "HC_D5_WATCH_DAY10_HALF_EXIT": "exp_20260511_003425109_a974",
+        "HC_D5_DELAYED_5D_HALF_EXIT": "exp_20260511_003929770_5652"
+      }
+    },
+    "unit_tests": "pytest tests/unit/test_signal_provider_exits.py tests/unit/test_breakout_signal_provider.py tests/unit/test_study_runner.py -q",
+    "unit_tests_result": "88 passed",
+    "openspec_validate": "openspec validate evaluate-high-chase-d5-action-ab --strict passed"
+  },
+  "decision": {
+    "status": "continue",
+    "reason": "Immediate high-chase-scoped D5 half-exit has the cleanest three-window evidence; watch has promise but is not stable enough in the main window; delayed day5 and all-scope D5 should not be promoted.",
+    "recommended_candidate": "HC_D5_IMMEDIATE_HALF_EXIT",
+    "not_recommended": [
+      "D5_ALL_3D_IMMEDIATE_HALF_EXIT",
+      "HC_D5_DELAYED_5D_HALF_EXIT"
+    ],
+    "follow_up": [
+      "Refine watch_day10 only under narrower live-safe conditions before any promotion."
+    ]
+  },
+  "next_actions": [
+    "Run a narrower watch AB only after defining non-overfit watch eligibility.",
+    "If promoting, promote only the high-chase-scoped immediate 50% reduction candidate, not full-scope D5."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "high-chase",
+    "D5",
+    "AB",
+    "runtime",
+    "watch",
+    "drawdown",
+    "research-only"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T08:55:15+08:00",
+  "updated_at": "2026-05-11T08:55:15+08:00"
+}

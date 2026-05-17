@@ -1242,6 +1242,7 @@ def build_s7_order_stage_output(runtime: Any) -> StageOutputs:
         slip_bps=float(getattr(runtime, "_slip_bps", 0.0) or 0.0),
         comm_rate=float(getattr(runtime, "_comm_rate", 0.0) or 0.0),
         comm_min=float(getattr(runtime, "_comm_min", 0.0) or 0.0),
+        stamp_rate=float(getattr(runtime, "_stamp_rate", 0.0) or 0.0),
         base_order_value=float(execution_base_order_value),
         weight_mode=str(getattr(runtime, "_weight_mode", "equal") or "equal"),
         min_positions=int(getattr(runtime, "_min_positions_cfg", 0) or 0),

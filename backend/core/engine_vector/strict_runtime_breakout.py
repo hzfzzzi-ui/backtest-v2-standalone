@@ -17,6 +17,7 @@ from backend.core.core.models import Position
 from backend.core.core.models import Signal
 from backend.core.core.types import Side
 from backend.core.engine_vector.candidate_index import build_daily_candidate_index
+from backend.core.engine_vector.atomic_rotation import filter_atomic_rotation_pending_orders
 from backend.core.engine_vector.data_matrix import build_ohlc_matrices_from_history
 from backend.core.engine_vector.features import compute_feature_matrices
 from backend.core.engine_vector.market_filter_gate import resolve_mf_gate_on_today
@@ -33,6 +34,64 @@ from backend.core.strategies.composite_strategy import CompositeStrategy
 from backend.core.strategies.ema_cross import EMACrossStrategy
 from backend.core.strategies.regime_router import RegimeRouter
 from backend.core.strategies.sma_cross import SMACrossStrategy
+
+
+def _arm_mfe_mae_restore_state_on_fill(
+    provider: Any,
+    *,
+    symbol: str,
+    day: date,
+    bar_index: int,
+    remaining_qty: int,
+    meta: dict[str, Any],
+) -> None:
+    if not bool(meta.get("mfe_mae_restore_candidate_arm_on_fill", False)):
+        return
+    if int(remaining_qty) <= 0:
+        return
+    state = getattr(provider, "_mfe_mae_restore_state", None)
+    if not isinstance(state, dict):
+        state = {}
+        provider._mfe_mae_restore_state = state
+    payload_keys = {
+        "high_chase_bool",
+        "high_chase_core_count",
+        "high_chase_reasons",
+        "close_mfe_pct",
+        "close_mae_pct",
+        "current_return_pct",
+        "entry_bar_index",
+        "held_qty_before_exit",
+    }
+    payload = {key: meta.get(key) for key in payload_keys if key in meta}
+    payload.update(
+        {
+            "armed_date": day.isoformat(),
+            "armed_bar_index": int(bar_index),
+            "remaining_qty_after_exit": int(remaining_qty),
+            "source_reason_code": str(
+                meta.get("mfe_mae_restore_candidate_source_reason_code")
+                or meta.get("triggered_rule")
+                or ""
+            ),
+            "source": str(meta.get("mfe_mae_restore_candidate_source") or "mfe_mae_confirmation_exit"),
+            "scope": str(meta.get("mfe_mae_restore_candidate_scope") or "high_chase").strip().lower(),
+            "arm_decision_date": str(meta.get("mfe_mae_restore_candidate_arm_decision_date") or ""),
+            "arm_decision_bar_index": meta.get("mfe_mae_restore_candidate_arm_decision_bar_index"),
+        }
+    )
+    state[str(symbol).lower()] = payload
+
+
+def _clear_mfe_mae_restore_state_on_buy(provider: Any, *, symbol: str, meta: dict[str, Any]) -> None:
+    if not bool(meta.get("restore_candidate", False)):
+        return
+    if not bool(meta.get("restore_clear_on_fill", True)):
+        return
+    state = getattr(provider, "_mfe_mae_restore_state", None)
+    if isinstance(state, dict):
+        state.pop(str(symbol).lower(), None)
+
 
 def _run_vector_portfolio_backtest_breakout(
     *,
@@ -99,6 +158,15 @@ def _run_vector_portfolio_backtest_breakout(
     rotation_replace_max_swaps_per_day_cfg = int(_sc_b.rotation_replace_max_swaps_per_day)
     rotation_replace_candidate_top_n_cfg = int(_sc_b.rotation_replace_candidate_top_n)
     rotation_replace_min_score_gap_cfg = float(_sc_b.rotation_replace_min_score_gap)
+    high_chase_a2_size_down_enabled_cfg = bool(_sc_b.high_chase_a2_size_down_enabled)
+    high_chase_a2_size_down_scale_cfg = float(_sc_b.high_chase_a2_size_down_scale)
+    high_chase_a2_pre20_ret_threshold_cfg = float(_sc_b.high_chase_a2_pre20_ret_threshold)
+    high_chase_a2_turnover_rate_f20_threshold_cfg = float(_sc_b.high_chase_a2_turnover_rate_f20_threshold)
+    high_chase_a2_volume_20d_vs_60d_threshold_cfg = float(_sc_b.high_chase_a2_volume_20d_vs_60d_threshold)
+    hot_amount_turnover_size_down_enabled_cfg = bool(_sc_b.hot_amount_turnover_size_down_enabled)
+    hot_amount_turnover_size_down_scale_cfg = float(_sc_b.hot_amount_turnover_size_down_scale)
+    hot_amount_turnover_amount_pct_threshold_cfg = float(_sc_b.hot_amount_turnover_amount_pct_threshold)
+    hot_amount_turnover_turnover_pct_threshold_cfg = float(_sc_b.hot_amount_turnover_turnover_pct_threshold)
 
     provider = BreakoutTrendProvider()
     _ec = exit_cfg if isinstance(exit_cfg, ExitConfig) else ExitConfig()
@@ -116,6 +184,7 @@ def _run_vector_portfolio_backtest_breakout(
         sector_data=sector_data,
         industry_map=industry_map,
         industry_history=_kwargs.get("industry_history"),
+        sizing_cfg=_sc_b,
     )
 
     day_list = list(trading_days)
@@ -260,7 +329,19 @@ def _run_vector_portfolio_backtest_breakout(
         traded_value = 0.0
 
         # ── T+1 open fills ──
-        for od in pending.pop(day, []):
+        day_pending_orders = filter_atomic_rotation_pending_orders(
+            orders=list(pending.pop(day, []) or []),
+            day=day,
+            cash=float(cash),
+            positions=positions,
+            open_idx=open_idx,
+            slip_bps=float(_slip_bps),
+            comm_rate=float(_comm_rate),
+            comm_min=float(_comm_min),
+            stamp_rate=float(_stamp_rate),
+            min_trade_price=float(_min_trade_price),
+        )
+        for od in day_pending_orders:
             px = float(open_idx.get((day, od["symbol"]), 0.0) or 0.0)
             if px <= 0:
                 continue
@@ -288,8 +369,17 @@ def _run_vector_portfolio_backtest_breakout(
                     for d in provider.extra_clear_dicts:
                         d.pop(od["symbol"], None)
                     provider.entry_day.pop(od["symbol"], None)
-                elif bool((od.get("meta") or {}).get("risk_off_partial_mark_on_fill", False)) and isinstance(risk_off_partial_state, dict):
-                    risk_off_partial_state[od["symbol"]] = True
+                else:
+                    _arm_mfe_mae_restore_state_on_fill(
+                        provider,
+                        symbol=od["symbol"],
+                        day=day,
+                        bar_index=int(i),
+                        remaining_qty=int(positions.get(od["symbol"], 0) or 0),
+                        meta=dict(od.get("meta") or {}),
+                    )
+                    if bool((od.get("meta") or {}).get("risk_off_partial_mark_on_fill", False)) and isinstance(risk_off_partial_state, dict):
+                        risk_off_partial_state[od["symbol"]] = True
                 trade_rows.append({
                     "date": day.isoformat(), "symbol": od["symbol"], "side": "SELL",
                     "price": px, "fill_price": round(fill_px, 4), "qty": qty,
@@ -310,7 +400,8 @@ def _run_vector_portfolio_backtest_breakout(
                 gross = qty * fill_px
                 comm = max(_comm_min, gross * _comm_rate)
                 net = gross + comm
-                if qty <= 0 or net > cash:
+                atomic_fill_approved = bool((od.get("meta") or {}).get("rotation_atomic_fill_approved", False))
+                if qty <= 0 or (net > cash and not atomic_fill_approved):
                     continue
                 cash -= net
                 traded_value += gross
@@ -345,6 +436,11 @@ def _run_vector_portfolio_backtest_breakout(
                 if provider.peak_state_on_buy is not None:
                     raw_c = float(close_idx.get((day, od["symbol"]), px))
                     provider.peak_state_on_buy.setdefault(od["symbol"], raw_c)
+                _clear_mfe_mae_restore_state_on_buy(
+                    provider,
+                    symbol=od["symbol"],
+                    meta=dict(od.get("meta") or {}),
+                )
                 trade_rows.append({
                     "date": day.isoformat(), "symbol": od["symbol"], "side": "BUY",
                     "price": px, "fill_price": round(fill_px, 4), "qty": qty,
@@ -579,6 +675,19 @@ def _run_vector_portfolio_backtest_breakout(
             rotation_replace_candidate_top_n=rotation_replace_candidate_top_n_cfg,
             rotation_replace_min_score_gap=rotation_replace_min_score_gap_cfg,
             rotation_min_hold_days=int(getattr(strategy, "min_hold_days", 0) or 0),
+            high_chase_a2_size_down_enabled=high_chase_a2_size_down_enabled_cfg,
+            high_chase_a2_size_down_scale=high_chase_a2_size_down_scale_cfg,
+            high_chase_a2_pre20_ret_threshold=high_chase_a2_pre20_ret_threshold_cfg,
+            high_chase_a2_turnover_rate_f20_threshold=high_chase_a2_turnover_rate_f20_threshold_cfg,
+            high_chase_a2_volume_20d_vs_60d_threshold=high_chase_a2_volume_20d_vs_60d_threshold_cfg,
+            hot_amount_turnover_size_down_enabled=hot_amount_turnover_size_down_enabled_cfg,
+            hot_amount_turnover_size_down_scale=hot_amount_turnover_size_down_scale_cfg,
+            hot_amount_turnover_amount_pct_threshold=hot_amount_turnover_amount_pct_threshold_cfg,
+            hot_amount_turnover_turnover_pct_threshold=hot_amount_turnover_turnover_pct_threshold_cfg,
+            slip_bps=float(_slip_bps),
+            comm_rate=float(_comm_rate),
+            comm_min=float(_comm_min),
+            stamp_rate=float(_stamp_rate),
         )
         if not bool(fast_mode):
             candidate_rows.extend(day_candidate_rows)

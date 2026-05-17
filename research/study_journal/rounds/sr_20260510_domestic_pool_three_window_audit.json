@@ -1,0 +1,243 @@
+{
+  "round_id": "sr_20260510_domestic_pool_three_window_audit",
+  "title": "ETF池剔除海外资产：三窗口补证审计",
+  "status": "decided",
+  "asset_scope": "cn_stock_etf",
+  "study_id": "cn_stock_etf/cn_stock_etf_domestic_defense_boundary_v1",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V2",
+  "primary_question": "DOMESTIC_POOL_BASE 补齐 2012-2017 和 2012-2026 后，是否仍支持剔除跨境 ETF 可以修复 V2 组合回撤的判断？",
+  "primary_variable": "ETF pool: DOMESTIC_POOL_BASE three-window evidence only",
+  "tags": [
+    "ETF",
+    "domestic-only",
+    "three-window",
+    "same-window-audit",
+    "combo",
+    "research-only"
+  ],
+  "windows": [
+    "1626",
+    "1217",
+    "1226"
+  ],
+  "variants": [
+    "DOMESTIC_POOL_BASE"
+  ],
+  "fixed_assumptions": [
+    "stock sleeve fixed from CN_STOCK_ETF_FORMAL_V1 combo template",
+    "combo runtime fixed; only ETF source compile input replaced",
+    "ETF pool remains cn_etf_research_domestic_pool_base_v1; cross-border ETF residual count is zero",
+    "no exposure tightening, no ranking/timing/fill-rule change, no baseline promotion in this round"
+  ],
+  "key_findings": [
+    "2016-2026 主开发窗口：combo exp_20260510_013931013_f536，CAGR 16.17%，Sharpe 0.886，MaxDD -25.05%，Calmar 0.646；相对 registry baseline delta：CAGR 1.84%，Sharpe 0.105，MaxDD 10.14%。",
+    "2012-2017 硬门槛窗口：combo exp_20260510_033525299_c8d2，CAGR 16.03%，Sharpe 0.897，MaxDD -35.04%，Calmar 0.457；相对 registry baseline delta：CAGR 1.69%，Sharpe 0.116，MaxDD 0.15%。",
+    "2012-2026 全周期审计窗口：combo exp_20260510_034302669_7790，CAGR 15.74%，Sharpe 0.853，MaxDD -35.04%，Calmar 0.449；相对 registry baseline delta：CAGR 1.40%，Sharpe 0.072，MaxDD 0.15%。",
+    "三窗口 registry verdict 均为 PASS，方向支持继续研究 domestic-only ETF 池。",
+    "严格口径上，1226 与 linked V2 baseline 同为 2012-07-12 有效起点，比较最可信；1217/1626 仍引用 full-period linked baseline 指标，不能单独作为升级依据。",
+    "三次 Docker run 均无致命 stderr；1217 仅有 pandas 日期格式 warning，1226 stderr 为空。"
+  ],
+  "next_actions": [
+    "已按用户确认将 1226 全周期结果提升为 CN_STOCK_ETF_COMBO_BASELINE_V3。",
+    "后续研究默认以 CN_STOCK_ETF_COMBO_BASELINE_V3 作为组合基线。",
+    "基于三窗口补证结果，下一轮可以进入 DOMESTIC_DEFENSE_TIGHT 弱状态防守收紧研究。",
+    "DOMESTIC_DEFENSE_TIGHT 必须单独立项：只改 TRANS_DOWN/RISK_OFF 防守或现金暴露，不再同时扩 ETF 池。",
+    "在防守收紧前，补一个严格 same-window baseline compare；若不补，则结论中只采信 1226 full-audit 对比。"
+  ],
+  "audit": {
+    "same_window_compare": false,
+    "docker_run_checked": true,
+    "config_truth_checked": true,
+    "nav_lineage_checked": true
+  },
+  "decision": {
+    "status": "promote_candidate",
+    "reason": "用户已明确要求直接提升该轮结果为组合基线 V3；本次以 1226 全周期同起点结果 exp_20260510_034302669_7790 作为 baseline truth，注册为 CN_STOCK_ETF_COMBO_BASELINE_V3。"
+  },
+  "evidence": [
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_013931013_f536",
+      "study_id": "cn_stock_etf/cn_stock_etf_domestic_defense_boundary_v1",
+      "window_key": "1626",
+      "variant_name": "DOMESTIC_POOL_BASE",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_domestic_defense_boundary_v1/1626/DOMESTIC_POOL_BASE",
+      "note": "combo exp; stock exp exp_20260510_013518798_15bf; ETF exp exp_20260510_013836859_066f",
+      "linked_at": "",
+      "stock_exp_id": "exp_20260510_013518798_15bf",
+      "etf_exp_id": "exp_20260510_013836859_066f",
+      "etf_source_study_id": "etf/cn_etf_domestic_defense_boundary_v1",
+      "etf_pool_version": "cn_etf_research_domestic_pool_base_v1"
+    },
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_033525299_c8d2",
+      "study_id": "cn_stock_etf/cn_stock_etf_domestic_defense_boundary_v1",
+      "window_key": "1217",
+      "variant_name": "DOMESTIC_POOL_BASE",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_domestic_defense_boundary_v1/1217/DOMESTIC_POOL_BASE",
+      "note": "combo exp; stock exp exp_20260510_033308184_b162; ETF exp exp_20260510_033509446_5603",
+      "linked_at": "",
+      "stock_exp_id": "exp_20260510_033308184_b162",
+      "etf_exp_id": "exp_20260510_033509446_5603",
+      "etf_source_study_id": "etf/cn_etf_domestic_defense_boundary_v1",
+      "etf_pool_version": "cn_etf_research_domestic_pool_base_v1"
+    },
+    {
+      "kind": "experiment",
+      "exp_id": "exp_20260510_034302669_7790",
+      "study_id": "cn_stock_etf/cn_stock_etf_domestic_defense_boundary_v1",
+      "window_key": "1226",
+      "variant_name": "DOMESTIC_POOL_BASE",
+      "path": "outputs/studies/cn_stock_etf/cn_stock_etf_domestic_defense_boundary_v1/1226/DOMESTIC_POOL_BASE",
+      "note": "combo exp; stock exp exp_20260510_033603951_8649; ETF exp exp_20260510_034150821_8962",
+      "linked_at": "",
+      "stock_exp_id": "exp_20260510_033603951_8649",
+      "etf_exp_id": "exp_20260510_034150821_8962",
+      "etf_source_study_id": "etf/cn_etf_domestic_defense_boundary_v1",
+      "etf_pool_version": "cn_etf_research_domestic_pool_base_v1"
+    }
+  ],
+  "notes": [
+    {
+      "note_id": "note_20260510_1217_1226_logs",
+      "kind": "run_log",
+      "body": "Docker logs: outputs/logs/study_domestic_pool_1217_20260510_113303.*.log; outputs/logs/study_domestic_pool_1226_20260510_113559.*.log",
+      "created_at": "2026-05-10T11:44:00+08:00"
+    },
+    {
+      "note_id": "note_20260510_governance_audit",
+      "kind": "audit",
+      "body": "Checked execution_contract/run_meta/perf for candidate exp ids; no precomputed_component_results/cached_component_results/display_only execution hits found; pool_version observed as cn_etf_research_domestic_pool_base_v1.",
+      "created_at": "2026-05-10T11:44:00+08:00"
+    },
+    {
+      "note_id": "note_20260510_baseline_v3_promotion",
+      "kind": "baseline_promotion",
+      "body": "Promoted full-period 1226 combo exp exp_20260510_034302669_7790 to CN_STOCK_ETF_COMBO_BASELINE_V3; CN_STOCK_ETF_FORMAL_V1 and CN_STOCK_ETF_COMBO_BASELINE_V2 were marked superseded for the same effective period.",
+      "created_at": "2026-05-10T12:25:00+08:00"
+    },
+    {
+      "note_id": "note_20260510_baseline_v3_regression_rerun",
+      "kind": "regression",
+      "body": "Docker baseline regression --rerun passed: candidate exp_20260510_043240625_52f9 compared to V3 anchor exp_20260510_034302669_7790 with blocking=0, warning=0, total=0.",
+      "created_at": "2026-05-10T12:33:00+08:00"
+    }
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-10T11:46:23+08:00",
+  "updated_at": "2026-05-10T12:25:00+08:00",
+  "auto_summary": {
+    "schema_version": "openclaw_study_auto_summary@1",
+    "generated_at": "2026-05-10T11:46:23+08:00",
+    "headline": "ETF池剔除海外资产：三窗口补证审计：主变量=ETF pool: DOMESTIC_POOL_BASE three-window evidence only",
+    "conclusion_draft": "用户已接受并提升 1226 全周期结果为组合基线 V3；后续以 V3 作为组合研究基线。",
+    "reliability": "partial",
+    "facts": [
+      "已关联 3 条证据。",
+      "匹配到 3 条 study conclusion registry 记录。",
+      "窗口覆盖：2012-2017、2012-2026、2016-2026。",
+      "verdict 分布：PASS=3。",
+      "1226 全周期实验 exp_20260510_034302669_7790 已注册为 CN_STOCK_ETF_COMBO_BASELINE_V3。"
+    ],
+    "risks": [
+      "尚未确认 same-window compare。"
+    ],
+    "next_actions": [
+      "后续研究默认以 CN_STOCK_ETF_COMBO_BASELINE_V3 作为组合基线。",
+      "基于三窗口补证结果，下一轮可以进入 DOMESTIC_DEFENSE_TIGHT 弱状态防守收紧研究。",
+      "DOMESTIC_DEFENSE_TIGHT 必须单独立项：只改 TRANS_DOWN/RISK_OFF 防守或现金暴露，不再同时扩 ETF 池。",
+      "在防守收紧前，补一个严格 same-window baseline compare；若不补，则结论中只采信 1226 full-audit 对比。"
+    ],
+    "evidence_counts": {
+      "linked": 3,
+      "matched_conclusions": 3
+    },
+    "window_coverage": [
+      "2012-2017",
+      "2012-2026",
+      "2016-2026"
+    ],
+    "verdict_counts": {
+      "PASS": 3
+    },
+    "metric_highlights": [
+      {
+        "exp_id": "exp_20260510_034302669_7790",
+        "window_key": "1226",
+        "variant_name": "DOMESTIC_POOL_BASE",
+        "cagr": {
+          "candidate": 0.1573746186219782,
+          "baseline": 0.14333707978339105,
+          "delta": 0.01403753883858716
+        },
+        "sharpe": {
+          "candidate": 0.8531643886747889,
+          "baseline": 0.7809460283926393,
+          "delta": 0.07221836028214967
+        },
+        "max_drawdown": {
+          "candidate": -0.35040287801526804,
+          "baseline": -0.3519328032535972,
+          "delta": 0.0015299252383291773
+        },
+        "calmar": {
+          "candidate": 0.44912478890975593,
+          "baseline": 0.4072853637349191,
+          "delta": 0.04183942517483685
+        }
+      },
+      {
+        "exp_id": "exp_20260510_033525299_c8d2",
+        "window_key": "1217",
+        "variant_name": "DOMESTIC_POOL_BASE",
+        "cagr": {
+          "candidate": 0.16028281453035986,
+          "baseline": 0.14333707978339105,
+          "delta": 0.01694573474696881
+        },
+        "sharpe": {
+          "candidate": 0.8965237725050906,
+          "baseline": 0.7809460283926393,
+          "delta": 0.11557774411245136
+        },
+        "max_drawdown": {
+          "candidate": -0.35040287801526804,
+          "baseline": -0.3519328032535972,
+          "delta": 0.0015299252383291773
+        },
+        "calmar": {
+          "candidate": 0.45742436659831287,
+          "baseline": 0.4072853637349191,
+          "delta": 0.05013900286339379
+        }
+      },
+      {
+        "exp_id": "exp_20260510_013931013_f536",
+        "window_key": "1626",
+        "variant_name": "DOMESTIC_POOL_BASE",
+        "cagr": {
+          "candidate": 0.1616919715024947,
+          "baseline": 0.14333707978339105,
+          "delta": 0.01835489171910365
+        },
+        "sharpe": {
+          "candidate": 0.8857802852823151,
+          "baseline": 0.7809460283926393,
+          "delta": 0.10483425688967585
+        },
+        "max_drawdown": {
+          "candidate": -0.25048717804305054,
+          "baseline": -0.3519328032535972,
+          "delta": 0.10144562521054667
+        },
+        "calmar": {
+          "candidate": 0.6455099728685719,
+          "baseline": 0.4072853637349191,
+          "delta": 0.23822460913365284
+        }
+      }
+    ]
+  },
+  "reliability": "partial"
+}

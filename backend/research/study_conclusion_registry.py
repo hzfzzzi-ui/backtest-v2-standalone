@@ -7,6 +7,9 @@ from typing import Any
 
 from backend.api.shared.json_utils import sanitize_json
 
+FORMAL_VERDICTS = {"confirmed", "falsified", "inconclusive"}
+LEGACY_GATE_STATUSES = {"PASS", "FAIL", "UNKNOWN"}
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -73,6 +76,51 @@ def _build_summary_short(
     return " | ".join(parts)
 
 
+def _normalize_gate_status(value: Any) -> str:
+    status = str(value or "").strip().upper()
+    return status if status in LEGACY_GATE_STATUSES else "UNKNOWN"
+
+
+def _normalize_formal_verdict(value: Any) -> str:
+    status = str(value or "").strip().lower()
+    if status in FORMAL_VERDICTS:
+        return status
+    return "inconclusive"
+
+
+def _normalize_verdict_payload(verdict: dict[str, Any] | None) -> dict[str, Any]:
+    payload = dict(verdict or {})
+    raw_status = str(payload.get("status") or "").strip()
+    raw_status_upper = raw_status.upper()
+    explicit_formal = payload.get("study_verdict") or payload.get("formal_verdict")
+    if explicit_formal is not None:
+        formal_status = _normalize_formal_verdict(explicit_formal)
+    else:
+        formal_status = _normalize_formal_verdict(raw_status)
+    gate_status = _normalize_gate_status(payload.get("gate_status") or raw_status_upper)
+    reason = str(payload.get("reason") or "").strip()
+    gate_reason = str(payload.get("gate_reason") or ("reason" in payload and raw_status_upper in LEGACY_GATE_STATUSES and reason) or "").strip()
+    source = str(payload.get("verdict_source") or "").strip()
+    if not source:
+        source = "formal_input" if raw_status.lower() in FORMAL_VERDICTS else "normalized_legacy_gate_status"
+    return sanitize_json(
+        {
+            "status": formal_status,
+            "reason": reason,
+            "gate_status": gate_status,
+            "gate_reason": gate_reason,
+            "gate_checks": (
+                payload.get("gate_checks")
+                if isinstance(payload.get("gate_checks"), dict)
+                else payload.get("checks")
+                if isinstance(payload.get("checks"), dict)
+                else {}
+            ),
+            "verdict_source": source,
+        }
+    )
+
+
 def append_study_conclusion(
     *,
     study_id: str,
@@ -84,8 +132,8 @@ def append_study_conclusion(
     compare: dict[str, Any] | None,
     results_dir: str | Path | None,
 ) -> dict[str, Any]:
-    verdict_payload = dict(verdict or {})
-    verdict_status = str(verdict_payload.get("status") or "UNKNOWN").strip() or "UNKNOWN"
+    verdict_payload = _normalize_verdict_payload(verdict)
+    verdict_status = str(verdict_payload.get("status") or "inconclusive").strip() or "inconclusive"
     verdict_reason = str(verdict_payload.get("reason") or "").strip()
     baseline_source = (
         sanitize_json(dict(compare.get("baseline_source_of_truth") or {}))
@@ -98,6 +146,10 @@ def append_study_conclusion(
             "study_id": str(study_id or "").strip(),
             "compared_baseline_id": str(compared_baseline_id or "").strip(),
             "verdict": verdict_status,
+            "gate_status": verdict_payload.get("gate_status"),
+            "gate_reason": verdict_payload.get("gate_reason"),
+            "gate_checks": verdict_payload.get("gate_checks"),
+            "verdict_source": verdict_payload.get("verdict_source"),
             "summary_short": _build_summary_short(
                 verdict_status=verdict_status,
                 verdict_reason=verdict_reason,

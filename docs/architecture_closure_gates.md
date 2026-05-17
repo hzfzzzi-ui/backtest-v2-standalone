@@ -6,11 +6,11 @@ boundary and baseline regression surfaces.
 ## Scope
 
 - Formal mainline anchor: `baseline_V10.1`
-- Formal stock+ETF anchor: `CN_STOCK_ETF_FORMAL_V1`
+- Formal stock+ETF anchor: `CN_STOCK_ETF_COMBO_BASELINE_V4`
 - Foundation baseline regression contract:
   `backend/scripts/ops/v2_backend_refactor_baseline_contract.json`
 - Active foundation regression experiment:
-  `exp_20260426_005716047_8650`
+  `exp_20260511_073506050_3d22`
 - Historical missing foundation regression experiment:
   `exp_20260314_144548534_7db9`
 - Historical missing `baseline_V10.1` rebase experiment:

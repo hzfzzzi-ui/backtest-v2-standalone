@@ -6,7 +6,8 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <title>多资产趋势研究台</title>
-  <link rel="stylesheet" href="assets/css/workbench.css?v=20260416_topcompact01" />
+  <link rel="icon" href="assets/icons/trading-assistant.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="assets/css/workbench.css?v=20260510_researchcompact02" />
   <style>
     #wbGlobalRegimeCard,
     #wbGlobalGovernorCard {
@@ -29,6 +30,7 @@
       <div class="wb-cmd-right">
         <button id="wbRunBtn" class="wb-btn-run">运行</button>
         <button id="wbQuickLoad" class="pill wb-cmd-btn">加载</button>
+        <a id="wbStudyJournalLink" class="pill wb-cmd-btn" href="/study-journal">研究日志</a>
         <button id="wbSaveBaseline" class="pill wb-cmd-btn">保存基线</button>
         <span id="wbLoadHint" class="wb-run-status">默认：V10.2 | 2012-2026</span>
         <span id="wbDataSyncHint" class="wb-chip" title="读取市场数据同步状态">数据同步：读取中</span>
@@ -220,6 +222,10 @@
         <button class="wb-rail-btn wb-rail-tool" data-panel="history" title="实验历史">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <span class="wb-rail-label">历史</span>
+        </button>
+        <button class="wb-rail-btn wb-rail-tool" data-panel="research" title="研究日志">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5V5a2 2 0 0 1 2-2h10.5a2 2 0 0 1 2 2v14.5"/><path d="M8 7h6"/><path d="M8 11h7"/><path d="M8 15h5"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/></svg>
+          <span class="wb-rail-label">研究</span>
         </button>
       </aside>
 
@@ -916,6 +922,18 @@
             </div>
           </div>
         </section>
+
+        <!-- Research journal module -->
+        <section class="wb-module" data-module="research">
+          <div class="wb-history-head">
+            <strong>研究日志</strong>
+            <a class="pill wb-action-ghost" href="/study-journal" target="_blank" rel="noopener">独立打开</a>
+          </div>
+          <div class="wb-research-drawer-card">
+            <div class="wb-mini">研究日志用于记录每一轮 study 的问题、证据、审计项、自动总结和下一步。</div>
+            <div class="wb-mini wb-gap-top">它只消费研究日志 API 和 outputs 证据索引，不参与回测执行，也不改写 baseline。</div>
+          </div>
+        </section>
       </aside>
 
       <!-- Main Canvas + Bottom Dock -->
@@ -924,6 +942,9 @@
         <!-- scrollable content area -->
         <div class="wb-main-content wb-scrollbox">
           <section id="wbResultsWorkbenchMount" class="wb-results-workbench-mount" hidden></section>
+          <section id="wbStudyJournalEmbed" class="wb-study-journal-embed" hidden>
+            <iframe id="wbStudyJournalFrame" src="/study-journal?embedded=1" title="研究日志"></iframe>
+          </section>
         </div>
       </main>
     </div>
@@ -957,11 +978,11 @@
   <script defer src="assets/js/desktop-shell/load-orchestration.js?v=20260404_desktopshell03"></script>
   <script defer src="assets/js/desktop-shell/save-orchestration.js?v=20260404_desktopshell03"></script>
   <script defer src="assets/js/desktop-shell/run-orchestration.js?v=20260404_desktopshell03"></script>
-  <script defer src="assets/js/desktop-shell/app-shell.js?v=20260405_appshell02"></script>
+  <script defer src="assets/js/desktop-shell/app-shell.js?v=20260510_baselinev3"></script>
   <script defer src="assets/js/desktop-shell/api-surface.js?v=20260426_desktopshellapisurface01"></script>
   <script defer src="assets/js/state/multi-alpha-ui.js?v=20260316_frontendperf01"></script>
   <script defer src="assets/js/state/config-draft-core.js?v=20260320_regimeframework01"></script>
-  <script defer src="assets/js/desktop-shell/config-workspace.js?v=20260404_desktopshell05"></script>
+  <script defer src="assets/js/desktop-shell/config-workspace.js?v=20260510_researchcompact01"></script>
   <script defer src="assets/js/charts.js?v=20260426_chartsurface01"></script>
   <script defer src="assets/dist/results-workbench-vue-shell.js?v=20260416_layoutdedupe01"></script>
   <script>

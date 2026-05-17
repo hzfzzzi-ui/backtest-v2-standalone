@@ -1,0 +1,128 @@
+{
+  "round_id": "sr_20260511_d5_mfe_mae_3d_runtime_ab",
+  "title": "D5 3日 MFE/MAE 确认失败 Runtime AB",
+  "status": "audited",
+  "study_id": "cn_stock_etf/cn_stock_etf_d5_mfe_mae_3d_runtime_ab_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "3日内 MFE 不足且 MAE 扩大的突破，是否应该在真实 runtime 中半卖以降低假突破损伤？",
+  "primary_variable": "enable_mfe_mae_confirmation_exit=true, lookahead=3, min_mfe=2%, max_mae=-5%, exit_pct=50%",
+  "fixed_assumptions": [
+    "source runtime config: outputs/experiments/exp_20260510_033603951_8649/run_config.json",
+    "same stock universe, ranking, entry rules, execution, costs, sizing, and ETF sleeve",
+    "normal runtime ledger only; no precomputed shadow rows",
+    "D5 trigger uses own-stock adjusted close path only",
+    "decision evidence is same-window B0 vs D5, not registry-to-baseline comparison"
+  ],
+  "windows": [
+    "2016-2026",
+    "2012-2017",
+    "2012-2026"
+  ],
+  "variants": [
+    "B0_V3_STOCK_REPLAY",
+    "D5_3D_MFE_MAE_RUNTIME_HALF_EXIT"
+  ],
+  "evidence": [
+    {
+      "kind": "experiment_pair",
+      "window_key": "1626",
+      "b0_exp_id": "exp_20260510_222327896_2106",
+      "d5_exp_id": "exp_20260510_222708549_6e2e",
+      "log": "outputs/logs/d5_3d_ab_1626_20260511_062325.log",
+      "note": "main window Docker runtime AB"
+    },
+    {
+      "kind": "experiment_pair",
+      "window_key": "1217",
+      "b0_exp_id": "exp_20260510_223408484_7b2c",
+      "d5_exp_id": "exp_20260510_223524690_1830",
+      "log": "outputs/logs/d5_3d_ab_1217_20260511_063404.log",
+      "note": "hard-gate window Docker runtime AB"
+    },
+    {
+      "kind": "experiment_pair",
+      "window_key": "1226",
+      "b0_exp_id": "exp_20260510_223654280_9ef2",
+      "d5_exp_id": "exp_20260510_224156828_5ad0",
+      "log": "outputs/logs/d5_3d_ab_1226_20260511_063649.log",
+      "note": "full-audit window Docker runtime AB"
+    }
+  ],
+  "same_window_metrics": [
+    {
+      "window_key": "1626",
+      "delta_total_return": 0.045857925547959866,
+      "delta_cagr": 0.0011863810845127443,
+      "delta_sharpe": 0.020096845746623737,
+      "delta_max_drawdown": 0.030287338227791394,
+      "delta_calmar": 0.07329114731205799,
+      "delta_trades": 130,
+      "d5_exit_count": 42
+    },
+    {
+      "window_key": "1217",
+      "delta_total_return": 0.014177506334161224,
+      "delta_cagr": 0.001492365592831614,
+      "delta_sharpe": 0.01557488868435304,
+      "delta_max_drawdown": 0.01496705021541212,
+      "delta_calmar": 0.02764449219704779,
+      "delta_trades": 16,
+      "d5_exit_count": 12
+    },
+    {
+      "window_key": "1226",
+      "delta_total_return": -0.2759696779507866,
+      "delta_cagr": -0.00313968982372659,
+      "delta_sharpe": 0.002657799542297104,
+      "delta_max_drawdown": 0.01496705021541212,
+      "delta_calmar": 0.015708107477571508,
+      "delta_trades": 147,
+      "d5_exit_count": 53
+    }
+  ],
+  "key_findings": [
+    "主窗口 1626 正向：总收益 +4.59 pct, CAGR +0.12 pct, Sharpe +0.020, MaxDD 改善 3.03 pct, 但交易数 +130。",
+    "硬门槛 1217 小幅正向：总收益 +1.42 pct, CAGR +0.15 pct, MaxDD 改善 1.50 pct, 交易数 +16。",
+    "全周期 1226 不通过收益口径：总收益 -27.60 pct, CAGR -0.31 pct；但 Sharpe 小幅 +0.003, MaxDD 改善 1.50 pct。",
+    "D5 直接作用的股票并不是稳定贡献来源：1626 中 D5 exit symbols PnL delta = -116,275, non-D5 symbols = +160,335；1226 中 D5 exit symbols = -449,993, non-D5 symbols = +169,515。",
+    "D5 3日版的收益来自二阶资金再分配和风险路径，而不是被半卖股票本身稳定变差；这说明 3日规则过早，容易切掉后续恢复的强股。"
+  ],
+  "audit": {
+    "docker_required": true,
+    "docker_container": "backtest-v2-standalone",
+    "openspec_change": "openspec/changes/evaluate-d5-mfe-mae-3d-runtime-ab",
+    "openspec_validated_strict": true,
+    "local_tests": [
+      "tests/unit/test_signal_provider_exits.py",
+      "tests/unit/test_breakout_signal_provider.py",
+      "tests/unit/test_study_runner.py",
+      "tests/unit/test_experiment_runner_multi_alpha_compile.py"
+    ],
+    "registry_warning": "outputs/studies/conclusions registry rows compare each variant to baseline_V10_1; they are not the final same-window AB decision.",
+    "source_shadow_round": "sr_20260511_v3_d5_mfe_mae_confirmation_shadow"
+  },
+  "decision": {
+    "status": "do_not_promote",
+    "reason": "D5 3日版改善回撤和 Sharpe，但全周期同窗收益/CAGR 输给 B0，且直接被 D5 半卖的股票贡献为负；不适合作为 V3 规则直接上线。"
+  },
+  "next_actions": [
+    "不要推进 D5 3日固定半卖为正式规则。",
+    "下一轮只研究 D5 改造版：加入 profit-runner protection 或改为 5/10日确认，不引入行业主题。",
+    "对被 D5 半卖后恢复的强股做反例归因，重点看是否存在 breakout quality、final_score、二次突破或回补信号。"
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "D5",
+    "mfe",
+    "mae",
+    "runtime-ab",
+    "docker",
+    "same-window-compare",
+    "do-not-promote"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T06:50:02+08:00",
+  "updated_at": "2026-05-11T06:50:02+08:00"
+}

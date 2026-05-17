@@ -19,13 +19,20 @@ from backend.core.portfolio.sizing import calc_buy_slots
 
 def _allow_existing_holding_top_up(meta: dict[str, Any] | None) -> bool:
     payload = dict(meta or {})
+    owner_system = str(payload.get("owner_system", "") or "").strip().lower()
+    target_weight_basis = str(payload.get("target_weight_basis", "") or "").strip().lower()
+    if (
+        bool(payload.get("restore_candidate", False))
+        and target_weight_basis == "delta_restore_gap"
+        and owner_system == "cn_stock_trend_alpha_core"
+    ):
+        return True
     if bool(payload.get("trans_up_recovery_confirmed_scale_up_active", False)):
         return True
     sleeve_id = str(payload.get("sleeve_id", "") or "").strip().lower()
     alpha_id = str(payload.get("alpha_id", "") or "").strip().lower()
     strategy_role = str(payload.get("strategy_role", "") or "").strip().lower()
     execution_path = str(payload.get("execution_path", "") or "").strip().lower()
-    target_weight_basis = str(payload.get("target_weight_basis", "") or "").strip().lower()
     if sleeve_id != "cn_etf_beta" and alpha_id != "cn_etf_beta":
         return False
     if strategy_role != "governed_broad_based_standalone_mainline":
@@ -41,6 +48,26 @@ def _allow_existing_holding_top_up(meta: dict[str, Any] | None) -> bool:
         "weak_state_inter_rebalance_defense_redeploy",
         "shared_risk_on_to_defensive_transition_defense_establish",
     }
+
+
+def _restore_delta_qty(
+    *,
+    meta: dict[str, Any] | None,
+    future_positions: dict[str, int],
+    symbol: str,
+    qty: int,
+    lot_size: int,
+) -> int:
+    payload = dict(meta or {})
+    if not (
+        bool(payload.get("restore_candidate", False))
+        and str(payload.get("target_weight_basis", "") or "").strip().lower() == "delta_restore_gap"
+    ):
+        return int(qty)
+    held = int(future_positions.get(str(symbol).lower(), 0) or 0)
+    delta = max(0, int(qty) - held)
+    lot = max(1, int(lot_size))
+    return int(delta // lot * lot)
 
 
 def _entry_gap_guard_hit(
@@ -60,6 +87,181 @@ def _entry_gap_guard_hit(
         return False
     gap_pct = float(next_open_price) / float(decision_close_price) - 1.0
     return gap_pct > float(entry_gap_guard_pct)
+
+
+def _resolve_high_chase_a2_size_down(
+    *,
+    sig_meta: dict[str, Any] | None,
+    enabled: bool,
+    scale: float,
+    pre20_ret_threshold: float,
+    turnover_rate_f20_threshold: float,
+    volume_20d_vs_60d_threshold: float,
+) -> dict[str, Any]:
+    meta = dict(sig_meta or {})
+    owner = str(
+        meta.get("owner_system")
+        or meta.get("sleeve_id")
+        or meta.get("alpha_id")
+        or ""
+    ).strip().lower()
+
+    def _feature(*keys: str) -> float | None:
+        for key in keys:
+            value = _safe_float_or_none(meta.get(key))
+            if value is not None:
+                return float(value)
+        return None
+
+    pre20_ret = _feature("high_chase_a2_pre_ret_20d", "pre_ret_20d")
+    turnover20 = _feature("high_chase_a2_avg_turnover_rate_f_20d", "avg_turnover_rate_f_20d")
+    volume20v60 = _feature("high_chase_a2_volume_20d_vs_60d", "volume_20d_vs_60d")
+    try:
+        applied_scale = max(0.0, min(1.0, float(scale)))
+    except Exception:
+        applied_scale = 0.5
+    owner_ok = owner == "cn_stock_trend_alpha_core"
+    triggered = (
+        bool(enabled)
+        and bool(owner_ok)
+        and pre20_ret is not None
+        and turnover20 is not None
+        and volume20v60 is not None
+        and float(pre20_ret) >= float(pre20_ret_threshold)
+        and float(turnover20) >= float(turnover_rate_f20_threshold)
+        and float(volume20v60) >= float(volume_20d_vs_60d_threshold)
+    )
+    return {
+        "high_chase_a2_size_down_enabled": bool(enabled),
+        "high_chase_a2_size_down_triggered": bool(triggered),
+        "high_chase_a2_owner_system": str(owner),
+        "high_chase_a2_owner_ok": bool(owner_ok),
+        "high_chase_a2_size_down_scale": float(applied_scale),
+        "high_chase_a2_applied_scale": float(applied_scale if triggered else 1.0),
+        "high_chase_a2_pre_ret_20d": None if pre20_ret is None else float(pre20_ret),
+        "high_chase_a2_avg_turnover_rate_f_20d": None if turnover20 is None else float(turnover20),
+        "high_chase_a2_volume_20d_vs_60d": None if volume20v60 is None else float(volume20v60),
+        "high_chase_a2_pre20_ret_threshold": float(pre20_ret_threshold),
+        "high_chase_a2_turnover_rate_f20_threshold": float(turnover_rate_f20_threshold),
+        "high_chase_a2_volume_20d_vs_60d_threshold": float(volume_20d_vs_60d_threshold),
+    }
+
+
+def _rank_pct_by_symbol(values: dict[str, float | None]) -> dict[str, float]:
+    valid = [
+        (str(symbol).lower(), float(value))
+        for symbol, value in dict(values or {}).items()
+        if value is not None and math.isfinite(float(value))
+    ]
+    if len(valid) <= 1:
+        return {}
+    valid.sort(key=lambda item: (float(item[1]), str(item[0])))
+    out: dict[str, float] = {}
+    n = len(valid)
+    i = 0
+    while i < n:
+        j = i
+        value = float(valid[i][1])
+        while j + 1 < n and float(valid[j + 1][1]) == value:
+            j += 1
+        avg_rank = ((i + 1) + (j + 1)) / 2.0
+        pct = float(avg_rank / float(n))
+        for k in range(i, j + 1):
+            out[str(valid[k][0]).lower()] = pct
+        i = j + 1
+    return out
+
+
+def _build_hot_amount_turnover_pct_maps(ranked: list[dict[str, Any]]) -> tuple[dict[str, float], dict[str, float]]:
+    amount_values: dict[str, float | None] = {}
+    turnover_values: dict[str, float | None] = {}
+    for item in list(ranked or ()):
+        sym = str(item.get("symbol", "")).lower()
+        signal = item.get("signal")
+        raw_meta = getattr(signal, "meta", {}) if signal is not None else {}
+        meta = raw_meta if isinstance(raw_meta, dict) else {}
+        amount_values[sym] = _safe_float_or_none(meta.get("hot_amount_turnover_amount20", meta.get("amount20")))
+        turnover_values[sym] = _safe_float_or_none(
+            meta.get("hot_amount_turnover_turnover_rate20", meta.get("turnover_rate20"))
+        )
+    return _rank_pct_by_symbol(amount_values), _rank_pct_by_symbol(turnover_values)
+
+
+def _resolve_hot_amount_turnover_size_down(
+    *,
+    sig_meta: dict[str, Any] | None,
+    symbol: str,
+    amount_pct_map: dict[str, float],
+    turnover_pct_map: dict[str, float],
+    enabled: bool,
+    scale: float,
+    amount_pct_threshold: float,
+    turnover_pct_threshold: float,
+) -> dict[str, Any]:
+    meta = dict(sig_meta or {})
+    sym = str(symbol or "").lower()
+    owner = str(
+        meta.get("owner_system")
+        or meta.get("sleeve_id")
+        or meta.get("alpha_id")
+        or ""
+    ).strip().lower()
+    amount20 = _safe_float_or_none(meta.get("hot_amount_turnover_amount20", meta.get("amount20")))
+    turnover20 = _safe_float_or_none(meta.get("hot_amount_turnover_turnover_rate20", meta.get("turnover_rate20")))
+    amount_pct = _safe_float_or_none(amount_pct_map.get(sym))
+    turnover_pct = _safe_float_or_none(turnover_pct_map.get(sym))
+    try:
+        applied_scale = max(0.0, min(1.0, float(scale)))
+    except Exception:
+        applied_scale = 0.8
+    owner_ok = owner == "cn_stock_trend_alpha_core"
+    triggered = (
+        bool(enabled)
+        and bool(owner_ok)
+        and amount_pct is not None
+        and turnover_pct is not None
+        and float(amount_pct) >= float(amount_pct_threshold)
+        and float(turnover_pct) >= float(turnover_pct_threshold)
+    )
+    return {
+        "hot_amount_turnover_size_down_enabled": bool(enabled),
+        "hot_amount_turnover_size_down_triggered": bool(triggered),
+        "hot_amount_turnover_owner_system": str(owner),
+        "hot_amount_turnover_owner_ok": bool(owner_ok),
+        "hot_amount_turnover_size_down_scale": float(applied_scale),
+        "hot_amount_turnover_applied_scale": float(applied_scale if triggered else 1.0),
+        "hot_amount_turnover_amount20": None if amount20 is None else float(amount20),
+        "hot_amount_turnover_turnover_rate20": None if turnover20 is None else float(turnover20),
+        "hot_amount_turnover_amount20_pct": None if amount_pct is None else float(amount_pct),
+        "hot_amount_turnover_turnover_rate20_pct": None if turnover_pct is None else float(turnover_pct),
+        "hot_amount_turnover_amount_pct_threshold": float(amount_pct_threshold),
+        "hot_amount_turnover_turnover_pct_threshold": float(turnover_pct_threshold),
+    }
+
+
+def _resolve_entry_risk_position_sizing(
+    *,
+    sig_meta: dict[str, Any] | None,
+) -> dict[str, Any]:
+    meta = dict(sig_meta or {})
+    enabled = bool(meta.get("entry_risk_position_sizing_enabled", False))
+    preserve_existing_target = bool(
+        meta.get("entry_risk_position_preserve_existing_target", False)
+        or str(meta.get("target_weight_basis", "") or "").strip()
+    )
+    try:
+        multiplier = max(0.0, min(1.0, float(meta.get("entry_risk_position_multiplier", 1.0))))
+    except Exception:
+        multiplier = 1.0
+    triggered = bool(enabled and not preserve_existing_target and multiplier < 1.0 - 1e-12)
+    return {
+        "entry_risk_position_sizing_enabled": bool(enabled),
+        "entry_risk_position_sizing_applied": bool(triggered),
+        "entry_risk_position_applied_scale": float(multiplier if triggered else 1.0),
+        "entry_risk_position_preserve_existing_target": bool(preserve_existing_target),
+        "entry_risk_position_order_value_scale_before": None,
+        "entry_risk_position_order_value_scale_after": None,
+    }
 
 
 def _resolve_overlay_veto_bottom_pct(mode: str) -> float:
@@ -270,6 +472,15 @@ def build_candidate_plan(
     rotation_replace_candidate_top_n: int = 3,
     rotation_replace_min_score_gap: float = 0.15,
     rotation_min_hold_days: int = 0,
+    high_chase_a2_size_down_enabled: bool = False,
+    high_chase_a2_size_down_scale: float = 0.5,
+    high_chase_a2_pre20_ret_threshold: float = 0.50,
+    high_chase_a2_turnover_rate_f20_threshold: float = 8.0,
+    high_chase_a2_volume_20d_vs_60d_threshold: float = 1.5,
+    hot_amount_turnover_size_down_enabled: bool = False,
+    hot_amount_turnover_size_down_scale: float = 0.8,
+    hot_amount_turnover_amount_pct_threshold: float = 0.8,
+    hot_amount_turnover_turnover_pct_threshold: float = 0.8,
 ) -> dict[str, Any]:
     future_positions = {str(k).lower(): int(v) for k, v in dict(positions or {}).items() if int(v) > 0}
     est_cash = float(cash_available)
@@ -560,6 +771,7 @@ def build_candidate_plan(
         score_weight_min_scale=float(score_weight_min_scale),
         score_weight_max_scale=float(score_weight_max_scale),
     )
+    hot_amount_pct_map, hot_turnover_pct_map = _build_hot_amount_turnover_pct_maps(ranked)
     sizing_context = build_sizing_context(
         items=ranked,
         nav_close=float(nav_close),
@@ -615,6 +827,48 @@ def build_candidate_plan(
         score_weight_score = _score_weight_scores.get(sym)
         score_weight_raw_scale = float(_score_weight_raw_scales.get(sym, score_weight_scale) or 1.0)
         order_value_scale = float(order_value_scale) * float(score_weight_scale)
+        high_chase_a2_payload: dict[str, Any] = {}
+        if bool(high_chase_a2_size_down_enabled):
+            high_chase_a2_payload = _resolve_high_chase_a2_size_down(
+                sig_meta=sig_meta,
+                enabled=bool(high_chase_a2_size_down_enabled),
+                scale=float(high_chase_a2_size_down_scale),
+                pre20_ret_threshold=float(high_chase_a2_pre20_ret_threshold),
+                turnover_rate_f20_threshold=float(high_chase_a2_turnover_rate_f20_threshold),
+                volume_20d_vs_60d_threshold=float(high_chase_a2_volume_20d_vs_60d_threshold),
+            )
+            order_value_scale = float(order_value_scale) * float(high_chase_a2_payload["high_chase_a2_applied_scale"])
+            item.update(high_chase_a2_payload)
+            if isinstance(raw_sig_meta, dict):
+                raw_sig_meta.update(high_chase_a2_payload)
+        hot_amount_turnover_payload: dict[str, Any] = {}
+        if bool(hot_amount_turnover_size_down_enabled):
+            hot_amount_turnover_payload = _resolve_hot_amount_turnover_size_down(
+                sig_meta=sig_meta,
+                symbol=sym,
+                amount_pct_map=hot_amount_pct_map,
+                turnover_pct_map=hot_turnover_pct_map,
+                enabled=bool(hot_amount_turnover_size_down_enabled),
+                scale=float(hot_amount_turnover_size_down_scale),
+                amount_pct_threshold=float(hot_amount_turnover_amount_pct_threshold),
+                turnover_pct_threshold=float(hot_amount_turnover_turnover_pct_threshold),
+            )
+            order_value_scale = float(order_value_scale) * float(
+                hot_amount_turnover_payload["hot_amount_turnover_applied_scale"]
+            )
+            item.update(hot_amount_turnover_payload)
+            if isinstance(raw_sig_meta, dict):
+                raw_sig_meta.update(hot_amount_turnover_payload)
+        entry_risk_position_payload = _resolve_entry_risk_position_sizing(sig_meta=sig_meta)
+        if bool(entry_risk_position_payload.get("entry_risk_position_sizing_enabled", False)):
+            entry_risk_position_payload["entry_risk_position_order_value_scale_before"] = float(order_value_scale)
+            order_value_scale = float(order_value_scale) * float(
+                entry_risk_position_payload["entry_risk_position_applied_scale"]
+            )
+            entry_risk_position_payload["entry_risk_position_order_value_scale_after"] = float(order_value_scale)
+            item.update(entry_risk_position_payload)
+            if isinstance(raw_sig_meta, dict):
+                raw_sig_meta.update(entry_risk_position_payload)
         trend_tier = str(sig_meta.get("trend_tier", "")).upper()
         if order_value_scale <= 0:
             item["pre_reject_reason"] = "BLOCK_WEAK_TIER_DISABLED" if trend_tier == "WEAK" else "SKIP_QTY_ZERO"
@@ -632,8 +886,19 @@ def build_candidate_plan(
         )
         target_amount_scaled = float(sizing["target_amount_scaled"])
         qty = int(sizing["qty"])
+        qty = _restore_delta_qty(
+            meta=sig_meta,
+            future_positions=future_positions,
+            symbol=sym,
+            qty=int(qty),
+            lot_size=int(lot_size),
+        )
         if qty < lot_size:
-            item["pre_reject_reason"] = "SKIP_QTY_ZERO"
+            item["pre_reject_reason"] = (
+                "SKIP_RESTORE_DELTA_ZERO"
+                if bool(sig_meta.get("restore_candidate", False))
+                else "SKIP_QTY_ZERO"
+            )
             continue
         item["order_value_scale"] = float(order_value_scale)
         item["mf_rank"] = int(mf_rank)
@@ -645,9 +910,11 @@ def build_candidate_plan(
         item["score_weight_score"] = None if score_weight_score is None else float(score_weight_score)
         item["score_weight_raw_scale"] = float(score_weight_raw_scale)
         item["score_weight_scale"] = float(score_weight_scale)
+        if bool(sig_meta.get("restore_candidate", False)):
+            target_amount_scaled = min(float(target_amount_scaled), float(qty) * float(px))
         item["target_amount_scaled"] = float(target_amount_scaled)
         item["candidate_qty"] = int(qty)
-        item["candidate_cost"] = float(sizing["cost"])
+        item["candidate_cost"] = float(qty) * float(px) if bool(sig_meta.get("restore_candidate", False)) else float(sizing["cost"])
         item["pre_reject_reason"] = ""
 
     rotation_plan: dict[str, Any] = {"candidate_pool": [], "held_pool": [], "pairs": []}
@@ -826,6 +1093,36 @@ def build_candidate_plan(
             "score_weighted_enabled": bool(str(weight_mode or "").strip().lower() == "score_weighted"),
             "score_weight_min_scale": float(score_weight_min_scale),
             "score_weight_max_scale": float(score_weight_max_scale),
+            "high_chase_a2_size_down_enabled": bool(high_chase_a2_size_down_enabled),
+            "high_chase_a2_size_down_scale": float(max(0.0, min(1.0, float(high_chase_a2_size_down_scale)))),
+            "high_chase_a2_trigger_count": int(
+                sum(1 for item in ranked if bool(item.get("high_chase_a2_size_down_triggered", False)))
+            ),
+            "high_chase_a2_selected_trigger_count": int(
+                sum(1 for item in planned_items if bool(item.get("high_chase_a2_size_down_triggered", False)))
+            ),
+            "hot_amount_turnover_size_down_enabled": bool(hot_amount_turnover_size_down_enabled),
+            "hot_amount_turnover_size_down_scale": float(
+                max(0.0, min(1.0, float(hot_amount_turnover_size_down_scale)))
+            ),
+            "hot_amount_turnover_trigger_count": int(
+                sum(1 for item in ranked if bool(item.get("hot_amount_turnover_size_down_triggered", False)))
+            ),
+            "hot_amount_turnover_selected_trigger_count": int(
+                sum(1 for item in planned_items if bool(item.get("hot_amount_turnover_size_down_triggered", False)))
+            ),
+            "entry_risk_position_sizing_enabled": bool(
+                any(
+                    bool(dict(getattr(item.get("signal"), "meta", {}) or {}).get("entry_risk_position_sizing_enabled", False))
+                    for item in ranked
+                )
+            ),
+            "entry_risk_position_trigger_count": int(
+                sum(1 for item in ranked if bool(item.get("entry_risk_position_sizing_applied", False)))
+            ),
+            "entry_risk_position_selected_trigger_count": int(
+                sum(1 for item in planned_items if bool(item.get("entry_risk_position_sizing_applied", False)))
+            ),
             "moneyflow_overlay_enabled": bool(_overlay_mode_supported(overlay_mode_norm)),
             "moneyflow_overlay_mode": overlay_mode_norm,
             "moneyflow_overlay_gate_on": bool(overlay_active_today),

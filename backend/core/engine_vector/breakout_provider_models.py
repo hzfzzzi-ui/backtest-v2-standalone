@@ -60,6 +60,40 @@ class BreakoutProviderConfig:
     profit_decay_exit_profit_pct: float = 0.15
     profit_decay_exit_min_hold_bars: int = 10
     profit_decay_exit_residual_score_threshold: float = 0.35
+    enable_peak_giveback_ma20_exit: bool = False
+    peak_giveback_ma20_min_peak_profit_pct: float = 0.20
+    peak_giveback_ma20_min_giveback_pct: float = 0.25
+    peak_giveback_ma20_min_hold_bars: int = 10
+    peak_giveback_ma20_exit_pct: float = 0.5
+    enable_mfe_mae_confirmation_exit: bool = False
+    mfe_mae_confirmation_lookahead_bars: int = 3
+    mfe_mae_confirmation_min_mfe_pct: float = 0.02
+    mfe_mae_confirmation_max_mae_pct: float = -0.05
+    mfe_mae_confirmation_exit_pct: float = 0.5
+    mfe_mae_confirmation_scope: str = "all"
+    mfe_mae_confirmation_action: str = "exit"
+    mfe_mae_high_chase_min_core_flags: int = 2
+    mfe_mae_high_chase_ret5_pct: float = 0.20
+    mfe_mae_high_chase_ret10_pct: float = 0.30
+    mfe_mae_high_chase_ret20_pct: float = 0.45
+    mfe_mae_high_chase_ma20_extension_pct: float = 0.27
+    mfe_mae_high_chase_ma60_extension_pct: float = 0.45
+    mfe_mae_high_chase_atr_extension: float = 4.5
+    mfe_mae_high_chase_breakout_margin_pct: float = 0.05
+    mfe_mae_high_chase_open_gap_pct: float = 0.024
+    mfe_mae_high_chase_fade_pct: float = 0.025
+    mfe_mae_high_chase_breakout_quality_max: float = 0.46
+    mfe_mae_high_chase_volume_price_quality_max: float = 0.08
+    mfe_mae_watch_review_bars: int = 10
+    mfe_mae_watch_review_min_mfe_pct: float = 0.02
+    mfe_mae_watch_review_max_current_return_pct: float = 0.0
+    mfe_mae_watch_review_max_mae_pct: float = -0.05
+    mfe_mae_watch_deep_mae_immediate_pct: float = -0.08
+    enable_mfe_mae_restore_candidate: bool = False
+    mfe_mae_restore_candidate_scope: str = "high_chase"
+    mfe_mae_restore_candidate_max_bars: int = 40
+    mfe_mae_restore_candidate_target_basis: str = "original_target"
+    mfe_mae_restore_candidate_clear_on_fill: bool = True
     enable_pullback_candidates: bool = False
     pullback_variant_mode: str = "pb_reclaim_ma20"
     pullback_touch_lookback: int = 12
@@ -85,6 +119,23 @@ class BreakoutProviderConfig:
     bull_breakout_quality_veto_enabled: bool = False
     bull_breakout_quality_veto_min_residual_strength_score: float = 0.0
     bull_breakout_quality_veto_min_breakout_margin_score: float = 0.0
+    bad_breakout_quality_veto_enabled: bool = False
+    bad_breakout_quality_ret5_rank_min: float = 0.80
+    bad_breakout_quality_r2_60_rank_max: float = 0.20
+    trend_quality_soft_score_enabled: bool = False
+    trend_quality_soft_score_weight: float = 0.30
+    trend_quality_r2_60_weight: float = 0.45
+    trend_quality_slope60_weight: float = 0.25
+    trend_quality_ret60_vol_adj_weight: float = 0.15
+    trend_quality_ret60_dd_adj_weight: float = 0.15
+    risk_archetype_soft_deprioritize_enabled: bool = False
+    risk_archetype_soft_deprioritize_quantile: float = 0.80
+    risk_archetype_hot_crowded_penalty: float = 0.20
+    risk_archetype_high_volatility_penalty: float = 0.15
+    entry_risk_position_sizing_enabled: bool = False
+    entry_risk_position_watch_scale: float = 0.80
+    entry_risk_position_high_scale: float = 0.50
+    entry_risk_position_extreme_scale: float = 1.0 / 3.0
     residual_window_regime_mode: str = "off"
     residual_window_fallback: int = 60
     residual_window_regime_fast_ma: int = 120
@@ -110,6 +161,7 @@ class BreakoutProviderConfig:
     min_price: float = 0.0
     min_list_days: int = 0
     min_avg_turnover_20d: float = 0.0
+    csi1000_new_min_circ_mv_yi: float = 0.0
 
 
 @dataclass(slots=True)
@@ -161,6 +213,16 @@ def build_breakout_provider_config(
         "residual_industry_weight_fallback",
         residual_industry_weight,
     )
+    bad_breakout_quality_ret5_rank_min = getattr(
+        strategy,
+        "bad_breakout_quality_ret5_rank_min",
+        0.80,
+    )
+    bad_breakout_quality_r2_60_rank_max = getattr(
+        strategy,
+        "bad_breakout_quality_r2_60_rank_max",
+        0.20,
+    )
     return BreakoutProviderConfig(
         breakout_window=breakout_window,
         enable_dual_breakout=bool(getattr(strategy, "enable_dual_breakout", False)),
@@ -197,6 +259,98 @@ def build_breakout_provider_config(
         profit_decay_exit_min_hold_bars=int(getattr(strategy, "profit_decay_exit_min_hold_bars", 10) or 10),
         profit_decay_exit_residual_score_threshold=float(
             getattr(strategy, "profit_decay_exit_residual_score_threshold", 0.35) or 0.35
+        ),
+        enable_peak_giveback_ma20_exit=bool(getattr(strategy, "enable_peak_giveback_ma20_exit", False)),
+        peak_giveback_ma20_min_peak_profit_pct=float(
+            getattr(strategy, "peak_giveback_ma20_min_peak_profit_pct", 0.20) or 0.20
+        ),
+        peak_giveback_ma20_min_giveback_pct=float(
+            getattr(strategy, "peak_giveback_ma20_min_giveback_pct", 0.25) or 0.25
+        ),
+        peak_giveback_ma20_min_hold_bars=int(getattr(strategy, "peak_giveback_ma20_min_hold_bars", 10) or 10),
+        peak_giveback_ma20_exit_pct=float(getattr(strategy, "peak_giveback_ma20_exit_pct", 0.5) or 0.5),
+        enable_mfe_mae_confirmation_exit=bool(getattr(strategy, "enable_mfe_mae_confirmation_exit", False)),
+        mfe_mae_confirmation_lookahead_bars=int(
+            getattr(strategy, "mfe_mae_confirmation_lookahead_bars", 3) or 3
+        ),
+        mfe_mae_confirmation_min_mfe_pct=float(
+            getattr(strategy, "mfe_mae_confirmation_min_mfe_pct", 0.02) or 0.02
+        ),
+        mfe_mae_confirmation_max_mae_pct=float(
+            getattr(strategy, "mfe_mae_confirmation_max_mae_pct", -0.05)
+        ),
+        mfe_mae_confirmation_exit_pct=float(
+            getattr(strategy, "mfe_mae_confirmation_exit_pct", 0.5) or 0.5
+        ),
+        mfe_mae_confirmation_scope=str(
+            getattr(strategy, "mfe_mae_confirmation_scope", "all") or "all"
+        ).strip().lower(),
+        mfe_mae_confirmation_action=str(
+            getattr(strategy, "mfe_mae_confirmation_action", "exit") or "exit"
+        ).strip().lower(),
+        mfe_mae_high_chase_min_core_flags=int(
+            getattr(strategy, "mfe_mae_high_chase_min_core_flags", 2) or 2
+        ),
+        mfe_mae_high_chase_ret5_pct=float(
+            getattr(strategy, "mfe_mae_high_chase_ret5_pct", 0.20) or 0.20
+        ),
+        mfe_mae_high_chase_ret10_pct=float(
+            getattr(strategy, "mfe_mae_high_chase_ret10_pct", 0.30) or 0.30
+        ),
+        mfe_mae_high_chase_ret20_pct=float(
+            getattr(strategy, "mfe_mae_high_chase_ret20_pct", 0.45) or 0.45
+        ),
+        mfe_mae_high_chase_ma20_extension_pct=float(
+            getattr(strategy, "mfe_mae_high_chase_ma20_extension_pct", 0.27) or 0.27
+        ),
+        mfe_mae_high_chase_ma60_extension_pct=float(
+            getattr(strategy, "mfe_mae_high_chase_ma60_extension_pct", 0.45) or 0.45
+        ),
+        mfe_mae_high_chase_atr_extension=float(
+            getattr(strategy, "mfe_mae_high_chase_atr_extension", 4.5) or 4.5
+        ),
+        mfe_mae_high_chase_breakout_margin_pct=float(
+            getattr(strategy, "mfe_mae_high_chase_breakout_margin_pct", 0.05) or 0.05
+        ),
+        mfe_mae_high_chase_open_gap_pct=float(
+            getattr(strategy, "mfe_mae_high_chase_open_gap_pct", 0.024) or 0.024
+        ),
+        mfe_mae_high_chase_fade_pct=float(
+            getattr(strategy, "mfe_mae_high_chase_fade_pct", 0.025) or 0.025
+        ),
+        mfe_mae_high_chase_breakout_quality_max=float(
+            getattr(strategy, "mfe_mae_high_chase_breakout_quality_max", 0.46) or 0.46
+        ),
+        mfe_mae_high_chase_volume_price_quality_max=float(
+            getattr(strategy, "mfe_mae_high_chase_volume_price_quality_max", 0.08) or 0.08
+        ),
+        mfe_mae_watch_review_bars=int(getattr(strategy, "mfe_mae_watch_review_bars", 10) or 10),
+        mfe_mae_watch_review_min_mfe_pct=float(
+            getattr(strategy, "mfe_mae_watch_review_min_mfe_pct", 0.02) or 0.02
+        ),
+        mfe_mae_watch_review_max_current_return_pct=float(
+            getattr(strategy, "mfe_mae_watch_review_max_current_return_pct", 0.0)
+        ),
+        mfe_mae_watch_review_max_mae_pct=float(
+            getattr(strategy, "mfe_mae_watch_review_max_mae_pct", -0.05)
+        ),
+        mfe_mae_watch_deep_mae_immediate_pct=float(
+            getattr(strategy, "mfe_mae_watch_deep_mae_immediate_pct", -0.08)
+        ),
+        enable_mfe_mae_restore_candidate=bool(
+            getattr(strategy, "enable_mfe_mae_restore_candidate", False)
+        ),
+        mfe_mae_restore_candidate_scope=str(
+            getattr(strategy, "mfe_mae_restore_candidate_scope", "high_chase") or "high_chase"
+        ).strip().lower(),
+        mfe_mae_restore_candidate_max_bars=int(
+            getattr(strategy, "mfe_mae_restore_candidate_max_bars", 40) or 40
+        ),
+        mfe_mae_restore_candidate_target_basis=str(
+            getattr(strategy, "mfe_mae_restore_candidate_target_basis", "original_target") or "original_target"
+        ).strip().lower(),
+        mfe_mae_restore_candidate_clear_on_fill=bool(
+            getattr(strategy, "mfe_mae_restore_candidate_clear_on_fill", True)
         ),
         enable_pullback_candidates=bool(getattr(strategy, "enable_pullback_candidates", False)),
         pullback_variant_mode=str(getattr(strategy, "pullback_variant_mode", "pb_reclaim_ma20") or "pb_reclaim_ma20").strip().lower(),
@@ -235,6 +389,47 @@ def build_breakout_provider_config(
         bull_breakout_quality_veto_min_breakout_margin_score=float(
             getattr(strategy, "bull_breakout_quality_veto_min_breakout_margin_score", 0.0) or 0.0
         ),
+        bad_breakout_quality_veto_enabled=bool(getattr(strategy, "bad_breakout_quality_veto_enabled", False)),
+        bad_breakout_quality_ret5_rank_min=float(
+            0.80 if bad_breakout_quality_ret5_rank_min is None else bad_breakout_quality_ret5_rank_min
+        ),
+        bad_breakout_quality_r2_60_rank_max=float(
+            0.20 if bad_breakout_quality_r2_60_rank_max is None else bad_breakout_quality_r2_60_rank_max
+        ),
+        trend_quality_soft_score_enabled=bool(getattr(strategy, "trend_quality_soft_score_enabled", False)),
+        trend_quality_soft_score_weight=float(getattr(strategy, "trend_quality_soft_score_weight", 0.30) or 0.0),
+        trend_quality_r2_60_weight=float(getattr(strategy, "trend_quality_r2_60_weight", 0.45) or 0.0),
+        trend_quality_slope60_weight=float(getattr(strategy, "trend_quality_slope60_weight", 0.25) or 0.0),
+        trend_quality_ret60_vol_adj_weight=float(
+            getattr(strategy, "trend_quality_ret60_vol_adj_weight", 0.15) or 0.0
+        ),
+        trend_quality_ret60_dd_adj_weight=float(
+            getattr(strategy, "trend_quality_ret60_dd_adj_weight", 0.15) or 0.0
+        ),
+        risk_archetype_soft_deprioritize_enabled=bool(
+            getattr(strategy, "risk_archetype_soft_deprioritize_enabled", False)
+        ),
+        risk_archetype_soft_deprioritize_quantile=float(
+            getattr(strategy, "risk_archetype_soft_deprioritize_quantile", 0.80) or 0.80
+        ),
+        risk_archetype_hot_crowded_penalty=float(
+            getattr(strategy, "risk_archetype_hot_crowded_penalty", 0.20) or 0.0
+        ),
+        risk_archetype_high_volatility_penalty=float(
+            getattr(strategy, "risk_archetype_high_volatility_penalty", 0.15) or 0.0
+        ),
+        entry_risk_position_sizing_enabled=bool(
+            getattr(strategy, "entry_risk_position_sizing_enabled", False)
+        ),
+        entry_risk_position_watch_scale=float(
+            getattr(strategy, "entry_risk_position_watch_scale", 0.80) or 0.0
+        ),
+        entry_risk_position_high_scale=float(
+            getattr(strategy, "entry_risk_position_high_scale", 0.50) or 0.0
+        ),
+        entry_risk_position_extreme_scale=float(
+            getattr(strategy, "entry_risk_position_extreme_scale", 1.0 / 3.0) or 0.0
+        ),
         residual_window_regime_mode=str(getattr(strategy, "residual_window_regime_mode", "off") or "off").strip().lower(),
         residual_window_fallback=int(getattr(strategy, "residual_window_fallback", getattr(strategy, "residual_window", 60)) or getattr(strategy, "residual_window", 60)),
         residual_window_regime_fast_ma=int(getattr(strategy, "residual_window_regime_fast_ma", 120) or 120),
@@ -260,6 +455,7 @@ def build_breakout_provider_config(
         min_price=float(universe_filters.get("min_price", getattr(strategy, "min_price", 0.0)) or 0.0),
         min_list_days=int(universe_filters.get("min_list_days", 0) or 0),
         min_avg_turnover_20d=float(universe_filters.get("min_avg_turnover_20d", 0.0) or 0.0),
+        csi1000_new_min_circ_mv_yi=float(universe_filters.get("csi1000_new_min_circ_mv_yi", 0.0) or 0.0),
     )
 
 

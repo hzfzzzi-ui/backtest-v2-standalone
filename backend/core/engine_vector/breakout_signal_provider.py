@@ -23,6 +23,7 @@ from backend.core.config.models import WeeklyFiveStateRegimeConfig
 from backend.core.core.models import Signal
 from backend.core.engine_vector.breakout_provider_day_signals import (
     build_breakout_day_signals as _build_breakout_day_signals,
+    evaluate_mfe_mae_confirmation_exits as _evaluate_mfe_mae_confirmation_exits_helper,
     evaluate_profit_decay_exits as _evaluate_profit_decay_exits_helper,
 )
 from backend.core.engine_vector.breakout_provider_models import (
@@ -37,7 +38,9 @@ from backend.core.engine_vector.breakout_provider_precompute import (
     _compute_residual_ranking_matrices,
 )
 from backend.core.engine_vector.breakout_support import (
+    aligned_numeric_matrix as _aligned_numeric_matrix,
     build_industry_assignment_matrices as _build_industry_assignment_matrices,
+    normalize_history_like as _normalize_history_like,
     return_matrix as _return_matrix,
     rolling_any as _rolling_any,
     rolling_max_matrix as _rolling_max_matrix,
@@ -454,6 +457,13 @@ class BreakoutTrendProvider:
         self._conditional_crowding_score: np.ndarray = np.array([])
         self._conditional_recent_limit_hit_3d: np.ndarray = np.array([])
         self._conditional_near_limit_up: np.ndarray = np.array([])
+        self._high_chase_a2_emit_features: bool = False
+        self._high_chase_a2_pre_ret_20d: np.ndarray = np.array([])
+        self._high_chase_a2_avg_turnover_rate_f_20d: np.ndarray = np.array([])
+        self._high_chase_a2_volume_20d_vs_60d: np.ndarray = np.array([])
+        self._hot_amount_turnover_emit_features: bool = False
+        self._hot_amount_turnover_amount20: np.ndarray = np.array([])
+        self._hot_amount_turnover_turnover_rate20: np.ndarray = np.array([])
         self._industry_second_stage_score: np.ndarray = np.array([])
         self._industry_second_stage_not_hot_score: np.ndarray = np.array([])
         self._industry_second_stage_uncrowded_score: np.ndarray = np.array([])
@@ -531,6 +541,42 @@ class BreakoutTrendProvider:
         self._profit_decay_exit_profit_pct: float = 0.15
         self._profit_decay_exit_min_hold_bars: int = 10
         self._profit_decay_exit_residual_score_threshold: float = 0.35
+        self._enable_peak_giveback_ma20_exit: bool = False
+        self._peak_giveback_ma20_min_peak_profit_pct: float = 0.20
+        self._peak_giveback_ma20_min_giveback_pct: float = 0.25
+        self._peak_giveback_ma20_min_hold_bars: int = 10
+        self._peak_giveback_ma20_exit_pct: float = 0.5
+        self._enable_mfe_mae_confirmation_exit: bool = False
+        self._mfe_mae_confirmation_lookahead_bars: int = 3
+        self._mfe_mae_confirmation_min_mfe_pct: float = 0.02
+        self._mfe_mae_confirmation_max_mae_pct: float = -0.05
+        self._mfe_mae_confirmation_exit_pct: float = 0.5
+        self._mfe_mae_confirmation_scope: str = "all"
+        self._mfe_mae_confirmation_action: str = "exit"
+        self._mfe_mae_high_chase_min_core_flags: int = 2
+        self._mfe_mae_high_chase_ret5_pct: float = 0.20
+        self._mfe_mae_high_chase_ret10_pct: float = 0.30
+        self._mfe_mae_high_chase_ret20_pct: float = 0.45
+        self._mfe_mae_high_chase_ma20_extension_pct: float = 0.27
+        self._mfe_mae_high_chase_ma60_extension_pct: float = 0.45
+        self._mfe_mae_high_chase_atr_extension: float = 4.5
+        self._mfe_mae_high_chase_breakout_margin_pct: float = 0.05
+        self._mfe_mae_high_chase_open_gap_pct: float = 0.024
+        self._mfe_mae_high_chase_fade_pct: float = 0.025
+        self._mfe_mae_high_chase_breakout_quality_max: float = 0.46
+        self._mfe_mae_high_chase_volume_price_quality_max: float = 0.08
+        self._mfe_mae_watch_review_bars: int = 10
+        self._mfe_mae_watch_review_min_mfe_pct: float = 0.02
+        self._mfe_mae_watch_review_max_current_return_pct: float = 0.0
+        self._mfe_mae_watch_review_max_mae_pct: float = -0.05
+        self._mfe_mae_watch_deep_mae_immediate_pct: float = -0.08
+        self._enable_mfe_mae_restore_candidate: bool = False
+        self._mfe_mae_restore_candidate_scope: str = "high_chase"
+        self._mfe_mae_restore_candidate_max_bars: int = 40
+        self._mfe_mae_restore_candidate_target_basis: str = "original_target"
+        self._mfe_mae_restore_candidate_clear_on_fill: bool = True
+        self._mfe_mae_confirmation_watch_state: dict[str, dict[str, float | int | str]] = {}
+        self._mfe_mae_restore_state: dict[str, dict[str, float | int | str | bool]] = {}
         self._min_hold_exempt_set: set[str] = set()
         self._base_order_value: float = 0.0
         self._enable_pullback_candidates: bool = False
@@ -557,6 +603,25 @@ class BreakoutTrendProvider:
         self._breakout_quality_margin_cap_pct: float = 0.08
         self._breakout_quality_fade_cap_pct: float = 0.035
         self._breakout_quality_open_gap_cap_pct: float = 0.04
+        self._bad_breakout_quality_veto_enabled: bool = False
+        self._bad_breakout_quality_ret5_rank_min: float = 0.80
+        self._bad_breakout_quality_r2_60_rank_max: float = 0.20
+        self._bad_breakout_quality_ret5: np.ndarray = np.array([])
+        self._bad_breakout_quality_r2_60: np.ndarray = np.array([])
+        self._bad_breakout_quality_ret5_rank: np.ndarray = np.array([])
+        self._bad_breakout_quality_r2_60_rank: np.ndarray = np.array([])
+        self._bad_breakout_quality_veto_mask: np.ndarray = np.array([], dtype=bool)
+        self._trend_quality_soft_score_enabled: bool = False
+        self._trend_quality_soft_score_weight: float = 0.30
+        self._trend_quality_r2_60_weight: float = 0.45
+        self._trend_quality_slope60_weight: float = 0.25
+        self._trend_quality_ret60_vol_adj_weight: float = 0.15
+        self._trend_quality_ret60_dd_adj_weight: float = 0.15
+        self._trend_quality_soft_score: np.ndarray = np.array([])
+        self._trend_quality_r2_60_rank: np.ndarray = np.array([])
+        self._trend_quality_slope60_rank: np.ndarray = np.array([])
+        self._trend_quality_ret60_vol_adj_rank: np.ndarray = np.array([])
+        self._trend_quality_ret60_dd_adj_rank: np.ndarray = np.array([])
         self._residual_window_regime_mode: str = "off"
         self._residual_window_fallback: int = 60
         self._residual_window_regime_fast_ma: int = 120
@@ -585,6 +650,7 @@ class BreakoutTrendProvider:
         self.bull_breakout_quality_veto_block_count: int = 0
         self.bull_breakout_quality_veto_residual_block_count: int = 0
         self.bull_breakout_quality_veto_margin_block_count: int = 0
+        self.bad_breakout_quality_veto_block_count: int = 0
         self.precompute_seconds: float = 0.0
         self.diag_reason_counts: dict[str, int] = {}
 
@@ -637,11 +703,83 @@ class BreakoutTrendProvider:
             min_price=float(config.min_price),
             min_list_days=int(config.min_list_days),
             min_avg_turnover_20d=float(config.min_avg_turnover_20d),
+            csi1000_new_min_circ_mv_yi=float(config.csi1000_new_min_circ_mv_yi),
         )
         mx = self._mx
         t, n = mx.close.shape
         if n == 0:
             raise ValueError("history has no symbols")
+
+        sizing_cfg_for_a2 = kwargs.get("sizing_cfg")
+        a2_enabled_from_sizing = bool(getattr(sizing_cfg_for_a2, "high_chase_a2_size_down_enabled", False))
+        if isinstance(sizing_cfg_for_a2, dict):
+            a2_enabled_from_sizing = bool(sizing_cfg_for_a2.get("high_chase_a2_size_down_enabled", False))
+        hot_enabled_from_sizing = bool(getattr(sizing_cfg_for_a2, "hot_amount_turnover_size_down_enabled", False))
+        if isinstance(sizing_cfg_for_a2, dict):
+            hot_enabled_from_sizing = bool(sizing_cfg_for_a2.get("hot_amount_turnover_size_down_enabled", False))
+        self._high_chase_a2_emit_features = bool(
+            a2_enabled_from_sizing
+            or bool(getattr(strategy, "high_chase_a2_size_down_enabled", False))
+            or bool(kwargs.get("high_chase_a2_emit_features", False))
+        )
+        self._hot_amount_turnover_emit_features = bool(
+            hot_enabled_from_sizing
+            or bool(getattr(strategy, "hot_amount_turnover_size_down_enabled", False))
+            or bool(kwargs.get("hot_amount_turnover_emit_features", False))
+        )
+        self._high_chase_a2_pre_ret_20d = np.array([])
+        self._high_chase_a2_avg_turnover_rate_f_20d = np.array([])
+        self._high_chase_a2_volume_20d_vs_60d = np.array([])
+        self._hot_amount_turnover_amount20 = np.array([])
+        self._hot_amount_turnover_turnover_rate20 = np.array([])
+        if bool(self._high_chase_a2_emit_features):
+            self._high_chase_a2_pre_ret_20d = _return_matrix(mx.close, 20)
+            vol20 = pd.DataFrame(mx.volume).rolling(20, min_periods=20).mean().to_numpy(dtype=float)
+            vol60 = pd.DataFrame(mx.volume).rolling(60, min_periods=60).mean().to_numpy(dtype=float)
+            vol_ratio = np.full(mx.close.shape, np.nan, dtype=float)
+            valid_vol = ~np.isnan(vol20) & ~np.isnan(vol60) & (vol60 > 1e-8)
+            vol_ratio[valid_vol] = vol20[valid_vol] / vol60[valid_vol]
+            self._high_chase_a2_volume_20d_vs_60d = vol_ratio
+
+        if bool(self._high_chase_a2_emit_features or self._hot_amount_turnover_emit_features):
+            feature_history = raw_history if isinstance(raw_history, pd.DataFrame) and not raw_history.empty else hist
+            normalized_feature_history = _normalize_history_like(feature_history)
+            turnover_rate_f = _aligned_numeric_matrix(
+                normalized_feature_history,
+                dates=mx.dates,
+                symbols=mx.symbols,
+                column="turnover_rate_f",
+            )
+            turnover_rate = _aligned_numeric_matrix(
+                normalized_feature_history,
+                dates=mx.dates,
+                symbols=mx.symbols,
+                column="turnover_rate",
+            )
+            turnover_proxy = np.where(~np.isnan(turnover_rate_f), turnover_rate_f, turnover_rate)
+            turnover20 = pd.DataFrame(turnover_proxy).rolling(20, min_periods=20).mean().to_numpy(dtype=float)
+            if bool(self._high_chase_a2_emit_features):
+                self._high_chase_a2_avg_turnover_rate_f_20d = turnover20
+            if bool(self._hot_amount_turnover_emit_features):
+                amount = _aligned_numeric_matrix(
+                    normalized_feature_history,
+                    dates=mx.dates,
+                    symbols=mx.symbols,
+                    column="amount",
+                )
+                turnover_amount = _aligned_numeric_matrix(
+                    normalized_feature_history,
+                    dates=mx.dates,
+                    symbols=mx.symbols,
+                    column="turnover",
+                )
+                amount_proxy = np.where(~np.isnan(amount), amount, turnover_amount)
+                fallback_amount = mx.close * mx.volume
+                amount_proxy = np.where(~np.isnan(amount_proxy), amount_proxy, fallback_amount)
+                self._hot_amount_turnover_amount20 = (
+                    pd.DataFrame(amount_proxy).rolling(20, min_periods=20).mean().to_numpy(dtype=float)
+                )
+                self._hot_amount_turnover_turnover_rate20 = turnover20
 
         self._feats = compute_feature_matrices(
             close=mx.close, high=mx.high, low=mx.low,
@@ -882,6 +1020,45 @@ class BreakoutTrendProvider:
                 threshold = np.partition(valid_vals, -topk)[-topk]
                 self._momentum_ok[_di, :] = valid_mask & (row >= threshold)
 
+        if not self._enable_pullback_candidates:
+            zero_pullback = np.zeros((t, n), dtype=bool)
+            self._pullback_pb1 = zero_pullback
+            self._pullback_pb2 = zero_pullback
+            self._pullback_pb3 = zero_pullback
+            self._pullback_tight1 = zero_pullback
+            self._pullback_tight2 = zero_pullback
+            self._pullback_raw_selected = zero_pullback
+            _finalize_breakout_provider_precompute(
+                self,
+                raw_history=raw_history,
+                mx=mx,
+                sector_data=sector_data if isinstance(sector_data, dict) else None,
+                industry_map=industry_map if isinstance(industry_map, dict) else None,
+                industry_history=industry_history if isinstance(industry_history, pd.DataFrame) else None,
+            )
+            if hasattr(self, "_wide_runtime_optimization_notes"):
+                self._wide_runtime_optimization_notes.append("skip_pullback_candidate_matrices")
+            self._peak_close_state = {}
+            self._risk_off_partial_state = {}
+            self._mfe_mae_confirmation_watch_state = {}
+            self._mfe_mae_restore_state = {}
+            self.entry_day = {}
+            self.last_sell_day = {}
+            self.entry_bar_index = {}
+            self.entry_breakout_floor_raw = {}
+            self.extra_clear_dicts = [
+                self._peak_close_state,
+                self._risk_off_partial_state,
+                self._mfe_mae_confirmation_watch_state,
+                self._mfe_mae_restore_state,
+                self.entry_bar_index,
+                self.entry_breakout_floor_raw,
+            ]
+            self.peak_state_on_buy = self._peak_close_state
+            _capture_breakout_runtime_state(self)
+            self.precompute_seconds = float(_time.perf_counter() - pre_t0)
+            return
+
         # -- 缂佺厧鎮庢稊鏉垮弳閸婃瑩鈧鐓╅梼?--
         trend_base = (
             ~np.isnan(mx.close)
@@ -1054,6 +1231,8 @@ class BreakoutTrendProvider:
         # -- fill hooks 閸掓繂顫愰崠?--
         self._peak_close_state = {}
         self._risk_off_partial_state = {}
+        self._mfe_mae_confirmation_watch_state = {}
+        self._mfe_mae_restore_state = {}
         self.entry_day = {}
         self.last_sell_day = {}
         self.entry_bar_index = {}
@@ -1061,6 +1240,8 @@ class BreakoutTrendProvider:
         self.extra_clear_dicts = [
             self._peak_close_state,
             self._risk_off_partial_state,
+            self._mfe_mae_confirmation_watch_state,
+            self._mfe_mae_restore_state,
             self.entry_bar_index,
             self.entry_breakout_floor_raw,
         ]
@@ -1087,6 +1268,24 @@ class BreakoutTrendProvider:
             positions=positions,
             position_avg_cost=position_avg_cost,
             close_idx=close_idx,
+            exit_syms=exit_syms,
+            exit_counts=exit_counts,
+        )
+
+    def _evaluate_mfe_mae_confirmation_exits(
+        self,
+        *,
+        day: date,
+        day_idx: int,
+        positions: dict[str, int],
+        exit_syms: set[str],
+        exit_counts: ExitCounts,
+    ) -> list[Signal]:
+        return _evaluate_mfe_mae_confirmation_exits_helper(
+            self,
+            day=day,
+            day_idx=day_idx,
+            positions=positions,
             exit_syms=exit_syms,
             exit_counts=exit_counts,
         )

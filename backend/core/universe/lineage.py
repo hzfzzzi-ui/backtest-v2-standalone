@@ -77,6 +77,27 @@ UNIVERSE_LINEAGE: dict[str, UniverseLineage] = {
             "historical monthly/static scripts are fallback only."
         ),
     ),
+    "HS300_ZZ500_CSI1000": UniverseLineage(
+        mode="HS300_ZZ500_CSI1000",
+        symbols_source=INDEX_CONSTITUENTS_SYMBOLS_SOURCE,
+        load_table="pit_index_constituents",
+        resolver_entrypoint="backend.core.universe.universe_resolver._resolve_hs300_zz500_csi1000",
+        resolve_asof_policy="start_date",
+        dynamic_all_a_entry=False,
+        import_assets=(
+            "backend/scripts/fetch_csi800_pit_history.py",
+            "backend/scripts/build_csi800_formal_history.py",
+            "backend/scripts/import_csi800_pit.py",
+            "data_cache/csi1000_rebalance_calendar.csv",
+            "backend/scripts/fetch_csi1000_pit_by_calendar.py",
+            "backend/scripts/import_csi1000_pit.py",
+        ),
+        notes=(
+            "Research-only union of CSI800 (000906.SH, covering HS300+ZZ500) and "
+            "CSI1000 (000852.SH) PIT constituent rows. Runtime must preserve PIT_DYNAMIC "
+            "membership and audit the CSI1000 subset with refresh sidecar evidence."
+        ),
+    ),
     "INDUSTRY": UniverseLineage(
         mode="INDUSTRY",
         symbols_source=INDUSTRY_HISTORY_SYMBOLS_SOURCE,
@@ -114,7 +135,17 @@ def get_universe_lineage(mode: str | None) -> UniverseLineage:
 
 
 def list_universe_lineage() -> list[UniverseLineage]:
-    return [UNIVERSE_LINEAGE[key] for key in ("ALL_A", "HS300_ZZ500", "CSI1000", "INDUSTRY", "CUSTOM")]
+    return [
+        UNIVERSE_LINEAGE[key]
+        for key in (
+            "ALL_A",
+            "HS300_ZZ500",
+            "CSI1000",
+            "HS300_ZZ500_CSI1000",
+            "INDUSTRY",
+            "CUSTOM",
+        )
+    ]
 
 
 def resolve_universe_timing(

@@ -122,6 +122,7 @@ def load_mainline_breakout_research_context(
             'min_avg_turnover_rate_20d': float(bundle.universe_filters_raw.get('min_avg_turnover_rate_20d', 0.0) or 0.0),
             'turnover_rate_field': str(bundle.universe_filters_raw.get('turnover_rate_field', 'turnover_rate_f') or 'turnover_rate_f'),
             'exclude_star_market': bool(bundle.universe_filters_raw.get('exclude_star_market', False)),
+            'csi1000_new_min_circ_mv_yi': float(bundle.universe_filters_raw.get('csi1000_new_min_circ_mv_yi', 0.0) or 0.0),
             'dynamic_all_a_entry': bool(bundle.dynamic_all_a_entry),
         }
         strategy.state['membership_history'] = bundle.membership_history

@@ -1,0 +1,106 @@
+{
+  "round_id": "sr_20260511_v3_d1d2d3_entry_risk_sliced_confirmation_shadow",
+  "title": "V3 D1D2D3 入场风险拆分确认失败 Shadow",
+  "status": "audited",
+  "study_id": "cn_stock_etf/v3_d1d2d3_entry_risk_sliced_confirmation_shadow_v1",
+  "asset_scope": "cn_stock_etf",
+  "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+  "primary_question": "买入后确认失败规则是否只应作用于低质量突破、高追涨、弱流动性三类入场风险？",
+  "primary_variable": "entry risk slice applied to post-entry confirmation failure shadow",
+  "fixed_assumptions": [
+    "CN_STOCK_ETF_COMBO_BASELINE_V3 fixed",
+    "stock closed trades only; ETF sleeve excluded",
+    "no runtime, NAV, signal, pool, ranking, execution, or exit-rule changes",
+    "one slice label per analysis; no bundled filter used for decision"
+  ],
+  "windows": [
+    "2012-2026"
+  ],
+  "variants": [
+    "D1_3D_FAIL_FULL",
+    "D1_3D_FAIL_HALF",
+    "D1_5D_FAIL_FULL",
+    "D1_5D_FAIL_HALF",
+    "D1_10D_WEAK_FULL",
+    "D1_10D_WEAK_HALF"
+  ],
+  "analyses": [
+    {
+      "analysis_id": "D1_LOW_QUALITY_BREAKOUT",
+      "analysis_name": "D1 低质量突破",
+      "label_col": "low_quality_breakout_bool",
+      "description": "confirmation failure only applies when breakout quality/fade/volume-price evidence is weak"
+    },
+    {
+      "analysis_id": "D2_HIGH_CHASE",
+      "analysis_name": "D2 高追涨",
+      "label_col": "high_chase_bool",
+      "description": "confirmation failure only applies when entry has chase-style extension/gap/margin evidence"
+    },
+    {
+      "analysis_id": "D3_WEAK_LIQUIDITY",
+      "analysis_name": "D3 弱流动性",
+      "label_col": "weak_liquidity_bool",
+      "description": "confirmation failure only applies when entry liquidity/participation evidence is weak"
+    }
+  ],
+  "evidence": [
+    {
+      "kind": "report",
+      "study_id": "cn_stock_etf/v3_d1d2d3_entry_risk_sliced_confirmation_shadow_v1",
+      "window_key": "1226",
+      "variant_name": "D1D2D3_ENTRY_RISK_SLICED_CONFIRMATION_SHADOW",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_d1d2d3_entry_risk_sliced_confirmation_shadow\\human\\d1d2d3_entry_risk_sliced_confirmation_shadow.md",
+      "note": "human D1D2D3 sliced confirmation shadow report",
+      "linked_at": "2026-05-11T05:49:18+08:00"
+    },
+    {
+      "kind": "table",
+      "study_id": "cn_stock_etf/v3_d1d2d3_entry_risk_sliced_confirmation_shadow_v1",
+      "window_key": "1226",
+      "variant_name": "D1D2D3_ENTRY_RISK_SLICED_CONFIRMATION_SHADOW",
+      "path": "outputs\\studies\\cn_stock_etf\\sr_20260511_v3_d1d2d3_entry_risk_sliced_confirmation_shadow\\machine\\d1d2d3_trade_detail.csv",
+      "note": "per-trade D1D2D3 sliced counterfactual detail",
+      "linked_at": "2026-05-11T05:49:18+08:00"
+    }
+  ],
+  "key_findings": [
+    "D1_LOW_QUALITY_BREAKOUT: best=D1_5D_FAIL_HALF, delta=-262,991, active=78",
+    "D2_HIGH_CHASE: best=D1_3D_FAIL_HALF, delta=-98,014, active=55",
+    "D3_WEAK_LIQUIDITY: best=D1_3D_FAIL_HALF, delta=-58,815, active=47"
+  ],
+  "audit": {
+    "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "closed_trades": 388,
+    "symbols_requested": 320,
+    "symbols_loaded": 320,
+    "ohlcv_rows": 974244,
+    "min_query_date": "2012-10-16",
+    "max_query_date": "2026-05-18",
+    "source_prices": "public.pams_ohlcv_daily_v2 adjusted OHLCV",
+    "source_candidates": "outputs\\experiments\\exp_20260510_033603951_8649\\candidate_signals.csv",
+    "source_parent_shadow": "outputs/studies/cn_stock_etf/sr_20260511_v3_d1_post_entry_confirmation_shadow",
+    "read_only_shadow": true,
+    "liquidity_field": "public.pams_ohlcv_daily_v2.turnover as amount proxy"
+  },
+  "decision": {
+    "status": "reject",
+    "reason": "No sliced analysis is positive."
+  },
+  "next_actions": [
+    "If a sliced analysis is positive, inspect profit TOP30 damage before Docker AB.",
+    "Do not combine D1/D2/D3 until each single slice has a stable reason."
+  ],
+  "tags": [
+    "cn_stock_etf",
+    "V3",
+    "D1D2D3",
+    "confirmation-failure",
+    "entry-risk",
+    "shadow",
+    "research-only"
+  ],
+  "schema_version": "openclaw_study_round@1",
+  "created_at": "2026-05-11T05:49:18+08:00",
+  "updated_at": "2026-05-11T05:49:18+08:00"
+}

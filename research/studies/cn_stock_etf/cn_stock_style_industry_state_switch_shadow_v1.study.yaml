@@ -1,0 +1,89 @@
+study_id: cn_stock_etf/cn_stock_style_industry_state_switch_shadow_v1
+title: CN Stock Style/Industry State Switch Shadow V1
+asset_scope: cn_a_equity
+baseline_id: CN_STOCK_ETF_COMBO_BASELINE_V3
+hypothesis: >
+  Current stock-leg weakness is more likely tied to slow state-switch recognition
+  than to a single static stock filter. First build a market-style state surface
+  from PIT broad-index data before touching trading rules.
+change_scope:
+  modules_modified:
+    - research_only_style_state_shadow
+  fixed_modules:
+    - baseline_logic
+    - signal_timing
+    - execution_timing
+    - stock_universe
+    - etf_universe
+    - ranking_factor
+    - exit_rules
+    - sizing
+    - combo_allocator
+variants:
+  - name: M1_STYLE_STATE
+    description: >
+      Research-only daily market style state using HS300, ZZ500, and CSI1000
+      PIT index history, plus I1 SW L1 industry health breadth and R1
+      held-industry rotation pressure from the fixed V4 baseline trades, plus
+      R2 entry-order-vs-held-industry alignment and R3 rejected/diagnostic
+      candidate alignment from the fixed V4 stock component candidate_signals artifact.
+      No NAV recomputation and no trade mutation.
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-05-12"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-12"
+  - key: "recent_2526"
+    role: diagnostic
+    start: "2025-01-01"
+    end: "2026-05-12"
+  - key: "turn_202512_202604"
+    role: diagnostic
+    start: "2025-12-01"
+    end: "2026-04-30"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  fast_mode: true
+  runner_params:
+    style_index_symbols:
+      hs300: "000300.SH"
+      zz500: "000905.SH"
+      csi1000: "000852.SH"
+    thresholds:
+      risk_off_avg_ret20: -0.03
+      risk_off_avg_ret60: -0.05
+      risk_off_worst_drawdown60: -0.10
+      trend_score_strong: 0.60
+      trend_score_gap: 0.15
+      relative_ret20_gap: 0.03
+      split_ret20_gap: 0.02
+      min_coverage_ratio: 0.70
+    baseline_artifact_id: CN_STOCK_ETF_COMBO_BASELINE_V4
+metadata:
+  research_only: true
+  primary_variable: M1_I1_R1_state_shadow_surface
+  runner_mode: cn_stock_style_industry_state_switch_shadow
+  docker_required: true
+  source_policy: pit_index_daily_style_indices_first
+  implemented_layers:
+    - M1_STYLE_STATE
+    - I1_INDUSTRY_HEALTH
+    - R1_ROTATION_PRESSURE
+    - R2_ENTRY_CANDIDATE_ALIGNMENT
+    - R3_CANDIDATE_POOL_ALIGNMENT
+  pending_layers: []
+  no_runtime_trade_change: true
+  not_nav_backtest: true

@@ -1,0 +1,51 @@
+study_id: cn_stock_etf/cn_stock_etf_domestic_defense_boundary_v1
+title: CN Stock ETF Domestic Defense Boundary V1
+asset_scope: cn_a_equity
+baseline_id: CN_STOCK_ETF_COMBO_BASELINE_V2
+hypothesis: Test whether the V2 stock+ETF combo drawdown issue is driven by cross-border ETFs by holding the stock sleeve and combo runtime fixed while replacing only the ETF source with DOMESTIC_POOL_BASE.
+change_scope:
+  modules_modified:
+    - research_entry.cn_stock_etf.domestic_defense_boundary_v1
+    - backend.research.cn_stock_etf_expanded_pool_shadow_study
+variants:
+  - name: DOMESTIC_POOL_BASE
+    description: Fixed stock sleeve plus domestic-only ETF pool base; no exposure tightening and no stock-leg changes.
+    request_overrides:
+      runner_params:
+        etf_source:
+          mode: etf_study_variant
+          study_id: etf/cn_etf_domestic_defense_boundary_v1
+          variant_name: DOMESTIC_POOL_BASE
+          pool_version: cn_etf_research_domestic_pool_base_v1
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-04"
+    end: "2026-05-08"
+  - key: "1217"
+    role: hard_gate
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-08"
+hard_gates: {}
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  fast_mode: true
+  runner_params:
+    combo_template_path: outputs/baselines/CN_STOCK_ETF_FORMAL_V1/config.json
+metadata:
+  runner_mode: cn_stock_etf_expanded_pool_shadow
+  research_only: true
+  combo_template_baseline_id: CN_STOCK_ETF_FORMAL_V1
+  comparison_baseline_id: CN_STOCK_ETF_COMBO_BASELINE_V2
+  stock_sleeve_policy: fixed_from_combo_template
+  etf_sleeve_policy: replace_compile_input_only
+  parent_etf_pool_version: cn_etf_research_style_smart_beta_pool_v2
+  etf_pool_version: cn_etf_research_domestic_pool_base_v1

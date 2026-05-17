@@ -1,0 +1,81 @@
+study_id: cn_stock_etf/cn_stock_trend_quality_soft_score_ab_v1
+title: CN Stock Trend Quality Soft Score AB V1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  Cross-sectional trend-quality ranks may improve stock-leg candidate ordering
+  without the hard-gate overfit risk seen in the bad-breakout veto test.
+change_scope:
+  modules_modified:
+    - strategy.params.trend_quality_soft_score_enabled
+    - strategy.params.trend_quality_soft_score_weight
+    - strategy.params.trend_quality_r2_60_weight
+    - strategy.params.trend_quality_slope60_weight
+    - strategy.params.trend_quality_ret60_vol_adj_weight
+    - strategy.params.trend_quality_ret60_dd_adj_weight
+  fixed_modules:
+    - universe.universe_mode
+    - universe.membership_mode
+    - universe.filters
+    - entry_rules
+    - execution_timing
+    - exit_rules
+    - costs
+    - sizing
+    - etf_leg
+    - combo_allocator
+variants:
+  - name: B0_V4_STOCK_REPLAY
+    description: Same-runtime replay of the current V4 stock-leg rule set.
+  - name: TQ_SOFT_SCORE_W030
+    description: Blend trend-quality cross-sectional score into stock candidate final_score with weight 0.30.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            trend_quality_soft_score_enabled: true
+            trend_quality_soft_score_weight: 0.30
+            trend_quality_r2_60_weight: 0.45
+            trend_quality_slope60_weight: 0.25
+            trend_quality_ret60_vol_adj_weight: 0.15
+            trend_quality_ret60_dd_adj_weight: 0.15
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-05-12"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-12"
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  runtime_config_path: outputs/experiments/exp_20260513_025957649_4f17/run_config.json
+  fast_mode: true
+  initial_capital: 1000000
+  enable_multifactor_rank: true
+  momentum_top_pct: 0.0
+  universe_mode: HS300_ZZ500
+  price_adj: hfq
+metadata:
+  research_only: true
+  primary_variable: trend_quality_soft_score
+  docker_required: true
+  source_stock_baseline_id: baseline_V10_1
+  source_stock_full_exp_id: exp_20260513_025957649_4f17
+  source_stock_main_exp_id: exp_20260513_034658229_16a1
+  source_stock_guard_exp_id: exp_20260513_035427350_0130
+  same_window_compare_required: true
+  stock_only: true
+  etf_or_combo_inputs: false
+  industry_or_theme_inputs: false

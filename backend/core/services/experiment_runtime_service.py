@@ -320,6 +320,8 @@ def run_experiment_request_body(
         wb_price_adj = str(wb_uni.get("price_adj") or "").strip()
         if wb_price_adj:
             overrides["price_adj"] = wb_price_adj
+        if "benchmark" not in overrides and "benchmark" in wb_uni and wb_uni.get("benchmark") is not None:
+            overrides["benchmark"] = str(wb_uni.get("benchmark"))
         if body.universe_mode and not runtime_config_supplied:
             overrides["universe_mode"] = str(body.universe_mode)
         if body.industries and not runtime_config_supplied:

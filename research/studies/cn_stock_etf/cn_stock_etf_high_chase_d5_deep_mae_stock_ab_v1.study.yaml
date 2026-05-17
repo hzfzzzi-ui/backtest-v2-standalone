@@ -1,0 +1,134 @@
+study_id: cn_stock_etf/cn_stock_etf_high_chase_d5_deep_mae_stock_ab_v1
+title: CN Stock High Chase D5 Deep MAE Stock AB V1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  High Chase plus D5 failure has explanatory power, but mild early MAE may be
+  too noisy for immediate action. This stock-only AB tests whether separating
+  mild and deep MAE preserves drawdown protection while reducing churn.
+change_scope:
+  modules_modified:
+    - strategy.params.enable_mfe_mae_confirmation_exit
+    - strategy.params.mfe_mae_confirmation_scope
+    - strategy.params.mfe_mae_confirmation_action
+    - strategy.params.mfe_mae_confirmation_lookahead_bars
+    - strategy.params.mfe_mae_confirmation_min_mfe_pct
+    - strategy.params.mfe_mae_confirmation_max_mae_pct
+    - strategy.params.mfe_mae_confirmation_exit_pct
+    - strategy.params.mfe_mae_watch_review_bars
+    - strategy.params.mfe_mae_watch_review_min_mfe_pct
+    - strategy.params.mfe_mae_watch_review_max_current_return_pct
+    - strategy.params.mfe_mae_watch_review_max_mae_pct
+    - strategy.params.mfe_mae_watch_deep_mae_immediate_pct
+  fixed_modules:
+    - universe.universe_mode
+    - universe.membership_mode
+    - ranking
+    - entry_rules
+    - execution
+    - costs
+    - sizing
+variants:
+  - name: B0_V3_STOCK_REPLAY
+    description: Same-runtime stock-leg replay from the V3 stock component runtime config.
+  - name: HC_D5_IMMEDIATE_HALF_EXIT
+    description: Incumbent candidate; high-chase day3 D5 failure with MAE <= -5% exits half immediately.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_mfe_mae_confirmation_exit: true
+            mfe_mae_confirmation_scope: high_chase
+            mfe_mae_confirmation_action: exit
+            mfe_mae_confirmation_lookahead_bars: 3
+            mfe_mae_confirmation_min_mfe_pct: 0.02
+            mfe_mae_confirmation_max_mae_pct: -0.05
+            mfe_mae_confirmation_exit_pct: 0.5
+  - name: D7_DEEP_ONLY_IMMEDIATE_HALF_EXIT
+    description: Only high-chase day3 D5 failures with MAE <= -8% exit half immediately; mild -5% to -8% failures are ignored.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_mfe_mae_confirmation_exit: true
+            mfe_mae_confirmation_scope: high_chase
+            mfe_mae_confirmation_action: exit
+            mfe_mae_confirmation_lookahead_bars: 3
+            mfe_mae_confirmation_min_mfe_pct: 0.02
+            mfe_mae_confirmation_max_mae_pct: -0.08
+            mfe_mae_confirmation_exit_pct: 0.5
+  - name: D7_MILD_WATCH_DEEP_IMMEDIATE_DAY10
+    description: Mild high-chase D5 failures enter day10 watch; deep MAE <= -8% still exits half immediately; day10 review requires MFE < +5% and MAE <= -8%.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_mfe_mae_confirmation_exit: true
+            mfe_mae_confirmation_scope: high_chase
+            mfe_mae_confirmation_action: watch_day10
+            mfe_mae_confirmation_lookahead_bars: 3
+            mfe_mae_confirmation_min_mfe_pct: 0.02
+            mfe_mae_confirmation_max_mae_pct: -0.05
+            mfe_mae_confirmation_exit_pct: 0.5
+            mfe_mae_watch_review_bars: 10
+            mfe_mae_watch_review_min_mfe_pct: 0.05
+            mfe_mae_watch_review_max_current_return_pct: 0.05
+            mfe_mae_watch_review_max_mae_pct: -0.08
+            mfe_mae_watch_deep_mae_immediate_pct: -0.08
+  - name: D7_ALL_WATCH_DEEP_REVIEW_DAY10
+    description: All high-chase day3 D5 failures enter day10 watch; day10 review requires MFE < +5% and MAE <= -8%.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_mfe_mae_confirmation_exit: true
+            mfe_mae_confirmation_scope: high_chase
+            mfe_mae_confirmation_action: watch_day10
+            mfe_mae_confirmation_lookahead_bars: 3
+            mfe_mae_confirmation_min_mfe_pct: 0.02
+            mfe_mae_confirmation_max_mae_pct: -0.05
+            mfe_mae_confirmation_exit_pct: 0.5
+            mfe_mae_watch_review_bars: 10
+            mfe_mae_watch_review_min_mfe_pct: 0.05
+            mfe_mae_watch_review_max_current_return_pct: 0.05
+            mfe_mae_watch_review_max_mae_pct: -0.08
+            mfe_mae_watch_deep_mae_immediate_pct: -1.0
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-05-11"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-11"
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  runtime_config_path: outputs/experiments/exp_20260510_033603951_8649/run_config.json
+  fast_mode: true
+  initial_capital: 1000000
+  enable_multifactor_rank: true
+  momentum_top_pct: 0.0
+  universe_mode: HS300_ZZ500
+  price_adj: hfq
+metadata:
+  research_only: true
+  primary_variable: high_chase_d5_deep_mae_stock_action
+  docker_required: true
+  source_stock_component_exp_id: exp_20260510_033603951_8649
+  source_combo_baseline_id: CN_STOCK_ETF_COMBO_BASELINE_V3
+  source_high_chase_d5_robustness: outputs/analysis/high_chase_d5_robustness_20260512
+  same_window_compare_required: true
+  stock_only: true
+  etf_or_combo_inputs: false
+  industry_or_theme_inputs: false

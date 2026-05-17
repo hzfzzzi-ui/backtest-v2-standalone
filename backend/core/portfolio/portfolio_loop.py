@@ -217,6 +217,15 @@ def run_portfolio_backtest(
     _rotation_replace_max_swaps_per_day_cfg = int(_sc_cfg.rotation_replace_max_swaps_per_day)
     _rotation_replace_candidate_top_n_cfg = int(_sc_cfg.rotation_replace_candidate_top_n)
     _rotation_replace_min_score_gap_cfg = float(_sc_cfg.rotation_replace_min_score_gap)
+    _high_chase_a2_size_down_enabled_cfg = bool(_sc_cfg.high_chase_a2_size_down_enabled)
+    _high_chase_a2_size_down_scale_cfg = float(_sc_cfg.high_chase_a2_size_down_scale)
+    _high_chase_a2_pre20_ret_threshold_cfg = float(_sc_cfg.high_chase_a2_pre20_ret_threshold)
+    _high_chase_a2_turnover_rate_f20_threshold_cfg = float(_sc_cfg.high_chase_a2_turnover_rate_f20_threshold)
+    _high_chase_a2_volume_20d_vs_60d_threshold_cfg = float(_sc_cfg.high_chase_a2_volume_20d_vs_60d_threshold)
+    _hot_amount_turnover_size_down_enabled_cfg = bool(_sc_cfg.hot_amount_turnover_size_down_enabled)
+    _hot_amount_turnover_size_down_scale_cfg = float(_sc_cfg.hot_amount_turnover_size_down_scale)
+    _hot_amount_turnover_amount_pct_threshold_cfg = float(_sc_cfg.hot_amount_turnover_amount_pct_threshold)
+    _hot_amount_turnover_turnover_pct_threshold_cfg = float(_sc_cfg.hot_amount_turnover_turnover_pct_threshold)
 
     day_list = list(trading_days)
     # Precompute per-day slice end offsets to avoid repeated full DataFrame scans.
@@ -512,6 +521,15 @@ def run_portfolio_backtest(
             rotation_replace_candidate_top_n=_rotation_replace_candidate_top_n_cfg,
             rotation_replace_min_score_gap=_rotation_replace_min_score_gap_cfg,
             rotation_min_hold_days=int(getattr(strategy, "min_hold_days", 0) or 0),
+            high_chase_a2_size_down_enabled=_high_chase_a2_size_down_enabled_cfg,
+            high_chase_a2_size_down_scale=_high_chase_a2_size_down_scale_cfg,
+            high_chase_a2_pre20_ret_threshold=_high_chase_a2_pre20_ret_threshold_cfg,
+            high_chase_a2_turnover_rate_f20_threshold=_high_chase_a2_turnover_rate_f20_threshold_cfg,
+            high_chase_a2_volume_20d_vs_60d_threshold=_high_chase_a2_volume_20d_vs_60d_threshold_cfg,
+            hot_amount_turnover_size_down_enabled=_hot_amount_turnover_size_down_enabled_cfg,
+            hot_amount_turnover_size_down_scale=_hot_amount_turnover_size_down_scale_cfg,
+            hot_amount_turnover_amount_pct_threshold=_hot_amount_turnover_amount_pct_threshold_cfg,
+            hot_amount_turnover_turnover_pct_threshold=_hot_amount_turnover_turnover_pct_threshold_cfg,
         )
         if debug_first_divergence:
             rank_pos_map: dict[str, int] = {}

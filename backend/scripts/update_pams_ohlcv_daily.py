@@ -11,6 +11,7 @@ from backend.cli.managed.update_pams_ohlcv_daily import (
     _compute_limit_prices,
     _load_cn_index_daily_tushare,
     _limit_pct_for_symbol,
+    _merge_index_symbols,
     _normalize_cn_a_rows,
     _normalize_cn_index_rows,
     _normalize_daily_basic_frame,
