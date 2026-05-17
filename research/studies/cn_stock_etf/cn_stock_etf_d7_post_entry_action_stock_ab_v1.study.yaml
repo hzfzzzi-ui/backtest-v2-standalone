@@ -1,0 +1,144 @@
+study_id: cn_stock_etf/cn_stock_etf_d7_post_entry_action_stock_ab_v1
+title: CN Stock D7 Post-entry Action Stock AB V1
+asset_scope: cn_a_equity
+baseline_id: baseline_V10_1
+hypothesis: >
+  The all-candidate D7 post-entry path shadow confirms D7 failure has
+  explanatory power, but the executable portfolio action remains uncertain.
+  This stock-only AB tests whether current half-exit, stronger immediate exit,
+  day5 delayed confirmation, or day10 watch gives the best drawdown/return
+  tradeoff.
+change_scope:
+  modules_modified:
+    - strategy.params.enable_mfe_mae_confirmation_exit
+    - strategy.params.mfe_mae_confirmation_scope
+    - strategy.params.mfe_mae_confirmation_action
+    - strategy.params.mfe_mae_confirmation_lookahead_bars
+    - strategy.params.mfe_mae_confirmation_min_mfe_pct
+    - strategy.params.mfe_mae_confirmation_max_mae_pct
+    - strategy.params.mfe_mae_confirmation_exit_pct
+    - strategy.params.mfe_mae_watch_review_bars
+    - strategy.params.mfe_mae_watch_review_min_mfe_pct
+    - strategy.params.mfe_mae_watch_review_max_current_return_pct
+    - strategy.params.mfe_mae_watch_review_max_mae_pct
+    - strategy.params.mfe_mae_watch_deep_mae_immediate_pct
+  fixed_modules:
+    - universe.universe_mode
+    - universe.membership_mode
+    - ranking
+    - entry_rules
+    - execution
+    - costs
+    - sizing
+    - etf_sleeve
+variants:
+  - name: B0_CURRENT_D7_HALF_EXIT
+    description: Current baseline_V10_1 stock replay; D7 high-chase day3 deep failures exit 50% immediately.
+  - name: D7_IMMEDIATE_50_CONTROL
+    description: Explicit current D7 control; high-chase day3 failures with MAE <= -8% exit 50% immediately.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_mfe_mae_confirmation_exit: true
+            mfe_mae_confirmation_scope: high_chase
+            mfe_mae_confirmation_action: exit
+            mfe_mae_confirmation_lookahead_bars: 3
+            mfe_mae_confirmation_min_mfe_pct: 0.02
+            mfe_mae_confirmation_max_mae_pct: -0.08
+            mfe_mae_confirmation_exit_pct: 0.5
+  - name: D7_IMMEDIATE_75
+    description: High-chase day3 D7 failures with MAE <= -8% exit 75% immediately.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_mfe_mae_confirmation_exit: true
+            mfe_mae_confirmation_scope: high_chase
+            mfe_mae_confirmation_action: exit
+            mfe_mae_confirmation_lookahead_bars: 3
+            mfe_mae_confirmation_min_mfe_pct: 0.02
+            mfe_mae_confirmation_max_mae_pct: -0.08
+            mfe_mae_confirmation_exit_pct: 0.75
+  - name: D7_IMMEDIATE_100
+    description: High-chase day3 D7 failures with MAE <= -8% exit fully.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_mfe_mae_confirmation_exit: true
+            mfe_mae_confirmation_scope: high_chase
+            mfe_mae_confirmation_action: exit
+            mfe_mae_confirmation_lookahead_bars: 3
+            mfe_mae_confirmation_min_mfe_pct: 0.02
+            mfe_mae_confirmation_max_mae_pct: -0.08
+            mfe_mae_confirmation_exit_pct: 1.0
+  - name: D7_DELAYED_5D_HALF_EXIT
+    description: Delay D7 confirmation to day5; high-chase failures with MFE < 2% and MAE <= -8% exit 50%.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_mfe_mae_confirmation_exit: true
+            mfe_mae_confirmation_scope: high_chase
+            mfe_mae_confirmation_action: exit
+            mfe_mae_confirmation_lookahead_bars: 5
+            mfe_mae_confirmation_min_mfe_pct: 0.02
+            mfe_mae_confirmation_max_mae_pct: -0.08
+            mfe_mae_confirmation_exit_pct: 0.5
+  - name: D7_WATCH_DAY10_HALF_EXIT
+    description: Day3 D7 failures enter watch; unresolved day10 cases exit 50%.
+    request_overrides:
+      runtime_config_json:
+        strategy:
+          params:
+            enable_mfe_mae_confirmation_exit: true
+            mfe_mae_confirmation_scope: high_chase
+            mfe_mae_confirmation_action: watch_day10
+            mfe_mae_confirmation_lookahead_bars: 3
+            mfe_mae_confirmation_min_mfe_pct: 0.02
+            mfe_mae_confirmation_max_mae_pct: -0.08
+            mfe_mae_confirmation_exit_pct: 0.5
+            mfe_mae_watch_review_bars: 10
+            mfe_mae_watch_review_min_mfe_pct: 0.05
+            mfe_mae_watch_review_max_current_return_pct: 0.05
+            mfe_mae_watch_review_max_mae_pct: -0.08
+            mfe_mae_watch_deep_mae_immediate_pct: -1.0
+windows:
+  - key: "1626"
+    role: main
+    start: "2016-01-01"
+    end: "2026-05-16"
+  - key: "1217"
+    role: guardrail
+    start: "2012-01-04"
+    end: "2017-12-29"
+  - key: "1226"
+    role: full_audit
+    start: "2012-01-04"
+    end: "2026-05-16"
+hard_gates:
+  min_trades: 1
+required_outputs:
+  - machine_bundle
+  - human_bundle
+  - study_conclusion
+request_template:
+  config_path: backend/configs/pams_cn_pg.json
+  runtime_config_path: outputs/baselines/baseline_V10_1/run_config.json
+  fast_mode: true
+  initial_capital: 1000000
+  enable_multifactor_rank: true
+  momentum_top_pct: 0.0
+  universe_mode: HS300_ZZ500
+  price_adj: hfq
+metadata:
+  research_only: true
+  primary_variable: d7_post_entry_action
+  docker_required: true
+  source_baseline_id: baseline_V10_1
+  source_shadow_audit: outputs/analysis/all_candidate_d7_post_entry_path_shadow_20260518
+  same_window_compare_required: true
+  stock_only: true
+  etf_or_combo_inputs: false
+  industry_or_theme_inputs: false
