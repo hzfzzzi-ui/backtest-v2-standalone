@@ -11,6 +11,15 @@ def _read(*parts: str) -> str:
     return _repo_root().joinpath(*parts).read_text(encoding="utf-8", errors="ignore")
 
 
+def _frontend_files(*parts: str) -> list[Path]:
+    root = _repo_root().joinpath("frontend", *parts)
+    return [
+        path
+        for path in root.rglob("*")
+        if path.suffix in {".js", ".html"} and path.is_file()
+    ]
+
+
 def test_desktop_entry_loads_formal_desktop_shell_chain() -> None:
     index_source = _read("frontend", "index.html")
     expected_order = [
@@ -82,7 +91,7 @@ def test_runtime_surface_owns_shared_runtime_helpers() -> None:
 
 def test_app_shell_bootstraps_formal_baseline_and_bridge_wiring() -> None:
     source = _read("frontend", "assets", "js", "desktop-shell", "app-shell.js")
-    assert "CN_STOCK_ETF_COMBO_BASELINE_V4" in source
+    assert "CN_STOCK_ETF_COMBO_BASELINE_V3" in source
     assert "baseline_V10_1" in source
     assert "syncResultsWorkbenchSurface" in source
     assert "syncAssetAwareShell" in source
@@ -96,6 +105,24 @@ def test_results_workspace_uses_canonical_surface_sections() -> None:
     assert "surfaceLazySections" in source
     assert "publishDesktopResultsWorkbenchSnapshot" in source
     assert "/artifacts/read" not in source
+    assert "Display-only fallback; canonical drawdown should come from the backend drawdown section." in source
+
+
+def test_research_workbench_uses_api_adapter_instead_of_direct_fetch() -> None:
+    offenders: list[str] = []
+    for path in _frontend_files("assets", "js", "desktop-shell"):
+        rel = path.relative_to(_repo_root()).as_posix()
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        if "fetch(" in source:
+            offenders.append(rel)
+
+    api_adapter = _read("frontend", "assets", "js", "desktop-shell", "api-adapter.js")
+    results_workspace = _read("frontend", "assets", "js", "desktop-shell", "results-workspace.js")
+
+    assert offenders == []
+    assert "requestJson" in api_adapter
+    assert "apiRequestJson" in results_workspace
+    assert "/api/backtest_v2/experiments/${encodeURIComponent(normalizedExpId)}/surface" in results_workspace
 
 
 def test_api_surface_owns_market_data_sync_status_and_port_fallback() -> None:
@@ -107,6 +134,22 @@ def test_api_surface_owns_market_data_sync_status_and_port_fallback() -> None:
     assert "renderMarketDataSyncStatus" in source
     assert "refreshMarketDataSyncStatus" in source
     assert "const LOCAL_BACKEND_FALLBACK_PORT = '8091';" in source
+
+
+def test_frontend_chart_data_comes_from_platform_api_not_vendors() -> None:
+    vendor_tokens = ("Tushare", "tushare", "iFinD", "ifind", "vendor_raw", "PGHOST", "psycopg")
+    offenders: list[str] = []
+    for path in _frontend_files():
+        rel = path.relative_to(_repo_root()).as_posix()
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        for token in vendor_tokens:
+            if token in source:
+                offenders.append(f"{rel}: {token}")
+
+    results_workspace = _read("frontend", "assets", "js", "desktop-shell", "results-workspace.js")
+    assert offenders == []
+    assert "/api/backtest_v2/series/benchmark" in results_workspace
+    assert "/api/backtest_v2/series/symbol" in results_workspace
 
 
 def test_config_workspace_owns_etf_preset_and_config_draft_bridge() -> None:
@@ -137,3 +180,9 @@ def test_mobile_shell_uses_mobile_owner_and_shared_api_only() -> None:
     assert "/assets/js/mobile-dashboard.js" in mobile_html
     assert "pages/mobile-dashboard-page.js" not in mobile_html
     assert "pages/mobile-dashboard-page.js" not in service_worker
+
+
+def test_frontend_derived_stage_funnel_is_marked_display_only() -> None:
+    source = _read("frontend", "app", "results-workbench", "helpers", "stageFunnelFormatting.js")
+    assert "Display-only aggregation for the stage funnel; canonical counters are backend-owned." in source
+    assert "export function buildStageRows" in source

@@ -7,6 +7,18 @@ from pathlib import Path
 _ROUTE_DECORATOR_RE = re.compile(
     r"@router\.(get|post|put|patch|delete|options|head)\(\s*[\"']([^\"']+)[\"']"
 )
+_ABSOLUTE_ROUTE_IMPORT_RE = re.compile(
+    r"^\s*(?:from|import)\s+backend\.api\.[^\n]*\.routes(?:\.|\s|$)",
+    re.MULTILINE,
+)
+_RELATIVE_ROUTE_IMPORT_RE = re.compile(
+    r"^\s*from\s+\.+routes(?:\.|\s)",
+    re.MULTILINE,
+)
+_SIBLING_ROUTE_IMPORT_RE = re.compile(
+    r"^\s*from\s+\.[a-zA-Z_][\w]*\s+import",
+    re.MULTILINE,
+)
 
 
 def _read_repo_file(*parts: str) -> str:
@@ -26,6 +38,14 @@ def _api_python_files() -> list[Path]:
 def _is_api_route_owner(path: Path) -> bool:
     rel = path.relative_to(_repo_root()).as_posix()
     return "/routes/" in rel or rel.endswith("/router.py")
+
+
+def _is_router_aggregator(path: Path) -> bool:
+    return path.relative_to(_repo_root()).as_posix().endswith("/router.py")
+
+
+def _is_package_init(path: Path) -> bool:
+    return path.name == "__init__.py"
 
 
 def test_mobile_routes_depend_on_new_mobile_impl_only() -> None:
@@ -164,6 +184,24 @@ def test_api_impl_modules_do_not_declare_route_owners() -> None:
             continue
         source = path.read_text(encoding="utf-8", errors="ignore")
         if "APIRouter" in source or "@router." in source or "router = APIRouter" in source:
+            offenders.append(rel)
+
+    assert offenders == []
+
+
+def test_api_layer_does_not_import_route_functions_from_other_routes() -> None:
+    offenders: list[str] = []
+
+    for path in _api_python_files():
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        rel = path.relative_to(_repo_root()).as_posix()
+        if _is_router_aggregator(path) or _is_package_init(path):
+            continue
+        if _ABSOLUTE_ROUTE_IMPORT_RE.search(source) or _RELATIVE_ROUTE_IMPORT_RE.search(source):
+            offenders.append(rel)
+        if "/routes/" in rel and _SIBLING_ROUTE_IMPORT_RE.search(source):
+            offenders.append(rel)
+        if "backend.api.endpoints" in source or "from backend.api.endpoints" in source:
             offenders.append(rel)
 
     assert offenders == []

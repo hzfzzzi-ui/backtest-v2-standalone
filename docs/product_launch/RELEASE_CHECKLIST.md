@@ -21,7 +21,7 @@
 - [x] `python_api_routes.csv` 不存在无说明的重复 `method + path`。
 - [x] `routes/*` 是唯一 HTTP decorator owner。
 - [x] impl/service 层不声明 route decorator。
-- [ ] API 层不调用另一个 API route 函数。
+- [x] API 层不调用另一个 API route 函数。
 - [ ] API 返回无 NaN/Inf。
 - [ ] API schema 有测试覆盖。
 
@@ -37,16 +37,16 @@
 
 - [ ] Tushare/iFinD 等供应商数据进入 raw vendor 层。
 - [ ] 上层通过 canonical market data 访问。
-- [ ] 字段 source matrix 存在。
+- [x] 字段 source matrix 存在。
 - [ ] 停牌、退市、缺口、合成补位有显式状态。
-- [ ] 数据 freshness 状态可查询。
+- [x] 数据 freshness 状态可查询。
 
 ## 6. 研究产物
 
-- [ ] 每个实验产出 `run_meta.json`。
-- [ ] 每个实验产出 manifest。
-- [ ] 每个实验产出 perf/nav/funnel/reason codes。
-- [ ] artifact 路径相对化。
+- [x] 每个实验产出 `run_meta.json`。
+- [x] 每个实验产出 manifest。
+- [x] 每个实验产出 perf/nav/funnel/reason codes。
+- [x] artifact 路径相对化。
 - [ ] 产物 schema 有校验。
 
 ## 7. PAMS 外部化
@@ -60,15 +60,15 @@
 
 ## 8. 前端
 
-- [ ] Research Workbench 只消费 API 和 artifact surface。
+- [x] Research Workbench 只消费 API 和 artifact surface。
 - [ ] 前端不重算核心研究口径。
-- [ ] 移动端资产/审批页面不属于研究平台正式上线范围。
-- [ ] 图表数据来自平台 API，不直连供应商数据。
+- [x] 移动端资产/审批页面不属于研究平台正式上线范围。
+- [x] 图表数据来自平台 API，不直连供应商数据。
 
 ## 9. 测试与审计
 
-- [ ] 边界测试覆盖 API route owner。
-- [ ] 边界测试覆盖 PAMS/mobile/sim_account 禁止主路径新增引用。
+- [x] 边界测试覆盖 API route owner。
+- [x] 边界测试覆盖 PAMS/mobile/sim_account 禁止主路径新增引用。
 - [ ] baseline regression check 可运行。
 - [ ] 数据合同测试可运行。
 - [ ] 研究报告和上线报告可生成。
