@@ -275,3 +275,24 @@ def test_baseline_regression_checklist_matches_cli_and_contract_tests() -> None:
     assert "test_cli_audit_lists_baseline_regression_target" in cli_tests
     assert "python -m backend.cli audit --target baseline_regression" in closure_doc
     assert _has_checked_line_with(checklist, "baseline regression check")
+
+
+def test_data_contract_checklist_matches_data_contract_tests() -> None:
+    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    data_contract_tests = _read("tests", "unit", "test_data_contract_audit_common.py")
+    microcap_contract_tests = _read("tests", "unit", "test_tactical_microcap_sleeve_candidate_audit.py")
+    v2_daily_tests = _read("tests", "unit", "test_update_pams_ohlcv_daily_v2.py")
+    runtime_data_tests = _read("tests", "unit", "test_runtime_data_access.py")
+
+    for marker in (
+        "test_data_contract_findings_report_failures",
+        "test_current_risk_name_coverage_requires_interval_source",
+    ):
+        assert marker in data_contract_tests
+
+    assert "test_build_data_contract_report_flags_current_risk_without_pit_interval" in microcap_contract_tests
+    assert "test_build_trade_date_rows_reclassifies_delist_tail_confirmed" in v2_daily_tests
+    assert "test_build_trade_date_rows_reclassifies_sh_side_evidence_gap_fill" in v2_daily_tests
+    assert "test_build_trade_date_rows_reclassifies_official_terminal_override_for_suspension_window" in v2_daily_tests
+    assert "test_resolve_validation_universe_uses_shared_filter_path" in runtime_data_tests
+    assert _has_checked_line_with(checklist, "数据合同测试")

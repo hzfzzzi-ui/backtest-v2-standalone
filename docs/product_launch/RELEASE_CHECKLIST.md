@@ -70,7 +70,7 @@
 - [x] 边界测试覆盖 API route owner。
 - [x] 边界测试覆盖 PAMS/mobile/sim_account 禁止主路径新增引用。
 - [x] baseline regression check 可运行。
-- [ ] 数据合同测试可运行。
+- [x] 数据合同测试可运行。
 - [ ] 研究报告和上线报告可生成。
 
 ## 10. 阻断项
