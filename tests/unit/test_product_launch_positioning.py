@@ -322,6 +322,25 @@ def test_research_publication_governance_checklist_matches_live_gate_tests() -> 
     assert _has_checked_line_with(checklist, "diagnostic probe")
 
 
+def test_three_window_research_discipline_checklist_matches_journal_and_audit_tests() -> None:
+    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    study_journal_tests = _read("tests", "unit", "test_study_journal.py")
+    formal_audit_tests = _read("tests", "unit", "test_run_pams_ohlcv_daily_v2_formal_audits.py")
+
+    for marker in (
+        "test_study_journal_three_window_ready_round_is_reviewable",
+        "2016_2026",
+        "2012_2017",
+        "2012_2026",
+        "三窗口证据尚不完整，不能作为 baseline 升级依据。",
+    ):
+        assert marker in study_journal_tests
+
+    assert "test_formal_audit_windows_use_2012_formal_policy" in formal_audit_tests
+    assert "test_formal_audits_runner_executes_all_required_windows" in formal_audit_tests
+    assert _has_checked_line_with(checklist, "三窗口研究纪律")
+
+
 def test_data_contract_checklist_matches_data_contract_tests() -> None:
     checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
     data_contract_tests = _read("tests", "unit", "test_data_contract_audit_common.py")

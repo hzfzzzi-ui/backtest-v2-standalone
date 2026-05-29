@@ -98,3 +98,48 @@ def test_study_journal_append_note_and_link_experiment_refresh_summary(monkeypat
     assert linked["auto_summary"]["verdict_counts"] == {"LEGACY_PASS": 1}
     assert linked["auto_summary"]["gate_status_counts"] == {"PASS": 1}
     assert linked["reliability"] in {"partial", "reviewable", "low"}
+
+
+def test_study_journal_three_window_ready_round_is_reviewable(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("STUDY_JOURNAL_ROOT", str(tmp_path / "journal"))
+    monkeypatch.setenv("RESULTS_ROOT", str(tmp_path / "outputs"))
+    windows = ["2016_2026", "2012_2017", "2012_2026"]
+    _write_jsonl(
+        tmp_path / "outputs" / "studies" / "conclusions" / "demo" / "registry.jsonl",
+        [
+            {
+                "recorded_at": f"2026-05-10T10:0{idx}:00",
+                "study_id": "demo/three_window",
+                "compared_baseline_id": "BASE",
+                "verdict": "confirmed",
+                "gate_status": "PASS",
+                "summary_short": f"confirmed | window={window} | variant=B1",
+                "exp_id": f"exp_demo_{idx}",
+                "window_key": window,
+                "variant_name": "B1",
+                "key_metrics": {"cagr": {"candidate": 0.12, "baseline": 0.10, "delta": 0.02}},
+            }
+            for idx, window in enumerate(windows, start=1)
+        ],
+    )
+
+    item = study_journal.save_round(
+        {
+            "round_id": "sr_demo_three_window",
+            "title": "Three Window Demo",
+            "study_id": "demo/three_window",
+            "baseline_id": "BASE",
+            "windows": windows,
+            "variants": ["B1"],
+            "evidence": [
+                {"kind": "experiment", "exp_id": f"exp_demo_{idx}", "window_key": window, "variant_name": "B1"}
+                for idx, window in enumerate(windows, start=1)
+            ],
+            "audit": {"same_window_compare": True, "config_truth_checked": True, "nav_lineage_checked": True},
+        }
+    )
+
+    assert item["reliability"] == "reviewable"
+    assert item["auto_summary"]["window_coverage"] == ["2012-2017", "2012-2026", "2016-2026"]
+    assert item["auto_summary"]["gate_status_counts"] == {"PASS": 3}
+    assert "三窗口证据尚不完整，不能作为 baseline 升级依据。" not in item["auto_summary"]["risks"]
