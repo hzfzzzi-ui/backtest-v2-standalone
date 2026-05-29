@@ -27,7 +27,7 @@
 
 ## 4. 研究主链
 
-- [ ] baseline 主逻辑有回归测试。
+- [x] baseline 主逻辑有回归测试。
 - [ ] 信号时点、成交时点、价格口径显式记录。
 - [ ] 三窗口研究纪律仍可执行。
 - [ ] controlled experiment 不会自动改变 baseline。

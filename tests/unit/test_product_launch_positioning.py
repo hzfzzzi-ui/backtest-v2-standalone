@@ -286,6 +286,7 @@ def test_baseline_regression_checklist_matches_cli_and_contract_tests() -> None:
 
     for marker in (
         "test_load_contract_has_foundation_baseline",
+        "test_current_combo_baseline_main_logic_has_regression_contract",
         "test_compare_experiment_dirs_passes_with_allowed_drift",
         "test_compare_experiment_dirs_fails_on_perf_drift_and_writes_report",
         "test_compare_experiment_dirs_fails_on_run_config_behavior_drift",
@@ -294,6 +295,7 @@ def test_baseline_regression_checklist_matches_cli_and_contract_tests() -> None:
 
     assert "test_cli_audit_lists_baseline_regression_target" in cli_tests
     assert "python -m backend.cli audit --target baseline_regression" in closure_doc
+    assert _has_checked_line_with(checklist, "baseline 主逻辑")
     assert _has_checked_line_with(checklist, "baseline regression check")
 
 

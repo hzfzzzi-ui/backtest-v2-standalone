@@ -203,6 +203,39 @@ def test_load_contract_has_foundation_baseline() -> None:
     assert "portfolio_daily.csv" in dict((contract.get("protected_artifacts") or {}).get("semantic_csv") or {})
 
 
+def test_current_combo_baseline_main_logic_has_regression_contract() -> None:
+    contract = _load_contract(Path("backend/scripts/ops/v2_backend_refactor_baseline_contract.json"))
+    protected = contract["protected_artifacts"]
+
+    assert contract["current_anchor"]["baseline_id"] == "CN_STOCK_ETF_COMBO_BASELINE_V3"
+    assert contract["baseline_exp_id"] == contract["current_anchor"]["exp_id"]
+    assert set(protected["exact_file_hash"]) >= {"portfolio_trades.csv", "portfolio_candidates.csv"}
+    assert set(protected["summary_json"]["perf.json"]) >= {
+        "total_return",
+        "max_drawdown",
+        "cagr",
+        "sharpe",
+        "trades",
+        "turnover",
+    }
+    assert set(protected["semantic_csv"]["portfolio_daily.csv"]["stable_fields"]) >= {
+        "date",
+        "nav",
+        "daily_return",
+        "drawdown",
+        "gross_exposure",
+        "market_state",
+        "trade_mode",
+    }
+    assert set(protected["semantic_surfaces"]) >= {
+        "run_meta_core",
+        "run_meta_universe",
+        "config_truth",
+        "manifest",
+    }
+    assert contract["verification_command"] == "python -m backend.cli.managed.baseline_regression_check --rerun --write-to-candidate"
+
+
 def test_compare_experiment_dirs_passes_with_allowed_drift(tmp_path: Path) -> None:
     contract = _load_contract(Path("backend/scripts/ops/v2_backend_refactor_baseline_contract.json"))
     baseline_dir = _make_exp_dir(tmp_path, "exp_baseline", cagr=0.1)
