@@ -183,6 +183,7 @@ def test_frontend_checklist_matches_frontend_boundary_tests() -> None:
     for marker in (
         "test_research_workbench_uses_api_adapter_instead_of_direct_fetch",
         "test_results_workspace_uses_canonical_surface_sections",
+        "test_frontend_core_research_math_is_backend_owned_or_display_only",
         "test_mobile_shell_uses_mobile_owner_and_shared_api_only",
         "test_frontend_chart_data_comes_from_platform_api_not_vendors",
     ):
@@ -192,6 +193,7 @@ def test_frontend_checklist_matches_frontend_boundary_tests() -> None:
 
     for checked_item in (
         "Research Workbench 只消费 API 和 artifact surface。",
+        "前端不重算核心研究口径。",
         "移动端资产/审批页面不属于研究平台正式上线范围。",
         "图表数据来自平台 API，不直连供应商数据。",
     ):

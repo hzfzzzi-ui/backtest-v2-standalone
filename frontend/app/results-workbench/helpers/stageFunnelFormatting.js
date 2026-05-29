@@ -111,6 +111,7 @@ export function reasonByPrefix(rows) {
 }
 
 export function buildStageRows(artifacts, counters) {
+  // Display-only aggregation for the stage funnel; canonical counters are backend-owned.
   const buyStageRows = Array.isArray(artifacts?.funnelRows) && artifacts.funnelRows.length
     ? artifacts.funnelRows
     : (Array.isArray(counters?.buy_stage_funnel) ? counters.buy_stage_funnel : []);

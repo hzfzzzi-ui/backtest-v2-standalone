@@ -1132,6 +1132,7 @@ function renderExplainPanel() {
       artifacts.nav = navRows;
       artifacts.navSeries = navRows.map((row) => ({ date: row.date, value: row.nav }));
       if (!Array.isArray(artifacts.drawdownSeries) || !artifacts.drawdownSeries.length) {
+        // Display-only fallback; canonical drawdown should come from the backend drawdown section.
         artifacts.drawdownSeries = navRows.reduce((acc, row) => {
           const peak = acc.length ? Math.max(acc[acc.length - 1].__peak || row.nav, row.nav) : row.nav;
           const value = peak > 0 ? ((row.nav - peak) / peak) : 0;

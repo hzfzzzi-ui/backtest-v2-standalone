@@ -1,11 +1,11 @@
 /* desktop-shell/app-shell.js: formal desktop page shell owner for init, navigation, and UI bridge wiring. */
 (function initDesktopAppShellModule(globalScope) {
-  const DEFAULT_BOOTSTRAP_BASELINE_ID = 'CN_STOCK_ETF_COMBO_BASELINE_V4';
+  const DEFAULT_BOOTSTRAP_BASELINE_ID = 'CN_STOCK_ETF_COMBO_BASELINE_V3';
   const MAX_FRONTEND_EXPERIMENT_LOAD_ITEMS = 12;
   const DEFAULT_BOOTSTRAP_SOURCE = {
     kind: 'baseline',
     id: DEFAULT_BOOTSTRAP_BASELINE_ID,
-    label: 'Baseline CN_STOCK_ETF_COMBO_BASELINE_V4',
+    label: 'Baseline CN_STOCK_ETF_COMBO_BASELINE_V3',
   };
   const FALLBACK_BOOTSTRAP_SOURCE = {
     kind: 'baseline',

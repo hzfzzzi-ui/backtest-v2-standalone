@@ -173,6 +173,38 @@ def test_run_orchestration_sends_asset_scope_without_recomputing_research_logic(
     assert "rank(" not in source
 
 
+def test_frontend_core_research_math_is_backend_owned_or_display_only() -> None:
+    banned_core_formula_markers = (
+        "calculateCagr",
+        "computeCagr",
+        "calculateSharpe",
+        "computeSharpe",
+        "calculateMaxDrawdown",
+        "computeMaxDrawdown",
+        "rankStocks",
+        "scoreCandidates",
+        "generateSignals",
+        "rebalancePortfolio",
+        "monthly_divergence_rate",
+    )
+    offenders: list[str] = []
+    for path in _frontend_files():
+        if "/vendor/" in path.as_posix():
+            continue
+        rel = path.relative_to(_repo_root()).as_posix()
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        for marker in banned_core_formula_markers:
+            if marker in source:
+                offenders.append(f"{rel}: {marker}")
+
+    results_workspace = _read("frontend", "assets", "js", "desktop-shell", "results-workspace.js")
+    stage_funnel_helper = _read("frontend", "app", "results-workbench", "helpers", "stageFunnelFormatting.js")
+    assert offenders == []
+    assert "surfaceLazySections" in results_workspace
+    assert "Display-only fallback; canonical drawdown should come from the backend drawdown section." in results_workspace
+    assert "Display-only aggregation for the stage funnel; canonical counters are backend-owned." in stage_funnel_helper
+
+
 def test_mobile_shell_uses_mobile_owner_and_shared_api_only() -> None:
     mobile_html = _read("frontend", "mobile.html")
     service_worker = _read("frontend", "mobile-service-worker.js")
