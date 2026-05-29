@@ -456,6 +456,40 @@ def test_market_data_status_checklist_matches_v2_row_status_contracts() -> None:
     assert _has_checked_line_with(checklist, "停牌", "退市", "缺口", "合成补位")
 
 
+def test_canonical_market_data_checklist_matches_access_contracts() -> None:
+    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    architecture_doc = _read("docs", "product_launch", "ARCHITECTURE.md")
+    features_doc = _read("docs", "product_launch", "FEATURES.md")
+    runtime_contract = _read(
+        "docs",
+        "02_系统架构设计",
+        "数据库",
+        "pams_ohlcv_daily_v2_runtime_contract.md",
+    )
+    data_access_boundary = _read("docs", "02_系统架构设计", "数据库", "市场数据访问边界.md")
+    market_data_tests = _read("tests", "unit", "test_market_data_access.py")
+    runtime_data_tests = _read("tests", "unit", "test_runtime_data_access.py")
+    schema_artifact_tests = _read("tests", "integration", "test_schema_and_artifacts.py")
+
+    for marker in (
+        "Raw --> Quality",
+        "Quality --> Canonical",
+        "Canonical --> Access",
+        "Access --> Engine",
+        "Access --> Study",
+    ):
+        assert marker in architecture_doc
+
+    assert "canonical market data 访问合同" in features_doc
+    assert "`canonical_market`" in runtime_contract
+    assert "研究 / 回测默认只消费 `canonical_market`" in data_access_boundary
+    assert "test_market_data_access_builds_canonical_data_source_from_runtime_config" in market_data_tests
+    assert "test_price_history_audit_uses_fixed_contract_fields" in market_data_tests
+    assert "test_resolve_validation_universe_uses_shared_filter_path" in runtime_data_tests
+    assert "test_run_meta_report_consistency_defaults_to_canonical_market_contract" in schema_artifact_tests
+    assert _has_checked_line_with(checklist, "canonical market data")
+
+
 def test_report_generation_checklist_matches_report_services_and_cli() -> None:
     checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
     research_report_tests = _read("tests", "unit", "test_research_report_common.py")

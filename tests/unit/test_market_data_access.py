@@ -5,6 +5,7 @@ from datetime import date
 import backend.core.data as data_pkg
 import pandas as pd
 
+from backend.core.config.models import DataSourceConfig
 from backend.core.data.market_data_access import (
     CALENDAR_VERSION,
     DIRECT_CANONICAL_CACHE_VERSION,
@@ -134,6 +135,23 @@ def test_price_history_audit_uses_fixed_contract_fields() -> None:
     assert result.audit.cache_version == DIRECT_CANONICAL_CACHE_VERSION
     assert result.audit.window_start == "2026-03-01"
     assert result.audit.window_end == "2026-03-31"
+
+
+def test_market_data_access_builds_canonical_data_source_from_runtime_config() -> None:
+    source = DataSourceConfig(
+        data_role="v2_runtime",
+        stocks_table="legacy_ohlcv",
+        v2_canonical_stocks_table="canonical_market_ohlcv_daily",
+        v2_runtime_stocks_table="canonical_market_ohlcv_runtime",
+        v2_schema_mapping_table="canonical_market_ohlcv_daily",
+    )
+
+    canonical = MarketDataAccess._build_canonical_data_source(source)
+
+    assert canonical.resolved_data_role() == "v2_canonical"
+    assert canonical.resolved_stocks_table() == "canonical_market_ohlcv_daily"
+    assert canonical.resolved_stocks_mapping_table() == "canonical_market_ohlcv_daily"
+    assert canonical.stocks_table == "canonical_market_ohlcv_daily"
 
 
 def test_trading_calendar_contract_returns_minimal_fields() -> None:
