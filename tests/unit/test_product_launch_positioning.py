@@ -442,21 +442,21 @@ def test_signal_execution_price_basis_checklist_matches_live_package_contract_te
 
 def test_data_contract_checklist_matches_data_contract_tests() -> None:
     checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
-    data_contract_tests = _read("tests", "unit", "test_data_contract_audit_common.py")
-    microcap_contract_tests = _read("tests", "unit", "test_tactical_microcap_sleeve_candidate_audit.py")
     v2_daily_tests = _read("tests", "unit", "test_update_pams_ohlcv_daily_v2.py")
+    v2_common_tests = _read("tests", "unit", "test_pams_ohlcv_daily_v2_common.py")
+    audit_tests = _read("tests", "unit", "test_audit_pams_ohlcv_daily_v2.py")
     runtime_data_tests = _read("tests", "unit", "test_runtime_data_access.py")
 
     for marker in (
-        "test_data_contract_findings_report_failures",
-        "test_current_risk_name_coverage_requires_interval_source",
+        "test_build_trade_date_rows_reclassifies_delist_tail_confirmed",
+        "test_build_trade_date_rows_reclassifies_sh_side_evidence_gap_fill",
+        "test_build_trade_date_rows_reclassifies_official_terminal_override_for_suspension_window",
     ):
-        assert marker in data_contract_tests
+        assert marker in v2_daily_tests
 
-    assert "test_build_data_contract_report_flags_current_risk_without_pit_interval" in microcap_contract_tests
-    assert "test_build_trade_date_rows_reclassifies_delist_tail_confirmed" in v2_daily_tests
-    assert "test_build_trade_date_rows_reclassifies_sh_side_evidence_gap_fill" in v2_daily_tests
-    assert "test_build_trade_date_rows_reclassifies_official_terminal_override_for_suspension_window" in v2_daily_tests
+    assert "test_canonical_row_statuses_cover_data_quality_states" in v2_common_tests
+    assert "test_build_runtime_gate_tracks_exclusion_reasons" in audit_tests
+    assert "test_build_trade_date_audit_excludes_synthetic_gap_fill_from_eligible_no_source" in audit_tests
     assert "test_resolve_validation_universe_uses_shared_filter_path" in runtime_data_tests
     assert _has_checked_line_with(checklist, "数据合同测试")
 
@@ -544,20 +544,23 @@ def test_canonical_market_data_checklist_matches_access_contracts() -> None:
 
 def test_report_generation_checklist_matches_report_services_and_cli() -> None:
     checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
-    research_report_tests = _read("tests", "unit", "test_research_report_common.py")
     baseline_report_tests = _read("tests", "unit", "test_baseline_report_service.py")
     launch_report_tests = _read("tests", "unit", "test_product_launch_report_service.py")
+    baseline_report_service = _read("backend", "core", "services", "baseline_report_service.py")
+    launch_report_service = _read("backend", "core", "services", "product_launch_report_service.py")
     audit_command = _read("backend", "cli", "commands", "audit.py")
 
     for marker in (
-        "test_write_markdown_report",
-        "render_markdown_table",
-        "write_markdown_report",
+        "baseline_report.md",
+        "build_baseline_report_append",
+        "append_experiment_to_baseline",
     ):
-        assert marker in research_report_tests
+        assert marker in baseline_report_service
 
     assert "test_append_experiment_to_baseline_appends_fail_and_only_promotes_pass" in baseline_report_tests
 
+    assert "build_launch_readiness_report" in launch_report_service
+    assert "write_launch_readiness_report" in launch_report_service
     for marker in (
         "test_build_launch_readiness_report_marks_unfinished_items_not_ready",
         "test_product_launch_report_cli_writes_report",
