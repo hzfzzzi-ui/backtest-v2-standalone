@@ -1,19 +1,25 @@
 {
   "contract_name": "v2_backend_refactor_foundation",
   "version": "1.2",
-  "baseline_exp_id": "exp_20260511_073506050_3d22",
-  "anchor_policy": "current_combo_baseline_v4_d7_deep_only_override",
+  "baseline_exp_id": "exp_20260510_034302669_7790",
+  "anchor_policy": "current_combo_baseline_v3_after_v4_overfit_rollback",
   "current_anchor": {
-    "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V4",
-    "exp_id": "exp_20260511_073506050_3d22",
-    "reason": "User-approved override promotion to combo baseline V4 from sr_20260511_high_chase_d5_deep_mae_combo_ab; full-period HC_D5_DEEP_ONLY_IMMEDIATE_COMBO aligned with D7 stock baseline."
+    "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "exp_id": "exp_20260510_034302669_7790",
+    "reason": "Restored to combo baseline V3 on 2026-05-17 after V4 overfit audit found high combo-level overfit risk and no decisive official 1226 improvement versus V3."
   },
   "superseded_anchors": [
     {
+      "exp_id": "exp_20260511_073506050_3d22",
+      "role": "rolled_back_combo_baseline_v4_anchor",
+      "status": "superseded",
+      "reason": "Rolled back to CN_STOCK_ETF_COMBO_BASELINE_V3 on 2026-05-17 after V4 overfit audit."
+    },
+    {
       "exp_id": "exp_20260510_034302669_7790",
       "role": "previous_combo_baseline_v3_anchor",
-      "status": "superseded",
-      "reason": "Superseded by CN_STOCK_ETF_COMBO_BASELINE_V4 on 2026-05-12."
+      "status": "active",
+      "reason": "Restored as current combo baseline on 2026-05-17."
     },
     {
       "exp_id": "exp_20260509_074944369_5f6c",

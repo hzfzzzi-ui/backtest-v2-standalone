@@ -187,10 +187,12 @@ def _make_exp_dir(
 
 def test_load_contract_has_foundation_baseline() -> None:
     contract = _load_contract(Path("backend/scripts/ops/v2_backend_refactor_baseline_contract.json"))
-    assert contract["baseline_exp_id"] == "exp_20260511_073506050_3d22"
-    assert contract["current_anchor"]["baseline_id"] == "CN_STOCK_ETF_COMBO_BASELINE_V4"
-    assert contract["current_anchor"]["exp_id"] == "exp_20260511_073506050_3d22"
+    assert contract["baseline_exp_id"] == "exp_20260510_034302669_7790"
+    assert contract["anchor_policy"] == "current_combo_baseline_v3_after_v4_overfit_rollback"
+    assert contract["current_anchor"]["baseline_id"] == "CN_STOCK_ETF_COMBO_BASELINE_V3"
+    assert contract["current_anchor"]["exp_id"] == "exp_20260510_034302669_7790"
     superseded = {row["exp_id"] for row in contract["superseded_anchors"]}
+    assert "exp_20260511_073506050_3d22" in superseded
     assert "exp_20260510_034302669_7790" in superseded
     assert "exp_20260509_074944369_5f6c" in superseded
     assert "exp_20260508_124555553_fabd" in superseded
