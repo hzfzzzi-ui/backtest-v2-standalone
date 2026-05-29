@@ -14,9 +14,9 @@
 
 | 类型 | 当前名称 | 正式名称 | 处理 |
 |---|---|---|---|
-| 产品 | `backtest_V2_standalone` | OpenClaw Quant Research Platform | 当前名称废弃 |
-| 仓库建议名 | `backtest_V2_standalone` | `openclaw-quant-research-platform` | 后续单独迁移 |
-| 中文定位 | 个人多资产趋势配置系统 | 专业量化研究平台 | 立即更新文档口径 |
+| 产品 | `backtest_V2_standalone` | OpenClaw Personal Multi-Asset Trend Allocation System | 当前名称废弃 |
+| 仓库建议名 | `backtest_V2_standalone` | `openclaw-personal-multi-asset-trend-allocation` | 后续单独迁移 |
+| 中文定位 | 旧量化研究平台口径 | 个人多资产趋势配置系统 | 立即更新文档口径 |
 | API 产品名 | `backtest_v2` | Research Experiment API | 兼容期保留路径，文档改名 |
 
 ## 3. 模块重命名计划
@@ -78,4 +78,3 @@
 - `shadow` 作为正式研究能力名称
 - `AB` 作为正式能力名称
 - `legacy` 作为长期运行路径名称
-

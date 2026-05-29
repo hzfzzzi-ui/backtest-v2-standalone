@@ -1,0 +1,85 @@
+{
+  "header": {
+    "schema_version": "daily_position_adjustment_package@1",
+    "package_id": "pkg_cn_a_demo_20260529",
+    "idempotency_key": "pkg:demo_strategy:2026-05-29:default",
+    "generated_at": "2026-05-29T15:30:00+08:00"
+  },
+  "source": {
+    "strategy_id": "demo_cn_a_trend_v1",
+    "strategy_run_id": "run_demo_cn_a_20260529",
+    "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "config_hash": "cfg_sha256_demo",
+    "execution_contract_hash": "exec_sha256_demo",
+    "publish_mode": "live"
+  },
+  "clock": {
+    "signal_date": "2026-05-29",
+    "execution_date": "2026-06-01",
+    "signal_clock": "after_close",
+    "execution_clock": "next_open_or_vwap",
+    "reference_price_basis": "close_t"
+  },
+  "scope": {
+    "market": "CN_A",
+    "asset_scope": "cn_a_equity",
+    "asset_class": "equity",
+    "account_scope": "default_personal_account",
+    "currency": "CNY",
+    "symbol_namespace": "tushare_ts_code"
+  },
+  "inputs": {
+    "market_snapshot_id": "market_cn_a_20260529",
+    "holdings_snapshot_id": "holdings_default_20260529",
+    "cash_snapshot_id": "cash_default_20260529",
+    "reconcile_id": "reconcile_default_20260529"
+  },
+  "package_status": "ready",
+  "target_positions": [
+    {
+      "symbol": "510300.SH",
+      "target_weight": 0.2,
+      "target_qty": 2000,
+      "current_qty": 1000,
+      "reference_price": 4.21
+    }
+  ],
+  "action_sheet": [
+    {
+      "action_id": "act_buy_510300_20260529",
+      "idempotency_key": "act:demo_strategy:2026-05-29:510300.SH:buy",
+      "symbol": "510300.SH",
+      "market": "CN_A",
+      "asset_class": "equity",
+      "action_type": "buy",
+      "action_status": "proposed",
+      "current_qty": 1000,
+      "target_qty": 2000,
+      "delta_qty": 1000,
+      "suggested_qty": 1000,
+      "target_weight": 0.2,
+      "reference_price": 4.21,
+      "reference_price_basis": "close_t",
+      "estimated_amount": 4210.0,
+      "reason_code": "trend_up",
+      "reason_tags": ["portfolio_rebalance"],
+      "reason_codes": ["trend_up", "portfolio_rebalance"],
+      "blocked": false,
+      "blocked_reason": "",
+      "expires_at": "2026-06-01T15:00:00+08:00"
+    }
+  ],
+  "risk_flags": [
+    {
+      "code": "cash_check_required",
+      "severity": "warning",
+      "message": "PAMS must re-check cash before approval."
+    }
+  ],
+  "validation": {
+    "status": "passed",
+    "failure_reason_codes": [],
+    "stale": false,
+    "drifted": false
+  }
+}

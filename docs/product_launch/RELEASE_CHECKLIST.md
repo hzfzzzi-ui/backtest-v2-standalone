@@ -2,25 +2,25 @@
 
 ## 1. 产品与文档
 
-- [ ] 根目录 `README.md` 使用正式产品名。
-- [ ] 所有核心文档使用“专业量化研究平台”作为正式定位。
-- [ ] 文档明确 PAMS 是独立资产管理系统。
-- [ ] 文档明确研究平台不直接接券商下单。
-- [ ] 文档明确 `outputs/` 不是源码主路径。
+- [x] 根目录 `README.md` 使用正式产品名。
+- [x] 所有核心文档使用“个人多资产趋势配置系统”作为正式定位。
+- [x] 文档明确 PAMS 是独立资产管理系统。
+- [x] 文档明确研究平台不直接接券商下单。
+- [x] 文档明确 `outputs/` 不是源码主路径。
 
 ## 2. 命名治理
 
-- [ ] 新增正式命名清单。
-- [ ] 新增废弃命名清单。
-- [ ] `backtest_V2_standalone` 不再作为产品名。
-- [ ] `PAMS/pams_` 不再作为研究平台正式命名前缀。
-- [ ] `shadow` 和 `AB` 已映射到 `diagnostic_probe` 和 `controlled_experiment`。
+- [x] 新增正式命名清单。
+- [x] 新增废弃命名清单。
+- [x] `backtest_V2_standalone` 不再作为产品名。
+- [x] `PAMS/pams_` 不再作为研究平台正式命名前缀。
+- [x] `shadow` 和 `AB` 已映射到 `diagnostic_probe` 和 `controlled_experiment`。
 
 ## 3. API 表面
 
-- [ ] `python_api_routes.csv` 不存在无说明的重复 `method + path`。
-- [ ] `routes/*` 是唯一 HTTP decorator owner。
-- [ ] impl/service 层不声明 route decorator。
+- [x] `python_api_routes.csv` 不存在无说明的重复 `method + path`。
+- [x] `routes/*` 是唯一 HTTP decorator owner。
+- [x] impl/service 层不声明 route decorator。
 - [ ] API 层不调用另一个 API route 函数。
 - [ ] API 返回无 NaN/Inf。
 - [ ] API schema 有测试覆盖。
@@ -51,12 +51,12 @@
 
 ## 7. PAMS 外部化
 
-- [ ] `api.mobile` 不属于正式研究平台主路径。
-- [ ] `mobile_*` services 标记为 externalized_to_pams 或 deprecated。
-- [ ] `sim_account` 不作为账户真值。
-- [ ] `transaction_lifecycle_service` 不作为研究平台正式交易主表 owner。
-- [ ] 调仓包合同存在。
-- [ ] PAMS 是正式通知、审批、执行状态 owner。
+- [x] `api.mobile` 不属于正式研究平台主路径。
+- [x] `mobile_*` services 标记为 externalized_to_pams 或 deprecated。
+- [x] `sim_account` 不作为账户真值。
+- [x] `transaction_lifecycle_service` 不作为研究平台正式交易主表 owner。
+- [x] 调仓包合同存在。
+- [x] PAMS 是正式通知、审批、执行状态 owner。
 
 ## 8. 前端
 
@@ -84,4 +84,3 @@
 - 研究平台直接接券商执行
 - `outputs/` 被源码依赖
 - 研究-only 模块可直接进入 live strategy 发布
-

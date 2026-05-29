@@ -1,0 +1,85 @@
+{
+  "header": {
+    "schema_version": "daily_position_adjustment_package@1",
+    "package_id": "pkg_hold_demo_20260529",
+    "idempotency_key": "pkg:demo_strategy:2026-05-29:hold",
+    "generated_at": "2026-05-29T15:30:00+08:00"
+  },
+  "source": {
+    "strategy_id": "demo_cn_a_trend_v1",
+    "strategy_run_id": "run_demo_cn_a_20260529",
+    "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "config_hash": "cfg_sha256_demo",
+    "execution_contract_hash": "exec_sha256_demo",
+    "publish_mode": "audit_copy"
+  },
+  "clock": {
+    "signal_date": "2026-05-29",
+    "execution_date": "2026-06-01",
+    "signal_clock": "POST_CLOSE",
+    "execution_clock": "NEXT_OPEN",
+    "reference_price_basis": "latest_close"
+  },
+  "scope": {
+    "market": "CN_A",
+    "asset_scope": "cn_a_equity",
+    "asset_class": "equity",
+    "account_scope": "default_personal_account",
+    "currency": "CNY",
+    "symbol_namespace": "tushare_ts_code"
+  },
+  "inputs": {
+    "market_snapshot_id": "market_cn_a_20260529",
+    "holdings_snapshot_id": "holdings_default_20260529",
+    "cash_snapshot_id": "cash_default_20260529",
+    "reconcile_id": "reconcile_default_20260529"
+  },
+  "package_status": "no_op",
+  "target_positions": [
+    {
+      "symbol": "600000.SH",
+      "target_weight": 0.12,
+      "target_qty": 100,
+      "current_qty": 100,
+      "reference_price": 10.8
+    }
+  ],
+  "action_sheet": [
+    {
+      "action_id": "act_hold_600000_20260529",
+      "idempotency_key": "act:demo_strategy:2026-05-29:600000.SH:hold",
+      "symbol": "600000.SH",
+      "market": "CN_A",
+      "asset_class": "equity",
+      "action_type": "hold",
+      "action_status": "no_op",
+      "current_qty": 100,
+      "target_qty": 100,
+      "delta_qty": 0,
+      "suggested_qty": 0,
+      "target_weight": 0.12,
+      "reference_price": 10.8,
+      "reference_price_basis": "latest_close",
+      "estimated_amount": 0.0,
+      "reason_code": "HOLD",
+      "reason_tags": ["currently_held"],
+      "reason_codes": ["HOLD", "currently_held"],
+      "blocked": false,
+      "blocked_reason": "",
+      "expires_at": "2026-06-01T15:00:00+08:00"
+    }
+  ],
+  "risk_flags": [
+    {
+      "code": "no_action_required",
+      "severity": "info",
+      "message": "Position remains within target tolerance."
+    }
+  ],
+  "validation": {
+    "status": "passed",
+    "failure_reason_codes": [],
+    "stale": false,
+    "drifted": false
+  }
+}

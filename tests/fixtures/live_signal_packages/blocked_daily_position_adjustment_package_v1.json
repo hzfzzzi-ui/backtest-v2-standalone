@@ -1,0 +1,85 @@
+{
+  "header": {
+    "schema_version": "daily_position_adjustment_package@1",
+    "package_id": "pkg_blocked_demo_20260529",
+    "idempotency_key": "pkg:demo_strategy:2026-05-29:blocked",
+    "generated_at": "2026-05-29T15:30:00+08:00"
+  },
+  "source": {
+    "strategy_id": "demo_cn_a_trend_v1",
+    "strategy_run_id": "run_demo_cn_a_20260529",
+    "baseline_id": "CN_STOCK_ETF_COMBO_BASELINE_V3",
+    "config_hash": "cfg_sha256_demo",
+    "execution_contract_hash": "exec_sha256_demo",
+    "publish_mode": "live"
+  },
+  "clock": {
+    "signal_date": "2026-05-29",
+    "execution_date": "2026-06-01",
+    "signal_clock": "POST_CLOSE",
+    "execution_clock": "NEXT_OPEN",
+    "reference_price_basis": "latest_close"
+  },
+  "scope": {
+    "market": "CN_A",
+    "asset_scope": "cn_a_equity",
+    "asset_class": "equity",
+    "account_scope": "default_personal_account",
+    "currency": "CNY",
+    "symbol_namespace": "tushare_ts_code"
+  },
+  "inputs": {
+    "market_snapshot_id": "market_cn_a_20260529",
+    "holdings_snapshot_id": "holdings_default_20260529",
+    "cash_snapshot_id": "cash_default_20260529",
+    "reconcile_id": "reconcile_default_20260529"
+  },
+  "package_status": "blocked",
+  "target_positions": [
+    {
+      "symbol": "510300.SH",
+      "target_weight": 0.2,
+      "target_qty": 2000,
+      "current_qty": 1000,
+      "reference_price": 4.21
+    }
+  ],
+  "action_sheet": [
+    {
+      "action_id": "act_blocked_510300_20260529",
+      "idempotency_key": "act:demo_strategy:2026-05-29:510300.SH:blocked",
+      "symbol": "510300.SH",
+      "market": "CN_A",
+      "asset_class": "equity",
+      "action_type": "buy",
+      "action_status": "blocked",
+      "current_qty": 1000,
+      "target_qty": 2000,
+      "delta_qty": 1000,
+      "suggested_qty": 1000,
+      "target_weight": 0.2,
+      "reference_price": 4.21,
+      "reference_price_basis": "latest_close",
+      "estimated_amount": 4210.0,
+      "reason_code": "BUY_BREAKOUT",
+      "reason_tags": ["breakout"],
+      "reason_codes": ["BUY_BREAKOUT", "cash_check_failed"],
+      "blocked": true,
+      "blocked_reason": "cash_check_failed",
+      "expires_at": "2026-06-01T15:00:00+08:00"
+    }
+  ],
+  "risk_flags": [
+    {
+      "code": "cash_check_failed",
+      "severity": "blocker",
+      "message": "PAMS cash check blocked this action."
+    }
+  ],
+  "validation": {
+    "status": "blocked",
+    "failure_reason_codes": ["cash_check_failed"],
+    "stale": false,
+    "drifted": false
+  }
+}

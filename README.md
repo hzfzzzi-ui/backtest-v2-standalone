@@ -1,14 +1,24 @@
-# OpenClaw Quant Research Platform
+# OpenClaw Personal Multi-Asset Trend Allocation System
 
-OpenClaw Quant Research Platform 是一个面向正式研究生产的专业量化研究平台。
+OpenClaw Personal Multi-Asset Trend Allocation System 是一个受研究纪律约束的个人多资产趋势配置系统。
 
-本平台的核心目标不是提供个人资产管理、券商交易、移动端审批或账户记账，而是提供可复现、可审计、可回滚的策略研究、实验运行、基线管理、数据口径治理和研究报告生产能力。
+本系统的核心目标不是提供个人资产记账、券商交易、移动端审批或账户管理真值，而是在不加杠杆前提下，提供可解释、可复现、可审计、可回滚的多市场趋势增强配置研究与 live 调仓建议生成能力。
 
 ## 正式定位
 
 本仓库的正式产品定位为：
 
-**专业量化研究平台**
+**个人多资产趋势配置系统**
+
+当前已正式接入：
+
+- A 股
+
+规划接入范围：
+
+- 美股，优先 ETF
+- 加密现货
+- 防守层资产，包含现金、货基、短债
 
 正式能力范围：
 
@@ -22,7 +32,7 @@ OpenClaw Quant Research Platform 是一个面向正式研究生产的专业量�
 
 明确非目标：
 
-- 不作为个人资产管理系统
+- 不作为个人资产管理或记账系统
 - 不持有账户、现金、持仓和交易生命周期真值
 - 不直接连接券商执行实盘下单
 - 不把移动端审批、approval ticket 或 `sim_account` 文件链路作为正式产品主路径
@@ -111,4 +121,3 @@ flowchart LR
 - 没有 PAMS/移动端/账户真值混入研究平台正式主路径
 - 没有运行产物反向污染源码主路径
 - 有回归测试、schema 校验和回退方案
-

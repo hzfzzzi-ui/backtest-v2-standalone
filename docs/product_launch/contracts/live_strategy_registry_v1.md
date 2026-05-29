@@ -1,0 +1,35 @@
+# live_strategy_registry@1 合同
+
+## 定位
+
+live strategy registry 是研究平台生成正式 `daily_position_adjustment_package@1` 前的发布门禁。它只登记哪些策略允许进入 PAMS 主通知流，不执行交易，不保存账户真值。
+
+## 必填字段
+
+每条策略记录必须包含：
+
+- `strategy_id`
+- `status`
+- `baseline_id`
+- `config_path`
+- `config_hash`
+- `execution_contract_hash`
+- `asset_scope`
+- `account_scopes`
+- `publish_schedule`
+- `approval_record`
+
+## 状态规则
+
+- 只有 `status=live_approved` 可以发布正式调仓包。
+- `research_only`、`shadow`、`ab_test`、`retired` 不得进入 PAMS 主通知流。
+- 发布前必须校验 registry 中的 `baseline_id`、`config_hash`、`execution_contract_hash` 与 live run 产物一致。
+- `account_scope` 必须属于 registry 允许的 `account_scopes`。
+
+## 默认配置
+
+默认 registry 文件为：
+
+`backend/configs/live_strategy_registry.json`
+
+初始状态为空列表，表示当前没有任何策略被正式批准发布。

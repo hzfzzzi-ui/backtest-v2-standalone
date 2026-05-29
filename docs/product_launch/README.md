@@ -1,6 +1,6 @@
 # 产品正式上线文档包
 
-本文档包定义 OpenClaw Quant Research Platform 的正式上线版本边界、功能特性、架构、模块归属、命名治理和验收标准。
+本文档包定义 OpenClaw Personal Multi-Asset Trend Allocation System 的正式上线版本边界、功能特性、架构、模块归属、命名治理和验收标准。
 
 ## 文档索引
 
@@ -14,9 +14,9 @@
 
 ## 上线原则
 
-正式上线版本必须体现专业量化研究平台的边界：
+正式上线版本必须体现个人多资产趋势配置系统的边界：
 
-1. 研究平台只管理研究真值，不管理资产真值。
+1. 本系统只管理配置研究真值，不管理资产真值。
 2. 数据进入统一研究口径后才能被策略、实验和 baseline 使用。
 3. 实验产物必须可复现、可审计、可回滚。
 4. live 策略只能输出调仓包，不能直接驱动券商交易。
@@ -25,11 +25,10 @@
 
 ## 正式产品名称
 
-产品中文名：专业量化研究平台
+产品中文名：个人多资产趋势配置系统
 
-产品英文名：OpenClaw Quant Research Platform
+产品英文名：OpenClaw Personal Multi-Asset Trend Allocation System
 
-推荐仓库名：`openclaw-quant-research-platform`
+推荐仓库名：`openclaw-personal-multi-asset-trend-allocation`
 
 当前仓库名 `backtest_V2_standalone` 视为历史名称，不再作为正式产品名称使用。
-

@@ -2,7 +2,9 @@
 
 ## 1. 架构目标
 
-OpenClaw Quant Research Platform 的正式上线架构必须支持：
+OpenClaw Personal Multi-Asset Trend Allocation System 的正式上线架构必须支持：
+
+本架构服务于“个人多资产趋势配置系统”，不把研究平台能力外推为资产管理或交易执行系统。
 
 - 数据可追溯
 - 实验可复现
@@ -28,7 +30,7 @@ flowchart LR
     Access["market_data_access_contract"]
   end
 
-  subgraph Research["Research Platform"]
+  subgraph Research["Trend Allocation Research"]
     Config["config compiler"]
     Engine["engine_vector"]
     Pipeline["stage_pipeline"]
