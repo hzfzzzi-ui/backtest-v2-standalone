@@ -157,6 +157,24 @@ def test_api_schema_checklist_matches_contract_boundary_tests() -> None:
     assert _has_checked_line_with(checklist, "API schema")
 
 
+def test_api_json_safety_checklist_matches_safe_response_tests() -> None:
+    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    api_json_tests = _read("tests", "unit", "test_api_json_safety.py")
+    safe_response = _read("backend", "api", "shared", "safe_json_response.py")
+
+    for marker in (
+        "test_api_json_sanitizer_removes_nonfinite_values",
+        "test_safe_json_response_renders_nonfinite_values_as_null",
+        "test_formal_api_routers_use_safe_json_response",
+        "test_backtest_v2_router_sanitizes_service_payload",
+        "test_mobile_router_sanitizes_service_payload",
+    ):
+        assert marker in api_json_tests
+
+    assert "sanitize_for_json(content)" in safe_response
+    assert _has_checked_line_with(checklist, "API 返回无 NaN/Inf")
+
+
 def test_frontend_checklist_matches_frontend_boundary_tests() -> None:
     checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
     frontend_tests = _read("tests", "unit", "test_frontend_runtime_boundaries.py")

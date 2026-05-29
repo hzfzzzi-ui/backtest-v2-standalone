@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from backend.api.shared.safe_json_response import SafeJSONResponse
+
 from .routes import (
     artifacts_router,
     configs_router,
@@ -13,7 +15,7 @@ from .routes import (
     validation_router,
 )
 
-router = APIRouter(tags=["backtest_v2"])
+router = APIRouter(tags=["backtest_v2"], default_response_class=SafeJSONResponse)
 router.include_router(configs_router)
 router.include_router(history_router)
 router.include_router(experiments_router)

@@ -22,7 +22,7 @@
 - [x] `routes/*` 是唯一 HTTP decorator owner。
 - [x] impl/service 层不声明 route decorator。
 - [x] API 层不调用另一个 API route 函数。
-- [ ] API 返回无 NaN/Inf。
+- [x] API 返回无 NaN/Inf。
 - [x] API schema 有测试覆盖。
 
 ## 4. 研究主链
