@@ -27,6 +27,13 @@ def _has_checked_line_with(checklist: str, *tokens: str) -> bool:
     )
 
 
+def _has_unchecked_line_with(checklist: str, *tokens: str) -> bool:
+    return any(
+        line.startswith("- [ ]") and all(token in line for token in tokens)
+        for line in checklist.splitlines()
+    )
+
+
 def test_root_readme_uses_formal_product_positioning() -> None:
     source = _read("README.md")
 
@@ -37,6 +44,8 @@ def test_root_readme_uses_formal_product_positioning() -> None:
     assert "不作为个人资产管理或记账系统" in source
     assert "PAMS 系统承接" in source
     assert "`outputs/` 运行产物" in source
+    assert "不是生产 READY 声明" in source
+    assert "iFinD / TradingView / IBKR 的正式生产接入" in source
 
     for deprecated_name in DEPRECATED_FORMAL_NAMES:
         assert deprecated_name not in source
@@ -67,6 +76,21 @@ def test_product_launch_docs_keep_formal_positioning_consistent() -> None:
     assert FORMAL_EN_NAME in architecture_doc
     assert "openclaw-personal-multi-asset-trend-allocation" in product_readme
     assert "openclaw-personal-multi-asset-trend-allocation" in naming_doc
+    assert "本仓库不是生产 READY 状态" in product_readme
+    assert "iFinD、TradingView、IBKR" in product_readme
+
+
+def test_release_checklist_tracks_current_not_ready_items() -> None:
+    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+
+    assert "本仓库不是生产 READY 状态" in checklist
+    assert _has_unchecked_line_with(checklist, "backtest_V2_standalone", "仓库")
+    assert _has_unchecked_line_with(checklist, "pams_ohlcv_daily_v2", "canonical market")
+    assert _has_unchecked_line_with(checklist, "iFinD raw vendor 同步器未实现")
+    assert _has_unchecked_line_with(checklist, "TradingView", "IBKR", "未实现生产数据接入")
+    assert _has_unchecked_line_with(checklist, "PAMS app/web", "端到端验证")
+    assert _has_unchecked_line_with(checklist, "OpenSpec", "用户确认项仍未完成")
+    assert _has_unchecked_line_with(checklist, "clean worktree", "全量 CI")
 
 
 def test_pams_externalization_checklist_matches_boundary_registry() -> None:
@@ -93,9 +117,16 @@ def test_pams_externalization_checklist_matches_boundary_registry() -> None:
         "`sim_account` 不作为账户真值。",
         "`transaction_lifecycle_service` 不作为研究平台正式交易主表 owner。",
         "调仓包合同存在。",
-        "PAMS 是正式通知、审批、执行状态 owner。",
     ):
         assert f"- [x] {checked_item}" in checklist
+
+    assert _has_unchecked_line_with(
+        checklist,
+        "PAMS app/web",
+        "通知",
+        "审批",
+        "端到端验证",
+    )
 
 
 def test_naming_governance_checklist_matches_naming_doc() -> None:
@@ -106,21 +137,25 @@ def test_naming_governance_checklist_matches_naming_doc() -> None:
         FORMAL_EN_NAME,
         "个人多资产趋势配置系统",
         "`openclaw-personal-multi-asset-trend-allocation`",
-        "当前名称废弃",
+        "仓库目录尚未迁移",
         "`pams_` 作为研究平台正式对象前缀",
         "`shadow` | `diagnostic_probe`",
         "`AB` | `controlled_experiment`",
+        "`pams_cn_etf_daily`",
     ):
         assert marker in naming_doc
 
     for checked_item in (
         "新增正式命名清单。",
         "新增废弃命名清单。",
-        "`backtest_V2_standalone` 不再作为产品名。",
-        "`PAMS/pams_` 不再作为研究平台正式命名前缀。",
+        "文档不再把 `backtest_V2_standalone` 作为产品名。",
+        "文档不再把 `PAMS/pams_` 作为研究平台正式命名前缀。",
         "`shadow` 和 `AB` 已映射到 `diagnostic_probe` 和 `controlled_experiment`。",
     ):
         assert f"- [x] {checked_item}" in checklist
+
+    assert _has_unchecked_line_with(checklist, "`backtest_V2_standalone`", "尚未完成")
+    assert _has_unchecked_line_with(checklist, "`pams_ohlcv_daily_v2`", "尚未完成")
 
 
 def test_testing_audit_checklist_matches_boundary_tests() -> None:
@@ -251,8 +286,8 @@ def test_vendor_raw_checklist_matches_tushare_raw_contract_and_ifind_boundary() 
 
     for marker in (
         "Tushare raw vendor 接入",
-        "iFinD 等新增供应商必须先落 raw vendor 合同",
-        "当前不作为已实现数据源宣传",
+        "iFinD 仅有 raw vendor 预留合同",
+        "TradingView 不作为本仓库数据真值",
     ):
         assert marker in features_doc
 
@@ -264,9 +299,9 @@ def test_vendor_raw_checklist_matches_tushare_raw_contract_and_ifind_boundary() 
     ):
         assert marker in vendor_raw_contract
 
-    assert 'IFIND["iFinD"]' in architecture_doc
-    assert 'Raw["vendor_raw"]' in architecture_doc
-    assert "IFIND --> Raw" in architecture_doc
+    assert 'IFIND["iFinD 预留"]' in architecture_doc
+    assert 'RawTushare["raw_tushare_*"]' in architecture_doc
+    assert "IFIND -.接入前必须新增同步器和测试.-> RawReserved" in architecture_doc
     assert "test_tushare_source_tables_land_in_raw_vendor_namespace" in raw_tests
 
     for table in (
@@ -283,7 +318,8 @@ def test_vendor_raw_checklist_matches_tushare_raw_contract_and_ifind_boundary() 
         assert table in raw_sql
 
     assert "SOURCE_TABLES = {" in raw_updater
-    assert _has_checked_line_with(checklist, "Tushare", "raw vendor", "iFinD")
+    assert _has_checked_line_with(checklist, "Tushare", "raw vendor")
+    assert _has_unchecked_line_with(checklist, "iFinD raw vendor 同步器未实现")
 
 
 def test_research_artifact_checklist_matches_artifact_contract_tests() -> None:
@@ -524,11 +560,10 @@ def test_canonical_market_data_checklist_matches_access_contracts() -> None:
     schema_artifact_tests = _read("tests", "integration", "test_schema_and_artifacts.py")
 
     for marker in (
-        "Raw --> Quality",
+        "RawTushare --> Quality",
         "Quality --> Canonical",
-        "Canonical --> Access",
-        "Access --> Engine",
-        "Access --> Study",
+        "Canonical --> Engine",
+        "Canonical --> Study",
     ):
         assert marker in architecture_doc
 

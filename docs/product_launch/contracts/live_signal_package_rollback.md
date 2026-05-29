@@ -2,7 +2,7 @@
 
 ## 适用范围
 
-本文用于 `backtest_V2_standalone` 与 PAMS 的 live 调仓包链路回退。回退不得修改 baseline、信号时点、执行时点、策略配置或研究口径。
+本文用于当前仓库与 PAMS 的 live 调仓包链路回退。当前仓库目录仍为历史名称 `backtest_V2_standalone`，但该名称不再作为正式产品名。回退不得修改 baseline、信号时点、执行时点、策略配置或研究口径。
 
 ## 关闭研究平台推送
 
@@ -30,6 +30,6 @@ PAMS_LEGACY_STRATEGY_JOBS_ENABLED=false
 
 1. 确认研究平台 registry 中策略仍为 `live_approved`。
 2. 确认 `baseline_id`、`config_hash` 和 `execution_contract_hash` 与 registry 一致。
-3. 先提交 `dry_run` package 到 PAMS 测试入站链路。
+3. 先提交 `dry_run` package 到 PAMS 测试入站链路；在跨仓库 dry-run 可复现前，不得把链路标记为生产 READY。
 4. 验证 package 查询、通知、审批、transaction lifecycle 均能追溯到 `package_id` 和 `action_id`。
 5. 再恢复 `publish_mode=live`。

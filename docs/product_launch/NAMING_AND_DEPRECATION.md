@@ -1,8 +1,10 @@
 # 正式命名与废弃计划
 
+当前状态：本文档定义目标命名和废弃纪律，不表示仓库目录、包名、数据库表名已经完成迁移。`backtest_V2_standalone`、`backtest_v2`、`pams_ohlcv_daily_v2`、`pams_cn_etf_daily` 等仍存在于当前仓库，必须按兼容名称治理。
+
 ## 1. 命名原则
 
-正式上线版本必须采用产品化命名：
+目标正式版本必须采用产品化命名：
 
 - 名称表达业务职责，不表达历史实现方式
 - 名称区分研究、资产、执行、展示
@@ -14,8 +16,8 @@
 
 | 类型 | 当前名称 | 正式名称 | 处理 |
 |---|---|---|---|
-| 产品 | `backtest_V2_standalone` | OpenClaw Personal Multi-Asset Trend Allocation System | 当前名称废弃 |
-| 仓库建议名 | `backtest_V2_standalone` | `openclaw-personal-multi-asset-trend-allocation` | 后续单独迁移 |
+| 产品 | `backtest_V2_standalone` | OpenClaw Personal Multi-Asset Trend Allocation System | 文档口径已废弃，仓库目录尚未迁移 |
+| 仓库建议名 | `backtest_V2_standalone` | `openclaw-personal-multi-asset-trend-allocation` | 后续单独迁移，当前未完成 |
 | 中文定位 | 旧量化研究平台口径 | 个人多资产趋势配置系统 | 立即更新文档口径 |
 | API 产品名 | `backtest_v2` | Research Experiment API | 兼容期保留路径，文档改名 |
 
@@ -36,6 +38,7 @@
 | `shadow` | `diagnostic_probe` | L2 文档和 registry 先行 |
 | `AB` | `controlled_experiment` | L2 文档和 registry 先行 |
 | `pams_ohlcv_daily_v2` | `canonical_market_ohlcv_daily` | L3 数据合同迁移 |
+| `pams_cn_etf_daily` | `canonical_market_cn_etf_daily` | L3 数据合同迁移 |
 
 ## 4. 术语规范
 

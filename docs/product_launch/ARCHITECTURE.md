@@ -1,10 +1,10 @@
-# 正式产品架构
+# 架构与当前调用边界
 
 ## 1. 架构目标
 
-OpenClaw Personal Multi-Asset Trend Allocation System 的正式上线架构必须支持：
+OpenClaw Personal Multi-Asset Trend Allocation System 的目标架构服务于“个人多资产趋势配置系统”，不把研究平台能力外推为资产管理或交易执行系统。
 
-本架构服务于“个人多资产趋势配置系统”，不把研究平台能力外推为资产管理或交易执行系统。
+目标能力：
 
 - 数据可追溯
 - 实验可复现
@@ -13,21 +13,24 @@ OpenClaw Personal Multi-Asset Trend Allocation System 的正式上线架构必�
 - 研究和资产管理解耦
 - live 调仓建议可发布但不可直接成交
 
-## 2. 正式系统调用图
+当前状态：A 股研究主链、Tushare raw vendor、canonical market access、baseline 审计、研究工作台和调仓包合同可在本仓库内验证；iFinD、TradingView、IBKR 和 PAMS app/web/审批/券商闭环尚未在本仓库内完成。
+
+## 2. 当前系统调用图
 
 ```mermaid
 flowchart LR
   subgraph Vendor["Data Vendors"]
-    Tushare["Tushare"]
-    IFIND["iFinD"]
-    Other["Other vendor data"]
+    Tushare["Tushare 当前可验证"]
+    IFIND["iFinD 预留"]
+    TV["TradingView 研究辅助"]
+    IBKR["IBKR 外部规划"]
   end
 
   subgraph Data["Market Data Domain"]
-    Raw["vendor_raw"]
+    RawTushare["raw_tushare_*"]
+    RawReserved["raw_ifind_* reserved"]
     Quality["data quality checks"]
-    Canonical["canonical_market"]
-    Access["market_data_access_contract"]
+    Canonical["canonical_market access"]
   end
 
   subgraph Research["Trend Allocation Research"]
@@ -38,7 +41,7 @@ flowchart LR
     Study["study runner"]
     Baseline["baseline governance"]
     Audit["research audit"]
-    Package["daily_position_adjustment_package"]
+    Package["daily_position_adjustment_package@1"]
   end
 
   subgraph UI["Research Workbench"]
@@ -46,19 +49,24 @@ flowchart LR
     Journal["research journal"]
   end
 
-  subgraph External["External Systems"]
-    PAMS["PAMS asset management"]
-    TV["TradingView chart / research-only alert inbox"]
+  subgraph Compat["Compatibility / Legacy In Repo"]
+    Mobile["backend/api/mobile"]
+    SimAccount["sim_account files"]
+    TxLifecycle["transaction_lifecycle_service"]
   end
 
-  Tushare --> Raw
-  IFIND --> Raw
-  Other --> Raw
-  Raw --> Quality
+  subgraph External["External Systems"]
+    PAMS["external PAMS"]
+    Broker["broker adapters"]
+  end
+
+  Tushare --> RawTushare
+  IFIND -.接入前必须新增同步器和测试.-> RawReserved
+  RawTushare --> Quality
+  RawReserved -.未进入正式主链.-> Quality
   Quality --> Canonical
-  Canonical --> Access
-  Access --> Engine
-  Access --> Study
+  Canonical --> Engine
+  Canonical --> Study
   Config --> Engine
   Engine --> Pipeline
   Pipeline --> Portfolio
@@ -69,12 +77,34 @@ flowchart LR
   Audit --> Workbench
   Baseline --> Workbench
   Study --> Journal
-  Package --> PAMS
-  TV -.research_only.-> Study
-  PAMS -.holdings snapshot for reconcile.-> Portfolio
+  Package -.合同边界，跨仓库待验证.-> PAMS
+  PAMS -.未来 holdings snapshot/reconcile 输入.-> Portfolio
+  PAMS --> Broker
+  TV -.不得作为行情或交易真值.-> Study
+  IBKR -.不得由本仓库直接下单.-> Broker
+  Mobile -.兼容/内部预览，不是正式主路径.-> PAMS
+  SimAccount -.兼容审计输入，不是账户真值.-> Portfolio
+  TxLifecycle -.长期 owner 在 PAMS.-> PAMS
 ```
 
-## 3. 正式分层
+## 3. 当前主实现路径
+
+| 路径 | 当前角色 |
+|---|---|
+| `backend/api/backtest_v2` | 当前实验、artifact、配置和数据 API 表面；名称处于兼容期 |
+| `backend/api/shared` | API 共享响应、路径和兼容工具 |
+| `backend/core/data` | 市场数据访问和 PG 映射 |
+| `backend/core/engine_vector` | 研究引擎核心 |
+| `backend/core/stage_pipeline` | stage 合同和 adapter |
+| `backend/core/portfolio` | portfolio research 和 candidate plan |
+| `backend/core/services` | 编排服务；其中 mobile/sim/transaction 服务为兼容遗留 |
+| `backend/research` | study、formal surface、diagnostic probe、controlled experiment |
+| `frontend/app/results-workbench` | 正式研究工作台 |
+| `research` | study YAML、journal、候选策略材料 |
+| `tests` | 合同、回归、边界和文档治理测试 |
+| `openspec` | 规格驱动变更记录 |
+
+## 4. 分层规则
 
 ### API Layer
 
@@ -153,7 +183,7 @@ flowchart LR
 - 修正后端数据
 - 推导交易建议
 
-## 4. 与 PAMS 的边界
+## 5. 与 PAMS 的边界
 
 研究平台输出：
 
@@ -162,7 +192,7 @@ flowchart LR
 - baseline metadata
 - holdings-aware reconcile 派生结果
 
-PAMS 输入并负责：
+PAMS 应负责：
 
 - package 接收和幂等
 - app/web 通知
@@ -171,4 +201,4 @@ PAMS 输入并负责：
 - 订单、成交、拒绝、撤销状态
 - 账户、现金、持仓真值
 
-研究平台不得直接接券商执行。
+当前未完成项：跨仓库 PAMS 接收、入库、展示、通知、审批和交易生命周期 dry-run 尚未在当前仓库验证，不得标记为已上线。

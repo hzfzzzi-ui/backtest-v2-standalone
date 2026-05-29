@@ -2,13 +2,14 @@
 
 ## 定位
 
-`daily_position_adjustment_package@1` 是量化研究平台向 PAMS 发布 live 策略每日仓位调整建议的唯一正式合同。它不是成交事实，不是账户真值，也不允许 PAMS 反向复算研究策略。
+`daily_position_adjustment_package@1` 是个人多资产趋势配置系统向 PAMS 发布 live 策略每日仓位调整建议的合同。它不是成交事实，不是账户真值，也不允许 PAMS 反向复算研究策略。
 
 ## 版本
 
 - `schema_version`: `daily_position_adjustment_package@1`
 - 兼容策略：新增字段必须向后兼容；删除字段或改变字段语义必须升级 schema version。
-- 正式接口：研究平台生成 package；PAMS 校验、幂等入库、通知、审批和交易生命周期映射。
+- 目标接口：研究平台生成 package；PAMS 校验、幂等入库、通知、审批和交易生命周期映射。
+- 当前状态：本仓库已提供合同、校验和研究侧发布服务；PAMS 端 app/web、通知、审批、券商适配和成交回写不在本仓库内证明完成。
 
 ## 必填结构
 
