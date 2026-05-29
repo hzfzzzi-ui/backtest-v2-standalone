@@ -38,7 +38,7 @@
 - [ ] Tushare/iFinD 等供应商数据进入 raw vendor 层。
 - [ ] 上层通过 canonical market data 访问。
 - [x] 字段 source matrix 存在。
-- [ ] 停牌、退市、缺口、合成补位有显式状态。
+- [x] 停牌、退市、缺口、合成补位有显式状态。
 - [x] 数据 freshness 状态可查询。
 
 ## 6. 研究产物

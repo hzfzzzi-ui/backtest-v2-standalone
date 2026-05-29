@@ -409,6 +409,53 @@ def test_data_contract_checklist_matches_data_contract_tests() -> None:
     assert _has_checked_line_with(checklist, "数据合同测试")
 
 
+def test_market_data_status_checklist_matches_v2_row_status_contracts() -> None:
+    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    schema_contract = _read(
+        "docs",
+        "02_系统架构设计",
+        "数据库",
+        "pams_ohlcv_daily_v2_schema_contract.md",
+    )
+    runtime_contract = _read(
+        "docs",
+        "02_系统架构设计",
+        "数据库",
+        "pams_ohlcv_daily_v2_runtime_contract.md",
+    )
+    common_tests = _read("tests", "unit", "test_pams_ohlcv_daily_v2_common.py")
+    v2_daily_tests = _read("tests", "unit", "test_update_pams_ohlcv_daily_v2.py")
+    audit_tests = _read("tests", "unit", "test_audit_pams_ohlcv_daily_v2.py")
+
+    for marker in (
+        "`traded`",
+        "`suspended_confirmed`",
+        "`delist_tail_confirmed`",
+        "`synthetic_gap_fill`",
+        "`source_unresolved`",
+    ):
+        assert marker in schema_contract
+
+    for marker in (
+        "`source_unresolved` 不进入 runtime",
+        "`delist_tail_confirmed` 不进入 runtime",
+        "`synthetic_gap_fill` 不进入 runtime",
+    ):
+        assert marker in runtime_contract
+
+    assert "test_canonical_row_statuses_cover_data_quality_states" in common_tests
+    for marker in (
+        "test_build_trade_date_rows_reclassifies_delist_tail_confirmed",
+        "test_build_trade_date_rows_reclassifies_sh_side_evidence_gap_fill",
+        "test_build_trade_date_rows_reclassifies_official_terminal_override_for_suspension_window",
+    ):
+        assert marker in v2_daily_tests
+
+    assert "test_build_trade_date_audit_excludes_synthetic_gap_fill_from_eligible_no_source" in audit_tests
+    assert "test_build_trade_date_audit_tracks_delist_tail_confirmed_separately" in audit_tests
+    assert _has_checked_line_with(checklist, "停牌", "退市", "缺口", "合成补位")
+
+
 def test_report_generation_checklist_matches_report_services_and_cli() -> None:
     checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
     research_report_tests = _read("tests", "unit", "test_research_report_common.py")

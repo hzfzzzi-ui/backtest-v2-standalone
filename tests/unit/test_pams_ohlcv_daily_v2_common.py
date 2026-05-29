@@ -21,3 +21,13 @@ def test_pick_akshare_hist_columns_supports_ascii_fallback_headers() -> None:
 
     assert date_col == "date"
     assert turnover_col == "turnover_rate"
+
+
+def test_canonical_row_statuses_cover_data_quality_states() -> None:
+    assert common.CANONICAL_ROW_STATUSES == (
+        "traded",
+        "suspended_confirmed",
+        "delist_tail_confirmed",
+        "synthetic_gap_fill",
+        "source_unresolved",
+    )
