@@ -8,6 +8,7 @@ from typing import Any
 
 _TARGETS = {
     "baseline_regression": "backend.cli.managed.baseline_regression_check",
+    "launch_readiness_report": "backend.cli.managed.product_launch_report",
     "report_consistency": "backend.cli.managed.report_consistency_check",
 }
 
