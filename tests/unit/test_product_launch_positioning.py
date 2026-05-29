@@ -234,6 +234,58 @@ def test_data_chain_checklist_matches_source_matrix_and_freshness_tests() -> Non
         assert f"- [x] {checked_item}" in checklist
 
 
+def test_vendor_raw_checklist_matches_tushare_raw_contract_and_ifind_boundary() -> None:
+    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    features_doc = _read("docs", "product_launch", "FEATURES.md")
+    architecture_doc = _read("docs", "product_launch", "ARCHITECTURE.md")
+    vendor_raw_contract = _read(
+        "docs",
+        "product_launch",
+        "contracts",
+        "market_data_vendor_raw_v1.md",
+    )
+    raw_tests = _read("tests", "unit", "test_update_pams_ohlcv_daily_v2_raw.py")
+    raw_common = _read("backend", "cli", "managed", "pams_ohlcv_daily_v2_common.py")
+    raw_updater = _read("backend", "cli", "managed", "update_pams_ohlcv_daily_v2_raw.py")
+    raw_sql = _read("docs", "02_系统架构设计", "数据库", "pams_ohlcv_daily_v2_apply.sql")
+
+    for marker in (
+        "Tushare raw vendor 接入",
+        "iFinD 等新增供应商必须先落 raw vendor 合同",
+        "当前不作为已实现数据源宣传",
+    ):
+        assert marker in features_doc
+
+    for marker in (
+        "Tushare | implemented | `raw_tushare_*`",
+        "iFinD | reserved | `raw_ifind_*`",
+        "未实现正式同步器",
+        "vendor API / files -> raw vendor tables -> quality checks -> canonical_market -> market_data_access",
+    ):
+        assert marker in vendor_raw_contract
+
+    assert 'IFIND["iFinD"]' in architecture_doc
+    assert 'Raw["vendor_raw"]' in architecture_doc
+    assert "IFIND --> Raw" in architecture_doc
+    assert "test_tushare_source_tables_land_in_raw_vendor_namespace" in raw_tests
+
+    for table in (
+        "raw_tushare_stock_basic",
+        "raw_tushare_trade_cal",
+        "raw_tushare_daily",
+        "raw_tushare_adj_factor",
+        "raw_tushare_daily_basic",
+        "raw_tushare_suspend_d",
+        "raw_tushare_stk_limit",
+        "raw_tushare_moneyflow",
+    ):
+        assert table in raw_common
+        assert table in raw_sql
+
+    assert "SOURCE_TABLES = {" in raw_updater
+    assert _has_checked_line_with(checklist, "Tushare", "raw vendor", "iFinD")
+
+
 def test_research_artifact_checklist_matches_artifact_contract_tests() -> None:
     checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
     artifact_sync_tests = _read("tests", "integration", "test_backtest_v2_experiment_artifacts.py")

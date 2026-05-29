@@ -6,6 +6,21 @@ import pandas as pd
 from backend.cli.managed import update_pams_ohlcv_daily_v2_raw as updater
 
 
+def test_tushare_source_tables_land_in_raw_vendor_namespace() -> None:
+    assert updater.SOURCE_TABLES == {
+        "stock_basic": "raw_tushare_stock_basic",
+        "trade_cal": "raw_tushare_trade_cal",
+        "daily": "raw_tushare_daily",
+        "adj_factor": "raw_tushare_adj_factor",
+        "daily_basic": "raw_tushare_daily_basic",
+        "suspend_d": "raw_tushare_suspend_d",
+        "stk_limit": "raw_tushare_stk_limit",
+        "moneyflow": "raw_tushare_moneyflow",
+    }
+    assert len(set(updater.SOURCE_TABLES.values())) == len(updater.SOURCE_TABLES)
+    assert all(table.startswith("raw_tushare_") for table in updater.SOURCE_TABLES.values())
+
+
 def test_query_with_retry_retries_then_succeeds(monkeypatch) -> None:
     calls = {"count": 0}
 
