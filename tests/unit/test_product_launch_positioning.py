@@ -144,6 +144,19 @@ def test_testing_audit_checklist_matches_boundary_tests() -> None:
         assert f"- [x] {checked_item}" in checklist
 
 
+def test_api_schema_checklist_matches_contract_boundary_tests() -> None:
+    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    api_schema_tests = _read("tests", "unit", "test_api_schema_contracts.py")
+
+    for marker in (
+        "test_api_query_contracts_reexport_core_owner",
+        "test_api_query_contracts_expose_pydantic_schema",
+    ):
+        assert marker in api_schema_tests
+
+    assert _has_checked_line_with(checklist, "API schema")
+
+
 def test_frontend_checklist_matches_frontend_boundary_tests() -> None:
     checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
     frontend_tests = _read("tests", "unit", "test_frontend_runtime_boundaries.py")

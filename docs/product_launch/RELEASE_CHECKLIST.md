@@ -23,7 +23,7 @@
 - [x] impl/service 层不声明 route decorator。
 - [x] API 层不调用另一个 API route 函数。
 - [ ] API 返回无 NaN/Inf。
-- [ ] API schema 有测试覆盖。
+- [x] API schema 有测试覆盖。
 
 ## 4. 研究主链
 
