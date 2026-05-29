@@ -22,7 +22,8 @@ live strategy registry 是研究平台生成正式 `daily_position_adjustment_pa
 ## 状态规则
 
 - 只有 `status=live_approved` 可以发布正式调仓包。
-- `research_only`、`shadow`、`ab_test`、`retired` 不得进入 PAMS 主通知流。
+- `research_only`、`diagnostic_probe`、`controlled_experiment`、`retired` 不得进入 PAMS 主通知流。
+- 旧状态名 `shadow`、`ab_test` 仍必须被阻断，只作为兼容输入，不作为正式上线命名。
 - 发布前必须校验 registry 中的 `baseline_id`、`config_hash`、`execution_contract_hash` 与 live run 产物一致。
 - `account_scope` 必须属于 registry 允许的 `account_scopes`。
 

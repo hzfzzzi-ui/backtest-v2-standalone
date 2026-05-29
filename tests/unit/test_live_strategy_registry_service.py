@@ -75,9 +75,13 @@ def test_registry_rejects_missing_required_field(tmp_path: Path) -> None:
         load_live_strategy_registry(path)
 
 
-def test_non_live_approved_strategy_is_blocked(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "status",
+    ["research_only", "diagnostic_probe", "controlled_experiment", "shadow", "ab_test", "retired"],
+)
+def test_non_live_approved_strategy_is_blocked(tmp_path: Path, status: str) -> None:
     path = tmp_path / "live_strategy_registry.json"
-    _write_registry(path, status="shadow")
+    _write_registry(path, status=status)
 
     with pytest.raises(LiveStrategyPublishBlocked) as exc_info:
         load_and_validate_live_strategy_publish_gate(

@@ -8,7 +8,15 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 LIVE_STRATEGY_REGISTRY_SCHEMA_VERSION = "live_strategy_registry@1"
-LiveStrategyStatus = Literal["live_approved", "research_only", "shadow", "ab_test", "retired"]
+LiveStrategyStatus = Literal[
+    "live_approved",
+    "research_only",
+    "diagnostic_probe",
+    "controlled_experiment",
+    "shadow",
+    "ab_test",
+    "retired",
+]
 
 
 class LiveStrategyPublishBlocked(RuntimeError):

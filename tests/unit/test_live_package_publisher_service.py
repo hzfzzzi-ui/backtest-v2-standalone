@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from backend.core.contracts.daily_position_adjustment_package import validate_daily_position_adjustment_package
 from backend.core.services.live_package_publisher_service import (
     build_daily_position_adjustment_package_from_reconcile,
@@ -190,6 +192,18 @@ def test_live_publish_gate_blocks_non_live_strategy_but_audit_copy_can_be_ready(
     assert audit_package.source.publish_mode == "audit_copy"
     assert audit_package.validation.failure_reason_codes == []
     validate_daily_position_adjustment_package(package_to_payload(audit_package))
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["research_only", "diagnostic_probe", "controlled_experiment", "shadow", "ab_test", "retired"],
+)
+def test_live_publish_gate_blocks_all_non_live_strategy_statuses(status: str) -> None:
+    package = _build_package(strategy=_strategy(status=status))
+
+    assert package.package_status == "blocked"
+    assert package.validation.status == "blocked"
+    assert package.validation.failure_reason_codes == ["strategy_not_live_approved"]
 
 
 def test_blocked_action_row_produces_blocked_package_and_action_reason() -> None:

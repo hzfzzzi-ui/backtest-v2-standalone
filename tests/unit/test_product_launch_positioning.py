@@ -299,6 +299,29 @@ def test_baseline_regression_checklist_matches_cli_and_contract_tests() -> None:
     assert _has_checked_line_with(checklist, "baseline regression check")
 
 
+def test_research_publication_governance_checklist_matches_live_gate_tests() -> None:
+    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    study_runner_tests = _read("tests", "unit", "test_study_runner.py")
+    registry_tests = _read("tests", "unit", "test_live_strategy_registry_service.py")
+    publisher_tests = _read("tests", "unit", "test_live_package_publisher_service.py")
+    registry_contract = _read("docs", "product_launch", "contracts", "live_strategy_registry_v1.md")
+
+    for marker in (
+        "diagnostic_probe",
+        "controlled_experiment",
+        "test_non_live_approved_strategy_is_blocked",
+        "test_live_publish_gate_blocks_all_non_live_strategy_statuses",
+    ):
+        assert marker in registry_tests or marker in publisher_tests
+
+    assert "`diagnostic_probe`" in registry_contract
+    assert "`controlled_experiment`" in registry_contract
+    assert "run[\"baseline_outputs\"] == {}" in study_runner_tests
+    assert "test_run_study_can_opt_in_to_baseline_append" in study_runner_tests
+    assert _has_checked_line_with(checklist, "controlled experiment")
+    assert _has_checked_line_with(checklist, "diagnostic probe")
+
+
 def test_data_contract_checklist_matches_data_contract_tests() -> None:
     checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
     data_contract_tests = _read("tests", "unit", "test_data_contract_audit_common.py")
