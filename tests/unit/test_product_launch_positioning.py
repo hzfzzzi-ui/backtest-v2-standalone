@@ -341,6 +341,53 @@ def test_three_window_research_discipline_checklist_matches_journal_and_audit_te
     assert _has_checked_line_with(checklist, "三窗口研究纪律")
 
 
+def test_signal_execution_price_basis_checklist_matches_live_package_contract_tests() -> None:
+    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    package_contract_doc = _read(
+        "docs",
+        "product_launch",
+        "contracts",
+        "daily_position_adjustment_package_v1.md",
+    )
+    package_contract_tests = _read("tests", "unit", "test_daily_position_adjustment_package_contract.py")
+    publisher_tests = _read("tests", "unit", "test_live_package_publisher_service.py")
+    publisher_integration_tests = _read("tests", "integration", "test_live_package_publisher_contract.py")
+    stage_contract_tests = _read("tests", "unit", "test_stage_pipeline_contracts.py")
+
+    for marker in (
+        "`clock.signal_date`",
+        "`clock.execution_date`",
+        "`clock.signal_clock`",
+        "`clock.execution_clock`",
+        "`clock.reference_price_basis`",
+        "`reference_price`",
+        "`reference_price_basis`",
+    ):
+        assert marker in package_contract_doc
+
+    for marker in (
+        "test_clock_requires_explicit_signal_execution_and_price_basis",
+        "test_action_sheet_requires_explicit_reference_price_fields",
+    ):
+        assert marker in package_contract_tests
+
+    for marker in (
+        "validated.clock.signal_date",
+        "validated.clock.execution_date",
+        "validated.clock.signal_clock",
+        "validated.clock.execution_clock",
+        "validated.clock.reference_price_basis",
+        "validated.action_sheet[0].reference_price",
+        "validated.action_sheet[0].reference_price_basis",
+    ):
+        assert marker in publisher_tests
+        assert marker in publisher_integration_tests
+
+    assert 'ctx.signal_clock == "POST_CLOSE"' in stage_contract_tests
+    assert 'ctx.execution_clock == "NEXT_OPEN"' in stage_contract_tests
+    assert _has_checked_line_with(checklist, "信号时点", "成交时点", "价格口径")
+
+
 def test_data_contract_checklist_matches_data_contract_tests() -> None:
     checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
     data_contract_tests = _read("tests", "unit", "test_data_contract_audit_common.py")

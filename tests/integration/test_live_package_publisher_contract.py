@@ -69,4 +69,11 @@ def test_live_package_publisher_output_passes_daily_package_contract() -> None:
 
     assert validated.package_status == "ready"
     assert validated.source.strategy_id == "integration_live_strategy"
+    assert validated.clock.signal_date == "2026-05-29"
+    assert validated.clock.execution_date == "2026-06-01"
+    assert validated.clock.signal_clock == "POST_CLOSE"
+    assert validated.clock.execution_clock == "NEXT_OPEN"
+    assert validated.clock.reference_price_basis == "latest_close"
+    assert validated.action_sheet[0].reference_price == 1500.0
+    assert validated.action_sheet[0].reference_price_basis == "latest_close"
     assert validated.action_sheet[0].idempotency_key

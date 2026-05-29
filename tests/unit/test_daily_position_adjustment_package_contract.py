@@ -91,6 +91,27 @@ def test_action_sheet_requires_account_consumable_fields() -> None:
         validate_daily_position_adjustment_package(payload)
 
 
+@pytest.mark.parametrize(
+    "clock_field",
+    ["signal_date", "execution_date", "signal_clock", "execution_clock", "reference_price_basis"],
+)
+def test_clock_requires_explicit_signal_execution_and_price_basis(clock_field: str) -> None:
+    payload = _load_fixture("valid_daily_position_adjustment_package_v1.json")
+    payload["clock"].pop(clock_field)
+
+    with pytest.raises(ValidationError):
+        validate_daily_position_adjustment_package(payload)
+
+
+@pytest.mark.parametrize("action_field", ["reference_price", "reference_price_basis"])
+def test_action_sheet_requires_explicit_reference_price_fields(action_field: str) -> None:
+    payload = _load_fixture("valid_daily_position_adjustment_package_v1.json")
+    payload["action_sheet"][0].pop(action_field)
+
+    with pytest.raises(ValidationError):
+        validate_daily_position_adjustment_package(payload)
+
+
 def test_blocked_package_requires_failure_reason_codes() -> None:
     payload = _load_fixture("valid_daily_position_adjustment_package_v1.json")
     payload["package_status"] = "blocked"

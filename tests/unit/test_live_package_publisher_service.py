@@ -134,10 +134,16 @@ def test_builds_ready_package_from_reconcile_action_sheet() -> None:
     assert validated.source.config_hash == CONFIG_HASH
     assert validated.scope.account_scope == ACCOUNT_SCOPE
     assert validated.inputs.reconcile_id == "rc_demo_20260529"
+    assert validated.clock.signal_date == "2026-05-29"
+    assert validated.clock.execution_date == "2026-06-01"
+    assert validated.clock.signal_clock == "POST_CLOSE"
+    assert validated.clock.execution_clock == "NEXT_OPEN"
+    assert validated.clock.reference_price_basis == "latest_close"
     assert len(validated.target_positions) == 3
     assert [action.action_type for action in validated.action_sheet] == ["buy", "sell"]
     assert validated.action_sheet[0].current_qty == 0
     assert validated.action_sheet[0].suggested_qty == 100
+    assert validated.action_sheet[0].reference_price == 1500.0
     assert validated.action_sheet[0].reference_price_basis == "latest_close"
     assert validated.action_sheet[0].expires_at == "2026-06-01T15:00:00+08:00"
 
