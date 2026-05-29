@@ -1,0 +1,87 @@
+# 正式上线验收清单
+
+## 1. 产品与文档
+
+- [ ] 根目录 `README.md` 使用正式产品名。
+- [ ] 所有核心文档使用“专业量化研究平台”作为正式定位。
+- [ ] 文档明确 PAMS 是独立资产管理系统。
+- [ ] 文档明确研究平台不直接接券商下单。
+- [ ] 文档明确 `outputs/` 不是源码主路径。
+
+## 2. 命名治理
+
+- [ ] 新增正式命名清单。
+- [ ] 新增废弃命名清单。
+- [ ] `backtest_V2_standalone` 不再作为产品名。
+- [ ] `PAMS/pams_` 不再作为研究平台正式命名前缀。
+- [ ] `shadow` 和 `AB` 已映射到 `diagnostic_probe` 和 `controlled_experiment`。
+
+## 3. API 表面
+
+- [ ] `python_api_routes.csv` 不存在无说明的重复 `method + path`。
+- [ ] `routes/*` 是唯一 HTTP decorator owner。
+- [ ] impl/service 层不声明 route decorator。
+- [ ] API 层不调用另一个 API route 函数。
+- [ ] API 返回无 NaN/Inf。
+- [ ] API schema 有测试覆盖。
+
+## 4. 研究主链
+
+- [ ] baseline 主逻辑有回归测试。
+- [ ] 信号时点、成交时点、价格口径显式记录。
+- [ ] 三窗口研究纪律仍可执行。
+- [ ] controlled experiment 不会自动改变 baseline。
+- [ ] diagnostic probe 不会进入 live 发布路径。
+
+## 5. 数据主链
+
+- [ ] Tushare/iFinD 等供应商数据进入 raw vendor 层。
+- [ ] 上层通过 canonical market data 访问。
+- [ ] 字段 source matrix 存在。
+- [ ] 停牌、退市、缺口、合成补位有显式状态。
+- [ ] 数据 freshness 状态可查询。
+
+## 6. 研究产物
+
+- [ ] 每个实验产出 `run_meta.json`。
+- [ ] 每个实验产出 manifest。
+- [ ] 每个实验产出 perf/nav/funnel/reason codes。
+- [ ] artifact 路径相对化。
+- [ ] 产物 schema 有校验。
+
+## 7. PAMS 外部化
+
+- [ ] `api.mobile` 不属于正式研究平台主路径。
+- [ ] `mobile_*` services 标记为 externalized_to_pams 或 deprecated。
+- [ ] `sim_account` 不作为账户真值。
+- [ ] `transaction_lifecycle_service` 不作为研究平台正式交易主表 owner。
+- [ ] 调仓包合同存在。
+- [ ] PAMS 是正式通知、审批、执行状态 owner。
+
+## 8. 前端
+
+- [ ] Research Workbench 只消费 API 和 artifact surface。
+- [ ] 前端不重算核心研究口径。
+- [ ] 移动端资产/审批页面不属于研究平台正式上线范围。
+- [ ] 图表数据来自平台 API，不直连供应商数据。
+
+## 9. 测试与审计
+
+- [ ] 边界测试覆盖 API route owner。
+- [ ] 边界测试覆盖 PAMS/mobile/sim_account 禁止主路径新增引用。
+- [ ] baseline regression check 可运行。
+- [ ] 数据合同测试可运行。
+- [ ] 研究报告和上线报告可生成。
+
+## 10. 阻断项
+
+存在以下任一项时，不得上线：
+
+- 未解释的 baseline 行为变化
+- 未解释的数据口径变化
+- API route 双 owner
+- PAMS 资产管理能力仍作为研究平台正式功能宣传
+- 研究平台直接接券商执行
+- `outputs/` 被源码依赖
+- 研究-only 模块可直接进入 live strategy 发布
+
