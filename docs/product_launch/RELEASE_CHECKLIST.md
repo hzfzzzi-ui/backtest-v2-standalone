@@ -47,7 +47,7 @@
 - [x] 每个实验产出 manifest。
 - [x] 每个实验产出 perf/nav/funnel/reason codes。
 - [x] artifact 路径相对化。
-- [ ] 产物 schema 有校验。
+- [x] 产物 schema 有校验。
 
 ## 7. PAMS 外部化
 

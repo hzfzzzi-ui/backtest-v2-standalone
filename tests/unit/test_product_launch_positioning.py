@@ -218,6 +218,7 @@ def test_research_artifact_checklist_matches_artifact_contract_tests() -> None:
     checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
     artifact_sync_tests = _read("tests", "integration", "test_backtest_v2_experiment_artifacts.py")
     schema_artifact_tests = _read("tests", "integration", "test_schema_and_artifacts.py")
+    artifact_contract_tests = _read("tests", "unit", "test_experiment_artifact_contract.py")
     example_manifest = json.loads(
         _read("examples", "experiment_contract_minimal", "manifest.json")
     )
@@ -235,6 +236,14 @@ def test_research_artifact_checklist_matches_artifact_contract_tests() -> None:
     ):
         assert marker in schema_artifact_tests
 
+    for marker in (
+        "test_validate_experiment_artifact_dir_accepts_minimal_contract",
+        "test_validate_experiment_artifact_dir_rejects_absolute_manifest_artifact_path",
+        "test_validate_experiment_artifact_dir_rejects_missing_required_artifact",
+        "test_validate_experiment_artifact_dir_rejects_invalid_csv_schema",
+    ):
+        assert marker in artifact_contract_tests
+
     for contract_key in ("artifacts", "core_artifacts"):
         artifact_refs = example_manifest[contract_key]
         for artifact_key in ("run_meta", "perf", "nav", "funnel", "reason_codes"):
@@ -246,3 +255,4 @@ def test_research_artifact_checklist_matches_artifact_contract_tests() -> None:
     assert _has_checked_line_with(checklist, "manifest")
     assert _has_checked_line_with(checklist, "perf/nav/funnel/reason codes")
     assert _has_checked_line_with(checklist, "artifact")
+    assert _has_checked_line_with(checklist, "schema", "校验")

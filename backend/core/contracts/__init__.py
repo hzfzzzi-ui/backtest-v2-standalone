@@ -7,6 +7,10 @@ from backend.core.contracts.daily_position_adjustment_package import (
     DailyPositionAdjustmentPackage,
     validate_daily_position_adjustment_package,
 )
+from backend.core.contracts.experiment_artifact_contract import (
+    ExperimentArtifactValidationResult,
+    validate_experiment_artifact_dir,
+)
 from backend.core.contracts.surface import (
     ExecutionPreview,
     ExperimentLazySurfaceSection,
@@ -18,6 +22,7 @@ __all__ = [
     "ExecutionPreview",
     "BacktestV2ExperimentRequest",
     "DailyPositionAdjustmentPackage",
+    "ExperimentArtifactValidationResult",
     "ExperimentLazySurfaceSection",
     "ExperimentManifest",
     "ExperimentSurface",
@@ -25,4 +30,5 @@ __all__ = [
     "HistoryListItem",
     "MobileExperimentSummary",
     "validate_daily_position_adjustment_package",
+    "validate_experiment_artifact_dir",
 ]
