@@ -141,7 +141,7 @@ def test_legacy_core_cli_delegates_to_unified_cli(capsys) -> None:
 
 def test_cli_surface_readme_declares_official_and_compat_roles() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    readme_path = repo_root / "backend" / "cli" / "README.md"
+    readme_path = repo_root / "README.md"
     text = readme_path.read_text(encoding="utf-8")
     assert "python -m backend.cli" in text
     assert "backend/cli/managed/" in text

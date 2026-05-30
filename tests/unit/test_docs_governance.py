@@ -26,8 +26,8 @@ def _read(*parts: str) -> str:
 
 
 def test_docs_readme_declares_human_machine_research_layers() -> None:
-    readme = _read("docs", "README.md")
-    governance = _read("docs", "DOCS_GOVERNANCE.md")
+    readme = _read("README.md")
+    governance = _read("docs", "文档治理.md")
 
     for marker in (
         "人读说明",
@@ -36,8 +36,9 @@ def test_docs_readme_declares_human_machine_research_layers() -> None:
         "研究记录",
         "历史/重构材料",
         "05_研究记录",
-        "product_launch",
-        "outputs/` 属于运行产物路径",
+        "上线准备",
+        "子目录不再放各级 README",
+        "`outputs/` 只保存实验、审计、报告和运行产物",
     ):
         assert marker in readme
 

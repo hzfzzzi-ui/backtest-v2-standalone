@@ -85,7 +85,7 @@ def parse_release_checklist(text: str) -> LaunchChecklistStatus:
         raise ValueError("release checklist has no '- [ ]' or '- [x]' items")
 
     return LaunchChecklistStatus(
-        title=title or "Release Checklist",
+        title=title or "上线差距清单",
         items=tuple(items),
         blocking_rules=tuple(blocking_rules),
     )
@@ -94,7 +94,7 @@ def parse_release_checklist(text: str) -> LaunchChecklistStatus:
 def build_launch_readiness_report(
     checklist_text: str,
     *,
-    source_path: str | Path = "docs/product_launch/RELEASE_CHECKLIST.md",
+    source_path: str | Path = "docs/上线准备/上线差距清单.md",
     generated_at: str | None = None,
 ) -> str:
     status = parse_release_checklist(checklist_text)

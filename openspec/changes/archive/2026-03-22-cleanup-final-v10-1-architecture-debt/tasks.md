@@ -17,7 +17,7 @@
 - [x] 3.1 将剩余顶层 `study-definition` 脚本批量迁入 `.study.yaml + generated thin script`；DoD：每个迁移专题都有 study 与 generated 入口；验证：study migration tests；风险：stored payload 不一致。
 - [x] 3.2 删除已过时且已等价迁移完成的顶层 `run_*_research.py`；DoD：顶层研究入口数量显著下降且 inventory 同步；验证：governance 测试；风险：误删仍有唯一价值的研究入口。
 - [x] 3.3 对明显过时、无主线价值的 research/diagnostic/sweep 顶层脚本直接删除，不保留兼容 wrapper；DoD：inventory 中不再保留无价值入口；验证：inventory 覆盖测试；风险：删除后缺少审计记录。
-- [x] 3.4 更新 `backend/scripts/README.md`、`inventory.json` 与 `backend/research/thin_script.py` 约束，明确 generated-only 主路径；DoD：文档、清单、模板一致；验证：governance 测试 + 生成脚本检查；风险：清单与真实文件漂移。
+- [x] 3.4 更新根目录 `README.md`、`inventory.json` 与 `backend/research/thin_script.py` 约束，明确 generated-only 主路径；DoD：文档、清单、模板一致；验证：governance 测试 + 生成脚本检查；风险：清单与真实文件漂移。
 
 ## 4. backend/core 热点拆分
 

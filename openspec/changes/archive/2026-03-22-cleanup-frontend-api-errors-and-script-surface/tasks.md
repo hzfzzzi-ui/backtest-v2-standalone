@@ -19,7 +19,7 @@
 ## 4. 脚本面与工作区治理
 
 - [x] 4.1 继续压薄已迁移的顶层脚本，确保 study/CLI 迁移完成后的脚本只剩 thin wrapper。DoD：顶层脚本不再包含正式业务逻辑；验证：`tests/unit/test_script_surface_governance.py`；风险：破坏已有人工使用入口。
-- [x] 4.2 继续更新 `backend/scripts/inventory.json`、`backend/scripts/README.md` 和 archive 标签，保证脚本分类与真实状态一致。DoD：inventory 覆盖全部顶层脚本；验证：治理单测；风险：清单与实际文件漂移。
+- [x] 4.2 继续更新 `backend/scripts/inventory.json`、根目录 `README.md` 和 archive 标签，保证脚本分类与真实状态一致。DoD：inventory 覆盖全部顶层脚本；验证：治理单测；风险：清单与实际文件漂移。
 - [x] 4.3 清理并忽略本地临时目录、调试截图、浏览器 profile 与 `tmp_*` 文件。DoD：工作区不再出现明显临时噪音；验证：`git status`；风险：误删用户需要保留的人工报告。
 
 ## 5. 验证与收口

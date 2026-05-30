@@ -93,7 +93,7 @@ def test_archive_surface_is_documentation_only() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     archive_root = repo_root / "backend" / "scripts" / "archive"
     archive_files = sorted(path.name for path in archive_root.iterdir() if path.is_file())
-    assert archive_files == ["README.md"]
+    assert archive_files == []
 
 
 def test_no_active_backend_source_references_internal_helper() -> None:

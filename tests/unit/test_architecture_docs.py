@@ -32,21 +32,50 @@ def test_architecture_doc_covers_main_paths_and_entrypoints() -> None:
 def test_schema_docs_and_runbook_exist() -> None:
     repo_root = _repo_root()
     for rel in (
-        "docs/01_系统接口模块定义/产物协议/SCHEMA_rows.json.md",
-        "docs/01_系统接口模块定义/产物协议/SCHEMA_run_meta.json.md",
-        "docs/01_系统接口模块定义/产物协议/SCHEMA_manifest.json.md",
-        "docs/02_系统架构设计/运行与基线/RUNBOOK_baseline_regression.md",
+        "docs/01_系统接口模块定义/产物协议/行明细产物协议.md",
+        "docs/01_系统接口模块定义/产物协议/运行元数据产物协议.md",
+        "docs/01_系统接口模块定义/产物协议/清单产物协议.md",
+        "docs/02_系统架构设计/运行与基线/基线回归运行手册.md",
     ):
         assert repo_root.joinpath(rel).exists(), rel
 
 
 def test_guardrails_reference_real_docs_and_examples() -> None:
-    source = _read("docs", "01_系统接口模块定义", "架构守门", "ARCHITECTURE_GUARDRAILS.md")
+    source = _read("docs", "01_系统接口模块定义", "架构守门", "架构守门规则.md")
     for marker in (
         "host.js -> runtime-surface.js -> app-shell.js",
         "execution_contract",
         "manifest.json",
         "run_meta.json",
+    ):
+        assert marker in source
+
+
+def test_architecture_map_and_boundary_rules_cover_current_owner_surfaces() -> None:
+    source = _read("docs", "02_系统架构设计", "架构地图与边界规则.md")
+    for marker in (
+        "backend.api.shared.json_utils",
+        "backend.core.shared.json_utils",
+        "backend.core.shared.artifact_io",
+        "backend.core.contracts.artifacts",
+        "backend.core.services.experiment_manifest_service",
+        "backend.core.services.experiment_output_helpers",
+        "backend.core.services.experiment_index_service",
+        "backend.core.services.backtest_data_surface_helpers",
+        "backend.core.services.experiment_public_run_surface",
+        "backend.core.services.experiment_artifacts_finalize_helpers",
+        "backend.core.config.semantic_config_compiler",
+        "backend.core.config.builtin_config_library",
+        "backend.core.config.runtime_config_bundle",
+        "backend.core.studies",
+        "backend.core.contracts.requests.BacktestV2ExperimentRequest",
+        "backend.core.services.locked_candidate_runtime_service",
+        "backend.api.backtest_v2.artifacts_impl",
+        "backend.api.backtest_v2.semantic_config_schema",
+        "backend.api.backtest_v2.builtin_config_library",
+        "backend.api.backtest_v2.runner_config_*",
+        "outputs/",
+        "pytest tests\\unit\\test_shared_helper_boundary.py -q",
     ):
         assert marker in source
 

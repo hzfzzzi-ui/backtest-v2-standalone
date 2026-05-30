@@ -7,8 +7,8 @@ from typing import Sequence
 from backend.core.services.product_launch_report_service import write_launch_readiness_report
 
 
-DEFAULT_CHECKLIST_PATH = Path("docs/product_launch/RELEASE_CHECKLIST.md")
-DEFAULT_OUTPUT_PATH = Path("outputs/product_launch/launch_readiness_report.md")
+DEFAULT_CHECKLIST_PATH = Path("docs/上线准备/上线差距清单.md")
+DEFAULT_OUTPUT_PATH = Path("outputs/上线准备/上线就绪报告.md")
 
 
 def build_parser() -> argparse.ArgumentParser:

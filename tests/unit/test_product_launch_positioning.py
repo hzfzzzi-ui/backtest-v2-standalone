@@ -53,12 +53,11 @@ def test_root_readme_uses_formal_product_positioning() -> None:
 
 def test_product_launch_docs_keep_formal_positioning_consistent() -> None:
     required_docs = (
-        ("docs", "product_launch", "README.md"),
-        ("docs", "product_launch", "FEATURES.md"),
-        ("docs", "product_launch", "ARCHITECTURE.md"),
-        ("docs", "product_launch", "MODULE_OWNERSHIP.md"),
-        ("docs", "product_launch", "NAMING_AND_DEPRECATION.md"),
-        ("docs", "product_launch", "RELEASE_CHECKLIST.md"),
+        ("docs", "上线准备", "功能特性与当前状态.md"),
+        ("docs", "上线准备", "架构与当前调用边界.md"),
+        ("docs", "上线准备", "模块归属与上线差距.md"),
+        ("docs", "上线准备", "正式命名与废弃计划.md"),
+        ("docs", "上线准备", "上线差距清单.md"),
     )
 
     for rel_parts in required_docs:
@@ -67,21 +66,21 @@ def test_product_launch_docs_keep_formal_positioning_consistent() -> None:
         for deprecated_name in DEPRECATED_FORMAL_NAMES:
             assert deprecated_name not in source, "/".join(rel_parts)
 
-    product_readme = _read("docs", "product_launch", "README.md")
-    naming_doc = _read("docs", "product_launch", "NAMING_AND_DEPRECATION.md")
-    architecture_doc = _read("docs", "product_launch", "ARCHITECTURE.md")
+    product_readme = _read("README.md")
+    naming_doc = _read("docs", "上线准备", "正式命名与废弃计划.md")
+    architecture_doc = _read("docs", "上线准备", "架构与当前调用边界.md")
 
     assert FORMAL_EN_NAME in product_readme
     assert FORMAL_EN_NAME in naming_doc
     assert FORMAL_EN_NAME in architecture_doc
     assert "openclaw-personal-multi-asset-trend-allocation" in product_readme
     assert "openclaw-personal-multi-asset-trend-allocation" in naming_doc
-    assert "本仓库不是生产 READY 状态" in product_readme
+    assert "不是生产 READY 声明" in product_readme
     assert "iFinD、TradingView、IBKR" in product_readme
 
 
 def test_release_checklist_tracks_current_not_ready_items() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
 
     assert "本仓库不是生产 READY 状态" in checklist
     assert _has_unchecked_line_with(checklist, "backtest_V2_standalone", "仓库")
@@ -96,12 +95,12 @@ def test_release_checklist_tracks_current_not_ready_items() -> None:
 def test_pams_externalization_checklist_matches_boundary_registry() -> None:
     from backend.core.services.service_boundary_status import SERVICE_BOUNDARY_BY_MODULE
 
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     contract_path = _repo_root().joinpath(
         "docs",
-        "product_launch",
-        "contracts",
-        "daily_position_adjustment_package_v1.md",
+        "上线准备",
+        "合同",
+        "每日调仓建议包合同.md",
     )
 
     assert SERVICE_BOUNDARY_BY_MODULE["backend.api.mobile"].target_system == "pams"
@@ -130,8 +129,8 @@ def test_pams_externalization_checklist_matches_boundary_registry() -> None:
 
 
 def test_naming_governance_checklist_matches_naming_doc() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
-    naming_doc = _read("docs", "product_launch", "NAMING_AND_DEPRECATION.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
+    naming_doc = _read("docs", "上线准备", "正式命名与废弃计划.md")
 
     for marker in (
         FORMAL_EN_NAME,
@@ -159,7 +158,7 @@ def test_naming_governance_checklist_matches_naming_doc() -> None:
 
 
 def test_testing_audit_checklist_matches_boundary_tests() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     api_boundary_tests = _read("tests", "unit", "test_api_compat_boundaries.py")
 
     for marker in (
@@ -180,7 +179,7 @@ def test_testing_audit_checklist_matches_boundary_tests() -> None:
 
 
 def test_api_schema_checklist_matches_contract_boundary_tests() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     api_schema_tests = _read("tests", "unit", "test_api_schema_contracts.py")
 
     for marker in (
@@ -193,7 +192,7 @@ def test_api_schema_checklist_matches_contract_boundary_tests() -> None:
 
 
 def test_api_json_safety_checklist_matches_safe_response_tests() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     api_json_tests = _read("tests", "unit", "test_api_json_safety.py")
     safe_response = _read("backend", "api", "shared", "safe_json_response.py")
 
@@ -211,9 +210,9 @@ def test_api_json_safety_checklist_matches_safe_response_tests() -> None:
 
 
 def test_frontend_checklist_matches_frontend_boundary_tests() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     frontend_tests = _read("tests", "unit", "test_frontend_runtime_boundaries.py")
-    module_ownership = _read("docs", "product_launch", "MODULE_OWNERSHIP.md")
+    module_ownership = _read("docs", "上线准备", "模块归属与上线差距.md")
 
     for marker in (
         "test_research_workbench_uses_api_adapter_instead_of_direct_fetch",
@@ -236,8 +235,8 @@ def test_frontend_checklist_matches_frontend_boundary_tests() -> None:
 
 
 def test_data_chain_checklist_matches_source_matrix_and_freshness_tests() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
-    source_matrix_path = _repo_root().joinpath("docs", "02_系统架构设计", "数据库", "v2_source_matrix.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
+    source_matrix_path = _repo_root().joinpath("docs", "02_系统架构设计", "数据库", "v2字段来源矩阵.md")
     source_matrix = source_matrix_path.read_text(encoding="utf-8", errors="ignore")
     sync_service_tests = _read("tests", "unit", "test_market_data_sync_service.py")
     sync_api_tests = _read("tests", "integration", "test_market_data_sync_api.py")
@@ -270,14 +269,14 @@ def test_data_chain_checklist_matches_source_matrix_and_freshness_tests() -> Non
 
 
 def test_vendor_raw_checklist_matches_tushare_raw_contract_and_ifind_boundary() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
-    features_doc = _read("docs", "product_launch", "FEATURES.md")
-    architecture_doc = _read("docs", "product_launch", "ARCHITECTURE.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
+    features_doc = _read("docs", "上线准备", "功能特性与当前状态.md")
+    architecture_doc = _read("docs", "上线准备", "架构与当前调用边界.md")
     vendor_raw_contract = _read(
         "docs",
-        "product_launch",
-        "contracts",
-        "market_data_vendor_raw_v1.md",
+        "上线准备",
+        "合同",
+        "市场数据供应商原始层合同.md",
     )
     raw_tests = _read("tests", "unit", "test_update_pams_ohlcv_daily_v2_raw.py")
     raw_common = _read("backend", "cli", "managed", "pams_ohlcv_daily_v2_common.py")
@@ -323,7 +322,7 @@ def test_vendor_raw_checklist_matches_tushare_raw_contract_and_ifind_boundary() 
 
 
 def test_research_artifact_checklist_matches_artifact_contract_tests() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     artifact_sync_tests = _read("tests", "integration", "test_backtest_v2_experiment_artifacts.py")
     schema_artifact_tests = _read("tests", "integration", "test_schema_and_artifacts.py")
     artifact_contract_tests = _read("tests", "unit", "test_experiment_artifact_contract.py")
@@ -367,10 +366,10 @@ def test_research_artifact_checklist_matches_artifact_contract_tests() -> None:
 
 
 def test_baseline_regression_checklist_matches_cli_and_contract_tests() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     baseline_tests = _read("tests", "unit", "test_baseline_regression_check.py")
     cli_tests = _read("tests", "unit", "test_baseline_regression_cli.py")
-    closure_doc = _read("docs", "architecture_closure_gates.md")
+    closure_doc = _read("docs", "架构关闭门禁.md")
 
     for marker in (
         "test_load_contract_has_foundation_baseline",
@@ -388,11 +387,11 @@ def test_baseline_regression_checklist_matches_cli_and_contract_tests() -> None:
 
 
 def test_research_publication_governance_checklist_matches_live_gate_tests() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     study_runner_tests = _read("tests", "unit", "test_study_runner.py")
     registry_tests = _read("tests", "unit", "test_live_strategy_registry_service.py")
     publisher_tests = _read("tests", "unit", "test_live_package_publisher_service.py")
-    registry_contract = _read("docs", "product_launch", "contracts", "live_strategy_registry_v1.md")
+    registry_contract = _read("docs", "上线准备", "合同", "实盘策略登记合同.md")
 
     for marker in (
         "diagnostic_probe",
@@ -411,7 +410,7 @@ def test_research_publication_governance_checklist_matches_live_gate_tests() -> 
 
 
 def test_three_window_research_discipline_checklist_matches_journal_and_audit_tests() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     study_journal_tests = _read("tests", "unit", "test_study_journal.py")
     formal_audit_tests = _read("tests", "unit", "test_run_pams_ohlcv_daily_v2_formal_audits.py")
 
@@ -430,12 +429,12 @@ def test_three_window_research_discipline_checklist_matches_journal_and_audit_te
 
 
 def test_signal_execution_price_basis_checklist_matches_live_package_contract_tests() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     package_contract_doc = _read(
         "docs",
-        "product_launch",
-        "contracts",
-        "daily_position_adjustment_package_v1.md",
+        "上线准备",
+        "合同",
+        "每日调仓建议包合同.md",
     )
     package_contract_tests = _read("tests", "unit", "test_daily_position_adjustment_package_contract.py")
     publisher_tests = _read("tests", "unit", "test_live_package_publisher_service.py")
@@ -477,7 +476,7 @@ def test_signal_execution_price_basis_checklist_matches_live_package_contract_te
 
 
 def test_data_contract_checklist_matches_data_contract_tests() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     v2_daily_tests = _read("tests", "unit", "test_update_pams_ohlcv_daily_v2.py")
     v2_common_tests = _read("tests", "unit", "test_pams_ohlcv_daily_v2_common.py")
     audit_tests = _read("tests", "unit", "test_audit_pams_ohlcv_daily_v2.py")
@@ -498,18 +497,18 @@ def test_data_contract_checklist_matches_data_contract_tests() -> None:
 
 
 def test_market_data_status_checklist_matches_v2_row_status_contracts() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     schema_contract = _read(
         "docs",
         "02_系统架构设计",
         "数据库",
-        "pams_ohlcv_daily_v2_schema_contract.md",
+        "历史行情日表v2结构合同.md",
     )
     runtime_contract = _read(
         "docs",
         "02_系统架构设计",
         "数据库",
-        "pams_ohlcv_daily_v2_runtime_contract.md",
+        "历史行情日表v2运行合同.md",
     )
     common_tests = _read("tests", "unit", "test_pams_ohlcv_daily_v2_common.py")
     v2_daily_tests = _read("tests", "unit", "test_update_pams_ohlcv_daily_v2.py")
@@ -545,14 +544,14 @@ def test_market_data_status_checklist_matches_v2_row_status_contracts() -> None:
 
 
 def test_canonical_market_data_checklist_matches_access_contracts() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
-    architecture_doc = _read("docs", "product_launch", "ARCHITECTURE.md")
-    features_doc = _read("docs", "product_launch", "FEATURES.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
+    architecture_doc = _read("docs", "上线准备", "架构与当前调用边界.md")
+    features_doc = _read("docs", "上线准备", "功能特性与当前状态.md")
     runtime_contract = _read(
         "docs",
         "02_系统架构设计",
         "数据库",
-        "pams_ohlcv_daily_v2_runtime_contract.md",
+        "历史行情日表v2运行合同.md",
     )
     data_access_boundary = _read("docs", "02_系统架构设计", "数据库", "市场数据访问边界.md")
     market_data_tests = _read("tests", "unit", "test_market_data_access.py")
@@ -578,7 +577,7 @@ def test_canonical_market_data_checklist_matches_access_contracts() -> None:
 
 
 def test_report_generation_checklist_matches_report_services_and_cli() -> None:
-    checklist = _read("docs", "product_launch", "RELEASE_CHECKLIST.md")
+    checklist = _read("docs", "上线准备", "上线差距清单.md")
     baseline_report_tests = _read("tests", "unit", "test_baseline_report_service.py")
     launch_report_tests = _read("tests", "unit", "test_product_launch_report_service.py")
     baseline_report_service = _read("backend", "core", "services", "baseline_report_service.py")

@@ -68,7 +68,7 @@ Relevant files:
 
 - `backend/research/thin_script.py`
 - `backend/scripts/inventory.json`
-- `backend/scripts/README.md`
+- 根目录 `README.md`
 
 ### Static debt checks after cleanup
 

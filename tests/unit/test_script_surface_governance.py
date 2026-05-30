@@ -23,26 +23,25 @@ def test_script_surface_has_generated_and_archive_zones() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     generated_root = repo_root / "backend" / "scripts" / "generated"
     archive_root = repo_root / "backend" / "scripts" / "archive"
-    readme_path = repo_root / "backend" / "scripts" / "README.md"
+    readme_path = repo_root / "README.md"
     assert generated_root.is_dir()
     assert archive_root.is_dir()
-    assert (archive_root / "README.md").exists()
     assert readme_path.exists()
     readme_text = readme_path.read_text(encoding="utf-8")
-    assert "generated/" in readme_text
-    assert "archive/" in readme_text
+    assert "backend/scripts/generated/run_<study_id>.py" in readme_text
+    assert "backend/scripts/archive/" in readme_text
     assert "_internal_helper.py" not in readme_text
-    assert "no longer hosts study-definition or archived-study entry points" in readme_text
-    assert "Active research entry points must be `research/studies/*.study.yaml` plus `backend/scripts/generated/run_<study_id>.py`." in readme_text
+    assert "不承接 active study" in readme_text
+    assert "research/studies/*.study.yaml" in readme_text
     assert "_archive_wrapper.py" not in readme_text
-    assert "documentation-only historical marker" in readme_text
+    assert "历史归档目录" in readme_text
 
 
 def test_archive_zone_is_documentation_only() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     archive_root = repo_root / "backend" / "scripts" / "archive"
     archive_files = sorted(path.name for path in archive_root.iterdir() if path.is_file())
-    assert archive_files == ["README.md"]
+    assert archive_files == []
 
 
 def test_archive_wrapper_is_removed_from_top_level_surface() -> None:

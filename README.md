@@ -2,6 +2,8 @@
 
 OpenClaw Personal Multi-Asset Trend Allocation System 是一个受研究纪律约束的个人多资产趋势配置系统。
 
+正式英文标识：`openclaw-personal-multi-asset-trend-allocation`
+
 当前仓库仍保留大量历史 `backtest_V2`、`pams_`、`mobile`、`sim_account` 兼容代码和研究草稿；因此本 README 描述的是当前真实边界和上线差距，不是生产 READY 声明。
 
 ## 正式定位
@@ -117,14 +119,37 @@ flowchart LR
 
 ## 文档入口
 
+本仓库只保留这一份 `README.md` 作为说明入口。`docs/`、`backend/`、`openspec/`、`research/` 等子目录不再放各级 README；具体材料通过中文文件名、OpenSpec 规格和治理测试直接进入。
+
+| 文档类型 | 入口 |
+|---|---|
+| 人读说明 | `docs/03_策略说明/*`、`docs/上线准备/*.md` |
+| 合同/准机器文档 | `docs/01_系统接口模块定义/产物协议/*`、`docs/02_系统架构设计/数据库/*合同.md`、`docs/上线准备/合同/*` |
+| 机器执行材料 | `docs/02_系统架构设计/数据库/*.sql`、`docs/02_系统架构设计/**/*运行手册.md` |
+| 研究记录 | `docs/05_研究记录/因子研究登记.md`、`research/studies/*`、`research/study_journal/*` |
+| 历史/重构材料 | `docs/04_重构思路/*` |
+
+文档治理入口：
+
+- `docs/文档治理.md`
+- `docs/05_研究记录/因子研究登记.md`
+
+脚本与 CLI 入口治理：
+
+- 正式 CLI 入口统一使用 `python -m backend.cli`。
+- 托管命令实现放在 `backend/cli/managed/`。
+- study 的脚本式入口只允许使用 `backend/scripts/generated/run_<study_id>.py`，且必须对应 `research/studies/*.study.yaml`。
+- `backend/scripts/archive/` 只作为历史归档目录，不再放 README 入口，不承接 active study。
+- `backend/scripts` 顶层只保留被 `backend/scripts/inventory.json` 显式登记的 legacy command implementation。
+- `backend/core/cli/` 仅作为 compatibility-only 旧入口，不接收新的命令逻辑。
+
 上线准备文档包：
 
-- `docs/product_launch/README.md`
-- `docs/product_launch/FEATURES.md`
-- `docs/product_launch/ARCHITECTURE.md`
-- `docs/product_launch/MODULE_OWNERSHIP.md`
-- `docs/product_launch/NAMING_AND_DEPRECATION.md`
-- `docs/product_launch/RELEASE_CHECKLIST.md`
+- `docs/上线准备/功能特性与当前状态.md`
+- `docs/上线准备/架构与当前调用边界.md`
+- `docs/上线准备/模块归属与上线差距.md`
+- `docs/上线准备/正式命名与废弃计划.md`
+- `docs/上线准备/上线差距清单.md`
 
 函数级静态分析产物：
 
@@ -141,6 +166,6 @@ flowchart LR
 - 没有 API 层调用另一个 API route 函数
 - 没有 PAMS/移动端/账户真值混入研究平台正式主路径
 - 没有运行产物反向污染源码主路径
-- iFinD/TradingView/IBKR 只在完成合同、测试和回退方案后进入正式能力
+- iFinD、TradingView、IBKR 只在完成合同、测试和回退方案后进入正式能力
 - PAMS 跨仓库接收、展示、审批、交易生命周期 dry-run 可复现
 - 工作区和 CI 处于可审计状态
