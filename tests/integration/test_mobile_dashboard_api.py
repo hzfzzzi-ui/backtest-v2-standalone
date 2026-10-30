@@ -205,6 +205,32 @@ def test_mobile_login_dashboard_and_logout(test_client, monkeypatch, tmp_path) -
     assert dashboard_after_logout.status_code == 401
 
 
+def test_approval_fails_explicitly_when_real_holdings_are_unavailable(test_client, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MOBILE_DASHBOARD_PASSWORD", "secret-pass")
+    monkeypatch.setenv("MOBILE_AUTH_SECRET", "signing-secret")
+    monkeypatch.setenv("RESULTS_ROOT", _prepare_outputs(tmp_path))
+    _login_mobile(test_client)
+
+    # This fixture only represents a previously issued token; it is not an actual trade.
+    token = mobile_mod.issue_confirm_token({"suggestion_id": "old-suggestion", "decision": "approve"})
+    def reject_write(*args, **kwargs):
+        raise AssertionError("an unavailable holdings source must not create a ticket")
+    monkeypatch.setattr(mobile_mod, "create_ticket_from_confirmed_action", reject_write)
+
+    headers = {"host": "192.168.1.8"}
+    prepared = test_client.post(
+        "/api/mobile/approvals/prepare",
+        json={"suggestion_id": "old-suggestion", "decision": "approve"}, headers=headers,
+    )
+    committed = test_client.post(
+        "/api/mobile/approvals/commit",
+        json={"confirm_token": token, "idempotency_key": "fixture"}, headers=headers,
+    )
+    for response in (prepared, committed):
+        assert response.status_code == 503
+        assert "real holdings or reconciliation are unavailable" in response.json()["detail"]
+
+
 def test_mobile_approval_commit_revoke_and_reject_flow(test_client, monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MOBILE_DASHBOARD_PASSWORD", "secret-pass")
     monkeypatch.setenv("MOBILE_AUTH_SECRET", "signing-secret")

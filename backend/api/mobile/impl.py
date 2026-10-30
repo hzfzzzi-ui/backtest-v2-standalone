@@ -80,6 +80,15 @@ def _find_approval_card(payload: dict[str, Any], suggestion_id: str) -> dict[str
     return None
 
 
+def _require_available_suggestion_source(payload: dict[str, Any]) -> None:
+    reconcile = payload.get("reconcile") if isinstance(payload, dict) else None
+    if isinstance(reconcile, dict) and reconcile.get("status") == "unavailable":
+        raise HTTPException(
+            status_code=503,
+            detail="real holdings or reconciliation are unavailable; approval suggestions cannot be generated",
+        )
+
+
 def _mobile_operator(request: Request) -> str:
     host = str(request.headers.get("host") or "").strip()
     client_host = str(getattr(request.client, "host", "") or "").strip()
@@ -206,6 +215,7 @@ def prepare_mobile_approval(body: MobileApprovalPrepareRequest, request: Request
     payload = _current_mobile_dashboard()
     card = _find_approval_card(payload, body.suggestion_id)
     if card is None:
+        _require_available_suggestion_source(payload)
         raise HTTPException(status_code=404, detail="suggestion not found")
     blocked_response = _validate_prepare_request(card, body)
     if blocked_response is not None:
@@ -247,6 +257,7 @@ def commit_mobile_approval(body: MobileApprovalCommitRequest, request: Request):
     payload = _current_mobile_dashboard()
     card = _find_approval_card(payload, str(token_payload.get("suggestion_id") or ""))
     if card is None:
+        _require_available_suggestion_source(payload)
         raise HTTPException(status_code=409, detail="suggestion snapshot changed")
     _validate_card_version(card, token_payload)
     if str(token_payload.get("decision") or "").strip().lower() == "approve":
