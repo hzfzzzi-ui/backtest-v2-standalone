@@ -5,7 +5,7 @@
 ## Requirements
 
 ### Requirement: 手机端必须展示真实持仓同步状态和 reconcile 动作单
-手机端 MUST 同时展示 `holding_sync`、`positions` 和 `reconcile` 三类信息。`positions` SHALL 来自最新成功的模拟盘持仓快照；`reconcile` SHALL 来自绑定该快照的最新有效 reconcile run。手机端 SHALL NOT 继续把实验成交推导持仓当成“当前持仓”。
+手机端 MUST 区分 `holding_sync`、`positions` 和 `reconcile` 的可用状态。模拟盘持仓来源及其自动同步已移除；本次清理未接入新的真实持仓来源，缺少可信持仓或有效 reconcile 时 MUST 明确标示不可用，不得伪造当前持仓或确认动作。若未来接入可信真实持仓快照，`reconcile` SHALL 绑定该快照；手机端 SHALL NOT 把实验成交推导持仓当成“当前持仓”。
 
 #### Scenario: 持仓已同步且存在有效 reconcile run
 - **WHEN** 账户已有最新持仓快照，且系统已基于该快照生成有效 reconcile run
@@ -39,6 +39,6 @@
 - **THEN** `positions` SHALL 保持为最近一次成功持仓快照的内容，不得直接变为“预期持仓”
 
 #### Scenario: 用户执行完成后再次同步持仓
-- **WHEN** 用户在模拟盘手工执行后重新同步持仓，且最新快照反映了新的真实仓位
+- **WHEN** 用户完成执行，且系统收到可信来源的持仓快照并确认其反映新的真实仓位
 - **THEN** 手机端当前持仓 SHALL 更新为该快照内容
 - **THEN** 旧动作单 SHALL 被标记为已失效、已完成或需要重算，而不是继续沿用旧版本

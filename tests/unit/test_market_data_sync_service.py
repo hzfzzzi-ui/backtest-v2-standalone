@@ -355,7 +355,6 @@ def test_run_cn_daily_sync_once_can_sync_when_live_target_exceeds_db_max(monkeyp
     call_order = []
     pit_index_calls = []
     pit_calls = []
-    auto_sync_calls = []
 
     def _record_insert(**kwargs):
         return 1
@@ -398,28 +397,18 @@ def test_run_cn_daily_sync_once_can_sync_when_live_target_exceeds_db_max(monkeyp
         or pit_calls.append(kwargs)
         or {"status": "ok", "outputs": {"changes_csv": "csi800.csv"}},
     )
-    monkeypatch.setattr(
-        mod.sim_account_auto_sync_service,
-        "run_auto_sync",
-        lambda *args, **kwargs: call_order.append("auto_sync")
-        or auto_sync_calls.append((args, kwargs))
-        or {"status": "disabled", "message": "not configured"},
-    )
 
     payload = mod.run_cn_daily_sync_once(force=True)
 
     assert payload["status"] == "success"
     assert payload["target_trade_date"] == "2026-03-12"
-    assert call_order == ["legacy", "pit_index", "v2_raw", "v2_main", "v2_moneyflow", "csi800", "auto_sync"]
+    assert call_order == ["legacy", "pit_index", "v2_raw", "v2_main", "v2_moneyflow", "csi800"]
     assert pit_index_calls
     assert payload["pit_index_daily_refresh"]["status"] == "ok"
     assert payload["v2_main_refresh"]["latest_trade_date_after"] == "2026-03-12"
     assert payload["v2_moneyflow_refresh"]["latest_trade_date_after"] == "2026-03-12"
     assert pit_calls
     assert payload["csi800_pit_refresh"]["status"] == "ok"
-    assert auto_sync_calls
-    assert auto_sync_calls[0][0][0] == mod.daily_updater.ROOT / "outputs"
-    assert payload["sim_account_auto_sync"]["status"] == "disabled"
     assert updates
     assert updates[0]["status"] == "success"
     assert updates[0]["latest_trade_date_after"] == date(2026, 3, 12)
@@ -501,61 +490,6 @@ def test_run_cn_daily_sync_once_fails_when_pit_index_refresh_raises(monkeypatch)
     assert updates[0]["error_text"] == "pit index sync failed"
 
 
-def test_run_cn_daily_sync_once_keeps_success_when_auto_sync_raises(monkeypatch) -> None:
-    updates = []
-    call_order = []
-
-    def _record_insert(**kwargs):
-        return 1
-
-    def _record_update(**kwargs):
-        updates.append(kwargs)
-
-    monkeypatch.setenv("CN_DAILY_SYNC_ENABLED", "true")
-    monkeypatch.setattr(mod, "ensure_sync_runs_table", lambda: None)
-    monkeypatch.setattr(mod, "resolve_target_trade_date", lambda now=None: date(2026, 3, 12))
-    monkeypatch.setattr(mod, "_connect", lambda: _DummyConn())
-    monkeypatch.setattr(mod, "_advisory_lock", lambda conn, sync_key: True)
-    monkeypatch.setattr(mod, "_advisory_unlock", lambda conn, sync_key: None)
-    monkeypatch.setattr(mod, "_load_latest_records", lambda conn=None: (None, None))
-    _patch_mainline_dates(monkeypatch, mainline_date=date(2026, 3, 10), legacy_date=date(2026, 3, 10))
-    monkeypatch.setattr(mod, "_insert_run_record", _record_insert)
-    monkeypatch.setattr(mod, "_update_run_record", _record_update)
-    monkeypatch.setattr(
-        mod.daily_updater,
-        "run_update_to_target",
-        lambda **kwargs: call_order.append("legacy")
-        or {
-            "latest_cn_a_before": "2026-03-10",
-            "latest_cn_a_after": "2026-03-12",
-            "upserted_rows": 128,
-        },
-    )
-    monkeypatch.setattr(
-        mod.pit_index_updater,
-        "run_update_to_target",
-        lambda **kwargs: call_order.append("pit_index") or {"status": "ok", "after_max": {"000001.SH": "2026-03-12"}},
-    )
-    _patch_v2_pipeline(monkeypatch, call_order, before="2026-03-10", after="2026-03-12")
-    monkeypatch.setattr(
-        mod.csi800_pit_refresher,
-        "run_refresh",
-        lambda **kwargs: call_order.append("csi800") or {"status": "ok", "outputs": {"changes_csv": "csi800.csv"}},
-    )
-    monkeypatch.setattr(
-        mod.sim_account_auto_sync_service,
-        "run_auto_sync",
-        lambda *args, **kwargs: call_order.append("auto_sync") or (_ for _ in ()).throw(RuntimeError("auto sync crashed")),
-    )
-
-    payload = mod.run_cn_daily_sync_once(force=True)
-
-    assert payload["status"] == "success"
-    assert call_order == ["legacy", "pit_index", "v2_raw", "v2_main", "v2_moneyflow", "csi800", "auto_sync"]
-    assert payload["sim_account_auto_sync"]["status"] == "failed"
-    assert payload["sim_account_auto_sync"]["error"] == "auto sync crashed"
-    assert updates
-    assert updates[0]["status"] == "success"
 
 
 def test_run_cn_daily_sync_once_treats_noop_daily_refresh_as_success_when_already_fresh(monkeypatch) -> None:
@@ -599,16 +533,11 @@ def test_run_cn_daily_sync_once_treats_noop_daily_refresh_as_success_when_alread
         "run_refresh",
         lambda **kwargs: call_order.append("csi800") or {"status": "ok", "outputs": {"changes_csv": "csi800.csv"}},
     )
-    monkeypatch.setattr(
-        mod.sim_account_auto_sync_service,
-        "run_auto_sync",
-        lambda *args, **kwargs: call_order.append("auto_sync") or {"status": "disabled", "message": "not configured"},
-    )
 
     payload = mod.run_cn_daily_sync_once(force=True)
 
     assert payload["status"] == "success"
-    assert call_order == ["legacy", "pit_index", "v2_raw", "v2_main", "v2_moneyflow", "csi800", "auto_sync"]
+    assert call_order == ["legacy", "pit_index", "v2_raw", "v2_main", "v2_moneyflow", "csi800"]
     assert updates
     assert updates[0]["status"] == "success"
     assert updates[0]["latest_trade_date_after"] == date(2026, 3, 16)
@@ -619,7 +548,6 @@ def test_run_cn_daily_sync_once_fails_when_adj_factor_integrity_check_fails(monk
     call_order = []
     pit_index_calls = []
     pit_calls = []
-    auto_sync_calls = []
 
     def _record_insert(**kwargs):
         return 1
@@ -669,21 +597,13 @@ def test_run_cn_daily_sync_once_fails_when_adj_factor_integrity_check_fails(monk
         or pit_calls.append(kwargs)
         or {"status": "ok", "outputs": {"changes_csv": "csi800.csv"}},
     )
-    monkeypatch.setattr(
-        mod.sim_account_auto_sync_service,
-        "run_auto_sync",
-        lambda *args, **kwargs: call_order.append("auto_sync")
-        or auto_sync_calls.append((args, kwargs))
-        or {"status": "disabled", "message": "not configured"},
-    )
 
     payload = mod.run_cn_daily_sync_once(force=True)
 
     assert payload["status"] == "failed"
-    assert call_order == ["legacy", "pit_index", "v2_raw", "v2_main", "v2_moneyflow", "csi800", "auto_sync"]
+    assert call_order == ["legacy", "pit_index", "v2_raw", "v2_main", "v2_moneyflow", "csi800"]
     assert pit_index_calls
     assert pit_calls
-    assert auto_sync_calls
     assert updates
     assert updates[0]["status"] == "failed"
     assert updates[0]["latest_trade_date_after"] == date(2026, 3, 12)
@@ -764,16 +684,11 @@ def test_run_cn_daily_sync_once_ignores_legacy_basis_success_record(monkeypatch)
         "run_refresh",
         lambda **kwargs: call_order.append("csi800") or {"status": "ok", "outputs": {"changes_csv": "csi800.csv"}},
     )
-    monkeypatch.setattr(
-        mod.sim_account_auto_sync_service,
-        "run_auto_sync",
-        lambda *args, **kwargs: call_order.append("auto_sync") or {"status": "disabled", "message": "not configured"},
-    )
 
     payload = mod.run_cn_daily_sync_once(force=False)
 
     assert payload["status"] == "success"
-    assert call_order == ["legacy", "pit_index", "v2_raw", "v2_main", "v2_moneyflow", "csi800", "auto_sync"]
+    assert call_order == ["legacy", "pit_index", "v2_raw", "v2_main", "v2_moneyflow", "csi800"]
     assert updates
     assert updates[0]["latest_trade_date_after"] == date(2026, 3, 12)
 

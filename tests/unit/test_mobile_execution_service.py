@@ -10,31 +10,25 @@ from backend.core.services.mobile_execution_service import (
     record_execution_update,
 )
 from backend.core.services.mobile_ops_service import create_ticket_from_confirmed_action
-from tests.unit.test_mobile_dashboard_service import (
-    _build_results_root,
-    _sample_action_sheet,
-    _seed_holdings_snapshot,
-    _seed_reconcile,
-)
+from tests.unit.test_mobile_dashboard_service import _build_results_root
 
 
 def _seed_ready_results_root(tmp_path):
-    results_root, exp_id = _build_results_root(tmp_path)
-    snapshot = _seed_holdings_snapshot(
-        results_root,
-        trade_date="2026-03-11",
-        positions=[
-            {"symbol": "sh600000", "qty": 100, "sellable_qty": 100, "avg_cost": 10.5, "name": "浦发银行"},
-            {"symbol": "sh600036", "qty": 200, "sellable_qty": 200, "avg_cost": 42.0, "name": "招商银行"},
-        ],
-    )
-    _seed_reconcile(results_root, exp_id=exp_id, snapshot=snapshot, action_sheet=_sample_action_sheet())
+    results_root, _ = _build_results_root(tmp_path)
     return results_root
 
 
+def _buy_card():
+    return {
+        "suggestion_id": "sg_test_001", "exp_id": "exp_mobile_001",
+        "account_id": "test-account", "symbol": "sh600519", "name": "synthetic",
+        "action_type": "buy", "bucket": "buy", "signal_date": "2026-03-11",
+        "system_suggestion": {"suggested_qty": 100, "target_weight": 0.2},
+    }
+
+
 def _create_buy_ticket(results_root):
-    payload = build_mobile_dashboard(results_root)
-    buy_card = next(card for card in payload["guidance"]["approval_cards"] if card["symbol"] == "sh600519")
+    buy_card = _buy_card()
     ticket, created = create_ticket_from_confirmed_action(
         results_root,
         card=buy_card,
@@ -148,8 +142,7 @@ def test_mobile_execution_service_handles_reject_and_timeout(tmp_path) -> None:
     assert rejected["status"] == "rejected"
     assert rejected["last_error_code"] == "broker_reject"
 
-    payload = build_mobile_dashboard(results_root)
-    buy_card = next(card for card in payload["guidance"]["approval_cards"] if card["symbol"] == "sh600519")
+    buy_card = _buy_card()
     second_ticket, created = create_ticket_from_confirmed_action(
         results_root,
         card=buy_card,

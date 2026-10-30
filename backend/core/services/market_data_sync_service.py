@@ -20,7 +20,6 @@ from backend.cli.managed import update_pams_ohlcv_daily_v2_raw as v2_raw_updater
 from backend.cli.managed import update_pit_index_daily as pit_index_updater
 from backend.cli.managed import update_pit_stock_moneyflow_v2 as v2_moneyflow_updater
 from backend.core.config.asset_profiles import resolve_asset_profile
-from backend.core.services import sim_account_auto_sync_service
 
 
 LOGGER = logging.getLogger(__name__)
@@ -176,36 +175,29 @@ def _connect():
     return daily_updater._connect()
 
 
+_SYNC_REQUIRED_COLUMNS = frozenset({
+    "id", "sync_key", "asset_scope", "target_trade_date", "status", "started_at", "finished_at",
+    "latest_trade_date_before", "latest_trade_date_after", "rows_upserted", "summary_json", "error_text", "created_at",
+})
+
+
 def ensure_sync_runs_table() -> None:
+    """Require the pre-provisioned sync schema; never create it at runtime."""
     table = daily_updater._safe_ident(_status_table())
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS public.{table} (
-                    id BIGSERIAL PRIMARY KEY,
-                    sync_key TEXT NOT NULL,
-                    asset_scope TEXT NOT NULL,
-                    target_trade_date DATE NULL,
-                    status TEXT NOT NULL,
-                    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    finished_at TIMESTAMPTZ NULL,
-                    latest_trade_date_before DATE NULL,
-                    latest_trade_date_after DATE NULL,
-                    rows_upserted INTEGER NULL,
-                    summary_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    error_text TEXT NULL,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
+                "SELECT attname FROM pg_attribute WHERE attrelid = to_regclass(%s) "
+                "AND attnum > 0 AND NOT attisdropped",
+                (f"public.{table}",),
             )
-            cur.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_{table}_sync_key_started_at ON public.{table} (sync_key, started_at DESC)"
-            )
-            cur.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_{table}_target_trade_date ON public.{table} (target_trade_date DESC)"
-            )
-        conn.commit()
+            columns = {row[0] for row in cur.fetchall()}
+    missing = _SYNC_REQUIRED_COLUMNS - columns
+    if missing:
+        raise RuntimeError(
+            f"required sync schema public.{table} is missing or incomplete: {', '.join(sorted(missing))}; "
+            "provision it separately"
+        )
 
 
 def _latest_table_trade_date(
@@ -726,27 +718,6 @@ def run_cn_daily_sync_once(now: datetime | None = None, *, force: bool = False) 
                 ops_dir=output_dir / "csi800_pit",
             )
             summary["csi800_pit_refresh"] = pit_summary
-            try:
-                auto_sync_summary = sim_account_auto_sync_service.run_auto_sync(
-                    _results_root(),
-                    target_trade_date=target_trade_date,
-                )
-            except Exception as exc:
-                LOGGER.exception("sim account auto sync failed")
-                auto_sync_summary = {
-                    "status": "failed",
-                    "account_id": sim_account_auto_sync_service._configured_account_id(),
-                    "source_path": sim_account_auto_sync_service._source_path_text(),
-                    "target_trade_date": target_trade_date.isoformat(),
-                    "snapshot_id": "",
-                    "trade_date": "",
-                    "reconcile_id": "",
-                    "synced_at": "",
-                    "updated_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
-                    "message": "sim account auto sync crashed",
-                    "error": str(exc),
-                }
-            summary["sim_account_auto_sync"] = auto_sync_summary
         except Exception as exc:
             with _connect() as record_conn:
                 latest_after = _latest_mainline_trade_date_from_summary(summary, conn=record_conn)

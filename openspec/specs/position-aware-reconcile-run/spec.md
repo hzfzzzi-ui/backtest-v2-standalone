@@ -4,7 +4,7 @@
 浠?2026-03-22 褰掓。鍙樻洿鎭㈠鐨勪富瑙勬牸銆?
 ## Requirements
 ### Requirement: 系统必须以最新持仓快照为输入重算正式策略
-系统 MUST 提供持仓感知的 reconcile run。该 run SHALL 使用正式策略配置、最新可用市场数据和最新成功的模拟盘持仓快照作为输入，而 SHALL NOT 继续以实验 `portfolio_trades.csv` 重建的持仓作为运行输入。reconcile run 结果 MUST 记录 `account_id`、`snapshot_id`、`reconcile_id`、`strategy_source`、`config_hash` 和 `as_of_date`。
+系统 MUST 提供持仓感知的 reconcile run。该 run SHALL 使用正式策略配置、最新可用市场数据和来源可信的真实持仓快照作为输入，而 SHALL NOT 继续以实验 `portfolio_trades.csv` 重建的持仓作为运行输入。模拟盘持仓来源已移除，本次清理未接入替代的真实持仓来源；缺少该输入时必须返回不可用，不得伪造动作。reconcile run 结果 MUST 记录 `account_id`、`snapshot_id`、`reconcile_id`、`strategy_source`、`config_hash` 和 `as_of_date`。
 
 #### Scenario: 基于最新持仓快照成功生成 reconcile run
 - **WHEN** 某账户已有最新成功持仓快照，且系统具备对应 `as_of_date` 的市场数据

@@ -593,16 +593,6 @@ svg {
   color: var(--md-text-soft);
 }
 
-.md-home-deposit-btn {
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.08);
-  color: var(--md-text);
-  white-space: nowrap;
-}
-
 .md-home-secondary {
   font-size: 12px;
   color: var(--md-text-soft);
@@ -1379,9 +1369,4 @@ svg {
     align-items: baseline;
   }
 
-  .md-home-deposit-btn {
-    min-height: 30px;
-    padding: 0 10px;
-    font-size: 11px;
-  }
 }

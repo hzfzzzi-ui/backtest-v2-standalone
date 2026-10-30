@@ -1,10 +1,10 @@
-const MOBILE_CACHE = "mobile-shell-v20260426-01";
+const MOBILE_CACHE = "mobile-shell-v20261030-nosim01";
 const SHELL_ASSETS = [
   "/mobile",
   "/assets/manifest.webmanifest",
-  "/assets/css/mobile-dashboard.css?v=20260316_mobileapp11",
+  "/assets/css/mobile-dashboard.css?v=20261030_nosim01",
   "/assets/js/state/mobile-state.js?v=20260316_mobileapp11",
-  "/assets/js/mobile-dashboard.js?v=20260426_mobileowner01",
+  "/assets/js/mobile-dashboard.js?v=20261030_nosim01",
   "/assets/icons/trading-assistant-192.png",
   "/assets/icons/trading-assistant-512.png",
 ];

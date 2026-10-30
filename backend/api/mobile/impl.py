@@ -23,10 +23,6 @@ from backend.api.shared.mobile_access import (
 from backend.api.shared.paths import results_root as _results_root
 from backend.api.shared.json_utils import sanitize_json
 from backend.core.services.mobile_dashboard_service import build_mobile_dashboard
-from backend.core.services.mobile_cash_pool_service import (
-    deposit_cash_into_pool,
-    get_reconcile_refresh_status,
-)
 from backend.core.services.mobile_ops_service import (
     create_ticket_from_confirmed_action,
     issue_confirm_token,
@@ -58,8 +54,6 @@ class MobileApprovalRevokeRequest(BaseModel):
     reason: str | None = None
 
 
-class MobileCashPoolDepositRequest(BaseModel):
-    amount: float
 
 
 def _preview_execution(config_json: dict[str, Any], exp_id: str, as_of_date: str | None) -> dict[str, Any]:
@@ -84,6 +78,15 @@ def _find_approval_card(payload: dict[str, Any], suggestion_id: str) -> dict[str
         if str(item.get("suggestion_id") or "") == str(suggestion_id or "").strip():
             return item
     return None
+
+
+def _require_available_suggestion_source(payload: dict[str, Any]) -> None:
+    reconcile = payload.get("reconcile") if isinstance(payload, dict) else None
+    if isinstance(reconcile, dict) and reconcile.get("status") == "unavailable":
+        raise HTTPException(
+            status_code=503,
+            detail="real holdings or reconciliation are unavailable; approval suggestions cannot be generated",
+        )
 
 
 def _mobile_operator(request: Request) -> str:
@@ -212,6 +215,7 @@ def prepare_mobile_approval(body: MobileApprovalPrepareRequest, request: Request
     payload = _current_mobile_dashboard()
     card = _find_approval_card(payload, body.suggestion_id)
     if card is None:
+        _require_available_suggestion_source(payload)
         raise HTTPException(status_code=404, detail="suggestion not found")
     blocked_response = _validate_prepare_request(card, body)
     if blocked_response is not None:
@@ -253,6 +257,7 @@ def commit_mobile_approval(body: MobileApprovalCommitRequest, request: Request):
     payload = _current_mobile_dashboard()
     card = _find_approval_card(payload, str(token_payload.get("suggestion_id") or ""))
     if card is None:
+        _require_available_suggestion_source(payload)
         raise HTTPException(status_code=409, detail="suggestion snapshot changed")
     _validate_card_version(card, token_payload)
     if str(token_payload.get("decision") or "").strip().lower() == "approve":
@@ -300,26 +305,3 @@ def revoke_mobile_approval_ticket(ticket_id: str, body: MobileApprovalRevokeRequ
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return sanitize_json({"ok": True, "ticket": ticket_summary(ticket)})
-
-
-def deposit_mobile_cash_pool(body: MobileCashPoolDepositRequest, request: Request):
-    require_mobile_session(request)
-    if float(body.amount) <= 0:
-        raise HTTPException(status_code=422, detail="amount must be > 0")
-    try:
-        result = deposit_cash_into_pool(
-            _results_root(),
-            amount=float(body.amount),
-        )
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="latest holdings snapshot is missing")
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    return sanitize_json({"ok": True, **result})
-
-
-def get_mobile_cash_pool_status(request: Request):
-    require_mobile_session(request)
-    return sanitize_json({"ok": True, "refresh_status": get_reconcile_refresh_status(_results_root())})

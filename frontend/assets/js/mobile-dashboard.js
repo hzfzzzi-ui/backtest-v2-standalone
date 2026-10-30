@@ -1,8 +1,6 @@
 (function mobileDashboardBootstrap() {
   const POLL_INTERVAL_MS = 15000;
   const RECENT_WINDOW_DAYS = 7;
-  const RECONCILE_REFRESH_POLL_MS = 2000;
-  const RECONCILE_REFRESH_MAX_POLLS = 75;
   const INACTIVE_TICKET_STATUSES = new Set(['rejected', 'revoked', 'expired', 'cancelled']);
   const state = {
     authenticated: false,
@@ -49,6 +47,7 @@
     'latest experiment is missing': '当前没有可用实验来源',
     'mobile dashboard signal snapshot is stale': '当前信号已过期，请先刷新',
     'current dashboard is fallback read-only': '当前为只读回退模式，不能直接确认',
+    'transaction lifecycle storage is unavailable': '交易生命周期暂不可用，交易状态未知',
     'sellable_qty is 0': '当前可卖数量为 0',
     'holdings are not synced': '真实持仓尚未同步',
     'holdings sync is stale': '真实持仓已过期',
@@ -58,7 +57,6 @@
     duplicate_submission: '当前动作已经存在待执行 Ticket',
     risk_locked: '当前被风控锁定',
     executor_unavailable: '执行器当前不可用',
-    'cash pool update is recomputing current orders': '资金已更新，策略正在重跑，当前委托稍后刷新',
   };
 
   function collectElements() {
@@ -75,7 +73,6 @@
       logoutBtn: document.getElementById('mdLogoutBtn'),
       sessionBadge: document.getElementById('mdSessionBadge'),
       headerStatus: document.getElementById('mdHeaderStatus'),
-      depositBtn: document.getElementById('mdDepositBtn'),
       homeNavValue: document.getElementById('mdHomeNavValue'),
       homeNavApprox: document.getElementById('mdHomeNavApprox'),
       homeDailyPnl: document.getElementById('mdHomeDailyPnl'),
@@ -352,6 +349,7 @@
   function getReconcile(payload) { return payload && payload.reconcile ? payload.reconcile : {}; }
   function getReconcileRefresh(payload) { return payload && payload.reconcile_refresh ? payload.reconcile_refresh : {}; }
   function getGuidance(payload) { return payload && payload.guidance ? payload.guidance : {}; }
+  function lifecycleUnavailable(payload) { return payload && payload.lifecycle_status && payload.lifecycle_status.status === 'unavailable'; }
   function getHoldingSync(payload) { return payload && payload.holding_sync ? payload.holding_sync : {}; }
   function getApprovalCards(payload) { const guidance = getGuidance(payload); return Array.isArray(guidance.approval_cards) ? guidance.approval_cards : []; }
   function getPendingTickets(payload) { const guidance = getGuidance(payload); return Array.isArray(guidance.pending_tickets) ? guidance.pending_tickets : []; }
@@ -508,6 +506,12 @@
   function renderPositionList(payload) {
     const holdingSync = getHoldingSync(payload);
     const view = buildPositionView(payload);
+    if (!Array.isArray(payload && payload.positions)) {
+      if (els.positionCountBadge) els.positionCountBadge.textContent = '--';
+      if (els.positionCount) els.positionCount.textContent = '--';
+      renderEmpty(els.positionList, '真实持仓暂不可用');
+      return view;
+    }
     if (els.positionCountBadge) els.positionCountBadge.textContent = formatQty(view.rows.length || 0);
     if (els.positionCount) els.positionCount.textContent = formatQty(view.rows.length || 0);
     if (!view.rows.length) {
@@ -562,16 +566,10 @@
 
   function renderHome(payload, view) {
     const experiment = getExperiment(payload);
-    const refresh = getReconcileRefresh(payload);
     const totalAssets = view.totalAssets != null ? view.totalAssets : num(experiment.nav);
     if (els.homeNavValue) els.homeNavValue.textContent = formatAmount(totalAssets);
     if (els.homeNavApprox) els.homeNavApprox.textContent = buildHomeApprox(view, experiment);
     if (els.homeDailyPnl) setToneText(els.homeDailyPnl, buildDailyPnlText(experiment), experiment.daily_pnl);
-    if (els.depositBtn) {
-      const refreshActive = ['queued', 'running'].includes(String(refresh.status || '').toLowerCase());
-      els.depositBtn.disabled = refreshActive;
-      els.depositBtn.textContent = refreshActive ? '重跑中' : '存入资金';
-    }
     if (els.homeStrategyTitle) els.homeStrategyTitle.textContent = experiment.title || '暂无策略';
     if (els.homeStrategySubtitle) els.homeStrategySubtitle.textContent = experiment.subtitle || '当前没有可展示的实验副标题';
     renderTagRow(els.homeTagRow, Array.isArray(experiment.tags) ? experiment.tags : []);
@@ -610,6 +608,15 @@
   }
 
   function renderBriefing(payload) {
+    if (lifecycleUnavailable(payload)) {
+      if (els.preOpenHeadline) els.preOpenHeadline.textContent = '交易状态暂不可用';
+      if (els.preOpenMeta) els.preOpenMeta.textContent = '--';
+      if (els.postCloseHeadline) els.postCloseHeadline.textContent = '交易状态暂不可用';
+      if (els.postCloseMeta) els.postCloseMeta.textContent = '--';
+      renderEmpty(els.preOpenList, '交易状态未知');
+      renderEmpty(els.postCloseList, '交易状态未知');
+      return;
+    }
     const briefing = getBriefing(payload);
     const preOpen = briefing && briefing.pre_open && typeof briefing.pre_open === 'object' ? briefing.pre_open : {};
     const postClose = briefing && briefing.post_close && typeof briefing.post_close === 'object' ? briefing.post_close : {};
@@ -725,6 +732,11 @@
   }
 
   function renderTradeOrders(payload) {
+    if (lifecycleUnavailable(payload)) {
+      if (els.tradeOrdersCount) els.tradeOrdersCount.textContent = '--';
+      renderEmpty(els.tradeOrdersList, '交易状态暂不可用');
+      return;
+    }
     if (isRefreshActive(payload)) {
       if (els.tradeOrdersCount) els.tradeOrdersCount.textContent = '0';
       renderEmpty(els.tradeOrdersList, '资金已更新，策略重跑中，当前委托稍后刷新');
@@ -768,6 +780,11 @@
   }
 
   function renderTradeConfirmed(payload) {
+    if (lifecycleUnavailable(payload)) {
+      if (els.tradeConfirmedCount) els.tradeConfirmedCount.textContent = '--';
+      renderEmpty(els.tradeConfirmedList, '交易状态暂不可用');
+      return;
+    }
     const tickets = getEffectiveTradeTickets(payload);
     const readOnly = isReadonlyResultSurface();
     if (els.tradeConfirmedCount) els.tradeConfirmedCount.textContent = String(tickets.length || 0);
@@ -822,6 +839,11 @@
   }
 
   function renderTradeIneffective(payload) {
+    if (lifecycleUnavailable(payload)) {
+      if (els.tradeIneffectiveCount) els.tradeIneffectiveCount.textContent = '--';
+      renderEmpty(els.tradeIneffectiveList, '交易状态暂不可用');
+      return;
+    }
     const tickets = getIneffectiveTradeTickets(payload);
     if (els.tradeIneffectiveCount) els.tradeIneffectiveCount.textContent = String(tickets.length || 0);
     if (!tickets.length) {
@@ -895,6 +917,14 @@
   }
 
   function renderAssets(payload, view) {
+    if (!Array.isArray(payload && payload.positions)) {
+      if (els.assetTotalValue) els.assetTotalValue.textContent = '--';
+      if (els.assetApprox) els.assetApprox.textContent = '--';
+      if (els.assetDailyPnl) setToneText(els.assetDailyPnl, '--', null);
+      if (els.cashBalance) els.cashBalance.textContent = '--';
+      if (els.positionMarketValue) els.positionMarketValue.textContent = '--';
+      return;
+    }
     const experiment = getExperiment(payload);
     const totalAssets = view.totalAssets != null ? view.totalAssets : num(experiment.nav);
     const cashBalance = view.cash != null ? view.cash : num(experiment.cash);
@@ -920,9 +950,9 @@
       : '';
 
     if (els.headerStatus) {
-      els.headerStatus.textContent = String(holdingSync.status || '').toLowerCase() === 'unsynced'
-        ? '当前未同步真实持仓，仅展示只读信息'
-        : '持仓已同步，可查看今日动作与资产状态';
+      els.headerStatus.textContent = String(holdingSync.status || '').toLowerCase() === 'fresh'
+        ? '持仓已同步，可查看今日动作与资产状态'
+        : '当前真实持仓不可用，仅展示只读信息';
       if (readonlySurfaceNote) els.headerStatus.textContent = `${els.headerStatus.textContent}；${readonlySurfaceNote}`;
     }
     if (els.holdingSync) els.holdingSync.textContent = `${mapLabel('holdingSync', holdingSync.status)}${holdingSync.trade_date ? ` / ${holdingSync.trade_date}` : ''}`;
@@ -1030,43 +1060,6 @@
     return payload;
   }
 
-  async function depositCashPool(amount) {
-    const response = await api('/api/mobile/cash-pool/deposit', {
-      method: 'POST',
-      body: JSON.stringify({ amount }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(warningText(payload.detail || '现金池存入失败'));
-    return payload;
-  }
-
-  async function getCashPoolStatus() {
-    const response = await api('/api/mobile/cash-pool/status');
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(warningText(payload.detail || '现金池状态读取失败'));
-    return payload.refresh_status || {};
-  }
-
-  function sleep(ms) {
-    return new Promise((resolve) => window.setTimeout(resolve, ms));
-  }
-
-  async function waitForReconcileRefresh(expectedSnapshotId) {
-    const targetSnapshotId = String(expectedSnapshotId || '').trim();
-    if (!targetSnapshotId) return null;
-    for (let index = 0; index < RECONCILE_REFRESH_MAX_POLLS; index += 1) {
-      const refreshStatus = await getCashPoolStatus();
-      const status = String(refreshStatus.status || '').trim().toLowerCase();
-      const requestedSnapshotId = String(refreshStatus.requested_snapshot_id || '').trim();
-      if (requestedSnapshotId === targetSnapshotId && status === 'succeeded') return refreshStatus;
-      if (requestedSnapshotId === targetSnapshotId && status === 'failed') {
-        throw new Error(refreshStatus.error || '策略重跑失败');
-      }
-      await sleep(RECONCILE_REFRESH_POLL_MS);
-    }
-    throw new Error('策略重跑超时，请稍后手动刷新');
-  }
-
   async function handleApprove(card, editable) {
     const params = { suggestion_id: card.suggestion_id, decision: 'approve' };
     if (editable) {
@@ -1102,29 +1095,6 @@
     if (!response.ok) throw new Error(warningText(payload.detail || '撤回失败'));
     setDashboardMessage('待执行 Ticket 已撤回', 'success');
     await refreshDashboard({ silent: true });
-  }
-
-  async function handleDeposit() {
-    if (isReadonlyResultSurface()) {
-      throw new Error('当前为只读结果面，不支持移动端存入资金');
-    }
-    const rawValue = window.prompt('输入存入金额（元）', '10000');
-    if (rawValue == null) return;
-    const amount = Number(String(rawValue).replaceAll(',', '').trim());
-    if (!Number.isFinite(amount) || amount <= 0) throw new Error('请输入大于 0 的金额');
-    if (!window.confirm(`确认向现金池存入 ${formatMoney(amount)} 吗？`)) return;
-    const result = await depositCashPool(amount);
-    await refreshDashboard({ silent: true });
-    setDashboardMessage(`已存入 ${formatMoney(result.amount)}，正在重跑策略并刷新当前委托`, 'success');
-    const refreshStatus = result.refresh_status || {};
-    const refreshState = String(refreshStatus.status || '').trim().toLowerCase();
-    if (['queued', 'running'].includes(refreshState)) {
-      await waitForReconcileRefresh(refreshStatus.requested_snapshot_id || result.snapshot_id);
-      await refreshDashboard({ silent: true });
-      setDashboardMessage('策略已重跑完成，当前委托已刷新', 'success');
-      return;
-    }
-    setDashboardMessage(`已存入 ${formatMoney(result.amount)}`, 'success');
   }
 
   async function handleDashboardAction(action, suggestionId, ticketId) {
@@ -1187,21 +1157,7 @@
         await refreshDashboard({ silent: false });
       });
     }
-    if (els.depositBtn && els.depositBtn.dataset.bound !== '1') {
-      els.depositBtn.dataset.bound = '1';
-      els.depositBtn.addEventListener('click', async () => {
-        if (isReadonlyResultSurface()) return;
-        if (state.busy) return;
-        state.busy = true;
-        try {
-          await handleDeposit();
-        } catch (error) {
-          setDashboardMessage(error.message || String(error), 'error');
-        } finally {
-          state.busy = false;
-        }
-      });
-    }
+
   }
 
   function hideBootSplash() {

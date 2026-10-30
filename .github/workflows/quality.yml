@@ -1,0 +1,64 @@
+name: 隔离清理回归
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - codex/v2-config-source-governance
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建应用与前端资源
+        run: docker build -t backtest-cleanup-ci .
+      - name: 断网验证清理及真实交易保留
+        shell: bash
+        run: |
+          mkdir -p outputs
+          docker run --rm --network none --read-only \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/app,readonly" \
+            --tmpfs /app/outputs:rw,noexec,nosuid,size=256m \
+            --tmpfs /tmp:rw,noexec,nosuid,size=256m \
+            -w /app \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e CN_DAILY_SYNC_ENABLED=false \
+            -e CN_ETF_DAILY_SYNC_ENABLED=false \
+            -e RESULTS_ROOT=/app/outputs \
+            backtest-cleanup-ci python -m pytest -q -p no:cacheprovider \
+              tests/unit/test_mobile_no_sim_account.py \
+              tests/integration/test_mobile_dashboard_api.py::test_approval_fails_explicitly_when_real_holdings_are_unavailable \
+              tests/unit/test_lifecycle_schema_preflight.py \
+              tests/unit/test_market_data_schema_preflight.py \
+              tests/unit/test_ops_domain_pg_schema.py \
+              tests/unit/test_stock_sleeve_single_factor_matrix.py \
+              tests/unit/test_study_runner.py \
+              tests/unit/test_a_share_moneyflow_divergence.py \
+              tests/unit/test_mobile_execution_service.py \
+              tests/unit/test_mobile_dashboard_service.py \
+              tests/unit/test_transaction_lifecycle_service.py \
+              tests/unit/test_market_data_sync_service.py \
+              tests/unit/test_refresh_cn_etf_daily.py
+      - name: 断网检查镜像页面与构建资源
+        run: |
+          docker run --rm --network none --read-only --entrypoint python backtest-cleanup-ci -c "from pathlib import Path; assert all((Path('/app/data_cache') / p).is_file() for p in ('index_stock_cons_000906.csv', 'industry_clf_hist_sw.csv'))"
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e CN_DAILY_SYNC_ENABLED=false \
+            -e CN_ETF_DAILY_SYNC_ENABLED=false \
+            -e RESULTS_ROOT=/tmp/results \
+            backtest-cleanup-ci python -c "from fastapi.testclient import TestClient; from backend.main import app; c=TestClient(app); assert c.get('/healthz').status_code == 200; assert c.get('/').status_code == 200; assert c.get('/assets/dist/results-workbench-vue-shell.js').status_code == 200"
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e CN_DAILY_SYNC_ENABLED=false \
+            -e CN_ETF_DAILY_SYNC_ENABLED=false \
+            -e RESULTS_ROOT=/tmp/results \
+            backtest-cleanup-ci python -m pytest -q -p no:cacheprovider tests/unit/test_internal_script_helper.py::test_active_alpha_experiment_runner_spec_marks_retirement

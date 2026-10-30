@@ -17,77 +17,39 @@ DIVIDEND_TABLE = "pit_cn_etf_dividend_events"
 PRICE_SERIES_SEMANTICS = "executable_price_only_not_total_return"
 
 
+_REQUIRED_COLUMNS = {
+    DAILY_TABLE: frozenset({
+        "trade_date", "symbol", "ts_code", "open", "high", "low", "close", "volume", "turnover", "amount",
+        "adj_factor", "price_adjust_mode", "price_series_semantics", "source", "build_run_id",
+        "latest_refresh_at", "created_at", "updated_at",
+    }),
+    COVERAGE_TABLE: frozenset({
+        "ts_code", "symbol", "batch_id", "exposure_bucket", "coverage_start", "coverage_end", "row_count",
+        "latest_refresh_at", "daily_table", "price_series_semantics", "created_at", "updated_at",
+    }),
+    DIVIDEND_TABLE: frozenset({
+        "event_id", "ts_code", "symbol", "ann_date", "imp_ann_date", "base_date", "record_date", "ex_date",
+        "pay_date", "earpay_date", "net_ex_date", "div_proc", "div_cash", "base_unit", "ear_distr", "source",
+        "build_run_id", "latest_refresh_at", "created_at", "updated_at",
+    }),
+}
+
+
 def _ensure_tables(cur) -> None:
-    cur.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS public.{DAILY_TABLE} (
-            trade_date DATE NOT NULL,
-            symbol VARCHAR(16) NOT NULL,
-            ts_code VARCHAR(16) NOT NULL,
-            open DOUBLE PRECISION,
-            high DOUBLE PRECISION,
-            low DOUBLE PRECISION,
-            close DOUBLE PRECISION,
-            volume DOUBLE PRECISION,
-            turnover DOUBLE PRECISION,
-            amount DOUBLE PRECISION,
-            adj_factor DOUBLE PRECISION,
-            price_adjust_mode TEXT NOT NULL DEFAULT 'none',
-            price_series_semantics TEXT NOT NULL DEFAULT '{PRICE_SERIES_SEMANTICS}',
-            source TEXT NOT NULL,
-            build_run_id TEXT NOT NULL,
-            latest_refresh_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (trade_date, symbol)
+    """Require pre-provisioned ETF schema without executing DDL."""
+    for table, required in _REQUIRED_COLUMNS.items():
+        cur.execute(
+            "SELECT attname FROM pg_attribute WHERE attrelid = to_regclass(%s) "
+            "AND attnum > 0 AND NOT attisdropped",
+            (f"public.{table}",),
         )
-        """
-    )
-    cur.execute(f"ALTER TABLE public.{DAILY_TABLE} ADD COLUMN IF NOT EXISTS adj_factor DOUBLE PRECISION")
-    cur.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS public.{COVERAGE_TABLE} (
-            ts_code VARCHAR(16) PRIMARY KEY,
-            symbol VARCHAR(16) NOT NULL UNIQUE,
-            batch_id TEXT NOT NULL,
-            exposure_bucket TEXT NOT NULL,
-            coverage_start DATE,
-            coverage_end DATE,
-            row_count BIGINT NOT NULL DEFAULT 0,
-            latest_refresh_at TIMESTAMPTZ,
-            daily_table TEXT NOT NULL DEFAULT '{DAILY_TABLE}',
-            price_series_semantics TEXT NOT NULL DEFAULT '{PRICE_SERIES_SEMANTICS}',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """
-    )
-    cur.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS public.{DIVIDEND_TABLE} (
-            event_id TEXT PRIMARY KEY,
-            ts_code VARCHAR(16) NOT NULL,
-            symbol VARCHAR(16) NOT NULL,
-            ann_date DATE,
-            imp_ann_date DATE,
-            base_date DATE,
-            record_date DATE,
-            ex_date DATE NOT NULL,
-            pay_date DATE,
-            earpay_date DATE,
-            net_ex_date DATE,
-            div_proc TEXT,
-            div_cash DOUBLE PRECISION NOT NULL,
-            base_unit DOUBLE PRECISION,
-            ear_distr DOUBLE PRECISION,
-            source TEXT NOT NULL,
-            build_run_id TEXT NOT NULL,
-            latest_refresh_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """
-    )
+        columns = {row[0] for row in cur.fetchall()}
+        missing = required - columns
+        if missing:
+            raise RuntimeError(
+                f"required ETF schema public.{table} is missing or incomplete: {', '.join(sorted(missing))}; "
+                "provision it separately"
+            )
 
 
 def _resolve_target_end(pro, explicit_end: str) -> date:

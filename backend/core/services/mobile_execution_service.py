@@ -215,6 +215,7 @@ def _apply_status_transition_locked(
     ticket_payload["status"] = normalized_status
     ticket_payload["updated_at"] = now_iso
     ticket_payload["execution"] = execution
+    transaction_lifecycle_service.preflight_transaction_schema()
     mobile_ops._atomic_write_json(_ticket_path(results_root, str(ticket_payload.get("ticket_id") or "")), ticket_payload)
 
     event_payload = _build_event_payload(

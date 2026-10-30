@@ -7,20 +7,15 @@ from typing import Any, Callable
 
 import pandas as pd
 from backend.core.services.mobile_briefing_service import build_mobile_daily_briefing
-from backend.core.services.mobile_cash_pool_service import get_reconcile_refresh_status
 from backend.core.services.mobile_execution_service import list_execution_tickets
 from backend.core.services.mobile_notification_service import build_mobile_notification_feed
+from backend.core.services.ops_domain_pg import OpsDomainSchemaMissing
 from backend.core.services.mobile_ops_service import (
     build_suggestion_id,
     load_mobile_control_state,
     signal_staleness_threshold_days,
 )
 from backend.core.services.experiment_query_service import build_mobile_experiment_summary
-from backend.core.services.sim_account_reconcile_service import load_latest_reconcile_run
-from backend.core.services.sim_account_service import (
-    get_holdings_sync_status,
-    load_latest_holdings_snapshot,
-)
 
 PreviewLoader = Callable[[dict[str, Any], str, str | None], dict[str, Any]]
 
@@ -562,54 +557,8 @@ def _unique_warnings(values: list[Any]) -> list[str]:
     return out
 
 
-def _dedupe_blockers(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
-    for item in values:
-        if not isinstance(item, dict):
-            continue
-        key = (
-            str(item.get("code") or "").strip(),
-            str(item.get("message") or "").strip(),
-            str(item.get("ticket_id") or "").strip(),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(item)
-    return out
 
 
-def _build_snapshot_positions(snapshot: dict[str, Any] | None) -> list[dict[str, Any]]:
-    if not isinstance(snapshot, dict) or not snapshot:
-        return []
-    snapshot_id = str(snapshot.get("snapshot_id") or "")
-    trade_date = str(snapshot.get("trade_date") or "")
-    positions: list[dict[str, Any]] = []
-    for item in list(snapshot.get("positions") or []):
-        if not isinstance(item, dict):
-            continue
-        symbol = str(item.get("symbol") or "").lower().strip()
-        if not symbol:
-            continue
-        avg_cost = _safe_number(item.get("avg_cost"))
-        positions.append(
-            {
-                "symbol": symbol,
-                "name": str(item.get("name") or symbol.upper()),
-                "qty": int(item.get("qty") or 0),
-                "sellable_qty": int(item.get("sellable_qty") or 0),
-                "avg_cost": avg_cost,
-                "avg_fill_price": avg_cost,
-                "entry_date": None,
-                "last_trade_date": trade_date,
-                "last_reason_code": "",
-                "snapshot_id": snapshot_id,
-                "trade_date": trade_date,
-            }
-        )
-    positions.sort(key=lambda item: str(item.get("symbol") or ""))
-    return positions
 
 
 def _build_risk_flags(ops_snapshot: dict[str, Any], holding_sync: dict[str, Any]) -> dict[str, Any]:
@@ -656,281 +605,33 @@ def _annotate_pending_tickets(
     return out
 
 
-def _build_reconcile_surface(
-    *,
-    results_root: Path,
-    market_summary: dict[str, Any],
-    experiment_summary: dict[str, Any] | None,
-    ops_snapshot: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
-    holding_sync = get_holdings_sync_status(results_root)
-    snapshot = load_latest_holdings_snapshot(results_root)
-    positions = _build_snapshot_positions(snapshot)
-    latest_reconcile = load_latest_reconcile_run(results_root)
-    latest_snapshot_id = str(holding_sync.get("latest_snapshot_id") or "")
-    reconcile_snapshot_id = str((latest_reconcile or {}).get("snapshot_id") or "")
-    has_matching_reconcile = bool(
-        latest_snapshot_id
-        and isinstance(snapshot, dict)
-        and snapshot
-        and isinstance(latest_reconcile, dict)
-        and latest_reconcile
-        and reconcile_snapshot_id == latest_snapshot_id
-    )
-
-    as_of_date = str(
-        ((latest_reconcile or {}).get("as_of_date") or "")
-        or ((latest_reconcile or {}).get("snapshot_trade_date") or "")
-        or str(holding_sync.get("trade_date") or "")
-    )
-    freshness = _build_freshness(as_of_date, market_summary)
-    if str(holding_sync.get("status") or "") == "stale" and str(freshness.get("status") or "") != "stale":
-        freshness = {**freshness, "status": "stale", "label": "stale"}
-
-    warnings: list[str] = list(holding_sync.get("warnings") or [])
-    if not snapshot:
-        warnings.append("latest holdings snapshot is missing")
-    elif not latest_reconcile:
-        warnings.append("latest reconcile run is missing")
-    elif not has_matching_reconcile:
-        warnings.append("latest reconcile run does not match latest holdings snapshot")
-
-    source_mode = "position_aware_reconcile" if has_matching_reconcile else "experiment_fallback"
-    status = "ok"
-    if source_mode != "position_aware_reconcile":
-        status = "unavailable"
-    elif str(freshness.get("status") or "") == "stale":
-        status = "stale"
-
-    action_sheet = list((latest_reconcile or {}).get("action_sheet") or []) if has_matching_reconcile else []
-    actions_payload = (latest_reconcile or {}).get("actions") if isinstance((latest_reconcile or {}).get("actions"), dict) else {}
-    risk_flags = _build_risk_flags(ops_snapshot, holding_sync)
-
+def _build_reconcile_surface(*, results_root: Path, market_summary: dict[str, Any],
+                             experiment_summary: dict[str, Any] | None,
+                             ops_snapshot: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """Account data is unavailable after removal; research output remains read-only."""
+    del results_root, experiment_summary
+    warning = "simulation account removed; account data is unavailable"
+    holding_sync = {"status": "unavailable", "warnings": [warning]}
     surface = {
-        "status": status,
-        "source_mode": source_mode,
-        "account_id": str(holding_sync.get("account_id") or ""),
-        "holding_sync": holding_sync,
-        "cash": _safe_number((snapshot or {}).get("cash")),
-        "snapshot_id": latest_snapshot_id,
-        "reconcile_id": str((latest_reconcile or {}).get("reconcile_id") or "") if has_matching_reconcile else "",
-        "as_of_date": as_of_date,
-        "positions": positions,
-        "action_sheet": action_sheet,
-        "actions": {
-            "buy": list(actions_payload.get("buy") or []) if has_matching_reconcile else [],
-            "sell": list(actions_payload.get("sell") or []) if has_matching_reconcile else [],
-            "hold": list(actions_payload.get("hold") or []) if has_matching_reconcile else [],
-        },
-        "freshness": freshness,
-        "risk_flags": risk_flags,
-        "warnings": _unique_warnings(warnings),
-        "strategy_source": (
-            dict((latest_reconcile or {}).get("strategy_source") or {})
-            if has_matching_reconcile
-            else {
-                "exp_id": str((experiment_summary or {}).get("exp_id") or ""),
-                "created_at": str((experiment_summary or {}).get("created_at") or ""),
-                "config_hash": "",
-                "asset_scope": "",
-            }
-        ),
-        "generated_at": str((latest_reconcile or {}).get("generated_at") or ""),
-        "summary": dict((latest_reconcile or {}).get("summary") or {}) if has_matching_reconcile else {
-            "action_count": 0,
-            "buy_count": 0,
-            "sell_count": 0,
-            "hold_count": len(positions),
-            "blocked_count": 0,
-        },
+        "status": "unavailable", "source_mode": "experiment_fallback",
+        "account_id": "", "holding_sync": holding_sync, "cash": None,
+        "snapshot_id": "", "reconcile_id": "", "as_of_date": "",
+        "positions": None, "action_sheet": [], "actions": {"buy": [], "sell": [], "hold": []},
+        "freshness": _build_freshness("", market_summary),
+        "risk_flags": _build_risk_flags(ops_snapshot, holding_sync),
+        "warnings": [warning], "strategy_source": {}, "generated_at": "", "summary": None,
     }
-    return surface, holding_sync, positions
+    return surface, holding_sync, []
 
 
-def _blocked_reason_message(code: str) -> str:
-    mapping = {
-        "sellable_qty_zero": "sellable_qty is 0",
-        "fallback_read_only": "current dashboard is fallback read-only",
-        "holding_unsynced": "holdings are not synced",
-        "holding_stale": "holdings sync is stale",
-        "holding_drift": "holdings changed during pending tickets",
-    }
-    normalized = str(code or "").strip().lower()
-    return mapping.get(normalized, normalized or "action blocked")
 
 
-def _build_reconcile_card_extra_blockers(
-    *,
-    row: dict[str, Any],
-    holding_sync: dict[str, Any],
-    reconcile_surface: dict[str, Any],
-) -> list[dict[str, Any]]:
-    blockers: list[dict[str, Any]] = []
-    holding_status = str(holding_sync.get("status") or "").strip().lower()
-    if holding_status == "unsynced":
-        blockers.append({"code": "holding_unsynced", "message": _blocked_reason_message("holding_unsynced")})
-    elif holding_status == "stale":
-        blockers.append({"code": "holding_stale", "message": _blocked_reason_message("holding_stale")})
-
-    drift_summary = holding_sync.get("drift_summary") if isinstance(holding_sync.get("drift_summary"), dict) else {}
-    if bool(drift_summary.get("pending_ticket_drift")):
-        blockers.append({"code": "holding_drift", "message": _blocked_reason_message("holding_drift")})
-
-    if str(reconcile_surface.get("source_mode") or "").strip().lower() != "position_aware_reconcile":
-        blockers.append({"code": "fallback_read_only", "message": _blocked_reason_message("fallback_read_only")})
-
-    if bool(row.get("blocked")):
-        blocked_reason = str(row.get("blocked_reason") or row.get("reason_code") or "action_blocked").strip().lower()
-        blockers.append({"code": blocked_reason, "message": _blocked_reason_message(blocked_reason)})
-    return blockers
 
 
-def _build_reconcile_approval_cards(
-    *,
-    experiment_summary: dict[str, Any],
-    reconcile_surface: dict[str, Any],
-    holding_sync: dict[str, Any],
-    ops_snapshot: dict[str, Any],
-) -> list[dict[str, Any]]:
-    freshness = dict(reconcile_surface.get("freshness") or {})
-    exit_tags = _extract_exit_tags(experiment_summary)
-    strategy_source = reconcile_surface.get("strategy_source") if isinstance(reconcile_surface.get("strategy_source"), dict) else {}
-    exp_id = str(strategy_source.get("exp_id") or experiment_summary.get("exp_id") or "")
-    default_signal_date = str(reconcile_surface.get("as_of_date") or "")
-    snapshot_id = str(reconcile_surface.get("snapshot_id") or "")
-    reconcile_id = str(reconcile_surface.get("reconcile_id") or "")
-    source_mode = str(reconcile_surface.get("source_mode") or "")
-    account_id = str(reconcile_surface.get("account_id") or holding_sync.get("account_id") or "")
-    cards: list[dict[str, Any]] = []
-    order_rank = {"buy": 0, "sell": 1, "hold": 2}
-    for item in list(reconcile_surface.get("action_sheet") or []):
-        if not isinstance(item, dict):
-            continue
-        action_type = str(item.get("action_type") or "").strip().lower()
-        symbol = str(item.get("symbol") or "").strip().lower()
-        if not symbol:
-            continue
-        signal_date = str(item.get("signal_date") or item.get("as_of_date") or default_signal_date or "")
-        as_of_date = str(item.get("as_of_date") or signal_date or default_signal_date or "")
-        suggestion_id = build_suggestion_id(
-            exp_id=exp_id,
-            signal_date=signal_date,
-            symbol=symbol,
-            action_type=action_type,
-            source_mode=source_mode,
-            snapshot_id=snapshot_id,
-            reconcile_id=reconcile_id,
-            as_of_date=as_of_date,
-        )
-        blockers = _build_blockers(
-            suggestion_id=suggestion_id,
-            freshness=freshness,
-            ops_snapshot=ops_snapshot,
-        )
-        blockers.extend(
-            _build_reconcile_card_extra_blockers(
-                row=item,
-                holding_sync=holding_sync,
-                reconcile_surface=reconcile_surface,
-            )
-        )
-        blockers = _dedupe_blockers(blockers)
-        user_decision = _build_user_decision(suggestion_id, ops_snapshot)
-        actionable = action_type in {"buy", "sell"} and source_mode == "position_aware_reconcile"
-        can_confirm = actionable and not blockers
-        can_reject = actionable and str(user_decision.get("status") or "") != "approved_pending"
-        cards.append(
-            {
-                "suggestion_id": suggestion_id,
-                "exp_id": exp_id,
-                "signal_date": signal_date,
-                "as_of_date": as_of_date,
-                "source_mode": source_mode,
-                "account_id": account_id,
-                "snapshot_id": snapshot_id,
-                "reconcile_id": reconcile_id,
-                "symbol": symbol,
-                "name": str(item.get("name") or symbol.upper()),
-                "bucket": action_type,
-                "action_type": action_type,
-                "system_suggestion": {
-                    "reference_price": _safe_number(item.get("reference_price")),
-                    "reference_price_basis": str(item.get("reference_price_basis") or ""),
-                    "target_weight": _safe_number(item.get("target_weight")),
-                    "suggested_qty": int(item.get("suggested_qty") or 0),
-                    "current_qty": int(item.get("current_qty") or 0),
-                    "target_qty": int(item.get("target_qty") or 0),
-                    "delta_qty": int(item.get("delta_qty") or 0),
-                    "sellable_qty": int(item.get("sellable_qty") or 0),
-                    "cap_reason": str(item.get("blocked_reason") or ""),
-                },
-                "reason_tags": list(item.get("reason_tags") or ([] if not item.get("reason_code") else [item.get("reason_code")])),
-                "exit_tags": exit_tags,
-                "freshness": freshness,
-                "blockers": blockers,
-                "user_decision": user_decision,
-                "can_confirm": can_confirm,
-                "can_reject": can_reject,
-                "can_edit": can_confirm,
-                "blocked_reason": str(item.get("blocked_reason") or ""),
-            }
-        )
-    cards.sort(key=lambda item: str(item.get("symbol") or ""))
-    cards.sort(key=lambda item: str(item.get("as_of_date") or ""), reverse=True)
-    cards.sort(key=lambda item: order_rank.get(str(item.get("bucket") or ""), 9))
-    return cards
 
 
-def _build_reconcile_guidance(
-    *,
-    experiment_summary: dict[str, Any],
-    reconcile_surface: dict[str, Any],
-    holding_sync: dict[str, Any],
-    ops_snapshot: dict[str, Any],
-) -> dict[str, Any]:
-    cards = _build_reconcile_approval_cards(
-        experiment_summary=experiment_summary,
-        reconcile_surface=reconcile_surface,
-        holding_sync=holding_sync,
-        ops_snapshot=ops_snapshot,
-    )
-    status = str(reconcile_surface.get("status") or "unavailable")
-    if str(reconcile_surface.get("source_mode") or "") != "position_aware_reconcile":
-        status = "fallback_read_only"
-    return {
-        "status": status,
-        "source_mode": str(reconcile_surface.get("source_mode") or ""),
-        "as_of_date_used": str(reconcile_surface.get("as_of_date") or ""),
-        "buy": list((reconcile_surface.get("actions") or {}).get("buy") or []),
-        "sell": list((reconcile_surface.get("actions") or {}).get("sell") or []),
-        "hold": list((reconcile_surface.get("actions") or {}).get("hold") or []),
-        "warnings": list(reconcile_surface.get("warnings") or []),
-        "freshness": dict(reconcile_surface.get("freshness") or {}),
-        "approval_cards": cards,
-    }
 
 
-def _apply_refresh_overlay(
-    guidance: dict[str, Any],
-    *,
-    refresh_status: dict[str, Any],
-    reconcile_surface: dict[str, Any],
-) -> dict[str, Any]:
-    payload = dict(guidance or {})
-    status = str((refresh_status or {}).get("status") or "").strip().lower()
-    requested_snapshot_id = str((refresh_status or {}).get("requested_snapshot_id") or "").strip()
-    latest_snapshot_id = str((reconcile_surface or {}).get("snapshot_id") or "").strip()
-    if status not in {"queued", "running"} or not requested_snapshot_id or requested_snapshot_id != latest_snapshot_id:
-        return payload
-    warnings = list(payload.get("warnings") or [])
-    warnings.insert(0, "cash pool update is recomputing current orders")
-    payload["warnings"] = _unique_warnings(warnings)
-    payload["status"] = "refreshing"
-    payload["approval_cards"] = []
-    payload["buy"] = []
-    payload["sell"] = []
-    payload["hold"] = list((reconcile_surface or {}).get("actions", {}).get("hold") or [])
-    return payload
 
 
 def _build_fallback_guidance(
@@ -1194,7 +895,15 @@ def _build_mobile_dashboard_v2(results_root: Path, preview_loader: PreviewLoader
     experiment_context, experiment_errors = _load_latest_experiment(results_root)
     errors.extend(experiment_errors)
     market_summary, _market_snapshot = _read_latest_market_snapshot(results_root)
-    ops_snapshot = load_mobile_control_state(results_root)
+    lifecycle_missing = False
+    try:
+        ops_snapshot = load_mobile_control_state(results_root)
+        execution_tickets = list_execution_tickets(results_root)
+    except OpsDomainSchemaMissing:
+        lifecycle_missing = True
+        ops_snapshot = {}
+        execution_tickets = None
+        errors.append("transaction lifecycle storage is unavailable")
     experiment_summary = dict(experiment_context.get("summary") or {}) if isinstance(experiment_context, dict) else None
     reconcile_surface, holding_sync, positions = _build_reconcile_surface(
         results_root=results_root,
@@ -1202,40 +911,35 @@ def _build_mobile_dashboard_v2(results_root: Path, preview_loader: PreviewLoader
         experiment_summary=experiment_summary,
         ops_snapshot=ops_snapshot,
     )
-    refresh_status = get_reconcile_refresh_status(results_root)
+    if lifecycle_missing:
+        reconcile_surface["risk_flags"].update({
+            "pending_ticket_drift": None, "risk_locked": None, "risk_lock_reason": "transaction_lifecycle_schema_missing",
+            "executor_declared": None, "executor_available": None, "executor_reason": "transaction_lifecycle_schema_missing",
+        })
+    refresh_status = {"status": "unavailable", "reason": "simulation_account_removed"}
 
-    if str(reconcile_surface.get("source_mode") or "") == "position_aware_reconcile":
-        guidance = _build_reconcile_guidance(
-            experiment_summary=experiment_summary or {},
-            reconcile_surface=reconcile_surface,
-            holding_sync=holding_sync,
-            ops_snapshot=ops_snapshot,
-        )
+    guidance = _build_fallback_guidance(experiment_summary=experiment_summary, reconcile_surface=reconcile_surface)
+
+    if lifecycle_missing:
+        guidance["pending_tickets"] = None
+        guidance["pending_count"] = None
+        guidance["execution_tickets"] = None
+        guidance["execution_count"] = None
     else:
-        guidance = _build_fallback_guidance(
-            experiment_summary=experiment_summary,
-            reconcile_surface=reconcile_surface,
+        guidance["pending_tickets"] = _annotate_pending_tickets(
+            list(ops_snapshot.get("pending_tickets") or []),
+            source_mode=str(reconcile_surface.get("source_mode") or ""),
+            snapshot_id=str(reconcile_surface.get("snapshot_id") or ""),
+            reconcile_id=str(reconcile_surface.get("reconcile_id") or ""),
         )
-    guidance = _apply_refresh_overlay(
-        guidance,
-        refresh_status=refresh_status,
-        reconcile_surface=reconcile_surface,
-    )
-
-    guidance["pending_tickets"] = _annotate_pending_tickets(
-        list(ops_snapshot.get("pending_tickets") or []),
-        source_mode=str(reconcile_surface.get("source_mode") or ""),
-        snapshot_id=str(reconcile_surface.get("snapshot_id") or ""),
-        reconcile_id=str(reconcile_surface.get("reconcile_id") or ""),
-    )
-    guidance["pending_count"] = len(guidance["pending_tickets"])
-    guidance["execution_tickets"] = _annotate_pending_tickets(
-        list_execution_tickets(results_root),
-        source_mode=str(reconcile_surface.get("source_mode") or ""),
-        snapshot_id=str(reconcile_surface.get("snapshot_id") or ""),
-        reconcile_id=str(reconcile_surface.get("reconcile_id") or ""),
-    )
-    guidance["execution_count"] = len(guidance["execution_tickets"])
+        guidance["pending_count"] = len(guidance["pending_tickets"])
+        guidance["execution_tickets"] = _annotate_pending_tickets(
+            execution_tickets,
+            source_mode=str(reconcile_surface.get("source_mode") or ""),
+            snapshot_id=str(reconcile_surface.get("snapshot_id") or ""),
+            reconcile_id=str(reconcile_surface.get("reconcile_id") or ""),
+        )
+        guidance["execution_count"] = len(guidance["execution_tickets"])
     warnings = _unique_warnings(
         errors
         + list(market_summary.get("warnings") or [])
@@ -1243,27 +947,32 @@ def _build_mobile_dashboard_v2(results_root: Path, preview_loader: PreviewLoader
         + list(holding_sync.get("warnings") or [])
         + list(reconcile_surface.get("warnings") or [])
     )
-    status = "ok" if experiment_context is not None or positions or str(holding_sync.get("status") or "") != "unsynced" else "empty"
-    briefing = build_mobile_daily_briefing(
-        results_root,
-        experiment_summary=experiment_summary,
-        guidance=guidance,
-        holding_sync=holding_sync,
-        reconcile_surface=reconcile_surface,
-        market_summary=market_summary,
-    )
-    notifications = build_mobile_notification_feed(results_root, briefing=briefing)
+    status = "degraded" if lifecycle_missing else ("ok" if experiment_context is not None else "empty")
+    if lifecycle_missing:
+        briefing = {"status": "unavailable", "reason": "transaction_lifecycle_schema_missing"}
+        notifications = {"status": "unavailable", "reason": "transaction_lifecycle_schema_missing", "items": None, "count": None}
+    else:
+        briefing = build_mobile_daily_briefing(
+            results_root,
+            experiment_summary=experiment_summary,
+            guidance=guidance,
+            holding_sync=holding_sync,
+            reconcile_surface=reconcile_surface,
+            market_summary=market_summary,
+        )
+        notifications = build_mobile_notification_feed(results_root, briefing=briefing)
 
     return {
         "status": status,
         "updated_at": _now_iso(),
+        "lifecycle_status": {"status": "unavailable", "reason": "transaction_lifecycle_schema_missing"} if lifecycle_missing else None,
         "source_mode": str(reconcile_surface.get("source_mode") or ""),
         "experiment": experiment_summary,
         "holding_sync": holding_sync,
         "reconcile": reconcile_surface,
         "guidance": guidance,
         "market": market_summary,
-        "positions": positions,
+        "positions": None,
         "briefing": briefing,
         "notifications": notifications,
         "reconcile_refresh": refresh_status,

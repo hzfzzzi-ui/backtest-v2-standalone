@@ -238,6 +238,7 @@ def _maybe_expire_ticket_locked(results_root: Path, ticket: dict[str, Any], *, n
     ticket["lifecycle_status"] = "expired"
     ticket["failure_reason_codes"] = list(dict.fromkeys(_normalize_reason_codes(ticket.get("failure_reason_codes")) + ["expired"]))
     ticket["updated_at"] = _now_iso(now_value)
+    transaction_lifecycle_service.preflight_transaction_schema()
     _atomic_write_json(Path(str(ticket.get("_path") or _approval_tickets_root(results_root) / f"{ticket.get('ticket_id')}.json")), {k: v for k, v in ticket.items() if not str(k).startswith("_")})
     _append_jsonl(
         _audit_log_path(results_root),
@@ -452,6 +453,7 @@ def create_ticket_from_confirmed_action(
             "blockers_at_submit": list(card.get("blockers") or []),
         }
         ticket_path = _approval_tickets_root(results_root) / f"{ticket_payload['ticket_id']}.json"
+        transaction_lifecycle_service.preflight_transaction_schema()
         _atomic_write_json(ticket_path, ticket_payload)
         _atomic_write_json(mapping_path, {"ticket_id": ticket_payload["ticket_id"]})
         _append_jsonl(
@@ -507,6 +509,7 @@ def revoke_ticket(
         )
         ticket["updated_at"] = now_iso
         ticket["approval"] = approval
+        transaction_lifecycle_service.preflight_transaction_schema()
         _atomic_write_json(ticket_path, ticket)
         _append_jsonl(
             _audit_log_path(results_root),

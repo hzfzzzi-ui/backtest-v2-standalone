@@ -60,6 +60,4 @@ Define the formal capability boundary for `research-db-structure-governance` in 
 
 ### Requirement: transactions 鐢熷懡鍛ㄦ湡涓昏〃灞炰簬涓氬姟浜嬪姟鍩熸寮忓璞?绯荤粺 SHALL 鍦ㄦ暟鎹簱缁撴瀯娌荤悊涓槑纭?`transactions` 鐢熷懡鍛ㄦ湡涓昏〃灞炰簬涓氬姟浜嬪姟鍩熸寮忓璞★紝骞朵笌鐮旂┒鏁版嵁鍩熴€佸疄楠屽煙鍒嗙銆?
 #### Scenario: 浜嬪姟涓昏〃鍩熷綊灞炴竻鏅?- **WHEN** 鏂囨。鎴栧疄鐜板０鏄庢暟鎹簱瀵硅薄鐨勬寮忓綊灞?- **THEN** `transactions` 鐢熷懡鍛ㄦ湡涓昏〃 MUST 琚綊绫诲埌涓氬姟浜嬪姟鍩?
-### Requirement: sim_account 姝ｅ紡瀵硅薄灞炰簬涓氬姟浜嬪姟鍩?绯荤粺 SHALL 鍦ㄦ暟鎹簱缁撴瀯娌荤悊涓槑纭?`accounts`銆乣holdings_snapshots`銆乣cash_ledger`銆乣sync_logs` 灞炰簬涓氬姟浜嬪姟鍩熸寮忓璞°€?
-#### Scenario: sim_account 瀵硅薄鍩熷綊灞炴槑纭?- **WHEN** 鏂囨。鎴栧疄鐜板０鏄?`sim_account` 鐩稿叧瀵硅薄鐨勬寮忓綊灞?- **THEN** 杩欎簺瀵硅薄 MUST 琚綊绫诲埌涓氬姟浜嬪姟鍩?
 

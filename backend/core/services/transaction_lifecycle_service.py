@@ -274,6 +274,16 @@ def _record_from_ticket(ticket: dict[str, Any], *, events: list[dict[str, Any]] 
     }
 
 
+def preflight_transaction_schema() -> None:
+    """Fail before caller-side file writes when the lifecycle table is absent."""
+    try:
+        with ops_domain_pg.connect() as conn:
+            ops_domain_pg.ensure_tables(conn)
+    except ops_domain_pg.OpsDomainDbUnavailable:
+        # Preserve the existing file-backed compatibility mode for connection failures.
+        return
+
+
 def sync_ticket(results_root: Path, ticket: dict[str, Any], *, compat_source: str = "mobile_ops_file") -> dict[str, Any]:
     transaction_id = str(ticket.get("ticket_id") or "").strip()
     if not transaction_id:

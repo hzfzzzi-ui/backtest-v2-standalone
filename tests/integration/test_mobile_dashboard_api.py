@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 import json
-import time
-from pathlib import Path
-from threading import Event
 
 from backend.api.mobile import impl as mobile_mod
-from backend.core.services import mobile_cash_pool_service as cash_pool_mod
 from backend.core.services.mobile_execution_service import (
     claim_approval_ticket,
     record_execution_update,
 )
-from backend.core.services.sim_account_service import load_latest_holdings_snapshot, store_holdings_snapshot
 
 
 def _write_json(path, payload) -> None:
@@ -81,143 +76,32 @@ def _prepare_outputs(tmp_path) -> str:
             "risk_layer": {"drawdown_from_60d_high": -0.02},
         },
     )
-    snapshot = store_holdings_snapshot(
-        results_root,
-        {
-            "account_id": "paper_a_share_main",
-            "trade_date": "2026-03-12",
-            "cash": 345678.0,
-            "positions": [
-                {"symbol": "sh600000", "qty": 100, "sellable_qty": 100, "avg_cost": 11.0, "name": "娴﹀彂閾惰"},
-            ],
-        },
-    )
-    reconcile_payload = {
-        "schema_version": "sim_account_reconcile_run@1",
-        "account_id": "paper_a_share_main",
-        "reconcile_id": "rc_api_001",
-        "generated_at": "2026-03-12T15:15:00+08:00",
-        "snapshot_id": snapshot["snapshot_id"],
-        "snapshot_trade_date": "2026-03-12",
-        "snapshot_synced_at": snapshot["synced_at"],
-        "as_of_date": "2026-03-13",
-        "source_mode": "position_aware_reconcile",
-        "strategy_source": {
-            "exp_id": exp_id,
-            "created_at": "2026-03-12T12:00:00",
-            "config_hash": "cfg_api_001",
-            "asset_scope": "cn_a_equity",
-        },
-        "execution_assumptions": {
-            "signal_clock": "POST_CLOSE",
-            "execution_clock": "NEXT_OPEN",
-            "reference_price_basis": "latest_close",
-        },
-        "summary": {
-            "action_count": 2,
-            "buy_count": 1,
-            "sell_count": 1,
-            "hold_count": 0,
-            "blocked_count": 0,
-        },
-        "actions": {
-            "buy": [
-                {
-                    "symbol": "sh600519",
-                    "name": "璐靛窞鑼呭彴",
-                    "action_type": "buy",
-                    "current_qty": 0,
-                    "sellable_qty": 0,
-                    "suggested_qty": 100,
-                    "target_qty": 100,
-                    "delta_qty": 100,
-                    "reference_price": 1500.0,
-                    "reference_price_basis": "latest_close",
-                    "reason_code": "BUY_BREAKOUT",
-                    "reason_tags": ["breakout", "rank=1"],
-                    "blocked": False,
-                    "blocked_reason": "",
-                    "target_weight": 0.2,
-                }
-            ],
-            "sell": [
-                {
-                    "symbol": "sh600000",
-                    "name": "娴﹀彂閾惰",
-                    "action_type": "sell",
-                    "current_qty": 100,
-                    "sellable_qty": 100,
-                    "suggested_qty": 100,
-                    "target_qty": 0,
-                    "delta_qty": -100,
-                    "reference_price": 11.2,
-                    "reference_price_basis": "latest_close",
-                    "reason_code": "SELL_EXIT",
-                    "reason_tags": ["exit"],
-                    "blocked": False,
-                    "blocked_reason": "",
-                    "target_weight": 0.0,
-                }
-            ],
-            "hold": [],
-        },
-        "action_sheet": [],
-        "diagnostics": {
-            "reason_counts": {},
-            "order_reject_reason_counts": {},
-            "blocked_count": 0,
-            "market_state": "BULL",
-            "trade_mode": "TREND_MAIN",
-            "effective_max_positions": 10,
-        },
-    }
-    reconcile_payload["action_sheet"] = reconcile_payload["actions"]["buy"] + reconcile_payload["actions"]["sell"]
-    _write_json(
-        results_root / "ops" / "sim_account" / "paper_a_share_main" / "reconcile" / "latest.json",
-        reconcile_payload,
-    )
-    _write_json(
-        results_root / "ops" / "sim_account" / "paper_a_share_main" / "reconcile" / "history" / "rc_api_001.json",
-        reconcile_payload,
-    )
     return str(results_root)
 
 
-def _refresh_surface(results_root: str, *, snapshot_trade_date: str, snapshot_qty: int, reconcile_id: str) -> None:
-    root = mobile_mod._results_root()
-    snapshot = store_holdings_snapshot(
-        root,
-        {
-            "account_id": "paper_a_share_main",
-            "trade_date": snapshot_trade_date,
-            "cash": 345678.0,
-            "positions": [
-                {"symbol": "sh600000", "qty": snapshot_qty, "sellable_qty": snapshot_qty, "avg_cost": 11.0, "name": "娴﹀彂閾惰"},
-            ],
-        },
-    )
-    payload = _read_json(root / "ops" / "sim_account" / "paper_a_share_main" / "reconcile" / "latest.json")
-    payload["reconcile_id"] = reconcile_id
-    payload["snapshot_id"] = snapshot["snapshot_id"]
-    payload["snapshot_trade_date"] = snapshot_trade_date
-    payload["snapshot_synced_at"] = snapshot["synced_at"]
-    for item in payload["action_sheet"]:
-        if item["symbol"] == "sh600000":
-            item["current_qty"] = snapshot_qty
-            item["sellable_qty"] = snapshot_qty
-            item["suggested_qty"] = snapshot_qty
-            item["delta_qty"] = -snapshot_qty
-    for item in payload["actions"]["sell"]:
-        item["current_qty"] = snapshot_qty
-        item["sellable_qty"] = snapshot_qty
-        item["suggested_qty"] = snapshot_qty
-        item["delta_qty"] = -snapshot_qty
-    _write_json(root / "ops" / "sim_account" / "paper_a_share_main" / "reconcile" / "latest.json", payload)
-    _write_json(root / "ops" / "sim_account" / "paper_a_share_main" / "reconcile" / "history" / f"{reconcile_id}.json", payload)
 
 
-def _read_json(path):
-    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _synthetic_approval_cards(monkeypatch):
+    """Exercise retained approval API with explicit synthetic input, not an account integration."""
+    original_dashboard = mobile_mod._current_mobile_dashboard
+    state = {"snapshot_id": "fixture-snapshot"}
+    def dashboard():
+        payload = original_dashboard()
+        cards = []
+        for symbol, action in [("sh600519", "buy"), ("sh600000", "sell")]:
+            cards.append({"suggestion_id": "fixture-" + action, "symbol": symbol, "name": "fixture",
+                          "action_type": action, "bucket": action, "source_mode": "explicit_test_fixture",
+                          "exp_id": "exp_mobile_api_001", "signal_date": "2026-03-13",
+                          "as_of_date": "2026-03-13", "snapshot_id": state["snapshot_id"],
+                          "reconcile_id": "fixture-context", "account_id": "test-account",
+                          "system_suggestion": {"suggested_qty": 100, "target_weight": 0.2},
+                          "blockers": [], "user_decision": {"status": "none"}})
+        payload["guidance"]["approval_cards"] = cards
+        return payload
+    monkeypatch.setattr(mobile_mod, "_current_mobile_dashboard", dashboard)
+    return state
 
 
 def _login_mobile(test_client) -> None:
@@ -251,7 +135,7 @@ def test_mobile_page_is_available_on_private_host(test_client, monkeypatch) -> N
     assert 'id="mdAuthTemplate"' in response.text
     assert 'id="mdDashboardTemplate"' in response.text
     assert 'id="mdTradeIneffectiveCount"' in response.text
-    assert 'id="mdDepositBtn"' in response.text
+    assert 'id="mdDepositBtn"' not in response.text
 
 
 def test_mobile_pwa_assets_follow_private_host_restrictions(test_client, monkeypatch) -> None:
@@ -297,16 +181,14 @@ def test_mobile_login_dashboard_and_logout(test_client, monkeypatch, tmp_path) -
     dashboard = test_client.get("/api/mobile/dashboard", headers={"host": "192.168.1.8"})
     assert dashboard.status_code == 200
     payload = dashboard.json()
-    assert payload["status"] == "ok"
-    assert payload["source_mode"] == "position_aware_reconcile"
-    assert payload["reconcile"]["cash"] == 345678.0
+    assert payload["holding_sync"]["status"] == "unavailable"
+    assert payload["source_mode"] == "experiment_fallback"
+    assert payload["reconcile"]["cash"] is None
+    assert payload["positions"] is None
     assert payload["experiment"]["exp_id"] == "exp_mobile_api_001"
-    assert [item["symbol"] for item in payload["positions"]] == ["sh600000"]
     assert payload["notifications"]["active_channel"] == "in_app_feed"
-    assert payload["notifications"]["count"] >= 1
-    assert [item["symbol"] for item in payload["guidance"]["buy"]] == ["sh600519"]
-    assert [item["symbol"] for item in payload["guidance"]["sell"]] == ["sh600000"]
-    assert any(card["symbol"] == "sh600519" for card in payload["guidance"]["approval_cards"])
+    assert payload["guidance"]["status"] == "fallback_read_only"
+    assert payload["guidance"]["approval_cards"] == []
 
     session_after = test_client.get("/api/mobile/session", headers={"host": "192.168.1.8"})
     assert session_after.status_code == 200
@@ -323,11 +205,38 @@ def test_mobile_login_dashboard_and_logout(test_client, monkeypatch, tmp_path) -
     assert dashboard_after_logout.status_code == 401
 
 
+def test_approval_fails_explicitly_when_real_holdings_are_unavailable(test_client, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MOBILE_DASHBOARD_PASSWORD", "secret-pass")
+    monkeypatch.setenv("MOBILE_AUTH_SECRET", "signing-secret")
+    monkeypatch.setenv("RESULTS_ROOT", _prepare_outputs(tmp_path))
+    _login_mobile(test_client)
+
+    # This fixture only represents a previously issued token; it is not an actual trade.
+    token = mobile_mod.issue_confirm_token({"suggestion_id": "old-suggestion", "decision": "approve"})
+    def reject_write(*args, **kwargs):
+        raise AssertionError("an unavailable holdings source must not create a ticket")
+    monkeypatch.setattr(mobile_mod, "create_ticket_from_confirmed_action", reject_write)
+
+    headers = {"host": "192.168.1.8"}
+    prepared = test_client.post(
+        "/api/mobile/approvals/prepare",
+        json={"suggestion_id": "old-suggestion", "decision": "approve"}, headers=headers,
+    )
+    committed = test_client.post(
+        "/api/mobile/approvals/commit",
+        json={"confirm_token": token, "idempotency_key": "fixture"}, headers=headers,
+    )
+    for response in (prepared, committed):
+        assert response.status_code == 503
+        assert "real holdings or reconciliation are unavailable" in response.json()["detail"]
+
+
 def test_mobile_approval_commit_revoke_and_reject_flow(test_client, monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MOBILE_DASHBOARD_PASSWORD", "secret-pass")
     monkeypatch.setenv("MOBILE_AUTH_SECRET", "signing-secret")
     monkeypatch.setenv("RESULTS_ROOT", _prepare_outputs(tmp_path))
 
+    _synthetic_approval_cards(monkeypatch)
     _login_mobile(test_client)
 
     dashboard = test_client.get("/api/mobile/dashboard", headers={"host": "192.168.1.8"})
@@ -357,7 +266,7 @@ def test_mobile_approval_commit_revoke_and_reject_flow(test_client, monkeypatch,
 
     dashboard_after_buy = test_client.get("/api/mobile/dashboard", headers={"host": "192.168.1.8"})
     assert dashboard_after_buy.status_code == 200
-    assert [item["symbol"] for item in dashboard_after_buy.json()["positions"]] == ["sh600000"]
+    assert dashboard_after_buy.json()["positions"] is None
     assert dashboard_after_buy.json()["guidance"]["pending_count"] == 1
 
     commit_buy_duplicate = test_client.post(
@@ -443,6 +352,7 @@ def test_mobile_commit_rejects_when_surface_changes(test_client, monkeypatch, tm
     monkeypatch.setenv("MOBILE_AUTH_SECRET", "signing-secret")
     monkeypatch.setenv("RESULTS_ROOT", _prepare_outputs(tmp_path))
 
+    synthetic_state = _synthetic_approval_cards(monkeypatch)
     _login_mobile(test_client)
 
     dashboard = test_client.get("/api/mobile/dashboard", headers={"host": "192.168.1.8"})
@@ -455,7 +365,7 @@ def test_mobile_commit_rejects_when_surface_changes(test_client, monkeypatch, tm
     )
     assert prepare_buy.status_code == 200
 
-    _refresh_surface(mobile_mod._results_root(), snapshot_trade_date="2026-03-13", snapshot_qty=80, reconcile_id="rc_api_002")
+    synthetic_state["snapshot_id"] = "changed-snapshot"
     _write_json(
         mobile_mod._results_root() / "market_snapshots" / "2026-03-13" / "market_snapshot.json",
         {
@@ -488,6 +398,7 @@ def test_mobile_dashboard_surfaces_execution_ticket_lifecycle(test_client, monke
     monkeypatch.setenv("MOBILE_AUTH_SECRET", "signing-secret")
     monkeypatch.setenv("RESULTS_ROOT", _prepare_outputs(tmp_path))
 
+    _synthetic_approval_cards(monkeypatch)
     _login_mobile(test_client)
 
     dashboard = test_client.get("/api/mobile/dashboard", headers={"host": "192.168.1.8"})
@@ -538,111 +449,13 @@ def test_mobile_dashboard_surfaces_execution_ticket_lifecycle(test_client, monke
     assert payload["briefing"]["post_close"]["executed_count"] == 1
 
 
-def test_mobile_cash_pool_deposit_keeps_dashboard_current(test_client, monkeypatch, tmp_path) -> None:
+
+
+def test_removed_cash_pool_routes_are_unavailable(test_client, monkeypatch) -> None:
     monkeypatch.setenv("MOBILE_DASHBOARD_PASSWORD", "secret-pass")
     monkeypatch.setenv("MOBILE_AUTH_SECRET", "signing-secret")
-    monkeypatch.setenv("RESULTS_ROOT", _prepare_outputs(tmp_path))
-    cash_pool_mod._REFRESH_WORKERS.clear()
-
-    started = Event()
-    finished = Event()
-
-    def fake_run_position_aware_reconcile(
-        results_root: Path,
-        account_id: str | None = None,
-        *,
-        strategy_as_of_date=None,
-        now_ts=None,
-    ):
-        started.set()
-        assert strategy_as_of_date == "2026-03-13"
-        assert finished.wait(timeout=2.0)
-        normalized_account_id = str(account_id or "paper_a_share_main")
-        snapshot = load_latest_holdings_snapshot(results_root, normalized_account_id)
-        assert snapshot is not None
-        latest_path = (
-            Path(results_root)
-            / "ops"
-            / "sim_account"
-            / normalized_account_id
-            / "reconcile"
-            / "latest.json"
-        )
-        payload = _read_json(latest_path)
-        payload["reconcile_id"] = "rc_api_refresh_001"
-        payload["snapshot_id"] = snapshot["snapshot_id"]
-        payload["snapshot_trade_date"] = snapshot["trade_date"]
-        payload["snapshot_synced_at"] = snapshot["synced_at"]
-        payload["as_of_date"] = "2026-03-13"
-        _write_json(latest_path, payload)
-        _write_json(
-            latest_path.parent / "history" / "rc_api_refresh_001.json",
-            payload,
-        )
-        return payload
-
-    monkeypatch.setattr(cash_pool_mod, "run_position_aware_reconcile", fake_run_position_aware_reconcile)
-
     _login_mobile(test_client)
-
-    before = test_client.get("/api/mobile/dashboard", headers={"host": "192.168.1.8"})
-    assert before.status_code == 200
-    before_payload = before.json()
-    before_snapshot_id = before_payload["holding_sync"]["latest_snapshot_id"]
-    assert before_payload["source_mode"] == "position_aware_reconcile"
-    assert before_payload["reconcile"]["cash"] == 345678.0
-
-    deposit = test_client.post(
-        "/api/mobile/cash-pool/deposit",
-        json={"amount": 10000},
-        headers={"host": "192.168.1.8"},
-    )
-    assert deposit.status_code == 200
-    deposit_payload = deposit.json()
-    assert deposit_payload["cash_after"] == 355678.0
-    assert deposit_payload["mode"] == "patched"
-    assert deposit_payload["refresh_status"]["status"] in {"queued", "running", "succeeded"}
-    assert deposit_payload["snapshot_id"] != before_snapshot_id
-
-    deadline = time.time() + 2.0
-    while not started.is_set() and time.time() < deadline:
-        time.sleep(0.01)
-    assert started.is_set()
-
-    during = test_client.get("/api/mobile/dashboard", headers={"host": "192.168.1.8"})
-    assert during.status_code == 200
-    during_payload = during.json()
-    assert during_payload["source_mode"] == "position_aware_reconcile"
-    assert during_payload["reconcile"]["cash"] == 355678.0
-    assert during_payload["holding_sync"]["latest_snapshot_id"] != before_snapshot_id
-    assert during_payload["reconcile_refresh"]["status"] in {"queued", "running"}
-    assert during_payload["guidance"]["status"] == "refreshing"
-    assert during_payload["guidance"]["approval_cards"] == []
-    assert during_payload["guidance"]["buy"] == []
-    assert any(
-        warning == "cash pool update is recomputing current orders"
-        for warning in during_payload["guidance"]["warnings"]
-    )
-
-    finished.set()
-
-    status_payload = {}
-    deadline = time.time() + 2.0
-    while time.time() < deadline:
-        status_response = test_client.get("/api/mobile/cash-pool/status", headers={"host": "192.168.1.8"})
-        assert status_response.status_code == 200
-        status_payload = status_response.json()["refresh_status"]
-        if status_payload["status"] == "succeeded":
-            break
-        time.sleep(0.02)
-    assert status_payload["status"] == "succeeded"
-    assert status_payload["reconcile_id"] == "rc_api_refresh_001"
-
-    after = test_client.get("/api/mobile/dashboard", headers={"host": "192.168.1.8"})
-    assert after.status_code == 200
-    after_payload = after.json()
-    assert after_payload["source_mode"] == "position_aware_reconcile"
-    assert after_payload["reconcile"]["cash"] == 355678.0
-    assert after_payload["holding_sync"]["latest_snapshot_id"] != before_snapshot_id
-    assert after_payload["reconcile_refresh"]["status"] == "succeeded"
-    assert len(after_payload["guidance"]["approval_cards"]) >= 1
+    assert test_client.get("/api/mobile/cash-pool/status", headers={"host": "192.168.1.8"}).status_code == 404
+    assert test_client.post("/api/mobile/cash-pool/deposit", json={"amount": 10}, headers={"host": "192.168.1.8"}).status_code == 404
+    spec = test_client.get("/openapi.json").json()
+    assert not any(path.startswith("/api/mobile/cash-pool") for path in spec["paths"])
