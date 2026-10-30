@@ -8,3 +8,8 @@ outputs
 **/__pycache__
 **/.pytest_cache
 **/.mypy_cache
+
+# Only tracked static inputs belong in the build context.
+data_cache/*
+!data_cache/index_stock_cons_000906.csv
+!data_cache/industry_clf_hist_sw.csv

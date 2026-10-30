@@ -47,6 +47,7 @@ jobs:
               tests/unit/test_refresh_cn_etf_daily.py
       - name: 断网检查镜像页面与构建资源
         run: |
+          docker run --rm --network none --read-only --entrypoint python backtest-cleanup-ci -c "from pathlib import Path; assert all((Path('/app/data_cache') / p).is_file() for p in ('index_stock_cons_000906.csv', 'industry_clf_hist_sw.csv'))"
           docker run --rm --network none --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,size=64m \
             -e PYTHONDONTWRITEBYTECODE=1 \
