@@ -23,10 +23,6 @@ from backend.api.shared.mobile_access import (
 from backend.api.shared.paths import results_root as _results_root
 from backend.api.shared.json_utils import sanitize_json
 from backend.core.services.mobile_dashboard_service import build_mobile_dashboard
-from backend.core.services.mobile_cash_pool_service import (
-    deposit_cash_into_pool,
-    get_reconcile_refresh_status,
-)
 from backend.core.services.mobile_ops_service import (
     create_ticket_from_confirmed_action,
     issue_confirm_token,
@@ -58,8 +54,6 @@ class MobileApprovalRevokeRequest(BaseModel):
     reason: str | None = None
 
 
-class MobileCashPoolDepositRequest(BaseModel):
-    amount: float
 
 
 def _preview_execution(config_json: dict[str, Any], exp_id: str, as_of_date: str | None) -> dict[str, Any]:
@@ -300,26 +294,3 @@ def revoke_mobile_approval_ticket(ticket_id: str, body: MobileApprovalRevokeRequ
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return sanitize_json({"ok": True, "ticket": ticket_summary(ticket)})
-
-
-def deposit_mobile_cash_pool(body: MobileCashPoolDepositRequest, request: Request):
-    require_mobile_session(request)
-    if float(body.amount) <= 0:
-        raise HTTPException(status_code=422, detail="amount must be > 0")
-    try:
-        result = deposit_cash_into_pool(
-            _results_root(),
-            amount=float(body.amount),
-        )
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="latest holdings snapshot is missing")
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    return sanitize_json({"ok": True, **result})
-
-
-def get_mobile_cash_pool_status(request: Request):
-    require_mobile_session(request)
-    return sanitize_json({"ok": True, "refresh_status": get_reconcile_refresh_status(_results_root())})

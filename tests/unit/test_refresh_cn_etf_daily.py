@@ -15,6 +15,12 @@ class _FakeCursor:
     def execute(self, sql: str, params: tuple[object, ...] | None = None) -> None:
         self.executed.append((sql, params))
 
+    def fetchall(self) -> list[tuple[str]]:
+        sql, params = self.executed[-1]
+        assert "pg_attribute" in sql and params
+        table = str(params[0]).removeprefix("public.")
+        return [(name,) for name in refresh_cn_etf_daily._REQUIRED_COLUMNS[table]]
+
     def __enter__(self) -> _FakeCursor:
         return self
 

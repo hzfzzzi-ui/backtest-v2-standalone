@@ -4,7 +4,7 @@ OpenClaw Personal Multi-Asset Trend Allocation System 是一个受研究纪律�
 
 正式英文标识：`openclaw-personal-multi-asset-trend-allocation`
 
-当前仓库仍保留大量历史 `backtest_V2`、`pams_`、`mobile`、`sim_account` 兼容代码和研究草稿；因此本 README 描述的是当前真实边界和上线差距，不是生产 READY 声明。
+当前仓库仍保留大量历史 `backtest_V2`、`pams_`、`mobile` 兼容代码和研究草稿；因此本 README 描述的是当前真实边界和上线差距，不是生产 READY 声明。
 
 ## 正式定位
 
@@ -79,12 +79,11 @@ flowchart LR
 - `backend/api/mobile`
 - `backend/api/transactions`
 - `backend/core/services/mobile_*`
-- `backend/core/services/sim_account_*`
 - `backend/core/services/transaction_lifecycle_service.py`
 - `frontend/mobile.html`
 - `frontend/mobile-service-worker.js`
 
-这些路径仍存在测试和兼容用途，但不应继续作为研究平台正式主路径扩展。
+这些路径仍存在测试和兼容用途，但不应继续作为研究平台正式主路径扩展。模拟账户服务及其自动同步入口已移除。
 
 运行产物路径：
 

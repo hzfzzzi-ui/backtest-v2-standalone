@@ -106,7 +106,6 @@ def test_pams_externalization_checklist_matches_boundary_registry() -> None:
     assert SERVICE_BOUNDARY_BY_MODULE["backend.api.mobile"].target_system == "pams"
     assert SERVICE_BOUNDARY_BY_MODULE["backend.api.mobile"].launch_status == "externalize_to_pams"
     assert SERVICE_BOUNDARY_BY_MODULE["backend.core.services.mobile_ops_service"].target_system == "pams"
-    assert SERVICE_BOUNDARY_BY_MODULE["backend.core.services.sim_account_service"].launch_status == "compat_audit_only"
     assert SERVICE_BOUNDARY_BY_MODULE["backend.core.services.transaction_lifecycle_service"].target_system == "pams"
     assert contract_path.exists()
 

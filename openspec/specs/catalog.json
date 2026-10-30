@@ -1,7 +1,7 @@
 {
   "version": "spec-catalog-v1",
   "generated_on": "2026-03-30",
-  "total_specs": 147,
+  "total_specs": 145,
   "groups": [
     {
       "name": "?????????",
@@ -127,7 +127,7 @@
     },
     {
       "name": "?????????",
-      "count": 16,
+      "count": 14,
       "specs": [
         "backtest-audit",
         "backtest-research-audit",
@@ -137,8 +137,6 @@
         "runtime-diagnostic-accounting",
         "position-aware-reconcile-run",
         "source-aware-holdings",
-        "sim-account-auto-sync",
-        "sim-account-holdings-sync",
         "baseline-moneyflow-overlay-diagnostics",
         "baseline-moneyflow-overlay-experiment",
         "a-share-moneyflow-divergence-study",

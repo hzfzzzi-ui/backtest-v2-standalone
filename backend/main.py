@@ -26,6 +26,7 @@ from backend.api.shared.mobile_access import (  # noqa: E402
     is_mobile_protected_path,
     mobile_private_access_enabled,
 )
+from backend.core.services.ops_domain_pg import OpsDomainSchemaMissing  # noqa: E402
 from backend.core.services.market_data_sync_service import (  # noqa: E402
     start_market_data_sync_scheduler,
     stop_market_data_sync_scheduler,
@@ -63,6 +64,14 @@ async def app_lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="backtest-v2-standalone", version="1.0.0", lifespan=app_lifespan)
+
+
+@app.exception_handler(OpsDomainSchemaMissing)
+async def lifecycle_schema_missing_handler(request: Request, exc: OpsDomainSchemaMissing) -> JSONResponse:
+    return JSONResponse(
+        {"detail": "transaction lifecycle storage is not initialized", "code": "transaction_lifecycle_schema_missing"},
+        status_code=503,
+    )
 app.add_middleware(NoCacheMiddleware)
 app.add_middleware(PrivateMobileAccessMiddleware)
 app.include_router(backtest_v2_router)

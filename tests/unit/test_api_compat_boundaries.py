@@ -247,11 +247,6 @@ def test_pams_transition_boundary_registry_covers_legacy_services() -> None:
         "backend.core.services.mobile_ops_service",
         "backend.core.services.mobile_execution_service",
         "backend.core.services.mobile_notification_service",
-        "backend.core.services.mobile_cash_pool_service",
-        "backend.core.services.sim_account_service",
-        "backend.core.services.sim_account_reconcile_service",
-        "backend.core.services.sim_account_domain_service",
-        "backend.core.services.sim_account_auto_sync_service",
         "backend.core.services.transaction_lifecycle_service",
     }
     assert len(SERVICE_BOUNDARY_STATUS) == len(SERVICE_BOUNDARY_BY_MODULE)
