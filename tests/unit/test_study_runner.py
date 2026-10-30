@@ -2,9 +2,66 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import os
+
+import pytest
 
 from backend.research.study_definition import validate_study_payload
 from backend.research import study_loader, study_runner
+
+
+@pytest.fixture(params=("synthetic", "real"))
+def historical_runtime_evidence(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise identical study assertions with explicit test or real inputs.
+
+    Real experiment output is optional and never inferred from a formal baseline.
+    Explicitly supplied evidence must contain the requested run configuration.
+    """
+    evidence = os.environ.get("BACKTEST_STUDY_REAL_EVIDENCE_ROOT", "").strip()
+    if request.param == "real":
+        if not evidence:
+            pytest.skip("历史运行配置验收未执行：未显式提供真实证据目录")
+        root = Path(evidence).expanduser()
+        if not root.is_absolute():
+            pytest.fail("真实证据目录必须使用绝对路径")
+        root = root.resolve()
+        repository = Path(__file__).resolve().parents[2]
+        if root == repository or root.is_relative_to(repository):
+            pytest.fail("真实证据应放在与源码工作区独立的只读目录")
+    else:
+        root = tmp_path
+        # Deliberately synthetic; this is not a copy or substitute for research evidence.
+        synthetic = {"db": {}, "schema_mapping": {}, "universe_mode": "HS300_ZZ500",
+                     "universe": {"membership_mode": "PIT_DYNAMIC"},
+                     "strategy": {"params": {"synthetic_control": 17}}}
+        relative_paths = (
+            "outputs/experiments/exp_20260510_033603951_8649/run_config.json",
+            "outputs/experiments/exp_20260513_025957649_4f17/run_config.json",
+            "outputs/baselines/baseline_V10_1/run_config.json",
+        )
+        for relative in relative_paths:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(synthetic), encoding="utf-8")
+
+    materialize = study_runner._materialize_mapping_payload
+
+    def materialize_from_evidence(payload, *, payload_key, path_key):
+        if path_key != "runtime_config_path":
+            return materialize(payload, payload_key=payload_key, path_key=path_key)
+        original = Path(payload[path_key])
+        repository = Path(__file__).resolve().parents[2]
+        try:
+            relative = original.relative_to(repository)
+        except ValueError:
+            pytest.fail("历史运行配置路径不在源码目录下")
+        path = root / relative
+        if not path.is_file():
+            pytest.fail(f"历史运行配置验收失败：缺少 {relative}")
+        redirected = dict(payload, **{path_key: str(path)})
+        return materialize(redirected, payload_key=payload_key, path_key=path_key)
+
+    monkeypatch.setattr(study_runner, "_materialize_mapping_payload", materialize_from_evidence)
 
 
 def _study():
@@ -84,7 +141,7 @@ def test_hs300_zz500_csi1000_pool_expansion_study_builds_stock_only_ab_plan() ->
     assert a2_payload["runtime_config_json"]["universe"]["filters"]["csi1000_new_min_circ_mv_yi"] == 100
 
 
-def test_b1_runtime_replacement_ab_uses_runtime_config_and_single_variable_patch() -> None:
+def test_b1_runtime_replacement_ab_uses_runtime_config_and_single_variable_patch(historical_runtime_evidence) -> None:
     study = study_loader.load_study_definition("cn_stock_etf/cn_stock_etf_b1_runtime_replacement_ab_v1")
     plan = study_runner.build_execution_plan(study, only_window_keys=["1626"])
 
@@ -119,7 +176,7 @@ def test_b1_runtime_replacement_ab_uses_runtime_config_and_single_variable_patch
     assert b1_payload["enable_multifactor_rank"] is True
 
 
-def test_v4_relative_replacement_stock_ab_uses_promoted_stock_runtime_config() -> None:
+def test_v4_relative_replacement_stock_ab_uses_promoted_stock_runtime_config(historical_runtime_evidence) -> None:
     study = study_loader.load_study_definition("cn_stock_etf/cn_stock_v4_relative_replacement_stock_ab_v1")
     plan = study_runner.build_execution_plan(study, only_window_keys=["1626"])
 
@@ -153,7 +210,7 @@ def test_v4_relative_replacement_stock_ab_uses_promoted_stock_runtime_config() -
     assert rel_payload["universe_mode"] == "HS300_ZZ500"
 
 
-def test_d5_mfe_mae_3d_runtime_ab_uses_runtime_config_and_single_variable_patch() -> None:
+def test_d5_mfe_mae_3d_runtime_ab_uses_runtime_config_and_single_variable_patch(historical_runtime_evidence) -> None:
     study = study_loader.load_study_definition("cn_stock_etf/cn_stock_etf_d5_mfe_mae_3d_runtime_ab_v1")
     plan = study_runner.build_execution_plan(study, only_window_keys=["1626"])
 
@@ -232,7 +289,7 @@ def test_high_chase_d5_action_ab_uses_runtime_config_and_scoped_d5_patches() -> 
     assert delayed_params["mfe_mae_confirmation_lookahead_bars"] == 5
 
 
-def test_high_chase_d5_deep_mae_stock_ab_uses_runtime_config_and_stock_only_patches() -> None:
+def test_high_chase_d5_deep_mae_stock_ab_uses_runtime_config_and_stock_only_patches(historical_runtime_evidence) -> None:
     study = study_loader.load_study_definition("cn_stock_etf/cn_stock_etf_high_chase_d5_deep_mae_stock_ab_v1")
     plan = study_runner.build_execution_plan(study, only_window_keys=["1626"])
 
@@ -287,7 +344,7 @@ def test_high_chase_d5_deep_mae_stock_ab_uses_runtime_config_and_stock_only_patc
     assert all_watch_params["mfe_mae_watch_deep_mae_immediate_pct"] == -1.0
 
 
-def test_trend_quality_soft_score_stock_ab_patches_only_soft_score_params() -> None:
+def test_trend_quality_soft_score_stock_ab_patches_only_soft_score_params(historical_runtime_evidence) -> None:
     study = study_loader.load_study_definition("cn_stock_etf/cn_stock_trend_quality_soft_score_ab_v1")
     plan = study_runner.build_execution_plan(study, only_window_keys=["1626"])
 
@@ -328,7 +385,7 @@ def test_trend_quality_soft_score_stock_ab_patches_only_soft_score_params() -> N
     assert candidate_params == b0_params
 
 
-def test_profit_giveback_ma20_protection_stock_ab_patches_only_giveback_params() -> None:
+def test_profit_giveback_ma20_protection_stock_ab_patches_only_giveback_params(historical_runtime_evidence) -> None:
     study = study_loader.load_study_definition("cn_stock_etf/cn_stock_profit_giveback_ma20_protection_ab_v1")
     plan = study_runner.build_execution_plan(study, only_window_keys=["1626"])
 
@@ -370,7 +427,7 @@ def test_profit_giveback_ma20_protection_stock_ab_patches_only_giveback_params()
     assert candidate_params == b0_params
 
 
-def test_risk_archetype_soft_deprioritize_stock_ab_patches_only_soft_score_params() -> None:
+def test_risk_archetype_soft_deprioritize_stock_ab_patches_only_soft_score_params(historical_runtime_evidence) -> None:
     study = study_loader.load_study_definition("cn_stock_etf/cn_stock_risk_archetype_soft_deprioritize_ab_v1")
     plan = study_runner.build_execution_plan(study, only_window_keys=["1626"])
 

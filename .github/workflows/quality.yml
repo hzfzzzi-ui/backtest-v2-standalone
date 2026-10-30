@@ -37,6 +37,7 @@ jobs:
               tests/unit/test_market_data_schema_preflight.py \
               tests/unit/test_ops_domain_pg_schema.py \
               tests/unit/test_stock_sleeve_single_factor_matrix.py \
+              tests/unit/test_study_runner.py \
               tests/unit/test_a_share_moneyflow_divergence.py \
               tests/unit/test_mobile_execution_service.py \
               tests/unit/test_mobile_dashboard_service.py \
