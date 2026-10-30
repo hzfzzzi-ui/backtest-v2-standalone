@@ -189,7 +189,7 @@ def test_create_provider_from_payload_prefers_materialized_config_json(monkeypat
     assert snapshot["data_source"]["stocks_table"] == "pams_ohlcv_daily_v2"
     assert config_hash == "hash"
     assert captured["payload"]["data_source"]["stocks_table"] == "pams_ohlcv_daily_v2"
-    assert str(captured["provider_rules_path"]).endswith("config\\rules.csv")
+    assert Path(captured["provider_rules_path"]).parts[-2:] == ("config", "rules.csv")
     assert captured["provider_use_cache"] is False
 
 
