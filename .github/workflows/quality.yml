@@ -3,6 +3,9 @@ name: 隔离清理回归
 on:
   pull_request:
   push:
+    branches:
+      - main
+      - codex/v2-config-source-governance
 
 permissions:
   contents: read
