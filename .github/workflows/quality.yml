@@ -33,6 +33,7 @@ jobs:
             -e RESULTS_ROOT=/app/outputs \
             backtest-cleanup-ci python -m pytest -q -p no:cacheprovider \
               tests/unit/test_mobile_no_sim_account.py \
+              tests/integration/test_mobile_dashboard_api.py::test_approval_fails_explicitly_when_real_holdings_are_unavailable \
               tests/unit/test_lifecycle_schema_preflight.py \
               tests/unit/test_market_data_schema_preflight.py \
               tests/unit/test_ops_domain_pg_schema.py \
