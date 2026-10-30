@@ -17,6 +17,7 @@ COPY backend /app/backend
 COPY frontend /app/frontend
 COPY --from=results-workbench /build/frontend/assets/dist/results-workbench-vue-shell.js /app/frontend/assets/dist/results-workbench-vue-shell.js
 COPY research /app/research
+COPY openspec /app/openspec
 COPY docs /app/docs
 COPY tests /app/tests
 
